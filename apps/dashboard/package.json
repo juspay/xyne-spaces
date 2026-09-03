@@ -137,6 +137,7 @@
     "ag-grid-react": "^35.0.0",
     "axios": "^1.18.1",
     "blocknote-layout-extensions": "4.2.0",
+    "buffer": "^6.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

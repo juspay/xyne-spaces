@@ -231,6 +231,7 @@ export const Event = {
   LIVEKIT_SCREEN_SHARE_RENDERED: 'livekit_screen_share_rendered',
   LIVEKIT_ROOM_EVENT: 'livekit_room_event',
   CANVAS_MENTION_DEBUG: 'canvas_mention_debug',
+  CANVAS_EXPORT_FAILED: 'canvas_export_failed',
   SHARE_RECORDING: 'share_recording',
   SHARE_RECORDING_ERROR: 'share_recording_error',
   RECORDING_STATE_CHANGED: 'recording_state_changed',

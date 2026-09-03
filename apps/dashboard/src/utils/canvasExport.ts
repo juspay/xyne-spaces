@@ -21,7 +21,10 @@ export interface CanvasPdfExportResult {
 
 export type CanvasMarkdownExportResult = CanvasPdfExportResult;
 
-export type CanvasDocxExportResult = CanvasPdfExportResult;
+/** The desktop save path can refuse a docx outright (oversized or invalid payload). */
+export interface CanvasDocxExportResult extends CanvasPdfExportResult {
+  error?: string;
+}
 
 // Custom canvas block types that have no text/markdown representation. The lossy
 // serializers silently drop them. When the live editor DOM is available we
@@ -276,6 +279,25 @@ const PRINT_CSS = `
   @media print{body{padding:0;}@page{margin:18mm;}}
 `;
 
+/**
+ * Serialize the canvas to sanitized HTML, shared by the PDF and DOCX exports.
+ * The canvas body is user-controlled, so the serialized HTML is sanitized before
+ * it is written into any export document. Embedded export images use base64
+ * data URIs, which must stay allowed for whiteboard/image blocks to render.
+ * `domRoot` lets custom canvas blocks be captured as embedded images first.
+ */
+async function buildSanitizedBodyHtml(
+  editor: CanvasExportEditor,
+  domRoot?: HTMLElement | null,
+): Promise<string> {
+  const blocks = await normalizeBlocksForExport(editor.document, domRoot);
+  const rawBodyHtml = await Promise.resolve(editor.blocksToHTMLLossy(blocks));
+  return DOMPurify.sanitize(rawBodyHtml, {
+    USE_PROFILES: { html: true },
+    ADD_DATA_URI_TAGS: ['img'],
+  });
+}
+
 function buildPdfHtml(title: string, bodyHtml: string): string {
   const safeTitle = escapeHtml(title || 'Untitled Canvas');
   const dateStr = new Date().toLocaleString();
@@ -301,15 +323,7 @@ export async function exportCanvasAsPDF(
   title: string,
   domRoot?: HTMLElement | null,
 ): Promise<CanvasPdfExportResult> {
-  const blocks = await normalizeBlocksForExport(editor.document, domRoot);
-  const rawBodyHtml = await Promise.resolve(editor.blocksToHTMLLossy(blocks));
-  // The canvas body is user-controlled, so sanitize the serialized HTML before
-  // it is written into the print document. Embedded export images use base64
-  // data URIs, which must stay allowed for whiteboard/image blocks to render.
-  const bodyHtml = DOMPurify.sanitize(rawBodyHtml, {
-    USE_PROFILES: { html: true },
-    ADD_DATA_URI_TAGS: ['img'],
-  });
+  const bodyHtml = await buildSanitizedBodyHtml(editor, domRoot);
   const html = buildPdfHtml(title, bodyHtml);
   const filename = `${sanitizeFilename(title)}.pdf`;
 
@@ -333,23 +347,72 @@ export async function exportCanvasAsPDF(
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+// The DOCX converter only reads inline styles and drops <head> entirely, so the
+// document is just a title heading plus the sanitized body — no stylesheet and
+// none of the PDF-only chrome (the "Exported from" line would become a stray
+// paragraph in Word).
+function buildDocxHtml(title: string, bodyHtml: string): string {
+  return `<h1>${escapeHtml(title || 'Untitled Canvas')}</h1>${styleDocxTableHeaders(bodyHtml)}`;
+}
+
+// Word has no user-agent stylesheet, so a bare <th> renders as a plain cell.
+// Give header cells the look the PDF gets from PRINT_CSS (bold, grey fill) as
+// inline styles — the only styling the docx converter honors. Runs on already
+// sanitized HTML and only adds our own style declarations.
+function styleDocxTableHeaders(bodyHtml: string): string {
+  if (!bodyHtml.includes('<th')) return bodyHtml;
+  const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, 'text/html');
+  doc.querySelectorAll('th').forEach(th => {
+    th.style.fontWeight = 'bold';
+    th.style.backgroundColor = '#f4f4f5';
+  });
+  return doc.body.innerHTML;
+}
+
+/**
+ * @turbodocx/html-to-docx's browser build still reads two Node globals: bare
+ * `global` in its output step (a ReferenceError in browsers) and `Buffer` when
+ * embedding images (missing → every image is silently dropped). Install both
+ * once and leave them in place: several canvases can be mounted at the same
+ * time, so two exports can overlap, and tearing the shims down when the first
+ * one finishes would break the second mid-conversion. Assignment is guarded so
+ * a Buffer/global supplied by anything else always wins.
+ */
+async function installDocxBrowserShims(): Promise<void> {
+  const g = globalThis as { global?: unknown; Buffer?: unknown };
+  g.global ??= globalThis;
+  g.Buffer ??= (await import('buffer')).Buffer;
+}
+
+/**
+ * Export the canvas as a Word document (.docx). Uses the same sanitized body as
+ * the PDF export, converted to native WordML so it opens with content in Word,
+ * Google Docs, Pages, and LibreOffice. Electron saves through a native dialog;
+ * browsers download a Blob.
+ */
 export async function exportCanvasAsDocx(
   editor: CanvasExportEditor,
   title: string,
   domRoot?: HTMLElement | null,
 ): Promise<CanvasDocxExportResult> {
-  const blocks = await normalizeBlocksForExport(editor.document, domRoot);
-  const rawBodyHtml = await Promise.resolve(editor.blocksToHTMLLossy(blocks));
-  const bodyHtml = DOMPurify.sanitize(rawBodyHtml, {
-    USE_PROFILES: { html: true },
-    ADD_DATA_URI_TAGS: ['img'],
-  });
+  const bodyHtml = await buildSanitizedBodyHtml(editor, domRoot);
+  await installDocxBrowserShims();
   const { default: HTMLtoDOCX } = await import('@turbodocx/html-to-docx');
-  const out = await HTMLtoDOCX(buildPdfHtml(title, bodyHtml), null, {
+  const out = await HTMLtoDOCX(buildDocxHtml(title, bodyHtml), null, {
     title: title || 'Untitled Canvas',
-    table: { row: { cantSplit: true } },
+    table: {
+      row: { cantSplit: true },
+      // The converter ignores CSS, so without this Word draws borderless
+      // tables; this mirrors the 1px #d4d4d8 cell borders of the PDF export.
+      borderOptions: { size: 4, stroke: 'single', color: 'D4D4D8' },
+    },
+    // Our HTML comes straight from the serializer, so the minifier pass
+    // (terser + clean-css) has nothing to do and only costs time.
+    preprocessing: { skipHTMLMinify: true },
   });
-  const blob = out instanceof Blob ? out : new Blob([out as ArrayBuffer], { type: DOCX_MIME });
+  // With the Buffer shim installed the converter returns a Buffer (a Uint8Array)
+  // rather than a Blob; both are valid Blob parts.
+  const blob = out instanceof Blob ? out : new Blob([out as BlobPart], { type: DOCX_MIME });
   const filename = `${sanitizeFilename(title)}.docx`;
 
   if (window.electronAPI?.exportCanvasDocx) {

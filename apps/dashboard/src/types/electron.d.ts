@@ -101,7 +101,7 @@ export interface ElectronAPI {
   exportCanvasDocx?: (
     fileName: string,
     data: ArrayBuffer,
-  ) => Promise<{ saved: boolean; filePath?: string }>;
+  ) => Promise<{ saved: boolean; filePath?: string; error?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
   onRecordingStopForTeardown?: (callback: () => void) => () => void;
