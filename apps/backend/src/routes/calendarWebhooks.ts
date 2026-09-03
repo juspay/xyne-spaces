@@ -170,9 +170,9 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
 // ============================================================================
 
 router.get('/microsoft-calendar', (req: Request, res: Response) => {
-  const validationToken = req.query.validationToken as string;
+  const validationToken = req.query.validationToken;
 
-  if (validationToken) {
+  if (typeof validationToken === 'string' && validationToken.length > 0) {
     logger.info(`${MICROSOFT_TAG} Webhook validation (GET)`);
     res.status(200).type('text/plain').send(validationToken);
   } else {
@@ -182,42 +182,55 @@ router.get('/microsoft-calendar', (req: Request, res: Response) => {
 
 router.post('/microsoft-calendar', async (req: Request, res: Response) => {
   try {
-    const validationToken = req.query.validationToken as string;
-    if (validationToken) {
+    const validationToken = req.query.validationToken;
+    if (typeof validationToken === 'string' && validationToken.length > 0) {
       logger.info(`${MICROSOFT_TAG} Webhook validation (POST)`);
       res.status(200).type('text/plain').send(validationToken);
       return;
     }
 
-    let payload = req.body;
+    let payload: unknown = req.body;
 
     if (Buffer.isBuffer(payload)) {
+      // Keep a Buffer-typed reference: `payload` is reassigned to the parsed JSON below, which
+      // widens its type, so the error branch must log from this known Buffer, not `payload`.
+      const rawBuf = payload;
       try {
-        const jsonString = payload.toString('utf-8');
+        const jsonString = rawBuf.toString('utf-8');
         payload = JSON.parse(jsonString);
       } catch (parseErr) {
         logger.error(`${MICROSOFT_TAG} Failed to parse Buffer payload`, {
           error: parseErr instanceof Error ? parseErr.message : String(parseErr),
-          preview: payload.slice(0, 100).toString('hex'),
+          preview: rawBuf.slice(0, 100).toString('hex'),
         });
         res.status(202).send('Accepted');
         return;
       }
     }
 
-    if (!payload || !Array.isArray(payload.value)) {
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      Array.isArray(payload) ||
+      !Array.isArray((payload as { value?: unknown }).value)
+    ) {
       logger.error(`${MICROSOFT_TAG} Invalid notification payload`, {
         bodyType: typeof req.body,
         isBuffer: Buffer.isBuffer(req.body),
-        bodyKeys: payload ? Object.keys(payload).slice(0, 10) : 'null',
+        bodyKeys:
+          payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? Object.keys(payload).slice(0, 10)
+            : 'null',
       });
       res.status(202).send('Accepted');
       return;
     }
 
+    const notifications = (payload as { value: unknown[] }).value;
+
     res.status(202).send('Accepted');
 
-    for (const notification of payload.value) {
+    for (const notification of notifications) {
       await processMicrosoftNotification(notification);
     }
   } catch (error) {

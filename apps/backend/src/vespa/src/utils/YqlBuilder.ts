@@ -220,7 +220,7 @@ export class YqlBuilder {
 
     //Build search condition
     const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
-    const queryLength = query?.length ?? 0;
+    const queryLength = typeof query === 'string' ? query.length : 0;
 
     // Optimization: Skip semantic search for short queries (< 3 chars) - lexical only
     const useSemantic = useSemanticAnyway && queryLength > 3;

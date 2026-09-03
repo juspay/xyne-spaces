@@ -153,7 +153,7 @@ export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lt
   }
 
   // Handle date range in format "YYYY-MM-DD_YYYY-MM-DD" from frontend calendar
-  const timeRange = filters.timeRange || '7d';
+  const timeRange = typeof filters.timeRange === 'string' ? filters.timeRange : '7d';
   if (timeRange.includes('_')) {
     const [startDateStr, endDateStr] = timeRange.split('_');
     const startDate = new Date(startDateStr);

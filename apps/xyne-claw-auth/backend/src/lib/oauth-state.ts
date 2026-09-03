@@ -53,6 +53,11 @@ export class OAuthStateError extends Error {
 }
 
 export function verifyOAuthState(state: string): VerifiedState {
+  // `state` reaches here from `req.query.state`, which is `string | string[]` at runtime.
+  // A duplicated `state` query param yields an array; treat any non-string as malformed.
+  if (typeof state !== "string") {
+    throw new OAuthStateError("malformed");
+  }
   const dot = state.lastIndexOf(".");
   if (dot <= 0 || dot === state.length - 1) {
     throw new OAuthStateError("malformed");

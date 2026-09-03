@@ -150,7 +150,7 @@ router.post(
       return;
     }
     try {
-      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      const files = Array.isArray(req.files) ? (req.files as Express.Multer.File[]) : [];
       const stepId = typeof req.body?.stepId === 'string' ? req.body.stepId : '';
       const attachments = await storeAutomationTemplates({
         files,

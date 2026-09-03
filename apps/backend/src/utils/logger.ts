@@ -163,6 +163,22 @@ function decycle(value: unknown, ancestors: unknown[]): unknown {
   return out;
 }
 
+const escapeLogControlChars = (value: string): string =>
+  // eslint-disable-next-line no-control-regex
+  value.replace(/[\u0000-\u001f\u007f]/g, (char) => {
+    if (char === "\n") return "\\n";
+    if (char === "\r") return "\\r";
+    if (char === "\t") return "\\t";
+    return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+  });
+
+const sanitizeLogMessage = winston.format((info) => {
+  if (typeof info.message === 'string') {
+    info.message = escapeLogControlChars(info.message);
+  }
+  return info;
+});
+
 const sanitizeForFluent = winston.format((info) => decycle(info, []) as winston.Logform.TransformableInfo);
 
 // Runs once at call time, before winston-transport's per-transport clone drops Error fields.
@@ -170,6 +186,7 @@ const sharedFormat = winston.format.combine(
   winston.format.timestamp(),
   winston.format.errors({ stack: true }),
   normalizeErrors(),
+  sanitizeLogMessage(),
   injectContext()
 );
 

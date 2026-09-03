@@ -12,8 +12,12 @@ if (!process.env['VESPA_CONFIG_SERVER_URL']) {
 }
 
 export const schemaHandler = async (req: Request, res: Response): Promise<void> => {
-  const schemaName = req.query['schema'] as string;
-  const url = `${SCHEMA_BASE_URL}/${schemaName}.sd`;
+  const schemaNameRaw = req.query['schema'];
+  const schemaName = typeof schemaNameRaw === 'string' ? schemaNameRaw : '';
+  // Encode the caller-supplied schema name so it can only ever be a single path segment:
+  // this stops `../` traversal or host manipulation from redirecting the fetch to another
+  // endpoint on the internal Vespa config server. Valid schema names are unaffected.
+  const url = `${SCHEMA_BASE_URL}/${encodeURIComponent(schemaName)}.sd`;
 
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });

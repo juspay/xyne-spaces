@@ -338,8 +338,14 @@ function sleep(ms: number): Promise<void> {
 
 function openBrowser(url: string): boolean {
 	try {
+		// Only hand a normalized http(s) URL to the OS opener. This rejects non-web schemes and,
+		// because a valid http(s) href never starts with "-", prevents the value from being
+		// interpreted as a CLI option/command argument by `open`/`xdg-open`/`cmd`.
+		const parsed = new URL(url);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+		const safeUrl = parsed.href;
 		const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-		const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+		const args = process.platform === "win32" ? ["/c", "start", "", safeUrl] : [safeUrl];
 		execFileSync(cmd, args, { stdio: "ignore" });
 		return true;
 	} catch {
