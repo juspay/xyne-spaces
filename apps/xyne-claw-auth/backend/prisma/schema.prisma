@@ -1342,6 +1342,39 @@ model ArtifactAppAgentRun {
   @@map("artifact_app_agent_runs")
 }
 
+/// Small key-value storage an artifact app reads and writes through the host
+/// bridge — the app-facing "database" for apps that need to keep state
+/// (preferences, drafts, counters) beyond one session.
+///
+/// Two-level key: `baseKey` names a collection, `dynamicKey` a record in it.
+/// The value is an opaque JSON blob — it is never filterable, by design: every
+/// query the API accepts touches only the key columns, so a busy app cannot
+/// force a sequential scan over this shared table.
+model ArtifactAppRecord {
+  id          String   @id @default(cuid())
+  /// Denormalized tenant key, stamped from the parent app on insert — same
+  /// discipline as ArtifactAppVersion.
+  workspaceId String
+  appId       String
+  baseKey     String
+  dynamicKey  String
+  /// "global" — one row every viewer of the app shares — or the userId whose
+  /// private row this is. Stamped from the session, never from the request, and
+  /// reads always filter to ("global", caller), so one viewer can never reach
+  /// another's rows. A cuid can never equal the literal "global".
+  owner       String
+  value       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// Doubles as the read index: every lookup filters workspaceId+appId+baseKey
+  /// (+owner) and walks dynamicKey in order, which is what makes prefix scans
+  /// and paging index-only. Also what `put` upserts against.
+  @@unique([workspaceId, appId, baseKey, owner, dynamicKey])
+  @@index([workspaceId, appId])
+  @@map("artifact_app_records")
+}
+
 /// A stable, revocable public link to the latest published HTML attachment in
 /// one Design Studio conversation. Only the bearer token hash is used for
 /// verification; its encrypted copy exists so
