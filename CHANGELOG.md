@@ -1,3 +1,10 @@
+## [1.273.0](https://github.com/juspay/xyne-spaces/compare/v1.272.0...v1.273.0) (2026-09-03)
+
+
+### Features
+
+* add people to a DM with conversation history scoping ([#690](https://github.com/juspay/xyne-spaces/issues/690)) ([0a5621f](https://github.com/juspay/xyne-spaces/commit/0a5621f045f285abb1c683a53175b826f94c267a))
+
 ## [1.272.0](https://github.com/juspay/xyne-spaces/compare/v1.271.0...v1.272.0) (2026-09-03)
 
 
