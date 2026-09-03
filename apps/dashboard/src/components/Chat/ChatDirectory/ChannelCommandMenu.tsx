@@ -28,7 +28,7 @@ import {
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Popover from '@radix-ui/react-popover';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
+import { Channel, isDeskChannelType, TicketPriority } from '@xyne/shared';
 import { PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
@@ -41,6 +41,7 @@ import {
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Avatar from '../../ui/Avatar/Avatar';
+import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import Badge from '../../ui/Badge';
 import { DisplaySearchResult } from '../../../types/search';
 import {
@@ -2038,32 +2039,9 @@ const ChannelCommandMenu = ({
     setHoveredResult(null);
   }, []);
 
-  const getChannelIcon = (channel: Channel): ReactElement => {
-    if (isGroupDMChannel(channel.scopeType)) {
-      // Slack-style group icon: people glyph with participant count badge
-      const otherCount = getDMParticipantIdsToFetch(channel, currentUserID).length;
-      return (
-        <div className='relative flex h-5 w-5 items-center justify-center'>
-          <UserTwo size={16} className='text-muted-foreground' />
-          {otherCount > 0 && (
-            <span className='absolute -bottom-0.5 -right-0.5 min-w-3 rounded-full bg-muted px-0.5 text-xs font-semibold leading-none text-muted-foreground'>
-              {otherCount}
-            </span>
-          )}
-        </div>
-      );
-    }
-    if (isDMChannel(channel.scopeType)) {
-      const userIds = getDMParticipantIdsToFetch(channel, currentUserID);
-      if (userIds.length > 0 && userIds[0]) {
-        return <Avatar userId={userIds[0]} size='xs' />;
-      }
-    }
-    if (channel.visibility === ChannelVisibility.PRIVATE) {
-      return <Lock02Close size={16} />;
-    }
-    return <Hashtag size={16} />;
-  };
+  const getChannelIcon = (channel: Channel): ReactElement => (
+    <ChannelIcon channel={channel} glyphClassName='text-muted-foreground' avatarSize='xs' />
+  );
 
   /**
    * Channel tag for a result row (currently only ticket rows render it).
