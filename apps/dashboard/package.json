@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-dashboard",
-  "version": "1.269.3",
+  "version": "1.270.0",
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {

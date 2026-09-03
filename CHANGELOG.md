@@ -1,3 +1,16 @@
+## [1.270.0](https://github.com/juspay/xyne-spaces/compare/v1.269.3...v1.270.0) (2026-09-03)
+
+
+### Features
+
+* ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([#1471](https://github.com/juspay/xyne-spaces/issues/1471)) ([#1479](https://github.com/juspay/xyne-spaces/issues/1479)) ([73d18f7](https://github.com/juspay/xyne-spaces/commit/73d18f78a63bced57cd4f280465ea391b0295327)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
+
+
+### Bug Fixes
+
+* open links in external browser by default ([#1470](https://github.com/juspay/xyne-spaces/issues/1470)) ([5599371](https://github.com/juspay/xyne-spaces/commit/559937155f3e1a628cdae8e479a3a6377f377f8c))
+* wire onExpand into carousel SlideContent so video minimize/maximize works in thread viewer ([#1369](https://github.com/juspay/xyne-spaces/issues/1369)) ([4cd80cd](https://github.com/juspay/xyne-spaces/commit/4cd80cde0b1b0b8092facbb168b3878d9953f847))
+
 ## [1.269.3](https://github.com/juspay/xyne-spaces/compare/v1.269.2...v1.269.3) (2026-09-03)
 
 
