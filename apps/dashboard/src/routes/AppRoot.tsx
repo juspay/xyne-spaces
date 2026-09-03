@@ -77,6 +77,7 @@ import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarnin
 import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallModal';
 import { IncomingCallDevHarness } from '../components/Call/IncomingCall/IncomingCallCard.dev';
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
+import { CallBar } from '../components/Call/CallBar/CallBar';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
@@ -123,7 +124,9 @@ import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
-import { isElectronApp } from '../utils/electronApp';
+import { isElectronApp, isCallWindow } from '../utils/electronApp';
+import { CallWindowRoute } from './CallWindow/CallWindowRoute';
+import { CallWindowNavigationBridge } from './CallWindow/CallWindowNavigationBridge';
 import {
   confirmRecordingInterrupt,
   isRecordingInterruptible,
@@ -480,6 +483,8 @@ const AppRoot = (): ReactElement => {
 
   // The SDLC bundle wants the same chromeless layout as the browser panel.
   const isInPanelWebview = useIsInPanelWebview() || isSdlcSurface;
+
+  const isCallWindowRealm = isCallWindow();
 
   // Get current location to check if we're on onboarding
   const location = useLocation();
@@ -907,12 +912,13 @@ const AppRoot = (): ReactElement => {
                     attachments inside the conversation itself. */}
                       {!isInPanelWebview && (
                         <>
-                          <IncomingCallModal />
+                          {!isCallWindowRealm && <IncomingCallModal />}
                           {import.meta.env.DEV &&
                             new URLSearchParams(window.location.search).has('devIncomingCall') && (
                               <IncomingCallDevHarness />
                             )}
-                          <GlobalCallOverlay />
+                          {!isCallWindowRealm && <GlobalCallOverlay />}
+                          {!isCallWindowRealm && <CallBar />}
                           {recordingVersion === 'v2' ? (
                             <NoteTakerOverlayHost />
                           ) : (
@@ -922,7 +928,7 @@ const AppRoot = (): ReactElement => {
                           <NotificationHandler />
                           <ElectronBadgeSync />
                           <ElectronUpdateNudge />
-                          <SosAlertBanner />
+                          {!isCallWindowRealm && <SosAlertBanner />}
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
@@ -1975,6 +1981,27 @@ export const router = createBrowserRouter(
                 </InitialStateLoader>
               </ZeroFallbackProvider>
             </ZeroProvider>
+          ),
+        },
+        {
+          path: '/newWindow/call/:callId/:callType',
+          element: (
+            <>
+              <CallWindowNavigationBridge />
+              <EncryptionBootstrapProvider>
+                <ZeroProvider>
+                  <ZeroFallbackProvider>
+                    <InitialStateLoader blockUntilReady={false}>
+                      <EditProvider>
+                        <div className='h-full bg-background'>
+                          <CallWindowRoute />
+                        </div>
+                      </EditProvider>
+                    </InitialStateLoader>
+                  </ZeroFallbackProvider>
+                </ZeroProvider>
+              </EncryptionBootstrapProvider>
+            </>
           ),
         },
         {

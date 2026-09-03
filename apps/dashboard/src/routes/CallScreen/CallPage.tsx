@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from 'react-rout
 import { joinCallSwitchingIfNeeded } from '../../machines/roomMachine';
 import { useZero } from '../../hooks/useZero';
 import { usePlatform } from '../../hooks/usePlatform';
+import { openJoinCallWindow, shouldUseCallWindow } from '../CallWindow/callWindowLauncher';
 /**
  * CallPage handles deep-linked call URLs (/call/:callId)
  *
@@ -29,14 +30,18 @@ export default function CallPage(): null {
       // lobby it was shared from rather than a "failed to join" toast.
       const callInviteUrl = (location.state as { callInviteUrl?: string } | null)?.callInviteUrl;
 
-      // Send JOIN_CALL event - backend API handles both regular and scheduled calls
-      joinCallSwitchingIfNeeded({
-        type: 'JOIN_CALL',
-        callId,
-        zero,
-        viewMode: isMobile ? 'full' : 'mini',
-        ...(callInviteUrl && { externalLobbyUrl: callInviteUrl }),
-      });
+      if (shouldUseCallWindow(isMobile)) {
+        openJoinCallWindow(callId);
+      } else {
+        // Send JOIN_CALL event - backend API handles both regular and scheduled calls
+        joinCallSwitchingIfNeeded({
+          type: 'JOIN_CALL',
+          callId,
+          zero,
+          viewMode: isMobile ? 'full' : 'mini',
+          ...(callInviteUrl && { externalLobbyUrl: callInviteUrl }),
+        });
+      }
 
       // Redirect to home - GlobalCallOverlay will render the call UI
       void navigate('/', { replace: true });
@@ -44,7 +49,7 @@ export default function CallPage(): null {
       // Invalid call link - redirect to home
       void navigate('/', { replace: true });
     }
-  }, [callId, searchParams, zero, navigate, location.state]);
+  }, [callId, searchParams, zero, navigate, isMobile, location.state]);
 
   // No UI needed - GlobalCallOverlay handles all loading/error states
   return null;

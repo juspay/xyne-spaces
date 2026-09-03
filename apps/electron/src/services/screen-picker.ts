@@ -1,4 +1,4 @@
-import { desktopCapturer, ipcMain } from 'electron';
+import { BrowserWindow, desktopCapturer, ipcMain } from 'electron';
 import Logger from 'electron-log/main';
 import { getMainWindow } from '../window/manager';
 
@@ -14,20 +14,22 @@ export type ScreenPickerPayload =
   | { sources: ScreenSource[]; permissionError: null }
   | { sources: []; permissionError: 'denied' };
 
-let isPickerOpen = false;
+const openPickers = new Set<number>();
 
 /**
  * Cancels the pending getDisplayMedia() request and shows the permission-denied
  * state in the custom picker UI. Never falls back to the native OS picker.
  */
-function showPermissionError(callback: (streams: Electron.Streams) => void): void {
+function showPermissionError(
+  callback: (streams: Electron.Streams) => void,
+  requester: BrowserWindow,
+): void {
   Logger.info('[ScreenPicker] No sources — Screen Recording permission likely denied');
   // Cancel the pending request — Electron may throw when no video stream is provided
   try { callback({} as Electron.Streams); } catch { /* suppress */ }
 
-  const win = getMainWindow();
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('screen-picker:show', {
+  if (!requester.isDestroyed()) {
+    requester.webContents.send('screen-picker:show', {
       sources: [],
       permissionError: 'denied',
     } satisfies ScreenPickerPayload);
@@ -39,39 +41,52 @@ function showPermissionError(callback: (streams: Electron.Streams) => void): voi
  *
  * Calls desktopCapturer.getSources() — this triggers the macOS "Screen Recording"
  * permission prompt on first run. If permission is denied (no sources returned),
- * falls back to one native OS picker attempt and shows the permission error UI.
+ * shows the permission error UI.
  */
-export function showScreenPicker(callback: (streams: Electron.Streams) => void): void {
-  if (isPickerOpen) {
-    getMainWindow()?.focus();
+export function showScreenPicker(
+  callback: (streams: Electron.Streams) => void,
+  requestingWindow?: BrowserWindow | null,
+): void {
+  const requester = requestingWindow ?? getMainWindow();
+  if (!requester || requester.isDestroyed()) {
+    Logger.warn('[ScreenPicker] Requesting window not available');
+    try { callback({} as Electron.Streams); } catch { /* suppress */ }
     return;
   }
 
-  const mainWindow = getMainWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    Logger.warn('[ScreenPicker] Main window not available');
+  const requesterId = requester.webContents.id;
+
+  if (openPickers.has(requesterId)) {
+    requester.focus();
     return;
   }
 
-  isPickerOpen = true;
+  openPickers.add(requesterId);
   let callbackCalled = false;
 
-  const cleanup = (): void => {
-    isPickerOpen = false;
+  const isFromRequester = (event: Electron.IpcMainEvent): boolean =>
+    event.sender.id === requesterId;
+
+  const removeListeners = (): void => {
+    openPickers.delete(requesterId);
     ipcMain.removeListener('screen-picker:select', handleSelect);
     ipcMain.removeListener('screen-picker:cancel', handleCancel);
-    const win = getMainWindow();
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('screen-picker:close');
+  };
+
+  const cleanup = (): void => {
+    removeListeners();
+    if (!requester.isDestroyed()) {
+      requester.webContents.send('screen-picker:close');
     }
   };
 
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
   const handleSelect = async (
-    _event: Electron.IpcMainEvent,
+    event: Electron.IpcMainEvent,
     sourceId: string,
     shareAudio: boolean,
   ): Promise<void> => {
+    if (!isFromRequester(event)) return;
     if (callbackCalled) return;
     callbackCalled = true;
     cleanup();
@@ -96,12 +111,21 @@ export function showScreenPicker(callback: (streams: Electron.Streams) => void):
     }
   };
 
-  const handleCancel = (): void => {
+  const handleCancel = (event: Electron.IpcMainEvent): void => {
+    if (!isFromRequester(event)) return;
     if (callbackCalled) return;
     callbackCalled = true;
     cleanup();
     try { callback({} as Electron.Streams); } catch { /* suppress "no video stream" error */ }
   };
+
+  const handleRequesterClosed = (): void => {
+    if (callbackCalled) return;
+    callbackCalled = true;
+    removeListeners();
+    try { callback({} as Electron.Streams); } catch { /* suppress */ }
+  };
+  requester.once('closed', handleRequesterClosed);
 
   ipcMain.on('screen-picker:select', handleSelect);
   ipcMain.on('screen-picker:cancel', handleCancel);
@@ -117,10 +141,9 @@ export function showScreenPicker(callback: (streams: Electron.Streams) => void):
       Logger.info(`[ScreenPicker] Got ${sources.length} sources`);
 
       if (sources.length === 0) {
-        isPickerOpen = false;
-        ipcMain.removeListener('screen-picker:select', handleSelect);
-        ipcMain.removeListener('screen-picker:cancel', handleCancel);
-        showPermissionError(callback);
+        callbackCalled = true;
+        removeListeners();
+        showPermissionError(callback, requester);
         return;
       }
 
@@ -136,17 +159,16 @@ export function showScreenPicker(callback: (streams: Electron.Streams) => void):
           type: s.id.startsWith('screen:') ? 'screen' : 'window',
         }));
 
-      mainWindow.webContents.send('screen-picker:show', {
+      if (requester.isDestroyed()) return;
+      requester.webContents.send('screen-picker:show', {
         sources: serialized,
         permissionError: null,
       } satisfies ScreenPickerPayload);
     } catch (err) {
       Logger.error('[ScreenPicker] getSources threw:', err);
-      isPickerOpen = false;
-      ipcMain.removeListener('screen-picker:select', handleSelect);
-      ipcMain.removeListener('screen-picker:cancel', handleCancel);
-      showPermissionError(callback);
+      callbackCalled = true;
+      removeListeners();
+      showPermissionError(callback, requester);
     }
   })();
 }
-

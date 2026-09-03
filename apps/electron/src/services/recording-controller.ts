@@ -37,7 +37,7 @@ let focusRequestTimer: ReturnType<typeof setTimeout> | null = null;
 
 let active = false;
 let startingRecording = false;
-let callActive = false;
+const callActiveByWindow = new Set<number>();
 let startingRecordingExpiry: ReturnType<typeof setTimeout> | null = null;
 let startTime: number | null = null;
 let paused = false;
@@ -85,19 +85,20 @@ export function onRecordingStateChange(
 function watchRendererLifecycle(win: BrowserWindow): void {
   if (watchedRenderers.has(win)) return;
   watchedRenderers.add(win);
+  const senderId = win.webContents.id;
   win.webContents.on('did-start-loading', () => {
     rendererReady = false;
     // A reload tears down the LiveKit connection, so any call is over; the
     // remounted renderer resends call state either way. Without this a renderer
     // that hangs mid-reload would strand the flag true and mute detection.
-    callActive = false;
+    clearCallActiveForWindow(senderId);
   });
   win.webContents.on('render-process-gone', () => {
     rendererReady = false;
     // syncRecordingState early-returns on inactive -> inactive, so a crash
     // mid-start would strand the flag.
     setRecordingStarting(false);
-    callActive = false;
+    clearCallActiveForWindow(senderId);
     syncRecordingState(false);
   });
 }
@@ -158,9 +159,10 @@ function isMainWindowFocused(): boolean {
 }
 
 function syncPowerSaveBlocker(): void {
-  if (active && powerSaveBlockerId === null) {
+  const shouldBlock = active || callActiveByWindow.size > 0;
+  if (shouldBlock && powerSaveBlockerId === null) {
     powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
-  } else if (!active && powerSaveBlockerId !== null) {
+  } else if (!shouldBlock && powerSaveBlockerId !== null) {
     powerSaveBlocker.stop(powerSaveBlockerId);
     powerSaveBlockerId = null;
   }
@@ -407,12 +409,27 @@ export function isRecordingInProgress(): boolean {
 // Calls enable the mic the same way recordings do, so the meeting detector must
 // treat both as ours. The renderer reports call state on every transition and on
 // mount; the lifecycle hooks above clear it when the renderer reloads or dies.
-export function setCallActive(next: boolean): void {
-  callActive = next;
+export function setCallActive(next: boolean, senderId?: number): void {
+  const key = senderId ?? 0;
+  if (next) {
+    callActiveByWindow.add(key);
+  } else {
+    callActiveByWindow.delete(key);
+  }
+  syncPowerSaveBlocker();
+}
+
+export function isCallActiveForWindow(senderId: number): boolean {
+  return callActiveByWindow.has(senderId);
+}
+
+export function clearCallActiveForWindow(senderId: number): void {
+  callActiveByWindow.delete(senderId);
+  syncPowerSaveBlocker();
 }
 
 export function isMicOwnedByXyne(): boolean {
-  return active || startingRecording || callActive;
+  return active || startingRecording || callActiveByWindow.size > 0;
 }
 
 export function syncRecordingState(

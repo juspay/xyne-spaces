@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { dialog, BrowserWindow, session, net, app } from 'electron';
 import log from 'electron-log/main';
 import { config } from '../app/config';
+import { getMainWindow } from '../window/manager';
 import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 import * as fs from 'fs';
@@ -1446,7 +1447,7 @@ class AgentAuthService {
    * Show consent dialog to user
    */
   private async showConsentDialog(authRequest: AuthRequest): Promise<{ approved: boolean; duration: DurationOption }> {
-    const mainWindow = BrowserWindow.getAllWindows()[0];
+    const mainWindow = getMainWindow() ?? BrowserWindow.getAllWindows()[0];
 
     if (!mainWindow) {
       log.error('[AgentAuth] No window available for consent dialog');

@@ -8,23 +8,36 @@ import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { useAuth } from './useAuth';
 import { useZero } from './useZero';
 import { usePlatform } from './usePlatform';
+import { isCallWindowActive } from '../utils/callWindowChannel';
+import {
+  openInitiateCallWindow,
+  openJoinCallWindow,
+  shouldUseCallWindow,
+} from '../routes/CallWindow/callWindowLauncher';
 
 // INITIATE_CALL is only handled in the machine's `idle` state; if we're already in
 // (or starting) a call, XState silently drops it. Guard so callers can bail *before*
 // any createDm, leaving no dangling channel for a call that never starts.
 const ensureRoomIdle = (): boolean => {
+  if (isCallWindowActive()) {
+    toast.error('Leave your current call before starting a new one.');
+    return false;
+  }
   if (roomActor.getSnapshot().matches('idle')) return true;
   toast.error('Leave your current call before starting a new one.');
   return false;
 };
 
-// A channel's live call = a non-thread (CONVERSATION-origin) ACTIVE call on that channel. Shared by
-// the "already live?" check (join directly) and joinOrStartCall's join-vs-initiate branch.
+// A channel's live call = the CHANNEL-origin ACTIVE call on that channel. Shared by the
+// "already live?" check (join directly) and joinOrStartCall's join-vs-initiate branch.
+// Match CHANNEL explicitly rather than excluding CONVERSATION — the query is ordered
+// newest-first, so "anything but a thread call" follows a calendar call that started
+// later. CHANNEL is what the backend converges on in findActiveCallByChannelId.
 const findLiveChannelCall = (channelId: string): Call | undefined =>
   roomActor
     .getSnapshot()
     .context.activeCalls.find(
-      call => call.channelId === channelId && call.callOrigin !== CallOrigin.CONVERSATION,
+      call => call.channelId === channelId && call.callOrigin === CallOrigin.CHANNEL,
     );
 
 interface UseQuickCallReturn {
@@ -64,6 +77,21 @@ export const useQuickCall = (): UseQuickCallReturn => {
       // CONVERSATION-origin calls are message-thread calls, not the channel call — exclude them
       // (mirrors useCallActions' currentChannelCall lookup).
       const activeCall = findLiveChannelCall(channelId);
+
+      if (shouldUseCallWindow(isMobile)) {
+        if (activeCall) {
+          openJoinCallWindow(activeCall.externalId);
+        } else {
+          openInitiateCallWindow({
+            channelId,
+            callType: CallType.AUDIO,
+            callDisplayName: displayName,
+            targetUserIds,
+          });
+        }
+        return;
+      }
+
       if (activeCall) {
         roomActor.send({ type: 'JOIN_CALL', callId: activeCall.externalId, zero, viewMode });
         return;

@@ -17,6 +17,8 @@ import {
   MediaDeviceFailure,
   Track,
   LocalVideoTrack,
+  LocalAudioTrack,
+  LocalTrack,
 } from 'livekit-client';
 import { BackgroundBlur } from '@livekit/track-processors';
 import type { Zero } from '@rocicorp/zero';
@@ -237,6 +239,19 @@ export interface RoomContext {
   // scoped to one call and clears with the rest of the context on disconnect.
   // Every consumer re-checks the CAC flag before acting on it.
   callUrlOverrides: CallUrlOverrides | null;
+  joinFailure: { message: string; terminal: boolean } | null;
+  awaitingAdmission: boolean;
+  initialTrackState: InitialTrackState | null;
+}
+
+export interface InitialTrackState {
+  mic: boolean;
+  camera: boolean;
+  micDeviceId?: string | undefined;
+  cameraDeviceId?: string | undefined;
+  speakerDeviceId?: string | undefined;
+  micTrack?: LocalAudioTrack | undefined;
+  cameraTrack?: LocalVideoTrack | undefined;
 }
 
 // Events for Room operations
@@ -248,6 +263,7 @@ export type RoomMachineEvent =
       callType: CallType;
       externalId: string;
       zero: Zero | null;
+      initialTrackState?: InitialTrackState;
     }
   | {
       type: 'INITIATE_CALL';
@@ -263,6 +279,7 @@ export type RoomMachineEvent =
       sdlcLink?: SdlcCallLink; // Optional: SDLC entity to link the call to
       // Omit for a join a person drove themselves (see RoomContext).
       callUrlOverrides?: CallUrlOverrides;
+      initialTrackState?: InitialTrackState;
     }
   | {
       type: 'JOIN_CALL';
@@ -274,6 +291,7 @@ export type RoomMachineEvent =
       // Set by the invite-link entry points, and only by them: where to send
       // the user if this call turns out not to be theirs to join.
       externalLobbyUrl?: string;
+      initialTrackState?: InitialTrackState;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -1315,6 +1333,8 @@ export const roomMachine = setup({
       callType: ({ event }) => (event.type === 'CONNECT' ? event.callType : CallType.VIDEO),
       externalId: ({ event }) => (event.type === 'CONNECT' ? event.externalId : null),
       zero: ({ event }) => (event.type === 'CONNECT' ? event.zero : null),
+      initialTrackState: ({ event }) =>
+        event.type === 'CONNECT' ? (event.initialTrackState ?? null) : null,
     }),
 
     cleanupRoom: ({ context }) => {
@@ -1369,6 +1389,13 @@ export const roomMachine = setup({
       isBackgroundBlurEnabled: () => false,
       hostControls: () => DEFAULT_HOST_CONTROLS,
       callUrlOverrides: () => null,
+      initialTrackState: () => null,
+      // Identity of the call that just ended. Only INITIATE_CALL writes these; JOIN_CALL
+      // never does, so leaving them set makes the next joined call render the previous
+      // call's display name and type.
+      callDisplayName: () => null,
+      callType: () => CallType.VIDEO,
+      scopeType: () => null,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1404,28 +1431,67 @@ export const roomMachine = setup({
             // exactly as if it had asked for nothing.
             const urlOverrides = isCallUrlApiAllowed() ? context.callUrlOverrides : null;
 
+            const lobbyChoice = context.initialTrackState;
+
             // Precedence, strongest first:
             //   1. host controls — never overridable by anyone but the host
-            //   2. an explicit request from the call URL (e.g. ?mic=on), once the
             //      flag above allows it
-            //   3. the user's saved join preferences + the crowded-room mute threshold
-            // Applying (2) here rather than toggling after 'connected' is deliberate:
-            // this action is the single writer of the initial track state, so there is
-            // no window where a post-connect compare-and-toggle could read a value
-            // these very awaits are about to overwrite and end up inverted.
             const enableMic =
-              !audioTurnedOffByHost && (urlOverrides?.mic ?? (!joinMuted && !shouldMuteByDefault));
+              !audioTurnedOffByHost &&
+              (lobbyChoice?.mic ?? urlOverrides?.mic ?? (!joinMuted && !shouldMuteByDefault));
 
             const enableCamera =
-              !cameraTurnedOffByHost && (urlOverrides?.camera ?? !joinWithoutVideo);
+              !cameraTurnedOffByHost &&
+              (lobbyChoice?.camera ?? urlOverrides?.camera ?? !joinWithoutVideo);
 
-            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            let micPublished = false;
+            let cameraPublished = false;
+            if (enableMic && lobbyChoice?.micTrack) {
+              try {
+                await context.room!.localParticipant.publishTrack(
+                  lobbyChoice.micTrack as unknown as LocalTrack,
+                );
+                micPublished = true;
+              } catch {
+                lobbyChoice.micTrack.stop();
+              }
+            }
+            if (enableCamera && lobbyChoice?.cameraTrack) {
+              try {
+                await context.room!.localParticipant.publishTrack(
+                  lobbyChoice.cameraTrack as unknown as LocalTrack,
+                );
+                cameraPublished = true;
+              } catch {
+                lobbyChoice.cameraTrack.stop();
+              }
+            }
 
-            await context.room!.localParticipant.setCameraEnabled(enableCamera);
+            if (!enableMic && lobbyChoice?.micTrack) lobbyChoice.micTrack.stop();
+            if (!enableCamera && lobbyChoice?.cameraTrack) lobbyChoice.cameraTrack.stop();
 
-            // Always select default audio devices regardless of mute state
-            await context.room!.switchActiveDevice('audioinput', 'default');
-            await context.room!.switchActiveDevice('audiooutput', 'default');
+            if (!micPublished && lobbyChoice?.micDeviceId) {
+              await context.room!.switchActiveDevice('audioinput', lobbyChoice.micDeviceId);
+            }
+            if (!cameraPublished && lobbyChoice?.cameraDeviceId) {
+              await context.room!.switchActiveDevice('videoinput', lobbyChoice.cameraDeviceId);
+            }
+
+            if (!micPublished) {
+              await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            }
+
+            if (!cameraPublished) {
+              await context.room!.localParticipant.setCameraEnabled(enableCamera);
+            }
+
+            if (!lobbyChoice?.micDeviceId && !micPublished) {
+              await context.room!.switchActiveDevice('audioinput', 'default');
+            }
+            await context.room!.switchActiveDevice(
+              'audiooutput',
+              lobbyChoice?.speakerDeviceId ?? 'default',
+            );
           } catch {
             // Fail silently - error will be handled by MediaDevicesError event listener
           }
@@ -1455,6 +1521,32 @@ export const roomMachine = setup({
       if (!context.externalLobbyUrl) return;
       openLink(context.externalLobbyUrl, null, { force: 'external' });
     },
+
+    recordJoinFailure: assign({
+      joinFailure: ({ event }) => {
+        const cause = (event as { error?: unknown }).error;
+        const raw =
+          cause instanceof Error && cause.message ? cause.message : 'Could not join the call.';
+        const terminal = /ended|access|not allowed|forbidden|permission|not found/i.test(raw);
+        return { message: raw, terminal };
+      },
+      awaitingAdmission: () => false,
+    }),
+
+    stopUnpublishedTracks: ({ context }) => {
+      context.initialTrackState?.micTrack?.stop();
+      context.initialTrackState?.cameraTrack?.stop();
+    },
+
+    clearJoinOutcome: assign({
+      joinFailure: () => null,
+      awaitingAdmission: () => false,
+    }),
+
+    markAwaitingAdmission: assign({
+      awaitingAdmission: () => true,
+      joinFailure: () => null,
+    }),
 
     showJoinCallErrorToast: ({ context }) => {
       if (context.callUrlOverrides) return;
@@ -1574,6 +1666,9 @@ export const roomMachine = setup({
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
     callUrlOverrides: null,
+    initialTrackState: null,
+    joinFailure: null,
+    awaitingAdmission: false,
   },
   id: 'roomMachine',
   on: {
@@ -1606,7 +1701,7 @@ export const roomMachine = setup({
       on: {
         CONNECT: {
           target: 'connecting',
-          actions: ['createRoom', 'storeConnectionParams', 'clearError'],
+          actions: ['createRoom', 'storeConnectionParams', 'clearError', 'clearJoinOutcome'],
         },
         INITIATE_CALL: {
           target: 'initiating',
@@ -1632,7 +1727,11 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' ? (event.sdlcLink ?? null) : null,
             callUrlOverrides: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.callUrlOverrides ?? null) : null,
+            initialTrackState: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.initialTrackState ?? null) : null,
             isInitiator: () => true,
+            joinFailure: () => null,
+            awaitingAdmission: () => false,
           }),
         },
         JOIN_CALL: {
@@ -1651,7 +1750,11 @@ export const roomMachine = setup({
                 event.type === 'JOIN_CALL' ? (event.callUrlOverrides ?? null) : null,
               externalLobbyUrl: ({ event }) =>
                 event.type === 'JOIN_CALL' ? (event.externalLobbyUrl ?? null) : null,
+              initialTrackState: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.initialTrackState ?? null) : null,
               isInitiator: () => false,
+              joinFailure: () => null,
+              awaitingAdmission: () => false,
             }),
           ],
         },
@@ -1696,6 +1799,10 @@ export const roomMachine = setup({
             error: () => 'Call setup was interrupted',
           }),
         },
+        DISCONNECT: {
+          target: 'idle',
+          actions: ['stopUnpublishedTracks', 'cleanupRoom', 'clearContext', 'clearError'],
+        },
       },
       invoke: {
         src: 'createCallEntry',
@@ -1731,7 +1838,11 @@ export const roomMachine = setup({
           {
             guard: ({ event }): boolean => event.output.pending === true,
             target: 'idle',
-            actions: ['showRequestingAdmissionToast'],
+            actions: [
+              'showRequestingAdmissionToast',
+              'markAwaitingAdmission',
+              'stopUnpublishedTracks',
+            ],
           },
           {
             target: 'connecting',
@@ -1753,10 +1864,14 @@ export const roomMachine = setup({
         ],
         onError: {
           target: 'failed',
-          actions: assign({
-            error: ({ event }) =>
-              event.error instanceof Error ? event.error.message : 'Failed to initiate call',
-          }),
+          actions: [
+            assign({
+              error: ({ event }) =>
+                event.error instanceof Error ? event.error.message : 'Failed to initiate call',
+            }),
+            'recordJoinFailure',
+            'stopUnpublishedTracks',
+          ],
         },
       },
     },
@@ -1789,7 +1904,11 @@ export const roomMachine = setup({
           {
             guard: ({ event }): boolean => event.output.pending === true,
             target: 'idle',
-            actions: ['showRequestingAdmissionToast'],
+            actions: [
+              'showRequestingAdmissionToast',
+              'markAwaitingAdmission',
+              'stopUnpublishedTracks',
+            ],
           },
           {
             target: 'connecting',
@@ -1827,6 +1946,7 @@ export const roomMachine = setup({
                 error: () => 'Call is not in this workspace',
               }),
               'routeToExternalCallLobby',
+              'stopUnpublishedTracks',
             ],
           },
           {
@@ -1837,9 +1957,17 @@ export const roomMachine = setup({
                   event.error instanceof Error ? event.error.message : 'Failed to join call',
               }),
               'showJoinCallErrorToast',
+              'recordJoinFailure',
+              'stopUnpublishedTracks',
             ],
           },
         ],
+      },
+      on: {
+        DISCONNECT: {
+          target: 'idle',
+          actions: ['stopUnpublishedTracks', 'cleanupRoom', 'clearContext', 'clearError'],
+        },
       },
     },
     connecting: {
@@ -1867,13 +1995,21 @@ export const roomMachine = setup({
         onError: {
           target: 'idle',
           actions: [
+            'stopUnpublishedTracks',
             'cleanupRoom',
             'clearContext',
             assign({
               error: ({ event }) =>
                 event.error instanceof Error ? event.error.message : 'Failed to connect',
             }),
+            'recordJoinFailure',
           ],
+        },
+      },
+      on: {
+        DISCONNECT: {
+          target: 'idle',
+          actions: ['stopUnpublishedTracks', 'cleanupRoom', 'clearContext', 'clearError'],
         },
       },
     },

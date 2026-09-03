@@ -69,7 +69,16 @@ export const isElectronStandaloneWindow = (): boolean => {
   return isElectronApp() && isStandaloneWindow();
 };
 
-const STANDALONE_SUPPORTED_ROUTES = ['/chat/'];
+export const CALL_WINDOW_PATH_PREFIX = '/newWindow/call/';
+
+export const isCallWindow = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return window.location.pathname.startsWith(CALL_WINDOW_PATH_PREFIX);
+};
+
+const STANDALONE_SUPPORTED_ROUTES = ['/chat/', '/call/'];
 
 export const isStandaloneSupportedPath = (path: string): boolean => {
   return STANDALONE_SUPPORTED_ROUTES.some(route => path.startsWith(route));
@@ -364,4 +373,69 @@ export const subscribeCreateTicketResult = (
   }
 
   return dispose;
+};
+
+export type CallWindowStage = 'ring' | 'lobby';
+
+export interface OpenCallWindowOptions {
+  callId: string;
+  callType: string;
+  stage: CallWindowStage;
+  workspaceId?: string | null | undefined;
+  theme?: string | null | undefined;
+  inactive?: boolean | undefined;
+  extraParams?: URLSearchParams | undefined;
+}
+
+const CALL_WINDOW_TARGET = 'xyne-call-window';
+const CALL_WINDOW_FEATURES = 'popup=yes,width=960,height=640';
+export const CALL_WINDOW_LAUNCH_PARAM = 'launch';
+
+let callWindowLaunchSeq = 0;
+
+export const buildCallWindowPath = (options: OpenCallWindowOptions): string => {
+  const search = new URLSearchParams();
+  search.set('stage', options.stage);
+  callWindowLaunchSeq += 1;
+  search.set(CALL_WINDOW_LAUNCH_PARAM, `${Date.now()}-${callWindowLaunchSeq}`);
+  if (options.workspaceId) search.set('workspaceId', options.workspaceId);
+  if (options.theme) search.set('theme', options.theme);
+  options.extraParams?.forEach((value, key) => search.set(key, value));
+  return `${CALL_WINDOW_PATH_PREFIX}${encodeURIComponent(options.callId)}/${encodeURIComponent(
+    options.callType,
+  )}?${search.toString()}`;
+};
+
+export const openCallWindow = (options: OpenCallWindowOptions): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const path = buildCallWindowPath(options);
+
+  if (isElectronApp() && window.electronAPI?.ipcSend) {
+    window.electronAPI.ipcSend('call:open-window', {
+      relativePath: path,
+      inactive: options.inactive === true,
+    });
+    return true;
+  }
+
+  const newWindow = window.open(path, CALL_WINDOW_TARGET, CALL_WINDOW_FEATURES);
+
+  if (newWindow) {
+    newWindow.focus();
+    return true;
+  }
+
+  logger.warn(LogEvent.FRONTEND_ERROR, {
+    type: 'migrated_console_warn',
+    message: String('Failed to open call window; popup may be blocked'),
+  });
+  return false;
+};
+
+export const focusCallWindow = (): void => {
+  if (typeof window === 'undefined') return;
+  window.electronAPI?.ipcSend?.('call:focus-window');
 };

@@ -34,6 +34,7 @@ import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 import { mutators } from '../../../zero/mutators';
 import { playAudio } from '../../../utils/audioPlayer';
+import { isCallWindow } from '../../../utils/electronApp';
 
 import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenShare';
 import { logger, Logger } from '../../../utils/logger';
@@ -66,6 +67,7 @@ export function CustomLiveKitRoom({
 }: CustomLiveKitRoomProps): React.ReactElement {
   // Sync custom screen picker on/off from CAC — only active while in a call
   useScreenPickerFlag();
+  const isInCallWindow = isCallWindow();
   const isSavingWhiteboardRef = useRef(false);
 
   // Subscribe to room state from global XState machine using a single snapshot
@@ -636,6 +638,8 @@ export function CustomLiveKitRoom({
         onToggleScreenShare={toggleScreenShare}
         onDisconnect={handleDisconnectClick}
         onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+        hideMinimize={isInCallWindow}
+        isWindowChrome={isInCallWindow}
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}

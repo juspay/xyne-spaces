@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { InvitationResponse } from '@xyne/shared';
 import { roomActor } from '../machines/roomMachine';
+import { openJoinCallWindow, shouldUseCallWindow } from '../routes/CallWindow/callWindowLauncher';
 import { useZero } from './useZero';
 import { usePlatform } from './usePlatform';
 import { getUserCallAccessLevel } from './useCalls';
@@ -111,6 +112,10 @@ function consumeAutoJoinRequestKey(requestKey: string): boolean {
 }
 
 function sendJoinCall(callId: string, zero: ReturnType<typeof useZero>, isMobile: boolean): void {
+  if (shouldUseCallWindow(isMobile)) {
+    openJoinCallWindow(callId);
+    return;
+  }
   roomActor.send({
     type: 'JOIN_CALL',
     callId,

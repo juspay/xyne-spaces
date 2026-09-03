@@ -6,6 +6,8 @@ import { mutators } from '../zero/mutators';
 import { schema } from '@xyne/shared';
 import { VITE_ZERO_SERVER, ZERO_STORAGE_KEY } from '../config';
 import { dropZeroDatabases, rememberZeroLane } from '../zero/dropZeroDatabases';
+import { isCallWindow } from '../utils/electronApp';
+import { isCallWindowActive } from '../utils/callWindowChannel';
 import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
@@ -55,12 +57,16 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
 
     const prevWorkspaceId = prevWorkspaceIdRef.current;
     const currentWorkspaceId = user.workspaceId ?? '';
-    prevWorkspaceIdRef.current = currentWorkspaceId;
+    const needsDrop = prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId;
+    const deferDrop = needsDrop && isCallWindowActive();
+    if (!deferDrop) {
+      prevWorkspaceIdRef.current = currentWorkspaceId;
+    }
 
     const initZero = async (): Promise<void> => {
       // If workspaceId changed, drop this lane's local databases to prevent stale
       // cross-workspace cache. Scoped so a sibling bundle on the same origin keeps its own.
-      if (prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId) {
+      if (needsDrop && !deferDrop) {
         try {
           await dropZeroDatabases();
         } catch {
@@ -77,7 +83,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         pingTimeoutMs: 10000,
         schema,
         mutators: mutators,
-        hiddenTabDisconnectDelay: 60000,
+        hiddenTabDisconnectDelay: isCallWindow() ? 24 * 60 * 60 * 1000 : 60000,
         context: {
           userID: user.id,
           workspaceId: currentWorkspaceId,

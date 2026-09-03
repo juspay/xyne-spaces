@@ -284,10 +284,30 @@ const electronAPI = {
   requestAllMediaPermissions: () =>
     ipcRenderer.invoke('request-all-media-permissions'),
 
+  takePendingCallRoute: (): Promise<string | null> =>
+    ipcRenderer.invoke('call:take-pending-route'),
+
+  onCallWindowLeave: (callback: () => void) => {
+    const listener = (): void => callback();
+    ipcRenderer.on('call:leave', listener);
+    return () => ipcRenderer.removeListener('call:leave', listener);
+  },
+
+  onCallWindowNavigate: (callback: (relativePath: string) => void) => {
+    const listener = (_event: unknown, relativePath: string): void => callback(relativePath);
+    ipcRenderer.on('call:navigate', listener);
+    return () => ipcRenderer.removeListener('call:navigate', listener);
+  },
+
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
     const allowed = [
       'app:theme-changed',
+      'call:close-window',
+      'call:focus-window',
+      'call:open-window',
+      'call:prewarm-window',
+      'call:ringing-changed',
       'call:state-changed',
       'meeting-popup:content-height',
       'recording-pill:recording-stopped',
