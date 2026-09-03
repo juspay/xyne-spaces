@@ -3249,7 +3249,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
         title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
         className={cn(
-          'flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors',
+          'flex items-center gap-2 text-sm text-muted-foreground transition-colors',
           canCreateNestedSubTicket ? 'hover:text-foreground' : 'cursor-not-allowed opacity-50',
         )}
       >
@@ -4815,20 +4815,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         {/* Sub-Tickets Section */}
         <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
           <div>
-            <div className='flex items-center gap-3'>
-              <p className='text-base font-semibold text-foreground'>Sub-Tickets</p>
-              <span
-                className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-                data-testid='sub-tickets-count'
-              >
-                {subTickets.length}
-              </span>
-              {boardData?.boardType !== BoardType.FLOW && (
-                <span className='inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                  <GitBranch size={12} />
-                  Tree
+            <div className='flex items-center justify-between gap-3'>
+              <div className='flex items-center gap-3'>
+                <p className='text-base font-semibold text-foreground'>Sub-Tickets</p>
+                <span
+                  className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
+                  data-testid='sub-tickets-count'
+                >
+                  {subTickets.length}
                 </span>
-              )}
+                {boardData?.boardType !== BoardType.FLOW && (
+                  <span className='inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                    <GitBranch size={12} />
+                    Tree
+                  </span>
+                )}
+              </div>
+              {createSubTicketButton}
             </div>
 
             <div className='mt-4 space-y-3' data-testid='sub-tickets-list'>
@@ -4839,7 +4842,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   No sub-tickets yet.
                 </div>
               )}
-              {createSubTicketButton}
               {addSubTicketPicker}
             </div>
           </div>
