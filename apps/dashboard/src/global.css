@@ -907,22 +907,22 @@
     --chip-fg: var(--mention-current-user-color, var(--mention-color));
   }
 
-  /* cmd+K "active" row tier (Slack-style): once the user engages a row (ArrowUp/Down or hover)
-     the selection turns blue; the resting auto-selection stays gray. Theme-tuned per data-theme.
+  /* cmd+K selected-row highlight: blue for the selected row from the moment it's selected,
+     resting or keyboard-engaged alike, matching the mention picker's .cmdk-active-row.
      Result rows carry aria-selected + an aria-selected:bg-accent utility, so !important is needed
      to win over the utilities layer; mention rows use the .cmdk-active-row class directly.
      When a mention typeahead is open (data-mention-active) selection is owned by the mention list's
      own .cmdk-active-row, so the aria-selected blue is suppressed to avoid a second highlighted row. */
-  [data-nav-active="true"]:not([data-mention-active="true"]) [cmdk-item][aria-selected="true"] {
-    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
+  [cmdk-root]:not([data-mention-active="true"]) [cmdk-item][aria-selected="true"] {
+    background-color: rgb(219 234 254) !important; /* blue-100, matches .cmdk-active-row */
   }
   .cmdk-active-row {
     background-color: rgb(219 234 254); /* blue-100 */
   }
   [data-theme="midnight"]
-    [data-nav-active="true"]:not([data-mention-active="true"])
+    [cmdk-root]:not([data-mention-active="true"])
     [cmdk-item][aria-selected="true"] {
-    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
+    background-color: rgb(30 58 138 / 0.4) !important; /* blue-900 @ 40%, matches .cmdk-active-row */
   }
   [data-theme="midnight"] .cmdk-active-row {
     background-color: rgb(30 58 138 / 0.4); /* blue-900 @ 40% */
