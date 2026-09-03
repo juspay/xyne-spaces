@@ -41,7 +41,7 @@
  * SAVED apps — an unsaved chat artifact has no stable id to key records on.
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
@@ -51,6 +51,59 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("artifact-app-storage");
 export const artifactAppStorageRouter: Router = Router();
+
+/**
+ * Storage-only Bearer bridge, mounted BEFORE requireAuth on this router's
+ * path (see http/routes.ts) and nowhere else — requireAuth itself is shared
+ * by every route in the service and stays untouched.
+ *
+ * An SDK client sends only `Authorization: Bearer <workspace JWT>`. Spaces'
+ * auth wants that token in a cookie whose NAME embeds the workspaceId
+ * (`xyne_ws_<id>_token`), so this synthesizes the cookie header from the
+ * token's own workspaceId claim and lets requireAuth's normal cookie path do
+ * the rest. The claim is decoded WITHOUT verification — safe, because it is
+ * only a routing hint: it selects which cookie slot Spaces verifies, and the
+ * signature check still happens there. A tampered claim just misroutes the
+ * caller's own request into a slot that fails verification.
+ *
+ * Strictly additive: it acts only when the request has NO cookie header —
+ * which today could never authenticate — and a non-JWT bearer (xyne_cli_*,
+ * xyne_svc_*) doesn't decode, so CLI/service tokens fall through untouched.
+ */
+export function storageBearerAuthBridge(req: Request, _res: Response, next: NextFunction): void {
+  if (!req.headers.cookie) {
+    const match = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? "");
+    const token = match?.[1]?.trim();
+    const workspaceId = token ? workspaceIdFromJwt(token) : undefined;
+    if (token && workspaceId) {
+      req.headers.cookie = `xyne_last_workspace=${workspaceId}; xyne_ws_${workspaceId}_token=${token}`;
+      if (typeof req.headers["x-workspace-id"] !== "string" || !req.headers["x-workspace-id"].trim()) {
+        req.headers["x-workspace-id"] = workspaceId;
+      }
+    }
+  }
+  next();
+}
+
+/** The workspaceId claim of a Spaces workspace JWT, undefined for anything
+ *  that isn't a decodable JWT. Charset-restricted because the value is
+ *  embedded into the synthesized Cookie header above. */
+function workspaceIdFromJwt(token: string): string | undefined {
+  const parts = token.split(".");
+  if (parts.length !== 3) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf8")) as {
+      workspaceId?: unknown;
+    };
+    const workspaceId = payload.workspaceId;
+    if (typeof workspaceId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(workspaceId)) {
+      return workspaceId;
+    }
+  } catch {
+    /* not decodable — not a workspace JWT */
+  }
+  return undefined;
+}
 
 const VISIBILITY_WORKSPACE = "WORKSPACE";
 
