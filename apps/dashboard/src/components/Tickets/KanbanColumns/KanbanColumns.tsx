@@ -1,5 +1,5 @@
 import React from 'react';
-import { Circle, PlusDefault as Plus } from '@xyne/icons';
+import { Circle, EyeOff, PlusDefault as Plus, ThreeDotsMenuHorizontal } from '@xyne/icons';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -20,11 +20,17 @@ import {
   useKanbanTicketsPage,
 } from '../../../routes/KanbanBoardScreen/useKanbanTicketsPage';
 import { TicketCard } from '../TicketCard/TicketCard';
-import Button from '../../ui/Button';
-import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
-import { ExpandIcon } from '../../../assets/icons/ExpandIcon';
 import { cn } from '../../../utils/classNames';
 import { StatusOptions } from '../TicketTable/TicketTableHelper';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
+
+export const KANBAN_COLUMN_WIDTH_CLASS = 'w-72 sm:w-[360px]';
+export const KANBAN_STRIP_GAP_CLASS = 'gap-1 sm:gap-4';
 
 const VIRTUAL_ROW_HEIGHT = 130;
 const VIRTUAL_OVERSCAN = 25;
@@ -81,9 +87,12 @@ const DroppableStage: React.FC<DroppableStageProps> = ({ id, children }) => {
   return <div ref={setNodeRef}>{children}</div>;
 };
 
+const StaticStage: React.FC<DroppableStageProps> = ({ children }) => <div>{children}</div>;
+
 const VirtualizedStageList: React.FC<{
   stageId: string;
   columnKey: string;
+  scrollClassName?: string;
   stageTickets: Ticket[];
   hasMore?: boolean;
   isLoadingMore?: boolean;
@@ -99,6 +108,7 @@ const VirtualizedStageList: React.FC<{
 }> = ({
   stageId,
   columnKey,
+  scrollClassName,
   stageTickets,
   hasMore = false,
   isLoadingMore = false,
@@ -157,7 +167,7 @@ const VirtualizedStageList: React.FC<{
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div ref={scrollRef} className='h-full overflow-y-auto pt-3 px-3'>
+    <div ref={scrollRef} className={cn(scrollClassName ?? 'h-full', 'overflow-y-auto pt-3 px-3')}>
       <div
         className='relative w-full'
         style={{
@@ -219,6 +229,7 @@ const VirtualizedStageList: React.FC<{
 const PaginatedStageList: React.FC<{
   stage: Stage;
   columnKey: string;
+  scrollClassName?: string;
   paginationArgs: KanbanTicketsPageBaseArgs;
   columnType: 'stage' | 'status';
   allKnownTickets: Ticket[];
@@ -233,6 +244,7 @@ const PaginatedStageList: React.FC<{
 }> = ({
   stage,
   columnKey,
+  scrollClassName,
   paginationArgs,
   columnType,
   allKnownTickets,
@@ -293,6 +305,7 @@ const PaginatedStageList: React.FC<{
       <VirtualizedStageList
         stageId={stage.id}
         columnKey={columnKey}
+        {...(scrollClassName !== undefined && { scrollClassName })}
         stageTickets={renderedTickets}
         hasMore={hasMore}
         isLoadingMore={isLoadingMore}
@@ -309,9 +322,6 @@ const PaginatedStageList: React.FC<{
   );
 };
 
-const isTerminalStageStatus = (status?: TicketStatusV2): boolean =>
-  status === TicketStatusV2.COMPLETED || status === TicketStatusV2.CANCELLED;
-
 const ticketBelongsToColumn = (
   ticket: Ticket,
   columnType: 'stage' | 'status',
@@ -327,6 +337,9 @@ const ticketBelongsToColumn = (
 
 interface KanbanColumnsProps {
   stages: Stage[];
+  mode?: 'full' | 'headers' | 'bodies';
+  hiddenColumnIds?: string[];
+  onHideColumn?: (stageId: string) => void;
   ticketsByStage: Record<string, Ticket[]>;
   stageCounts?: Record<string, number>;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
@@ -370,6 +383,9 @@ export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) 
 
 export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   stages,
+  mode = 'full',
+  hiddenColumnIds,
+  onHideColumn,
   ticketsByStage,
   stageCounts,
   onTicketClick,
@@ -390,57 +406,33 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     () => allKnownTickets ?? Object.values(ticketsByStage).flat(),
     [allKnownTickets, ticketsByStage],
   );
-  const stageCollapseSignature = React.useMemo(
-    () => stages.map(stage => `${stage.id}:${stage.defaultTicketStatusV2 ?? ''}`).join('|'),
-    [stages],
+  const StageWrapper = mode === 'headers' ? StaticStage : DroppableStage;
+
+  const visibleStages = React.useMemo(
+    () =>
+      hiddenColumnIds && hiddenColumnIds.length > 0
+        ? stages.filter(stage => !hiddenColumnIds.includes(stage.id))
+        : stages,
+    [stages, hiddenColumnIds],
   );
-  const userToggledCollapsedStageIdsRef = React.useRef<Set<string>>(new Set());
-  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>(() =>
-    stages
-      .filter(stage => isTerminalStageStatus(stage.defaultTicketStatusV2))
-      .map(stage => stage.id),
-  );
-
-  React.useEffect(() => {
-    setCollapsedStageIds(prev => {
-      const next = new Set(prev);
-
-      for (const stage of stages) {
-        if (
-          !isTerminalStageStatus(stage.defaultTicketStatusV2) ||
-          userToggledCollapsedStageIdsRef.current.has(stage.id)
-        ) {
-          continue;
-        }
-
-        next.add(stage.id);
-      }
-
-      return [...next];
-    });
-  }, [stageCollapseSignature, stages]);
-
-  const toggleCollapse = (stageId: string) => {
-    userToggledCollapsedStageIdsRef.current.add(stageId);
-    setCollapsedStageIds(prev =>
-      prev.includes(stageId) ? prev.filter(id => id !== stageId) : [...prev, stageId],
-    );
-  };
 
   return (
     <div
       className={cn(
-        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen no-scrollbar',
+        'flex',
+        mode === 'full' &&
+          'gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen no-scrollbar',
+        mode === 'headers' && cn('items-start pt-2 sm:pt-3', KANBAN_STRIP_GAP_CLASS),
+        mode === 'bodies' && cn('items-stretch pb-2 sm:pb-3', KANBAN_STRIP_GAP_CLASS),
         containerClassName,
       )}
     >
-      {stages.map(stage => {
+      {visibleStages.map(stage => {
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const countByStageId = stageCounts?.[stage.id];
         const countByStageName = stageCounts?.[stage.name];
         const stageCount = countByStageId ?? countByStageName ?? stageTickets.length;
-        const isCollapsed = collapsedStageIds.includes(stage.id);
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
           ? (): void =>
@@ -451,114 +443,82 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
           : undefined;
 
         return (
-          <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
+          <StageWrapper key={`${keyPrefix}${stage.id}`} id={stage.id}>
             <div
               className={cn(
-                'group/kanbancol flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
-                isCollapsed ? 'w-12 sm:w-14' : 'w-72 sm:w-96',
+                'group/kanbancol flex flex-col',
+                mode === 'full' &&
+                  cn(
+                    'rounded-lg transition-all duration-300 ease-in-out bg-muted/60 h-full',
+                    KANBAN_COLUMN_WIDTH_CLASS,
+                  ),
+                mode === 'headers' &&
+                  cn('shrink-0 rounded-t-[14px] bg-muted/60', KANBAN_COLUMN_WIDTH_CLASS),
+                mode === 'bodies' &&
+                  cn('shrink-0 min-h-[72px] max-h-[60vh]', KANBAN_COLUMN_WIDTH_CLASS),
               )}
             >
-              <div
-                className={cn(
-                  'flex items-center justify-between px-4 pt-3 pb-1 w-full',
-                  isCollapsed && 'h-full min-h-[236px] flex-col gap-2',
-                )}
-              >
-                {!isCollapsed ? (
-                  /* EXPANDED HEADER */
-                  <>
-                    <div className='flex items-center gap-2 min-w-0'>
-                      <KanbanIcon status={stage.defaultTicketStatusV2} />
-                      <h3 className='text-xs font-medium truncate uppercase text-foreground'>
-                        {stage.name}
-                      </h3>
-                      <span className='text-xs px-2 py-0.5 rounded-full text-muted-foreground bg-muted-foreground/10'>
-                        {stageCount}
-                      </span>
-                    </div>
-
-                    <div className='flex items-center gap-1'>
-                      <Button
-                        variant='ghost'
-                        onClick={() => toggleCollapse(stage.id)}
-                        className='!p-0 !bg-transparent'
-                        data-track-category='Tickets'
-                        data-track-name='CollapseKanbanColumn'
-                        data-track-metadata={JSON.stringify({
-                          stageId: stage.id,
-                          stageName: stage.name,
-                        })}
-                      >
-                        <CollapseIcon />
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  /* COLLAPSED HEADER */
-                  <div
-                    className='flex flex-col items-center justify-between w-full h-full min-h-[236px] cursor-pointer'
-                    onClick={() => toggleCollapse(stage.id)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        toggleCollapse(stage.id);
-                      }
-                    }}
-                    role='button'
-                    tabIndex={0}
-                    data-track-category='Tickets'
-                    data-track-name='ExpandKanbanColumn'
-                    data-track-metadata={JSON.stringify({
-                      stageId: stage.id,
-                      stageName: stage.name,
-                    })}
-                  >
-                    <div className='flex flex-col items-center gap-2 w-full h-full'>
-                      <KanbanIcon status={stage.defaultTicketStatusV2} />
-                      <h3
-                        className={cn(
-                          'text-sm font-medium whitespace-nowrap w-fit text-foreground',
-                          '[transform-origin:center] [writing-mode:vertical-rl] [text-orientation:mixed]',
-                        )}
-                      >
-                        {stage.name}
-                      </h3>
-                      <span
-                        className={cn(
-                          'text-sm py-2 px-0.5 rounded-full text-muted-foreground bg-muted-foreground/10',
-                          '[transform-origin:center] [writing-mode:vertical-rl] [text-orientation:mixed]',
-                        )}
-                      >
-                        {stageCount}
-                      </span>
-                    </div>
-
-                    <Button
-                      variant='ghost'
-                      onClick={e => {
-                        e.stopPropagation();
-                        toggleCollapse(stage.id);
-                      }}
-                      className='!p-0 !bg-transparent'
-                      data-track-category='Tickets'
-                      data-track-name='CollapseKanbanColumn'
-                      data-track-metadata={JSON.stringify({
-                        stageId: stage.id,
-                        stageName: stage.name,
-                      })}
-                    >
-                      <ExpandIcon />
-                    </Button>
+              {mode !== 'bodies' && (
+                <div
+                  className={cn(
+                    'flex items-center justify-between px-4 pt-3 w-full',
+                    mode === 'headers' ? 'pb-3' : 'pb-1',
+                  )}
+                >
+                  <div className='flex items-center gap-2 min-w-0'>
+                    <KanbanIcon status={stage.defaultTicketStatusV2} />
+                    <h3 className='text-xs font-medium truncate uppercase text-foreground'>
+                      {stage.name}
+                    </h3>
+                    <span className='text-xs tabular-nums text-muted-foreground'>{stageCount}</span>
                   </div>
-                )}
-              </div>
 
-              {!isCollapsed && (
+                  {onHideColumn && (
+                    <div className='flex items-center gap-1'>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type='button'
+                            aria-label={`${stage.name} column options`}
+                            className='flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+                            data-track-category='Tickets'
+                            data-track-name='OpenKanbanColumnMenu'
+                            data-track-metadata={JSON.stringify({
+                              stageId: stage.id,
+                              stageName: stage.name,
+                            })}
+                          >
+                            <ThreeDotsMenuHorizontal className='h-4 w-4' />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='end' className='w-[214px] rounded-xl p-[5px]'>
+                          <DropdownMenuItem
+                            className='h-[34px] gap-2.5 rounded-lg px-2.5 text-[13.5px]'
+                            onSelect={() => onHideColumn(stage.id)}
+                            data-track-category='Tickets'
+                            data-track-name='HideKanbanColumn'
+                            data-track-metadata={JSON.stringify({
+                              stageId: stage.id,
+                              stageName: stage.name,
+                            })}
+                          >
+                            <EyeOff className='h-4 w-4 shrink-0' />
+                            <span>Hide column</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {mode !== 'headers' && (
                 <div className='flex-1 min-h-0'>
                   {paginatedColumnConfig ? (
                     <PaginatedStageList
                       stage={stage}
                       columnKey={columnKey}
+                      {...(mode === 'bodies' ? { scrollClassName: 'max-h-[60vh]' } : {})}
                       paginationArgs={paginatedColumnConfig.baseArgs}
                       columnType={paginatedColumnConfig.columnType}
                       allKnownTickets={knownTicketsForOptimisticMerge}
@@ -576,6 +536,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       <VirtualizedStageList
                         stageId={stage.id}
                         columnKey={columnKey}
+                        {...(mode === 'bodies' ? { scrollClassName: 'max-h-[60vh]' } : {})}
                         stageTickets={stageTickets}
                         {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                         availableTags={availableTags}
@@ -591,7 +552,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                 </div>
               )}
             </div>
-          </DroppableStage>
+          </StageWrapper>
         );
       })}
     </div>
