@@ -1,3 +1,10 @@
+## [1.268.0-release-20260903.2](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.1...v1.268.0-release-20260903.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* revert native-button conversions to raw <button> ([#1496](https://github.com/juspay/xyne-spaces/issues/1496)) ([119a7c7](https://github.com/juspay/xyne-spaces/commit/119a7c713bb87c0fd9f0a28f341aec69ac27068f))
+
 ## [1.268.0-release-20260903.1](https://github.com/juspay/xyne-spaces/compare/v1.267.0...v1.268.0-release-20260903.1) (2026-09-03)
 
 
