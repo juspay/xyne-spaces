@@ -855,16 +855,33 @@ class LiveKitWebhookController {
 
     const statusName = EgressStatus[egressInfo.status] ?? `UNKNOWN(${egressInfo.status})`;
     const completedSuccessfully = egressInfo.status === EgressStatus.EGRESS_COMPLETE;
+    const egressError = egressInfo.error || undefined;
     logger.info(`[LiveKit Webhook] Egress ended: ${egressInfo.egressId}`, {
       roomName: egressInfo.roomName,
       status: egressInfo.status,
       statusName,
       completedSuccessfully,
-      error: egressInfo.error || undefined,
+      error: egressError,
     });
 
+    // Distinct, alertable signal when egress ended in a failed terminal state after
+    // it had already started — separate from a clean EGRESS_COMPLETE.
+    if (!completedSuccessfully) {
+      logger.warn('[LiveKit Webhook] egress_failed_after_start', {
+        egressId: egressInfo.egressId,
+        roomName: egressInfo.roomName,
+        reason: 'egress_terminal_not_complete',
+        status: egressInfo.status,
+        statusName,
+        error: egressError,
+      });
+    }
+
     try {
-      await callRecordingService.handleEgressEnded(egressInfo.egressId, completedSuccessfully);
+      await callRecordingService.handleEgressEnded(egressInfo.egressId, completedSuccessfully, {
+        statusName,
+        egressError: egressError ?? null,
+      });
     } catch (error) {
       logger.error(`[LiveKit Webhook] Error handling egress_ended for egress ${egressInfo.egressId}:`, error);
     }

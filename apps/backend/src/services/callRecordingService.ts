@@ -15,6 +15,27 @@ import { MessageType, AttachmentEntityType, CallType, RecordingType } from '@xyn
 /** HLS segment length. Smaller = more frequent uploads (less data lost on crash). */
 const SEGMENT_DURATION_SECONDS = 6;
 
+/**
+ * Normalize a thrown value into a compact, structured failure descriptor so every
+ * egress/consolidation failure log carries a consistent, greppable `reason` plus
+ * the underlying error name/code/message. Logging-only; never throws.
+ */
+function describeError(error: unknown): { reason: string; message: string; name?: string; code?: string; stack?: string } {
+  if (error instanceof Error) {
+    const name = error.name;
+    const rawCode = (error as { code?: string | number }).code;
+    const code = rawCode !== undefined && rawCode !== null ? String(rawCode) : undefined;
+    const msg = error.message || '';
+    const hay = `${name} ${msg} ${code ?? ''}`.toLowerCase();
+    let reason = 'error';
+    if (hay.includes('timeout') || hay.includes('timed out') || hay.includes('aborted')) reason = 'timeout';
+    else if (hay.includes('econnrefused') || hay.includes('enotfound') || hay.includes('econnreset') || hay.includes('network') || hay.includes('socket')) reason = 'network';
+    else if (code) reason = code;
+    return { reason, message: msg, name, code, stack: error.stack };
+  }
+  return { reason: 'non_error_throw', message: typeof error === 'string' ? error : (() => { try { return JSON.stringify(error); } catch { return String(error); } })() };
+}
+
 export interface StartRecordingResult {
   recording: CallRecording;
   /** true when an ACTIVE recording already existed — no new egress was started (C3). */
@@ -116,7 +137,16 @@ class CallRecordingService {
 
     // Single-active lock already held by another recording — idempotent no-op.
     if (!created) {
-      logger.info(`[CallRecording] start ignored — recording ${recording.id} already ACTIVE for call ${call.externalId}`);
+      logger.info('[CallRecording] egress_start_skipped', {
+        reason: 'already_active',
+        callExternalId: call.externalId,
+        callId: call.id,
+        recordingId: recording.id,
+        recordingType,
+        startedBy,
+        activeStatus: recording.status,
+        activeEgressId: recording.egressId ?? null,
+      });
       return { recording, alreadyActive: true };
     }
 
@@ -167,7 +197,20 @@ class CallRecordingService {
       return { recording: withEgress, alreadyActive: false };
     } catch (error) {
       // Free the single-active lock so the call is immediately recordable again (H1).
-      logger.error(`[CallRecording] startEgress failed for call ${call.externalId}, recordingId=${recording.id}:`, error);
+      const failure = describeError(error);
+      logger.error('[CallRecording] egress_start_failed', {
+        reason: failure.reason,
+        callExternalId: call.externalId,
+        callId: call.id,
+        recordingId: recording.id,
+        recordingType,
+        startedBy,
+        segmentPrefix: paths.segmentPrefix,
+        errorName: failure.name,
+        errorCode: failure.code,
+        error: failure.message,
+        stack: failure.stack,
+      });
       await repositories.callRecordings.markRecordingFailed(recording.id).catch((e) =>
         logger.error(`[CallRecording] failed to mark recording ${recording.id} RECORDING_FAILED:`, e));
       return null;
@@ -256,10 +299,21 @@ class CallRecordingService {
    * a partial recording if any segments landed; only a truly empty recording
    * moves to UPLOAD_FAILED (freeing the lock).
    */
-  async handleEgressEnded(egressId: string, completedSuccessfully: boolean): Promise<void> {
+  async handleEgressEnded(
+    egressId: string,
+    completedSuccessfully: boolean,
+    context: { statusName?: string; egressError?: string | null } = {},
+  ): Promise<void> {
+    const { statusName, egressError } = context;
     const recording = await repositories.callRecordings.findByEgressId(egressId);
     if (!recording) {
-      logger.warn('[CallRecording] egress_ended_no_recording', { egressId, reason: 'no_row_for_egressId' });
+      logger.warn('[CallRecording] egress_ended_no_recording', {
+        egressId,
+        reason: 'no_row_for_egressId',
+        completedSuccessfully,
+        egressStatus: statusName,
+        egressError: egressError ?? undefined,
+      });
       return;
     }
     // activeEgress is keyed by recording.id — delete by that, not egressId, or the entry leaks.
@@ -267,20 +321,63 @@ class CallRecordingService {
 
     // Only rows still awaiting egress act on this; anything else is a redelivery.
     if (recording.status !== 'RECORDING_ACTIVE' && recording.status !== 'RECORDING_STOPPED') {
-      logger.info(`[CallRecording] egress_ended ignored — recording ${recording.id} already in state ${recording.status}`);
+      logger.info('[CallRecording] egress_ended_ignored', {
+        recording: recording.id,
+        egressId,
+        reason: 'redelivery_or_terminal_state',
+        currentStatus: recording.status,
+        completedSuccessfully,
+        egressStatus: statusName,
+      });
       return;
+    }
+
+    // Egress ended in a failed terminal state after starting. We still try to salvage
+    // any HLS segments that landed before the failure; only a truly empty recording
+    // is unrecoverable.
+    if (!completedSuccessfully) {
+      logger.warn('[CallRecording] egress_failed_after_start', {
+        recording: recording.id,
+        callId: recording.callId,
+        egressId,
+        reason: 'egress_terminal_not_complete',
+        egressStatus: statusName,
+        egressError: egressError ?? undefined,
+      });
     }
 
     if (!(await this.hasSegments(recording.segmentPrefix))) {
       await repositories.callRecordings.markUploadFailed(recording.id);
-      logger.warn('[CallRecording] recording_upload_failed', { recording: recording.id, egressId, completedSuccessfully, reason: 'no_segments' });
+      logger.warn('[CallRecording] egress_consolidation_failed', {
+        recording: recording.id,
+        callId: recording.callId,
+        egressId,
+        completedSuccessfully,
+        segmentPrefix: recording.segmentPrefix,
+        egressStatus: statusName,
+        egressError: egressError ?? undefined,
+        reason: completedSuccessfully ? 'no_segments_despite_success' : 'egress_failed_no_segments',
+      });
       return;
+    }
+
+    if (!completedSuccessfully) {
+      logger.info('[CallRecording] egress_partial_salvage', {
+        recording: recording.id,
+        egressId,
+        reason: 'segments_present_after_failed_egress',
+      });
     }
 
     await repositories.callRecordings.markProcessing(recording.id);
     const { recordingStitchQueue } = await import('@/queues/recordingStitchQueue');
     await recordingStitchQueue.enqueue(recording.id);
-    logger.info(`[CallRecording] recording ${recording.id} PROCESSING — stitch enqueued (completedSuccessfully=${completedSuccessfully})`);
+    logger.info('[CallRecording] egress_ended_stitch_enqueued', {
+      recording: recording.id,
+      egressId,
+      completedSuccessfully,
+      segmentPrefix: recording.segmentPrefix,
+    });
   }
 
   /**
@@ -309,20 +406,37 @@ class CallRecordingService {
 
     const paths = this.buildPaths(call.externalId, recordingId);
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), `rec-${recordingId}-`));
+    // Track the consolidation stage so a failure log pinpoints where it broke.
+    let stage: 'download_segments' | 'stitch_mp4' | 'upload_mp4' | 'verify_mp4' | 'mark_uploaded' | 'delete_segments' = 'download_segments';
+    logger.info('[CallRecording] consolidation_started', {
+      recording: recordingId,
+      callExternalId: call.externalId,
+      segmentPrefix: recording.segmentPrefix,
+    });
     try {
+      stage = 'download_segments';
       await this.downloadSegments(recording.segmentPrefix, workDir);
       const localOut = path.join(workDir, 'out.mp4');
+      stage = 'stitch_mp4';
       await stitchHlsToMp4(path.join(workDir, path.basename(paths.playlistPath)), localOut);
 
       const mimetype = recording.recordingType === RecordingType.AUDIO_ONLY ? 'audio/mp4' : 'video/mp4';
       const buffer = await fs.readFile(localOut);
+      stage = 'upload_mp4';
       await this.storageService.uploadFileV2(buffer, { path: paths.mp4Path, contentType: mimetype });
+      stage = 'verify_mp4';
       if (!(await this.waitForFileExists(paths.mp4Path))) {
         throw new Error(`stitched MP4 not found at ${paths.mp4Path}`);
       }
 
+      stage = 'mark_uploaded';
       await repositories.callRecordings.markUploaded(recordingId, { storagePath: paths.mp4Path });
-      logger.info(`[CallRecording] recording ${recordingId} UPLOADED (stitched), path=${paths.mp4Path}`);
+      logger.info('[CallRecording] consolidation_uploaded', {
+        recording: recordingId,
+        callExternalId: call.externalId,
+        path: paths.mp4Path,
+      });
+      stage = 'delete_segments';
       await this.deleteSegments(recording.segmentPrefix);
 
       // NOTE_TAKER (headless) calls never create messages/attachments — the
@@ -340,7 +454,18 @@ class CallRecordingService {
       }
     } catch (err) {
       await repositories.callRecordings.markProcessingFailed(recordingId).catch(() => {});
-      logger.error(`[CallRecording] stitch failed for recording ${recordingId}:`, err);
+      const failure = describeError(err);
+      logger.error('[CallRecording] consolidation_failed', {
+        recording: recordingId,
+        callExternalId: call.externalId,
+        stage,
+        reason: failure.reason,
+        segmentPrefix: recording.segmentPrefix,
+        errorName: failure.name,
+        errorCode: failure.code,
+        error: failure.message,
+        stack: failure.stack,
+      });
       throw err;
     } finally {
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
