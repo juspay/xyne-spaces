@@ -1074,6 +1074,8 @@ model AgentRun {
   ///   "agent_runs_completedAt_triggerSource_idx"
   ///   ON "agent_runs" ("completedAt", "triggerSource");
   @@index([completedAt, triggerSource])
+  @@index([userId, startedAt])
+  @@index([orgId, startedAt])
   @@map("agent_runs")
 }
 

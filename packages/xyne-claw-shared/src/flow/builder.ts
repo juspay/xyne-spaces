@@ -9,6 +9,7 @@
 
 import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
 import type { UserQuestion } from "../tools/types.js";
+import { normalizeUnifiedPatch } from "./unified-patch.js";
 
 // ── Inlined FlowUI types (mirrors @xyne/shared) ──────────────────────────────
 
@@ -1024,20 +1025,18 @@ export function buildCodeFlow(code: string, language?: string): FlowDefinition {
 }
 
 export function buildDiffFlow(path: string, patch: string): FlowDefinition {
-  const firstMeaningfulLine = patch.split('\n').find((line) => line.trim() !== '') ?? '';
-  const headed =
-    firstMeaningfulLine.startsWith('diff --git ') || firstMeaningfulLine.startsWith('--- ');
-  const headedPatch = headed ? patch : `--- a/${path}\n+++ b/${path}\n${patch}`;
-  const lines = patch.split('\n');
-  const added = lines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
-  const removed = lines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+  // Never pass the model's patch through verbatim: bare `@@` headers, missing
+  // file headers and guessed line counts all make @pierre/diffs emit zero hunks
+  // WITHOUT throwing, which shows up as a blank diff card. See unified-patch.ts.
+  const normalized = normalizeUnifiedPatch(path, patch);
+  const { added, removed } = normalized;
   return new FlowBuilder(`diff-${crypto.randomUUID()}`)
     .addComponent({
       id: 'diff',
       type: 'diff',
       props: {
         path,
-        patch: clipArtifact(headedPatch, ' … diff truncated'),
+        patch: clipArtifact(normalized.patch ?? patch, ' … diff truncated'),
       },
     })
     .setData({ kind: 'diff', fallbackText: `${path} · +${added}/−${removed}` })

@@ -154,6 +154,184 @@ router.get("/search", asyncHandler(async (req: Request, res: Response) => {
   ok(res, data);
 }));
 
+const RUN_PAGED_DAY_MS = 24 * 60 * 60 * 1000;
+const RUN_PAGED_STATUSES = ["running", "completed", "failed", "cancelled"];
+
+/** Read a query param that must be a single string, treating "" as absent.
+ *
+ *  Express parses a REPEATED param (`?from=a&from=b`) into an ARRAY, and every
+ *  `typeof x === "string"` guard silently reads that as "not provided". For
+ *  `from`/`to` that lands on the 30-day default, so `?from=X&from=Y` returns
+ *  THIRTY DAYS of runs under a 200 — more than was asked for, which is the
+ *  dangerous direction and the exact widening parseRunWindowParam exists to
+ *  stop. For `status` it drops the filter; for `agentSlug` it flips an R2
+ *  single-agent request into the R3 cross-agent branch. Reject, never coerce. */
+function singleStringParam(raw: unknown, name: string): string | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string") throw badRequest(`${name} must be a single value`);
+  return raw === "" ? undefined : raw;
+}
+
+/** Parse a `from` / `to` query param as an ISO datetime. Rejects rather than
+ *  coerces: a typo'd date silently falling back to "last 30 days" hands the
+ *  caller a window they did not ask for and calls it their answer. */
+function parseRunWindowParam(raw: unknown, fallbackMs: number, name: string): Date {
+  const value = singleStringParam(raw, name);
+  if (value === undefined) return new Date(fallbackMs);
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) throw badRequest(`${name} must be an ISO datetime`);
+  return new Date(ms);
+}
+
+// GET /runs/paged — offset-paged, ACL-filtered run listing that also returns a
+// total (and optional facet counts) so the UI can render "1–50 of 1,284" plus
+// Previous/Next instead of a silently-capped list.
+//
+// One endpoint, two surfaces: the agent Activity tab (scope=all + agentSlug)
+// and the admin cross-agent Runs page (scope=all, no agentSlug), plus any
+// user's own history (scope=own, the default). Purely ADDITIVE — GET /runs,
+// /runs/light and /runs/search keep their existing shapes, so ChatPageV3's
+// listRuns is unaffected.
+//
+// Response is FLAT: ok(res, rows, extra) puts `total`/`limit`/`offset` as
+// SIBLINGS of `data`, the envelope the v3 client already parses for the admin
+// audit-log listing.
+//
+// orgScope=all is deliberately NOT supported. An all-orgs listing ordered by
+// startedAt desc has no leading equality to anchor on (there is no bare
+// startedAt index), so it would seq-scan agent_runs. The org is always the
+// requester's server-derived org.
+//
+// The router mount supplies only requireAuth + allowReadAccessToken("runs:read")
+// — no admin gate — and that read token grants any CLI/service bearer access to
+// every GET on this router. So nothing is assumed from the mount: each
+// elevation below is re-checked here.
+//
+// Must be declared BEFORE /:sessionId, or Express matches "paged" as a
+// sessionId and this route becomes unreachable.
+router.get("/paged", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = requireRequester(req);
+
+  const scopeRaw = singleStringParam(req.query["scope"], "scope") ?? "own";
+  if (scopeRaw !== "own" && scopeRaw !== "all") throw badRequest("scope must be own or all");
+  const scope: "own" | "all" = scopeRaw;
+
+  // Absent agentSlug means a CROSS-AGENT listing, which is a different (and
+  // more privileged) query shape — not "no filter applied".
+  const agentSlug = singleStringParam(req.query["agentSlug"], "agentSlug");
+
+  const userIdFilter = singleStringParam(req.query["userId"], "userId");
+  // Reject, never silently ignore. Honouring `userId` under scope=own would
+  // turn an endpoint with no elevation check into "any runs:read token reads
+  // any user's runs"; ignoring it would answer a question nobody asked while
+  // looking like it answered theirs.
+  if (userIdFilter && scope !== "all") throw badRequest("userId filter requires scope=all");
+
+  const status = singleStringParam(req.query["status"], "status");
+  if (status && !RUN_PAGED_STATUSES.includes(status)) {
+    throw badRequest(`status must be one of ${RUN_PAGED_STATUSES.join(", ")}`);
+  }
+
+  // A session id is an exact handle on ONE run, so searching by it is a server
+  // lookup rather than a filter over whatever page the client happens to hold —
+  // `sessionId` is @unique, so this is a single index probe. Prefix (not exact)
+  // so a user pasting the short id the UI shows still lands on the run.
+  const sessionIdPrefix = singleStringParam(req.query["sessionId"], "sessionId");
+  if (sessionIdPrefix !== undefined && sessionIdPrefix.length < 4) {
+    throw badRequest("sessionId must be at least 4 characters");
+  }
+
+  const now = Date.now();
+  const from = parseRunWindowParam(req.query["from"], now - 30 * RUN_PAGED_DAY_MS, "from");
+  const to = parseRunWindowParam(req.query["to"], now, "to");
+  if (to.getTime() <= from.getTime()) throw badRequest("to must be after from");
+  // The window cap is what bounds both the index range scan and the sibling
+  // COUNT(*); without it an unbounded `total` walks the whole table.
+  if (to.getTime() - from.getTime() > 366 * RUN_PAGED_DAY_MS) throw badRequest("date range may not exceed 366 days");
+
+  // Clamp in /runs/light's form, NOT /runs' Math.min(parseInt || 50, 200):
+  // that one lets limit=-5 through as a negative Prisma `take`, which does not
+  // error — it silently returns the OLDEST rows.
+  const limit = typeof req.query["limit"] === "string"
+    ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 50, 1), 100)
+    : 50;
+  const offset = typeof req.query["offset"] === "string" ? Math.max(parseInt(req.query["offset"], 10) || 0, 0) : 0;
+  // Hard ceiling rather than a clamp: paging past 10k rows means the caller
+  // wants a query, not a scroll, and deep OFFSET is where index-ordered paging
+  // stops being cheap.
+  if (offset > 10000) throw badRequest("offset may not exceed 10000");
+  const wantFacets = req.query["facets"] === "1";
+
+  // R1 (scope=own) needs nothing further — the repository hard-scopes the
+  // where clause to requesterId and adds no orgId predicate, matching
+  // listByUser / listByUserLight / searchByUser.
+  let orgId: string | undefined;
+  // Hoisted out of the R2 branch because listPagedFacets needs it: only an
+  // admin's grant spans every agent, so only an admin may have `agentSlug`
+  // dropped from the facet where clause (see the comment there).
+  let admin = false;
+  if (scope === "all" && agentSlug) {
+    // R2 — single-agent "All Runs": the same gate as GET /runs?scope=all.
+    const headerOrgId = getOrgId(req);
+    if (!headerOrgId) {
+      log.warn(`[runs/paged] orgId is required userId=${requesterId} agentSlug=${agentSlug}`);
+      throw badRequest("orgId is required");
+    }
+    const access = await getAgentEditAccess(requesterId, agentSlug, headerOrgId);
+    if (!access) {
+      // 404, not an empty list: a silent empty result turns a slug typo into a
+      // shrug and lets an attacker probe other orgs' slugs for free.
+      log.warn(`[runs/paged] agent org-scoped miss userId=${requesterId} agentSlug=${agentSlug} orgId=${headerOrgId}`);
+      throw notFound("Agent not found");
+    }
+    admin = await isClawAdmin(requesterId);
+    if (!admin && !access.canEdit) {
+      log.warn(`[runs/paged] denied userId=${requesterId} agentSlug=${agentSlug} orgId=${headerOrgId}`);
+      throw forbidden("Only admins, the owner, or contributors can view all runs for this agent");
+    }
+    // Query with the AGENT's org, not the header's — an agent resolved in one
+    // org listed against another org's runs is a cross-tenant leak.
+    orgId = access.agent.orgId;
+  } else if (scope === "all") {
+    // R3 — cross-agent, all-user listing: CLAW_ADMIN only. There is no agent
+    // to derive contributor access from, so admin is the only door.
+    if (!(await isClawAdmin(requesterId))) throw forbidden("CLAW_ADMIN role required for cross-agent all-user runs");
+    admin = true;
+    // getOrgId reads x-org-id, which requireAuth strips from the client and
+    // re-stamps from user.orgId — trustworthy, but best-effort, and it can
+    // legitimately be undefined. FAIL CLOSED: there is no "then omit the orgId
+    // predicate" fallback, because omitting it returns EVERY organisation's
+    // runs (task text + conversationIds) to one org's admin.
+    const headerOrgId = getOrgId(req);
+    if (!headerOrgId) {
+      log.warn(`[runs/paged] orgId is required for cross-agent listing userId=${requesterId}`);
+      throw badRequest("orgId is required");
+    }
+    orgId = headerOrgId;
+  }
+
+  // R4 (the usedUserToken OR on both scope=all branches) and R5 (facets carry
+  // the same ACL) live in the repository's shared buildRunListWhere, so the two
+  // queries below cannot disagree about who may see what.
+  const filter = {
+    requesterId,
+    scope,
+    ...(orgId ? { orgId } : {}),
+    ...(agentSlug ? { agentSlug } : {}),
+    ...(userIdFilter ? { userId: userIdFilter } : {}),
+    ...(status ? { status } : {}),
+    ...(sessionIdPrefix ? { sessionIdPrefix } : {}),
+    ...(admin ? { admin: true } : {}),
+    from,
+    to,
+  };
+  const [page, facets] = await Promise.all([
+    agentRunRepository.listPaged(filter, { limit, offset }),
+    wantFacets ? agentRunRepository.listPagedFacets(filter) : Promise.resolve(null),
+  ]);
+  ok(res, page.rows, { total: page.total, limit, offset, ...(facets ? { facets } : {}) });
+}));
+
 // GET /runs/by-agent/:slug — cross-user run history for one agent.
 //
 // Powers the `get-agent-runs` system tool. S2S-gated so it's only reachable

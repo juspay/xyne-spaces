@@ -133,6 +133,127 @@ export interface FinalizeRunInput {
   fastMode?: boolean | null;
 }
 
+/**
+ * Filter shape shared by the two paged run listings (GET /runs/paged) that back
+ * the agent Activity tab and the admin cross-agent Runs page.
+ *
+ * `orgId` is REQUIRED whenever `scope === "all"`. The route asserts it and
+ * fails the request closed; `buildRunListWhere` asserts it again, because an
+ * undefined org silently WIDENS a scope=all query to every tenant instead of
+ * narrowing it — the one failure mode here that leaks across organisations.
+ * `userId` is a scope=all-only ADDITIONAL filter: under scope=own the
+ * requester's own id is the only scope there is.
+ */
+export interface RunListFilter {
+  requesterId: string;
+  scope: "own" | "all";
+  orgId?: string;
+  agentSlug?: string;
+  userId?: string;
+  status?: string;
+  from: Date;
+  to: Date;
+  /** Case-insensitive sessionId PREFIX. When set the date window is dropped —
+   *  see buildRunListWhere. */
+  sessionIdPrefix?: string;
+  /** True only when the route proved the caller is a CLAW_ADMIN, i.e. entitled
+   *  to the CROSS-AGENT listing. Never used to widen the row query — only
+   *  `listPagedFacets` reads it, to decide whether dropping `agentSlug` is a
+   *  dropdown fix or a privilege escalation. See the comment there. */
+  admin?: boolean;
+}
+
+/**
+ * Single source of truth for the paged-listing WHERE clause. `listPaged` and
+ * `listPagedFacets` MUST both go through it.
+ *
+ * The `usedUserToken` OR-guard is already triplicated across `listAllForAgent`,
+ * `listByConversation` and `listSessionAclForConversation`; a fourth hand-rolled
+ * copy that drifts is exactly how a run which fetched another user's private
+ * OAuth token becomes readable by a different admin. One builder, two callers,
+ * nothing to drift.
+ */
+function buildRunListWhere(f: RunListFilter): Prisma.AgentRunWhereInput {
+  // Half-open window: `lt` on the upper bound so a caller passing an exact
+  // day boundary as both `to` of one page and `from` of the next can't
+  // double-count the run that started on the tick.
+  //
+  // A sessionId lookup DROPS the window entirely. A session id names one run
+  // that already exists; intersecting it with "the last 30 days" makes the
+  // search silently fail for the older run the user is holding an id for,
+  // which reads as "search is broken" rather than "your date filter excluded
+  // it". Scope/org/usedUserToken still apply below, so this widens what you
+  // can FIND, never what you are allowed to see.
+  const idLookup = !!f.sessionIdPrefix;
+  const window = idLookup
+    ? { sessionId: { startsWith: f.sessionIdPrefix as string, mode: "insensitive" as const } }
+    : { startedAt: { gte: f.from, lt: f.to } };
+
+  if (f.scope === "own") {
+    // No orgId predicate — userId already implies the org, and adding one
+    // would diverge from listByUser / listByUserLight / searchByUser for no
+    // gain while pushing the query off the (userId, startedAt) index.
+    return {
+      userId: f.requesterId,
+      ...window,
+      ...(f.status ? { status: f.status } : {}),
+      ...(f.agentSlug ? { agentSlug: f.agentSlug } : {}),
+    };
+  }
+
+  if (!f.orgId) {
+    // Never degrade to "no org predicate": that returns every organisation's
+    // runs — task text and conversationIds included — to one org's admin.
+    throw new Error("buildRunListWhere: orgId is required for scope=all");
+  }
+  return {
+    ...(f.agentSlug ? { agentSlug: f.agentSlug } : {}),
+    orgId: f.orgId,
+    ...window,
+    ...(f.status ? { status: f.status } : {}),
+    AND: [
+      // The user filter is an ADDITIONAL term, never a replacement for the
+      // token guard below: "show me Asha's runs" must not hand over the ones
+      // Asha ran under her own OAuth token (mail/calendar/drive content).
+      ...(f.userId ? [{ userId: f.userId }] : []),
+      { OR: [{ userId: f.requesterId }, { usedUserToken: false }] },
+    ],
+  };
+}
+
+/**
+ * Deliberately light projection for the paged listings — same discipline as
+ * `listByUserLight`, for the same reason.
+ *
+ * `toolInvocations` is EXCLUDED and must stay excluded: it is JSON, routinely
+ * hundreds of KB per row, and 50 rows of it is precisely the payload disaster
+ * `listByUserLight` was created to prevent. `result`, `error`, `toolsUsed` and
+ * the whole latency block are excluded too — no list row renders them, and a
+ * caller that genuinely needs them already has `getRun`. `usedUserToken` is an
+ * ACL input, not a client field, so it is never selected.
+ */
+const RUN_LIST_SELECT = {
+  id: true,
+  sessionId: true,
+  userId: true,
+  agentSlug: true,
+  triggerSource: true,
+  status: true,
+  task: true,
+  conversationId: true,
+  channelId: true,
+  startedAt: true,
+  completedAt: true,
+  tokensIn: true,
+  tokensOut: true,
+  rating: true,
+} satisfies Prisma.AgentRunSelect;
+
+/** Upper bound on task text shipped per list row. Not `listByAgentSlug`'s 240:
+ *  the UI-only search matches on task text, and a 240-char cap would make that
+ *  search a lie for long prompts. 2000 x 100 rows is ~200 KB worst case. */
+const RUN_LIST_TASK_CAP = 2000;
+
 export const agentRunRepository = {
   start: async (input: StartRunInput) => {
     // Stamp the agent's active prompt version so quality/latency can later be
@@ -841,6 +962,129 @@ export const agentRunRepository = {
       orderBy: { startedAt: "desc" },
       take: opts?.limit ?? 20,
     }),
+
+  /**
+   * Paged + counted run listing behind GET /runs/paged. Serves BOTH the agent
+   * Activity tab (scope=all + agentSlug) and the admin cross-agent Runs page
+   * (scope=all, no agentSlug), plus every user's own history (scope=own).
+   *
+   * OFFSET rather than a keyset cursor on purpose: the product requirement is a
+   * denominator ("1-50 of 1,284") and Prev as well as Next, neither of which a
+   * forward-only cursor gives. With the (userId|orgId, startedAt) composites and
+   * the route's mandatory bounded date window, LIMIT/OFFSET is an index-ordered
+   * scan skipping k index tuples, not a sort — and the route caps offset at
+   * 10000 so the deep-page cost stays bounded.
+   *
+   * `total` is a COUNT over the IDENTICAL where clause, issued in the same
+   * Promise.all so it rides the same index range.
+   */
+  listPaged: async (f: RunListFilter, page: { limit: number; offset: number }) => {
+    const where = buildRunListWhere(f);
+    const [rows, total] = await Promise.all([
+      prisma.agentRun.findMany({
+        where,
+        select: RUN_LIST_SELECT,
+        // The `id` tiebreaker is mandatory, not cosmetic: startedAt has ms
+        // resolution and batch-created runs genuinely tie, and OFFSET paging
+        // over a non-deterministic order both skips and duplicates rows across
+        // page boundaries.
+        orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+        take: page.limit,
+        skip: page.offset,
+      }),
+      prisma.agentRun.count({ where }),
+    ]);
+    const capped = rows.map((r) => ({
+      ...r,
+      task: r.task.length <= RUN_LIST_TASK_CAP ? r.task : r.task.slice(0, RUN_LIST_TASK_CAP),
+      userName: null as string | null,
+      userEmail: null as string | null,
+    }));
+    // Only the elevated listing shows other people's runs, so only it needs
+    // names. Under scope=own every row is the requester's own and the extra
+    // round-trip would buy nothing.
+    if (f.scope !== "all") return { rows: capped, total };
+    const userIds = [...new Set(capped.map((r) => r.userId))];
+    const users =
+      userIds.length === 0
+        ? []
+        : await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, email: true, name: true },
+          });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    return {
+      rows: capped.map((r) => {
+        const u = userMap.get(r.userId);
+        return { ...r, userName: u?.name ?? null, userEmail: u?.email ?? null };
+      }),
+      total,
+    };
+  },
+
+  /**
+   * Facet counts for the filter dropdowns of the same listing, in ONE groupBy.
+   *
+   * The userId predicate is ALWAYS dropped, and agentSlug is dropped only for
+   * callers whose grant already covers every agent: a facet list built from the
+   * already-filtered set collapses to the single option the user just picked,
+   * so the dropdown can never be changed again (same reasoning as the facet
+   * comment in AdminPageV3). Everything else — the org predicate, the date
+   * window, the status filter and the `usedUserToken` OR — is RETAINED, because
+   * the facets carry exactly the same ACL as the rows: without the OR the user
+   * dropdown becomes an org directory leak, listing names and emails of people
+   * whose every run is token-hidden.
+   */
+  listPagedFacets: async (f: RunListFilter) => {
+    // agentSlug may only be dropped when the caller could have asked for the
+    // cross-agent listing anyway — a CLAW_ADMIN, or scope=own where the where
+    // clause is pinned to the requester's own rows. An agent OWNER/CONTRIBUTOR
+    // reaches scope=all through the R2 gate with a grant that covers exactly
+    // ONE agent; dropping their agentSlug turns the facets into an org-wide
+    // user roster (name + email + run count of everyone in the org) plus the
+    // org's full agent inventory. It also makes the dropdown lie, offering
+    // users whose runs of THIS agent number zero.
+    const dropAgentSlug = f.admin === true || f.scope === "own";
+    // Destructured rather than spread-with-undefined: exactOptionalPropertyTypes
+    // rejects `{ ...f, agentSlug: undefined }` against `agentSlug?: string`.
+    const { agentSlug: droppedAgentSlug, userId: _droppedUserId, ...rest } = f;
+    const unfaceted: RunListFilter = dropAgentSlug
+      ? rest
+      : { ...rest, ...(droppedAgentSlug ? { agentSlug: droppedAgentSlug } : {}) };
+    const grouped = await prisma.agentRun.groupBy({
+      by: ["agentSlug", "userId"],
+      where: buildRunListWhere(unfaceted),
+      _count: { _all: true },
+    });
+    const agentCounts = new Map<string, number>();
+    const userCounts = new Map<string, number>();
+    for (const g of grouped) {
+      agentCounts.set(g.agentSlug, (agentCounts.get(g.agentSlug) ?? 0) + g._count._all);
+      userCounts.set(g.userId, (userCounts.get(g.userId) ?? 0) + g._count._all);
+    }
+    const agents = [...agentCounts.entries()]
+      .map(([agentSlug, count]) => ({ agentSlug, count }))
+      .sort((a, b) => b.count - a.count || a.agentSlug.localeCompare(b.agentSlug));
+    const users: Array<{ userId: string; name: string | null; email: string | null; count: number }> = [];
+    // scope=own has exactly one possible user (the requester); shipping a roster
+    // to a caller who passed no elevation check is the leak R5 exists to stop.
+    if (f.scope !== "all") return { agents, users };
+    const userIds = [...userCounts.keys()];
+    const hydrated =
+      userIds.length === 0
+        ? []
+        : await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, email: true, name: true },
+          });
+    const userMap = new Map(hydrated.map((u) => [u.id, u]));
+    for (const [userId, count] of userCounts) {
+      const u = userMap.get(userId);
+      users.push({ userId, name: u?.name ?? null, email: u?.email ?? null, count });
+    }
+    users.sort((a, b) => b.count - a.count || (a.name ?? a.userId).localeCompare(b.name ?? b.userId));
+    return { agents, users };
+  },
 
   /**
    * Aggregate rating stats per agent within a window. Null cutoff = all time.
@@ -1662,3 +1906,8 @@ export const agentRunRepository = {
     }));
   },
 };
+
+/** One row of the paged listing — the light projection plus the userName /
+ *  userEmail hydrated only under scope=all. Derived from the method so the
+ *  select clause stays the single definition of the shape. */
+export type AgentRunListRow = Awaited<ReturnType<typeof agentRunRepository.listPaged>>["rows"][number];
