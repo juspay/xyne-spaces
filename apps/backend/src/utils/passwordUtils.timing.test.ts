@@ -6,7 +6,7 @@ import {
   verifyEmailPassword,
 } from './passwordUtils';
 
-// PY-JP-017 / API PY-JP-004 (user enumeration by login timing).
+// Guards against user enumeration by login timing.
 // The no-account login branch verifies the submitted password against
 // DUMMY_PASSWORD_HASH. If that dummy took the fast sha256 (client-hash) branch
 // while real accounts are stored as scrypt, an unknown email would answer in
