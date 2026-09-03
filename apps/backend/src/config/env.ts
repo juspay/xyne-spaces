@@ -564,6 +564,18 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+  // 'shadow' records what archive inspection would refuse without blocking it;
+  // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
+  UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
+  // Comma-separated internal host suffixes the link-preview / outbound fetch guard
+  // refuses by name (e.g. corporate or in-cluster domains). Empty by default; set
+  // per environment so no internal topology is committed to source.
+  SSRF_INTERNAL_HOST_SUFFIXES: Joi.string().allow('').default(''),
+  // When true (default), the webhook SSRF guard allows private / internal
+  // destinations but still refuses loopback and link-local / cloud-metadata
+  // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
+  // are unaffected either way (always strict).
+  WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
 
 }).unknown();
@@ -597,9 +609,20 @@ export const config = {
     : '',
   host: envVars.HOST,
   cors: {
-    origin: envVars.CORS_ORIGIN.split(',')
-      .map((origin: string) => origin.trim())
-      .filter(Boolean),
+    // The CORS allow-list (CORS_ORIGIN) plus the app's own frontend origin
+    // (FRONTEND_URL). The frontend is always a legitimate client for both HTTP and
+    // WebSockets, so it is accepted even when CORS_ORIGIN does not list it — e.g.
+    // when the frontend and API share a host and never needed a CORS entry.
+    origin: (() => {
+      const list = envVars.CORS_ORIGIN.split(',')
+        .map((origin: string) => origin.trim())
+        .filter(Boolean);
+      try {
+        const own = new URL(envVars.FRONTEND_URL as string).origin;
+        if (own && !list.includes(own)) list.push(own);
+      } catch { /* FRONTEND_URL unset or not a URL: nothing to add */ }
+      return list;
+    })(),
     allowedMediaOrigins: envVars.ALLOWED_MEDIA_ORIGINS.split(',')
       .map((origin: string) => origin.trim())
       .filter(Boolean),
@@ -1194,5 +1217,17 @@ export const config = {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
+  },
+  uploads: {
+    archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
+  },
+  ssrf: {
+    internalHostSuffixes: (envVars.SSRF_INTERNAL_HOST_SUFFIXES as string)
+      .split(',')
+      .map((suffix: string) => suffix.trim().toLowerCase().replace(/^\.+/, ''))
+      .filter(Boolean),
+  },
+  webhooks: {
+    allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
   },
 };

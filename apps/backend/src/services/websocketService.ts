@@ -14,6 +14,7 @@ import { type NotificationData } from './notificationService';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
+import { config } from '@/config/env';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -71,9 +72,25 @@ class WebSocketService {
     this.io = new SocketIOServer(httpServer, {
       path: '/api/socket.io/',
       cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3000",
+        origin: config.cors.origin,
         methods: ["GET", "POST"],
         credentials: true
+      },
+      // The handshake authenticates from cookies, and CORS headers only govern what a
+      // page may *read* — they do not stop a browser from opening the socket. A browser
+      // always sends Origin on a cross-site WebSocket handshake, so an Origin outside
+      // the allow-list is refused before authentication. The list is the CORS origins
+      // plus the app's own frontend (config.cors.origin), so a same-origin frontend
+      // is accepted even if it is not a CORS entry. Native clients send no Origin and
+      // are unaffected.
+      allowRequest: (req, callback) => {
+        const origin = req.headers.origin;
+        if (origin && !config.cors.origin.includes(origin)) {
+          logger.warn(`WebSocket handshake rejected from disallowed origin: ${origin}`);
+          callback('Origin not allowed', false);
+          return;
+        }
+        callback(null, true);
       },
       transports: ['websocket', 'polling'],
       // Ping/pong configuration to keep connection alive

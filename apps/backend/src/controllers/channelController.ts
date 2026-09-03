@@ -997,6 +997,17 @@ export class ChannelController {
         }
       }
 
+      // The DM target is caller-supplied; scope it to the caller's workspace (from
+      // the session, not the request) so a member cannot DM a user in another
+      // workspace by id substitution. Rejected before the channel is created.
+      if (scopeType === 'DM' && scopeId) {
+        const dmTarget = await this.userRepository.findByIdInWorkspace(scopeId, req.user!.workspaceId);
+        if (!dmTarget || dmTarget.status !== 'ACTIVE') {
+          res.status(404).json({ error: 'Participant not found or inactive' });
+          return;
+        }
+      }
+
       // For DM channels, auto-generate name from user IDs
       let channelName: string;
       if (scopeType === 'DM' && scopeId) {
@@ -1026,7 +1037,8 @@ export class ChannelController {
         ChannelRole.ADMIN
       );
 
-      // For DM channels, add the other user as participant
+      // For DM channels, add the other user as participant.
+      // DM target was validated in-workspace above.
       if (scopeType === 'DM' && scopeId) {
         await this.channelParticipantRepository.addParticipant(
           channel.id,
@@ -1046,8 +1058,9 @@ export class ChannelController {
 
         for (const participantId of validParticipants) {
           try {
-            // Check if user exists before adding
-            const user = await this.userRepository.findById(participantId);
+            // Scope the caller-supplied id to the session workspace: a participant
+            // in another workspace resolves to null and is refused, not added.
+            const user = await this.userRepository.findByIdInWorkspace(participantId, req.user!.workspaceId);
             if (user && user.status === 'ACTIVE') {
               await this.channelParticipantRepository.addParticipant(
                 channel.id,
@@ -2066,11 +2079,13 @@ export class ChannelController {
         return;
       }
 
-      // Validate all participants exist and are active (skip for self-DM)
+      // Scope participants to the caller's workspace, taken from the session rather
+      // than the request body, so a caller-supplied id cannot reference a user
+      // outside it.
       const participantUsers = [];
       if (!isSelfDm) {
         for (const participantId of otherParticipantIds) {
-          const user = await this.userRepository.findById(participantId);
+          const user = await this.userRepository.findByIdInWorkspace(participantId, workspaceId);
           if (!user || user.status !== 'ACTIVE') {
             res.status(404).json({
               error: 'Participant not found or inactive',
@@ -2526,10 +2541,10 @@ export class ChannelController {
         return;
       }
 
-      // 4. Validate all new userIds are valid, active users
+      // Scope to this workspace, as createNewDM does: userIds is caller-supplied.
       const newUsers = [];
       for (const userId of uniqueUserIds) {
-        const user = await this.userRepository.findById(userId);
+        const user = await this.userRepository.findByIdInWorkspace(userId, workspaceId);
         if (!user || user.status !== 'ACTIVE') {
           res.status(404).json({
             error: 'One or more participants not found or inactive',

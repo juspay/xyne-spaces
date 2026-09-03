@@ -1,7 +1,8 @@
 import axios, { AxiosResponse } from 'axios';
 import { parse } from 'node-html-parser';
 import {logger} from '@/utils/logger';
-import { assertHostIsExternal } from '@/utils/ssrfGuard';
+import { resolveExternalHostPinned, pinnedAgentsFor } from '@/utils/ssrfGuard';
+import { config } from '@/config/env';
 
 export interface ExternalLinkMetadata {
   type?: 'external';
@@ -112,6 +113,11 @@ export class LinkPreviewService {
    * RFC1918, link-local/metadata 169.254.0.0/16, *.svc.cluster.local, etc.),
    * following redirects manually so each hop is re-checked. Link previews have
    * no legitimate internal target, so internal hosts are always refused.
+   *
+   * DATA_SOURCE_ALLOW_PRIVATE_HOSTS is honoured only in local development — it
+   * exists for dashboard data-source connectors, not link previews, and reading it
+   * unqualified would disable this guard wherever a connector needs it. Mirrors
+   * assertWebhookUrlSafe.
    */
   private async safeGet(initialUrl: string): Promise<AxiosResponse> {
     const MAX_REDIRECTS = 5;
@@ -122,7 +128,8 @@ export class LinkPreviewService {
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new Error(`Blocked non-http(s) scheme: ${parsed.protocol}`);
       }
-      await assertHostIsExternal(parsed.hostname);
+      const allowPrivate = config.dataSource.allowPrivateHosts && config.env === 'development';
+      const pinned = await resolveExternalHostPinned(parsed.hostname, allowPrivate);
 
       const response = await axios.get(currentUrl, {
         headers: {
@@ -133,6 +140,8 @@ export class LinkPreviewService {
         maxContentLength: this.MAX_CONTENT_LENGTH,
         maxRedirects: 0, // follow manually so each hop is re-validated above
         validateStatus: (status) => status >= 200 && status < 400,
+        // Connect to the validated addresses rather than re-resolving the name.
+        ...(pinned ? pinnedAgentsFor(parsed.hostname, pinned) : {}),
       });
 
       // Not a redirect → this is the final response.
