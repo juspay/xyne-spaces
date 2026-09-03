@@ -4106,6 +4106,19 @@ type SupportTicketDetailProps = {
   }>;
 };
 
+type TicketReplyKind = 'app' | 'channel';
+
+/**
+ * Reply routing is per-ticket, not per-channel: an app-sourced ticket can live in ANY
+ * desk channel (e.g. EMAIL intake + a connected app), so channel.type alone can no
+ * longer pick the thread/composer. 'channel' = the channel-type chain, unchanged.
+ */
+const getTicketReplyKind = (ticketMetadata: unknown): TicketReplyKind => {
+  const deskSource = (ticketMetadata as { deskSource?: { type?: string } } | null | undefined)
+    ?.deskSource;
+  return deskSource?.type === 'app' ? 'app' : 'channel';
+};
+
 export const SupportTicketDetail = ({
   ticketFilter,
   isMember,
@@ -4193,6 +4206,7 @@ export const SupportTicketDetail = ({
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
+  const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
@@ -5268,7 +5282,8 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK ||
+                  {isAppSourcedTicket ||
+                  channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
@@ -5297,7 +5312,20 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              {isAppSourcedTicket ? (
+                conversationId ? (
+                  <SlackComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
+                    variant='app'
+                    // The ticket is app-sourced whatever the desk type, so the
+                    // channel preference alone decides whether the reply reaches
+                    // the app — matching appDeskService's outbound gate.
+                    recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}

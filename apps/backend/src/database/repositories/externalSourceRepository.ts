@@ -5,7 +5,9 @@
 
 import { DatabaseClient } from '../client';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
+import { buildChannelAppSourceName, resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { encrypt, decrypt } from '@/services/encryptionService';
+import { logger } from '@/utils/logger';
 import type { ExternalSource } from '@prisma/client';
 
 export type CalendarProvider = 'GOOGLE' | 'MICROSOFT';
@@ -208,13 +210,108 @@ export class ExternalSourceRepository {
   }
 
   /**
-   * Find external source by channel ID
+   * Find the channel's source restricted to the given sourceTypes.
+   * Same ordering as findByChannelId (active first, then newest); pass
+   * requireActive to only consider active sources. Returns null when the
+   * channel has no source of the requested types.
    */
-  async findByChannelId(channelId: string) {
+  async findChannelSource(
+    channelId: string,
+    opts: { sourceTypes: string[]; requireActive?: boolean },
+  ) {
     return await this.db.externalSource.findFirst({
-      where: { channelId },
+      where: {
+        channelId,
+        sourceType: { in: opts.sourceTypes },
+        ...(opts.requireActive ? { isActive: true } : {}),
+      },
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
     });
+  }
+
+  /**
+   * List a channel's app-desk sources (oldest first).
+   */
+  async listChannelAppSources(channelId: string, opts?: { activeOnly?: boolean }) {
+    return await this.db.externalSource.findMany({
+      where: {
+        channelId,
+        sourceType: 'app-desk',
+        ...(opts?.activeOnly ? { isActive: true } : {}),
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Find the app-desk source binding a specific installed app to a channel.
+   *
+   * Matches on the *resolved* install id rather than `externalIdentifier` alone:
+   * rows created before the multi-desk migration (XYNE-55472) carry a null
+   * column and encode the install id in their name (`app-desk-<installedAppId>`).
+   * Querying the column directly would 403 those still-valid desks at ingest.
+   * A name-only match backfills the column so the next lookup is a plain index hit.
+   */
+  async findChannelAppSource(channelId: string, installedAppId: string) {
+    const sources = await this.listChannelAppSources(channelId);
+    const candidates = sources.filter(
+      s => s.externalIdentifier === installedAppId || resolveAppDeskInstalledAppId(s) === installedAppId,
+    );
+    // A channel can hold both a legacy row and a new-scheme row for the same
+    // install; the active one is the live binding.
+    const match = candidates.find(s => s.isActive) ?? candidates[0];
+    if (!match) return null;
+
+    if (!match.externalIdentifier) {
+      logger.info(
+        `[ExternalSource] Backfilling externalIdentifier on legacy app-desk source ${match.id}`,
+        { channelId, installedAppId },
+      );
+      return await this.db.externalSource.update({
+        where: { id: match.id },
+        data: { externalIdentifier: installedAppId },
+      });
+    }
+    return match;
+  }
+
+  /**
+   * Single connect path for an app↔channel app-desk binding (management API and
+   * APP-channel creation). Active binding → 'already-connected' (callers map to
+   * 409); inactive binding → reactivated; otherwise created.
+   *
+   * Every row written here sets externalIdentifier, so the name is never parsed
+   * to recover the install id — only pre-2026-07-29 rows need that, and the
+   * 20260903090000 migration backfills them.
+   */
+  async connectAppToChannel(params: {
+    channelId: string;
+    installedAppId: string;
+    workspaceId: string;
+    displayName: string;
+  }): Promise<{ source: ExternalSource; outcome: 'created' | 'reactivated' | 'already-connected' }> {
+    const { channelId, installedAppId, workspaceId, displayName } = params;
+
+    const existing = await this.findChannelAppSource(channelId, installedAppId);
+    if (existing) {
+      if (existing.isActive) {
+        return { source: existing, outcome: 'already-connected' };
+      }
+      const source = await this.update(existing.id, { isActive: true });
+      return { source, outcome: 'reactivated' };
+    }
+
+    const source = await this.create({
+      name: buildChannelAppSourceName(installedAppId, channelId),
+      sourceType: 'app-desk',
+      displayName,
+      channelId,
+      externalIdentifier: installedAppId,
+      credentials: encrypt(JSON.stringify({ installedAppId })),
+      isActive: true,
+      workspaceId,
+    });
+    return { source, outcome: 'created' };
   }
 
   /**
