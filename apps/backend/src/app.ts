@@ -200,6 +200,7 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import { encryptedFieldsConfig } from '@xyne/shared';
 
 
 export class App {
@@ -593,6 +594,18 @@ export class App {
       handleSdlcClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+
+    // Encrypted-fields config (S2S-only). Backend is the source of truth; the
+    // encryption service fetches this and caches it instead of importing @xyne/shared.
+    this.app.get('/api/internal/encryption/fields-config', validateS2SKey, (_req: Request, res: Response) => {
+      const encryptedFields = Object.fromEntries(
+        Object.entries(encryptedFieldsConfig).map(([table, tableConfig]) => [
+          table,
+          { fields: [...tableConfig.fields], enforceClientEncryption: tableConfig.enforceClientEncryption },
+        ]),
+      );
+      res.json({ encryptedFields });
+    });
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
