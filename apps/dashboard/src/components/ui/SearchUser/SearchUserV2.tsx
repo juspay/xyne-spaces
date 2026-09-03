@@ -333,7 +333,8 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
         : {})}
       onItemHighlighted={(itemValue, details) => {
         // Keep the keyboard-highlighted row scrolled into the virtual window.
-        if (!isVirtualized || itemValue == null || details.reason === 'pointer') return;
+        if (!isVirtualized || itemValue === null || itemValue === undefined || details.reason === 'pointer')
+          return;
         if (details.index >= 0) rowVirtualizer.scrollToIndex(details.index);
       }}
     >
