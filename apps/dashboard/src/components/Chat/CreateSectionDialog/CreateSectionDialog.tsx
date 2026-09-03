@@ -28,6 +28,7 @@ interface CreateSectionDialogProps {
   channels: VisibleChannel[];
   existingNames: string[];
   lastSectionPosition: string | null;
+  prioritizeType?: 'dm' | 'channel';
   onClose: () => void;
 }
 
@@ -71,6 +72,7 @@ export const CreateSectionDialog = ({
   channels,
   existingNames,
   lastSectionPosition,
+  prioritizeType = 'channel',
   onClose,
 }: CreateSectionDialogProps): ReactElement => {
   const zero = useZero();
@@ -144,15 +146,24 @@ export const CreateSectionDialog = ({
     const base = !q
       ? channels
       : channels.filter(c => getDMSearchableName(c, userMap, userID).toLowerCase().includes(q));
+    const preferDM = prioritizeType === 'dm';
     return [...base].sort((a, b) => {
       const aSelected = selected.has(a.id) ? 0 : 1;
       const bSelected = selected.has(b.id) ? 0 : 1;
-      return aSelected - bSelected;
+      if (aSelected !== bSelected) return aSelected - bSelected;
+      const aIsDM = isDMChannel(a.scopeType);
+      const bIsDM = isDMChannel(b.scopeType);
+      if (aIsDM === bIsDM) return 0;
+      if (preferDM) return aIsDM ? -1 : 1;
+      return aIsDM ? 1 : -1;
     });
-  }, [channels, filter, selected, userMap, userID]);
+  }, [channels, filter, selected, userMap, userID, prioritizeType]);
 
   const allFilteredSelected =
     filteredChannels.length > 0 && filteredChannels.every(c => selected.has(c.id));
+
+  const itemLabel = 'channels & DMs';
+  const itemLabelTitle = 'Channels & DMs';
 
   const toggleChannel = (id: string): void => {
     setSelected(prev => {
@@ -290,7 +301,7 @@ export const CreateSectionDialog = ({
                   !!nameError && 'pointer-events-none',
                 )}
               >
-                Create and Add Channels
+                Create and Add {itemLabelTitle}
               </Button>
             </span>
           </Tooltip>
@@ -303,7 +314,7 @@ export const CreateSectionDialog = ({
     <div className='space-y-4 p-4' data-testid='create-section-step2'>
       <div className='flex items-start justify-between gap-2'>
         <div>
-          <div className='text-xl font-medium text-foreground'>Add channels</div>
+          <div className='text-xl font-medium text-foreground'>Add {itemLabel}</div>
           <div className='flex items-center gap-1 text-sm text-muted-foreground'>
             {emoji.trim() && renderEmoji(emoji.trim(), 'size-4')}
             <span>{trimmedName}</span>
@@ -343,7 +354,7 @@ export const CreateSectionDialog = ({
         <div className='max-h-64 overflow-y-auto'>
           {filteredChannels.length === 0 ? (
             <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-              No channels found
+              No {itemLabel} found
             </div>
           ) : (
             filteredChannels.map(channel => (
@@ -382,7 +393,7 @@ export const CreateSectionDialog = ({
             disabled={selected.size === 0}
             className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
           >
-            Add Channels
+            Add {itemLabelTitle}
           </Button>
         </div>
       </div>
