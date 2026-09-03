@@ -4,8 +4,8 @@ import {
   appsService,
   type AppCommand,
   type AppShortcutWithApp,
+  type ShortcutType,
 } from '../services/Apps/appsService';
-import type { ShortcutType } from '../services/Apps/appsTypes';
 
 /**
  * App slash-commands available in a channel, scoped by accessibility
