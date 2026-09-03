@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.20](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.19...v1.239.0-release-20260827.20) (2026-09-03)
+
+
+### Features
+
+* ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([1f8e4ad](https://github.com/juspay/xyne-spaces/commit/1f8e4ad83fc72e1b6a9d2e09ca7a7533a8b62c07)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
+
 ## [1.239.0-release-20260827.19](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.18...v1.239.0-release-20260827.19) (2026-09-02)
 
 
