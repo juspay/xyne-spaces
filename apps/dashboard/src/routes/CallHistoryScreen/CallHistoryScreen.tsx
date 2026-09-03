@@ -29,6 +29,7 @@ import {
   ChannelScopeType,
   InvitationResponse,
   MeetingStatus,
+  TagMethod,
 } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
@@ -58,6 +59,9 @@ import {
   RecentCallFilter,
   FILTER_LABELS,
 } from './callHistoryItem.utils';
+import { CallLabelFilter } from './CallLabelFilter';
+import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
+import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDialog/CallExternalChatDialog';
 import { ParticipantsModal } from './ParticipantsModal';
 import CalendarWeekView from './CalendarWeekView';
@@ -254,6 +258,7 @@ const CallHistoryScreen = (): ReactElement => {
     return d;
   });
   const [recentCallFilter, setRecentCallFilter] = useState<RecentCallFilter>('all');
+  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [upcomingDay, setUpcomingDay] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -811,6 +816,33 @@ const CallHistoryScreen = (): ReactElement => {
     call => !isExternalCalendarEvent(call),
   );
 
+  // Options come off the Zero-backed list rather than the current view, so the
+  // dropdown doesn't shrink as you narrow the results.
+  const availableCallLabels = useMemo(
+    () => normalizeRecordingTags((calls ?? []).flatMap(call => call.labels)),
+    [calls],
+  );
+  // call.labels stores Tag ids (no FK), not display text — resolve them once so
+  // the dropdown shows real names. Every id is passed in, including generated
+  // ones, since resolving is also what reveals the method.
+  const { resolveLabel: resolveCallLabel, resolveMethod: resolveCallLabelMethod } =
+    useResolvedRecordingLabels(availableCallLabels);
+  const isManualCallLabel = useCallback(
+    (label: string): boolean => resolveCallLabelMethod(label) !== TagMethod.LLM,
+    [resolveCallLabelMethod],
+  );
+  const manualCallLabels = useMemo(
+    () =>
+      availableCallLabels
+        .filter(isManualCallLabel)
+        .sort((left, right) => resolveCallLabel(left).localeCompare(resolveCallLabel(right))),
+    [availableCallLabels, isManualCallLabel, resolveCallLabel],
+  );
+  // Search results are Vespa rows, built with `labels: []` (mapVespaCallResultToCall),
+  // so a selection would wrongly empty the list. Disable the control and skip it
+  // rather than silently filtering everything away.
+  const isLabelFilterDisabled = hasCallSearch;
+
   const filteredMissedCalls = (
     hasCallSearch
       ? filteredRecentCalls?.filter(call => isMissedCallForUser(call, user?.id))
@@ -846,6 +878,10 @@ const CallHistoryScreen = (): ReactElement => {
       default:
         filtered = base;
     }
+    if (selectedLabels.length > 0 && !hasCallSearch) {
+      const wanted = new Set(selectedLabels);
+      filtered = filtered.filter(call => (call.labels ?? []).some(label => wanted.has(label)));
+    }
     if (hasCallSearch) {
       return filtered;
     }
@@ -856,7 +892,14 @@ const CallHistoryScreen = (): ReactElement => {
       const bTop = b.status === CallStatus.ACTIVE || isScheduledCallJoinable(b) ? 0 : 1;
       return aTop - bTop;
     });
-  }, [filteredRecentCallsNoGcal, filteredMissedCalls, hasCallSearch, recentCallFilter, user?.id]);
+  }, [
+    filteredRecentCallsNoGcal,
+    filteredMissedCalls,
+    hasCallSearch,
+    recentCallFilter,
+    selectedLabels,
+    user?.id,
+  ]);
 
   if (queryDetails.type === 'error') {
     return (
@@ -1230,28 +1273,37 @@ const CallHistoryScreen = (): ReactElement => {
                 <span className='text-xs font-semibold tracking-widest text-muted-foreground uppercase'>
                   Recents
                 </span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className='flex items-center gap-1 px-2.5 py-1 text-sm font-medium text-foreground border border-border rounded-lg hover:bg-accent transition-colors focus:outline-none'>
-                      {FILTER_LABELS[recentCallFilter]}
-                      <ChevronDown className='size-3' />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align='end' className='rounded-xl w-44'>
-                    {(Object.keys(FILTER_LABELS) as RecentCallFilter[]).map(f => (
-                      <DropdownMenuItem
-                        key={f}
-                        className={cn(
-                          'text-sm rounded-lg cursor-pointer',
-                          recentCallFilter === f && 'font-medium',
-                        )}
-                        onSelect={() => setRecentCallFilter(f)}
-                      >
-                        {FILTER_LABELS[f]}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div className='flex items-center gap-2'>
+                  <CallLabelFilter
+                    labels={manualCallLabels}
+                    selectedLabels={selectedLabels}
+                    onSelectedLabelsChange={setSelectedLabels}
+                    resolveLabel={resolveCallLabel}
+                    isDisabled={isLabelFilterDisabled}
+                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className='flex items-center gap-1 px-2.5 py-1 text-sm font-medium text-foreground border border-border rounded-lg hover:bg-accent transition-colors focus:outline-none'>
+                        {FILTER_LABELS[recentCallFilter]}
+                        <ChevronDown className='size-3' />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end' className='rounded-xl w-44'>
+                      {(Object.keys(FILTER_LABELS) as RecentCallFilter[]).map(f => (
+                        <DropdownMenuItem
+                          key={f}
+                          className={cn(
+                            'text-sm rounded-lg cursor-pointer',
+                            recentCallFilter === f && 'font-medium',
+                          )}
+                          onSelect={() => setRecentCallFilter(f)}
+                        >
+                          {FILTER_LABELS[f]}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
 
               {displayRecentCalls.length === 0 ? (
@@ -1302,8 +1354,14 @@ const CallHistoryScreen = (): ReactElement => {
                               : undefined
                           }
                           isRecentCall
+                          labels={call.labels.filter(isManualCallLabel)}
+                          resolveLabel={resolveCallLabel}
                           onDetailClick={() => {
-                            void navigate(`${call.id}/detail`, { state: { call } });
+                            // The labels on screen right now double as the detail picker's
+                            // suggestions — same rows this screen's label filter is built from.
+                            void navigate(`${call.id}/detail`, {
+                              state: { call, labelSuggestions: availableCallLabels },
+                            });
                           }}
                         />
                       </div>

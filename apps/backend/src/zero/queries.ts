@@ -1432,6 +1432,29 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  // Topics Explorer: one desk's tickets in a created-at window, rolled up client-side.
+  // Not supportTicketsPageV3 — that pulls emailDrafts, emailReads, userMailbox and
+  // formEntityValues per row, where this reads scalar columns and no relation at all.
+  // The window bounds the sync: the panel caps its range at 7 days and opens on one.
+  // channelId + isMember are forwarded to TicketsACL for membership gating.
+  topicsExplorerTickets: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      createdAtStart: z.number(),
+      createdAtEnd: z.number(),
+    }).refine(
+      args => args.createdAtStart <= args.createdAtEnd,
+      'createdAtStart must be less than or equal to createdAtEnd',
+    ),
+    ({ args: { channelId, createdAtStart, createdAtEnd } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where('createdAt', '>=', createdAtStart)
+        .where('createdAt', '<=', createdAtEnd)
+        .orderBy('createdAt', 'desc'),
+  ),
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
   // channelId + isMember are forwarded to TicketsACL for membership gating.
   // @deprecated
@@ -4649,12 +4672,18 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .related('devTicket', q => {
           let devTicket = q
             .one()
-            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc'));
+            // Only the latest PR is rendered (pullRequests[0]); limit keeps the
+            // relation from hydrating a ticket's full PR history.
+            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc').limit(1));
           if (includeColumnData) {
             devTicket = devTicket.related('workflows').related('tags').related('formEntityValues');
           }
           return devTicket;
         })
+        // MUST stay in sync with the shared copy.
+        .related('subTicket', subTicket =>
+          subTicket.one().related('mappedTicket', mappedTicket => mappedTicket.one()),
+        )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
 

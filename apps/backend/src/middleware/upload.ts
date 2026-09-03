@@ -485,6 +485,47 @@ const uploadFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
   cb(null, true);
 };
 
+/**
+ * office-conversion is single-purpose (shell the upload out to LibreOffice's
+ * `soffice --convert-to pdf`), so unlike the generic uploadFileFilter above —
+ * a denylist covering every other upload path in the app — this one is an
+ * allowlist: only the office document types the FileViewer actually sends
+ * (apps/dashboard/src/components/FileViewer/utils.ts) are accepted, not
+ * "anything not explicitly blocked".
+ */
+const OFFICE_CONVERSION_EXTENSIONS = new Set([
+  '.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls',
+]);
+
+const OFFICE_CONVERSION_MIME_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+  'application/vnd.ms-powerpoint', // .ppt
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/msword', // .doc
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.ms-excel', // .xls
+]);
+
+const officeConversionFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  // Extension-primary, same as isBlockedUpload above: file.mimetype is
+  // client-supplied and often generic (application/octet-stream) even for a
+  // real office document.
+  const name = (file.originalname ?? '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const ext = dot === -1 ? '' : name.slice(dot);
+  const mime = (file.mimetype ?? '').split(';')[0].trim().toLowerCase();
+
+  if (!OFFICE_CONVERSION_EXTENSIONS.has(ext) && !OFFICE_CONVERSION_MIME_TYPES.has(mime)) {
+    logger.warn('[UPLOAD] Rejected non-office file for conversion', {
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+    });
+    cb(null, false);
+    return;
+  }
+  cb(null, true);
+};
+
 // Generic streaming storage engine for message attachments.
 // Streams directly to object storage without buffering in memory.
 const streamingStorage: multer.StorageEngine = {
@@ -635,6 +676,14 @@ export const versionUpload = multer({
   storage: makeCollectionStreamingStorage('itemId'),
   fileFilter: uploadFileFilter,
   limits: { fileSize: 100 * 1024 * 1024 },
+});
+
+// In-memory (not GCS-streamed): the file is transient input to a conversion,
+// never stored.
+export const officeConversionUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: officeConversionFileFilter,
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
 });
 
 const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>

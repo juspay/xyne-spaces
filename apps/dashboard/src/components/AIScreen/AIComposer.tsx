@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { PlusDefault } from '@xyne/icons';
 import { toast } from 'sonner';
+import { posthogService } from '../../services/Analytics/posthogService';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
@@ -35,6 +36,7 @@ import { ModelThinkingSelector, formatModelLabel } from './ModelThinkingSelector
 import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
+import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
@@ -65,6 +67,10 @@ export interface AIComposerHandle {
   clearContent: () => void;
   focus: () => void;
   setPrompt: (value: string) => void;
+  /** Submit `text` as its own turn, carrying the composer's current context
+   *  (agent, model, toggles) but not its draft or attachments — those stay
+   *  put. False when refused because a reply is still streaming. */
+  submitPrompt: (text: string) => boolean;
   /** REPLACE the composer's editable context with these items (empty clears it).
    *  Used on chat switch to carry the opened conversation's last-turn context
    *  into the composer. */
@@ -490,6 +496,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setValue(nextValue);
         window.setTimeout(() => textareaRef.current?.focus(), 0);
       },
+      submitPrompt: (text: string): boolean => {
+        if (pending) return false;
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        onSubmit?.(trimmed, undefined, buildContext());
+        return true;
+      },
       setContext: (items: AttachedContextItem[]): void => {
         const next = attachedContextToSelections(items);
         setSelections({
@@ -504,7 +517,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setFolderScopes(next.folderScopes);
       },
     }),
-    [handleFilesAdded],
+    [handleFilesAdded, pending, onSubmit, buildContext],
   );
 
   const submit = (): void => {
@@ -526,6 +539,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      // Keyboard submit is invisible to autocapture; emit it explicitly.
+      posthogService.capture('ai_query_submit', {
+        trigger: 'keyboard',
+        keyCombo: 'enter',
+      });
       submit();
     }
   };
@@ -698,12 +716,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       />
       <div
         className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
-        style={isVoiceRecording ? { borderRadius: '1.6rem' } : undefined}
+        style={isVoiceRecording ? { borderRadius: '1.125rem' } : undefined}
       >
         <div
           ref={wrapperRef}
           className={cn(
-            'ai-composer-wrapper group flex flex-col gap-1 rounded-3xl border border-[#c0bcb4] bg-[#f5f4f0] px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:border-[#a09c94] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
+            'ai-composer-wrapper group flex flex-col gap-1 rounded-2xl border border-chat-composer-border-active bg-background px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
           )}
         >
           {hasPills && (
@@ -952,7 +970,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   <Square className='h-2.5 w-2.5 fill-current' aria-hidden strokeWidth={0} />
                 </button>
               ) : (
-                <button
+                <Button
+                  variant='ghost'
+                  trackId='ai_composer_send'
                   type='submit'
                   disabled={!canSend}
                   aria-label='Send'
@@ -964,14 +984,14 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   )}
                 >
                   <ArrowUp className='h-4 w-4' aria-hidden strokeWidth={2.25} />
-                </button>
+                </Button>
               )}
             </div>
           </div>
         </div>
       </div>
       {hideDisclaimer ? null : (
-        <p className='mt-2 text-center text-[11px] text-muted-foreground/80'>
+        <p className='mt-1.5 text-center text-[11px] text-muted-foreground/80'>
           Xyne can make mistakes. Verify important details.
         </p>
       )}

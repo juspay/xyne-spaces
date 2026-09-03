@@ -40,10 +40,10 @@ export async function testRepoConnection(opts: {
     const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const resp = await fetch(`${apiUrl}/repos/${parsed.owner}/${parsed.repo}`, {
-      headers,
-      signal: AbortSignal.timeout(API_TIMEOUT_MS),
-    });
+    const resp = await fetch(
+      `${apiUrl}/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`,
+      { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) },
+    );
     if (resp.ok) {
       const json = (await resp.json()) as { full_name: string; default_branch: string };
       return {
@@ -84,7 +84,7 @@ export async function testRepoConnection(opts: {
       headers.Authorization = `Basic ${basic}`;
     }
     const resp = await fetch(
-      `${baseUrl}/projects/${parsed.projectKey}/repos/${parsed.repoSlug}`,
+      `${baseUrl}/projects/${encodeURIComponent(parsed.projectKey)}/repos/${encodeURIComponent(parsed.repoSlug)}`,
       { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) },
     );
     if (resp.ok) {

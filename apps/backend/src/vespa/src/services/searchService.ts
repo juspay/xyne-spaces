@@ -471,10 +471,18 @@ export class SearchService {
 
       // Execute search
       // Fetch feature flags from Superposition
-      const useSemanticAnyway = await superpositionClient.getBooleanValue(
-        'vespa_search_use_semantic_anyway',
-        true,
+      // Rank profiles that skip the vector half of retrieval. `personalized` reads no vector
+      // feature, so nearestNeighbor cannot change its ranking -- it only costs a filtered-HNSW
+      // traversal plus an embed call, and floods recall with zero-lexical docs that the
+      // channel-affinity tier then promotes over real matches. Default [] = nothing skipped.
+      const semanticDisabledRankProfiles = await superpositionClient.getObjectValue(
+        'vespa_search_semantic_disabled_rank_profiles',
+        [],
         {}
+      );
+      const useSemanticAnyway = !(
+        Array.isArray(semanticDisabledRankProfiles) &&
+        semanticDisabledRankProfiles.includes(rankProfile)
       );
       const newFallbackMethod = await superpositionClient.getBooleanValue(
         'vespa_search_new_fallback_method',

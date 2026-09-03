@@ -257,6 +257,7 @@ const ConversationHeader = ({
                 e.stopPropagation();
                 handleStarToggle();
               }}
+              trackId='toggle_star_channel'
               className={cn('h-7 w-7 rounded-lg shrink-0', actionIconClass)}
               style={APP_NO_DRAG_STYLE}
               data-track-category='CHANNELS'

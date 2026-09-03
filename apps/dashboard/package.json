@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-dashboard",
-  "version": "1.252.0",
+  "version": "1.269.3",
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {
@@ -172,7 +172,6 @@
     "lucide-react": "^0.544.0",
     "marked": "^15.0.12",
     "mermaid": "^11.15.0",
-    "mixpanel-browser": "^2.72.0",
     "openai-partial-stream": "^0.3.9",
     "papaparse": "^5.5.3",
     "pdfjs-dist": "5.4.296",

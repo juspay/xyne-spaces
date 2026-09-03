@@ -402,16 +402,18 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                     <p className='text-sm text-muted-foreground'>
                       Anyone in your workspace will be able to find and join this channel.
                     </p>
-                    <button
+                    <Button
+                      variant='ghost'
                       type='button'
                       onClick={handleMakePublic}
+                      trackId='make_channel_public'
                       className='mt-1 inline-flex items-center self-start rounded-[8px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent'
                       data-track-category='CHANNEL_SETTINGS'
                       data-track-name='MakeChannelPublic'
                       data-track-metadata={JSON.stringify({ channelId: channel.id })}
                     >
                       Change to public
-                    </button>
+                    </Button>
                   </>
                 ) : (
                   <p className='text-sm text-muted-foreground'>

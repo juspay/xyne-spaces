@@ -82,7 +82,6 @@ import {
   resolveCanvasHierarchy,
   parseFieldOptions,
   serializeFieldOptions,
-  VCSProviderType,
   ReleaseTrackingMode,
   parseRepliesMd,
   addReplyToData,
@@ -139,6 +138,7 @@ import {
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions } from '@/utils/mentionParser';
+import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
@@ -995,6 +995,25 @@ export function createMutators(
   asyncTasks: Array<() => Promise<void>>,
   awaitedPostCommitTasks: Array<() => Promise<void>>,
 ) {
+  // Release-config edits are open to workspace/org ADMIN and OWNER by role, and
+  // to anyone individually granted RELEASE-MANAGER WRITE. Mirrors the HTTP
+  // authorizePrivilegedOrResource middleware.
+  const assertReleaseManageAccess = async (): Promise<void> => {
+    const isPrivileged =
+      authData.role === WorkspaceRole.ADMIN ||
+      authData.role === WorkspaceRole.OWNER ||
+      authData.orgRole === OrgRole.ADMIN ||
+      authData.orgRole === OrgRole.OWNER;
+    if (isPrivileged) return;
+    const resource = await repositories.resources.findByName('RELEASE-MANAGER');
+    if (
+      !resource ||
+      !(await repositories.resourceAccess.hasAccess(authData.sub, resource.id, AccessType.WRITE))
+    ) {
+      throw new Error('This endpoint requires administrator or owner privileges');
+    }
+  };
+
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -4710,11 +4729,15 @@ export function createMutators(
                 },
               });
             } else {
-              // Just update status, keep existing metadata
+              // Just update status, keep existing metadata.
+              // Preserve startedAt across sessions of the same scheduled call: `endedAt` is only
+              // written when a prior session ended, so its presence means this is a rejoin and
+              // startedAt must keep the original first-join time. (startedAt itself is NOT NULL
+              // with a DB default of creation time, so it can't be used to detect "never joined".)
               await tx.mutate.calls.update({
                 id: call.id,
                 status: CallStatus.ACTIVE,
-                startedAt: now,
+                startedAt: call.endedAt ? call.startedAt : now,
                 lastActivityAt: now,
                 updatedAt: now,
               });
@@ -7108,7 +7131,6 @@ export function createMutators(
           projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
-          vcsProvider: z.nativeEnum(VCSProviderType),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
           applications: z.array(
@@ -7131,12 +7153,13 @@ export function createMutators(
             projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
-            vcsProvider,
             releaseTrackingMode,
             channelId,
             applications: rawApplications,
           },
         }) => {
+          await assertReleaseManageAccess();
+
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
@@ -7212,6 +7235,13 @@ export function createMutators(
           );
           if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
             throw new Error('All applications in a release group must use the same repository URL');
+          }
+
+          const vcsProvider = detectVcsProvider([...normalizedRepoUrls][0]);
+          if (!vcsProvider) {
+            throw new Error(
+              'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
+            );
           }
 
           if (!mainBoardName.trim()) {
@@ -7398,7 +7428,9 @@ export function createMutators(
             await tx.mutate.boards.update({
               id: existingMainBoard.id,
               name: mainBoardName.trim(),
-              vcsProvider,
+              // Keep the provider set at creation; re-inferring on edit would flip
+              // a GitHub-Enterprise-hosted board to BITBUCKET_SERVER.
+              vcsProvider: existingMainBoard.vcsProvider,
               releaseTrackingMode,
               updatedBy: authData.sub,
               updatedAt: Date.now(),
@@ -7930,6 +7962,8 @@ export function createMutators(
           }
 
           if (board.boardType === BoardType.RELEASE) {
+            // Gate release-board edits like board.delete and the config-save mutator.
+            await assertReleaseManageAccess();
             if (projectId !== undefined && projectId !== board.projectId) {
               throw new Error('Release boards cannot be moved to another project');
             }
@@ -8275,6 +8309,10 @@ export function createMutators(
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          if (board.boardType === BoardType.RELEASE) {
+            await assertReleaseManageAccess();
           }
 
           const [ownedApplication, applicationBoardOwner] = await Promise.all([
@@ -9977,7 +10015,7 @@ export function createMutators(
           if (canvas.isCollaborative) {
             asyncTasks.push(async () => {
               try {
-                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[]);
+                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[], authData.sub);
               } catch (error) {
                 logger.error('[MUTATOR-CANVAS-VERSION-RESTORE] Failed to sync Y-Sweet:', error);
               }

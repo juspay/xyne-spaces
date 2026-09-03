@@ -24,6 +24,7 @@ import {
 import { isTrayVisible, setTrayVisible } from '../services/tray';
 import {
   focusMainWindow,
+  isRecordingInProgress,
   markRendererReady,
   resumeRecordingFromOutside,
   setCallActive,
@@ -570,9 +571,10 @@ export function setupIpcHandlers(): void {
   ipcMain.on('meeting-popup:start-recording', () => {
     Logger.info(ElectronEvent.MEETING_POPUP_START_RECORDING, {}, 'MeetingDetector');
     const mainWindow = getMainWindow();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      // Navigate and auto-start recording without stealing focus from the meeting
-      mainWindow.webContents.send('navigate-to', '/recordings');
+    if (mainWindow && !mainWindow.isDestroyed() && !isRecordingInProgress()) {
+      // Auto-start recording without stealing focus from the meeting. The
+      // renderer navigates itself — main has no workspace id, and the router is
+      // /:workspaceId/recordings.
       mainWindow.webContents.send('meeting:start-recording');
     }
     // Delay close so the popup can show the recording-started state for 3 seconds
@@ -632,12 +634,14 @@ export function setupIpcHandlers(): void {
     ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
-      setRecordingStarting(!!state?.starting);
+      // Applied before clearing `starting`: the reverse order briefly leaves
+      // both flags false, which flickers the pill off and back on every start.
       syncRecordingState(!!state?.active, state?.startTime, {
         paused: !!state?.paused,
         pauseStartedAt: state?.pauseStartedAt ?? null,
         accumulatedPausedMs: state?.accumulatedPausedMs ?? 0,
       });
+      setRecordingStarting(!!state?.starting);
     },
   );
 

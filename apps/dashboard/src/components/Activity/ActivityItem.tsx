@@ -16,6 +16,7 @@ import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
+import { RecordingSummaryActivity } from './RecordingSummaryActivity';
 import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
 import { StageApprovalActivity } from './StageApprovalActivity';
 import { KbIngestionActivity } from './KbIngestionActivity';
@@ -105,6 +106,11 @@ export const ActivityItem = memo(function ActivityItem({
     case 'ticket_pr_declined':
     case 'ticket_pr_reviewer_assigned':
     case 'ticket_qa_assigned':
+    case 'ticket_release_started':
+    case 'ticket_release_completed':
+    case 'ticket_release_cancelled':
+    case 'ticket_release_paused':
+    case 'ticket_release_planning':
       return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'scheduled_call':
@@ -126,6 +132,9 @@ export const ActivityItem = memo(function ActivityItem({
     case 'recording_shared':
     case 'recording_access_revoked':
       return <RecordingSharedActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'recording_summary_ready':
+      return <RecordingSummaryActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'summary_template_shared':
     case 'summary_template_access_revoked':

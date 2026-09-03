@@ -3,6 +3,7 @@ import { ArrowUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
+import { Button } from '../../ui/Button/Button';
 
 interface SocialMediaReplyComposerProps {
   conversationId: string;
@@ -102,7 +103,8 @@ export const SocialMediaReplyComposer = ({
               {content.length}/{maxLength}
             </span>
           )}
-          <button
+          <Button
+            variant='ghost'
             type='button'
             onClick={() => void handleSend()}
             disabled={!canSend}
@@ -114,9 +116,10 @@ export const SocialMediaReplyComposer = ({
             data-track-category={trackingCategory}
             data-track-name='send-reply'
             aria-label='Send reply'
+            trackId='desk_send_social_reply'
           >
             {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
