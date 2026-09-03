@@ -28,6 +28,9 @@ const envSchema = Joi.object({
   ),
   RATE_LIMIT_WINDOW_MS: Joi.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
+  // Backing store for the global rate limiter. 'redis' = shared/exact across
+  // replicas (recommended); 'memory' = per-pod (operational fallback only).
+  RATE_LIMIT_STORE: Joi.string().valid('redis', 'memory').default('redis'),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
   // Streams error-level logs to Fluent Bit's forward input (see docker/fluent-bit/).
   // Off by default so envs without a Fluent Bit endpoint (e.g. prod, until one
@@ -606,6 +609,7 @@ export const config = {
   rateLimit: {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,
     max: envVars.RATE_LIMIT_MAX_REQUESTS,
+    store: envVars.RATE_LIMIT_STORE as 'redis' | 'memory',
   },
   logging: {
     level: envVars.LOG_LEVEL,

@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import { webhookLimiter } from '@/middleware/rateLimiters';
+import { globalRateLimiter } from '@/middleware/globalRateLimit';
 import morgan from 'morgan';
 
 import { config } from '@/config/env';
@@ -246,17 +247,11 @@ export class App {
       })
     );
 
-    // Rate limiting
-    // const limiter = rateLimit({
-    //   windowMs: config.rateLimit.windowMs,
-    //   max: config.rateLimit.max,
-    //   message: {
-    //     success: false,
-    //     error: 'Too many requests from this IP, please try again later.',
-    //     timestamp: new Date().toISOString(),
-    //   },
-    // });
-    // this.app.use(limiter);
+    // Global rate limiting — always-on default for EVERY route. Endpoints that
+    // need a different ceiling register an override via registerRateLimit()
+    // (see @/middleware/globalRateLimit). Mounted here so a route can never ship
+    // unprotected just because its author forgot to add a limiter.
+    this.app.use(globalRateLimiter);
 
     // Compression - skip SSE endpoints to allow streaming
     this.app.use(
