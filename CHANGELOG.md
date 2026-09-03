@@ -1,3 +1,10 @@
+## [1.266.1](https://github.com/juspay/xyne-spaces/compare/v1.266.0...v1.266.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* fix Cmd+K search keyboard navigation and mention auto… ([#1147](https://github.com/juspay/xyne-spaces/issues/1147)) ([ede1c2d](https://github.com/juspay/xyne-spaces/commit/ede1c2d8b8c52ba1badeb062f6dabb92ca357067))
+
 ## [1.266.0](https://github.com/juspay/xyne-spaces/compare/v1.265.2...v1.266.0) (2026-09-03)
 
 
