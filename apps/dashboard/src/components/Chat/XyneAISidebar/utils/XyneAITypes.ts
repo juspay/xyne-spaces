@@ -422,6 +422,9 @@ export interface ReactArtifactManifest {
   invokesAgents?: boolean;
   /** Agents the app prefers. Narrowing hint; the viewer's access is the ceiling. */
   agents?: string[];
+  /** Xyne icon id the agent chose. The APP's icon (which the user may have
+   *  changed) is authoritative; this is only the agent's suggestion. */
+  icon?: string;
   /** Stamped server-side once the conversation's app exists. A thread owns ONE
    *  app, so every artifact in it shares `appId`; `versionId` is the specific
    *  build this turn produced, which is what its card renders. */
