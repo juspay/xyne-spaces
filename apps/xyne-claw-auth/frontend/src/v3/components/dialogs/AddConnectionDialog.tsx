@@ -612,24 +612,14 @@ export function AddConnectionDialog({
           type: newServerType.trim(),
           url: newServerUrl.trim(),
           description: newServerDescription.trim() || undefined,
-          transport: newServerTransport,
+          transport: "http" as const,
           credentialForm: {
             fields: parseJson<CredentialField[]>("credential fields", newCredentialFields),
           },
-          ...(newServerTransport === "stdio"
-            ? {
-                launchConfigTemplate: parseJson<{
-                  cmd: string;
-                  args: string[];
-                  env: Record<string, string>;
-                }>("launch config", newLaunchConfig),
-              }
-            : {
-                httpConfigTemplate: parseJson<{
-                  url: string;
-                  headers: Record<string, string>;
-                }>("http config", newHttpConfig),
-              }),
+          httpConfigTemplate: parseJson<{
+            url: string;
+            headers: Record<string, string>;
+          }>("http config", newHttpConfig),
           healthcheckSpec: parseJson<{ name: string; params: Record<string, unknown> }>(
             "healthcheck spec",
             newHealthcheck,
@@ -938,17 +928,15 @@ export function AddConnectionDialog({
                   />
                   <SelectField
                     label="Transport"
-                    hint="Choose HTTP for a hosted MCP server. Local stdio servers require a code-reviewed adapter."
-                    value={newServerTransport}
-                    onValueChange={(v) => {
-                      const transport = v === "http" ? "http" : "stdio";
-                      setNewServerTransport(transport);
-                      if (transport === "http" && !builderHttpUrl.trim()) {
+                    hint="Self-serve MCP connectors can only use hosted HTTP endpoints. Local stdio connectors require a code-reviewed static adapter."
+                    value="http"
+                    onValueChange={() => {
+                      setNewServerTransport("http");
+                      if (!builderHttpUrl.trim()) {
                         setBuilderHttpUrl(newServerUrl.trim());
                       }
                     }}
                     options={[
-                      { value: "stdio", label: "stdio (npx/uvx/node/docker)" },
                       { value: "http", label: "http (remote MCP endpoint)" },
                     ]}
                   />
