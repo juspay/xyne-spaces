@@ -1,0 +1,365 @@
+{
+  "$comment": [
+    "Catalog operations the SDK deliberately does not expose, each with a reason.",
+    "The coverage check (npm run coverage) requires every Zero query and mutator to be",
+    "either referenced by a registry or listed here. A new backend operation therefore",
+    "fails the check until someone decides what to do with it.",
+    "Reason grammar: superseded-by:<name> | legacy-unused | internal | deferred:<why>"
+  ],
+  "exclusions": [
+    {
+      "name": "activeSlashCommandArtifacts",
+      "kind": "query",
+      "reason": "deferred:in-app banner feed",
+      "note": "Takes no arguments and is scoped entirely to ctx.userID/workspaceId — it drives the slash-command artifact banner in the product UI. No standalone value for an API client; revisit if artifacts become addressable."
+    },
+    {
+      "name": "activities.markThreadActivitiesAsRead",
+      "kind": "mutator",
+      "reason": "superseded-by:activities.markThreadActivitiesAsReadV2",
+      "note": "V2 adds draft preservation."
+    },
+    {
+      "name": "allTickets",
+      "kind": "query",
+      "reason": "superseded-by:ticketsQueryV2",
+      "note": "Unpaginated full-table read; ticketsQueryV2 covers the same shape with view scoping."
+    },
+    {
+      "name": "channelAndThreadMessages",
+      "kind": "query",
+      "reason": "superseded-by:channelAndThreadMessagesV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "channelConversations",
+      "kind": "query",
+      "reason": "superseded-by:channelConversationsPaginatedV3",
+      "note": "Unpaginated variant."
+    },
+    {
+      "name": "channelConversationsPaginated",
+      "kind": "query",
+      "reason": "superseded-by:channelConversationsPaginatedV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "channelConversationsPaginatedV2",
+      "kind": "query",
+      "reason": "superseded-by:channelConversationsPaginatedV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "channelConversationsV2",
+      "kind": "query",
+      "reason": "superseded-by:channelConversationsPaginatedV3",
+      "note": "Unpaginated variant."
+    },
+    {
+      "name": "channelLatestMessage",
+      "kind": "query",
+      "reason": "superseded-by:channelLatestMessageV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "channelLatestMultipleConversations",
+      "kind": "query",
+      "reason": "superseded-by:channelLatestMultipleConversationsV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "channelLatestMultipleConversationsV2",
+      "kind": "query",
+      "reason": "superseded-by:channelLatestMultipleConversationsV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "conversationLabelMappingsByConversationId",
+      "kind": "query",
+      "reason": "superseded-by:conversationLabelMappingsByConversationIdV2",
+      "note": "V2 takes channelId and isMember alongside conversationId, as an ACL hint. Same rows, same ordering."
+    },
+    {
+      "name": "conversationLabelsByChannelId",
+      "kind": "query",
+      "reason": "superseded-by:conversationLabelsByChannelIdV2",
+      "note": "V2 takes isMember alongside channelId as a hint to Zero's ACL layer. Same rows, same ordering; the SDK supplies isMember."
+    },
+    {
+      "name": "conversationMessages",
+      "kind": "query",
+      "reason": "superseded-by:conversationMessagesV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "formEntityValue.create",
+      "kind": "mutator",
+      "reason": "superseded-by:formEntityValue.createV2",
+      "note": "V2 additionally records formId."
+    },
+    {
+      "name": "getConversationAttachements",
+      "kind": "query",
+      "reason": "superseded-by:getConversationAttachementsV2",
+      "note": "Identical arguments; V2 moves channel-visibility gating onto the table ACL."
+    },
+    {
+      "name": "getDraftForConversation",
+      "kind": "query",
+      "reason": "superseded-by:getDraftForConversationV2",
+      "note": "V2 adds channelId/isMember for ACL membership gating; identical result shape."
+    },
+    {
+      "name": "getEmailsForConversations",
+      "kind": "query",
+      "reason": "superseded-by:getEmailsForConversationsV2",
+      "note": "V2 forwards channelId/isMember to the table ACL for membership gating instead of gating in the query body."
+    },
+    {
+      "name": "getMessageForActivity",
+      "kind": "query",
+      "reason": "superseded-by:getMessageForActivityV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "getPinnedMesseges",
+      "kind": "query",
+      "reason": "superseded-by:getPinnedMessegesV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "getSdlcChannels",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Lists the SDLC hub channels the caller participates in. getSdlcChannelById is exposed because a caller with a channel id has a concrete thing to ask about; enumerating the subsystem is the product decision that stays deferred."
+    },
+    {
+      "name": "getSdlcLinks",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "getSdlcRepoById",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "kanbanTicketsPage",
+      "kind": "query",
+      "reason": "superseded-by:kanbanTicketsPageV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "kanbanTicketsPageV2",
+      "kind": "query",
+      "reason": "superseded-by:kanbanTicketsPageV3",
+      "note": "Identical argument schema; V3 reads the isStageOverdue column instead of joining stageEtaEntries."
+    },
+    {
+      "name": "myChannelParticipations",
+      "kind": "query",
+      "reason": "legacy-unused",
+      "note": "Marked @deprecated \"Unused by frontend\" in queries.ts; returns only ADMIN rows."
+    },
+    {
+      "name": "myTicketMailbox",
+      "kind": "query",
+      "reason": "superseded-by:myTicketMailboxV2",
+      "note": "V2 takes channelId and isMember alongside ticketId, as an ACL hint. Same row."
+    },
+    {
+      "name": "sdlc.createLink",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlc.deleteLink",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlcDiscussionConversation",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlcDiscussionConversations",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlcRelatedConversations",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlcTicketsByChannel",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Tickets on an SDLC hub channel. tickets.listByChannel covers the same rows for any channel without entering the SDLC surface."
+    },
+    {
+      "name": "sdlcTicketsByIds",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlcUserActivities",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "supportTicketByXyneId",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketByXyneIdV4",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketByXyneIdV2",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketByXyneIdV4",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketByXyneIdV3",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketByXyneIdV4",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketDetail",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketDetailV2",
+      "note": "Same arguments; V2 drops the caller-scoped emailDrafts/emailReads and conversation relations, none of which were in the declared result."
+    },
+    {
+      "name": "supportTicketRow",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketRowV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketRowV2",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketRowV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketsFiltered",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketsFilteredV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketsFilteredV2",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketsFilteredV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketsPage",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketsPageV4",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketsPageV2",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketsPageV4",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "supportTicketsPageV3",
+      "kind": "query",
+      "reason": "superseded-by:supportTicketsPageV4",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "threadConversation",
+      "kind": "query",
+      "reason": "superseded-by:threadConversationV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "ticketById",
+      "kind": "query",
+      "reason": "superseded-by:ticketByIdV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "ticketByXyneId",
+      "kind": "query",
+      "reason": "superseded-by:ticketByXyneIdV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "ticketByXyneIdV2",
+      "kind": "query",
+      "reason": "superseded-by:ticketByXyneIdV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "ticketDetailsById",
+      "kind": "query",
+      "reason": "superseded-by:ticketDetailsByIdV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "ticketTag.create",
+      "kind": "mutator",
+      "reason": "superseded-by:ticketTagV2.create",
+      "note": "V2 creates the project tag alongside the mapping."
+    },
+    {
+      "name": "ticketTag.delete",
+      "kind": "mutator",
+      "reason": "superseded-by:ticketTagV2.delete",
+      "note": "Paired with ticketTagV2.create."
+    },
+    {
+      "name": "ticketsByProject",
+      "kind": "query",
+      "reason": "superseded-by:ticketsByProjectV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "ticketsForEmailChannels",
+      "kind": "query",
+      "reason": "superseded-by:ticketsForEmailChannelsV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "userActivities",
+      "kind": "query",
+      "reason": "superseded-by:userActivitiesV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "userActivitiesPaginated",
+      "kind": "query",
+      "reason": "superseded-by:userActivitiesPaginatedV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "userCallHistory",
+      "kind": "query",
+      "reason": "superseded-by:userCallHistoryV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "userConversationsPaginated",
+      "kind": "query",
+      "reason": "superseded-by:userConversationsPaginatedV2",
+      "note": "V1 cursor keyed on lastActivityAt; V2 uses lastReplyAt."
+    },
+    {
+      "name": "userScheduledCalls",
+      "kind": "query",
+      "reason": "superseded-by:userScheduledCallsV2",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "userVisibleChannels",
+      "kind": "query",
+      "reason": "superseded-by:userVisibleChannelsV3",
+      "note": "Older version of a covered operation."
+    },
+    {
+      "name": "userVisibleChannelsV2",
+      "kind": "query",
+      "reason": "superseded-by:userVisibleChannelsV3",
+      "note": "Older version of a covered operation."
+    }
+  ]
+}
