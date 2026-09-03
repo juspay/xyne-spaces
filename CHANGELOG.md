@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.11](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.10...v1.251.0-release-20260901.11) (2026-09-03)
+
+
+### Features
+
+* adding lables in app based desk ([#1412](https://github.com/juspay/xyne-spaces/issues/1412)) ([#1476](https://github.com/juspay/xyne-spaces/issues/1476)) ([dfa6f42](https://github.com/juspay/xyne-spaces/commit/dfa6f42b303cfcb535abeabcdd061ed2bdb8740e))
+
 ## [1.251.0-release-20260901.10](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.9...v1.251.0-release-20260901.10) (2026-09-03)
 
 
