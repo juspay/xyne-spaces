@@ -930,7 +930,7 @@ function transformCollection(
        relevanceScore: hit.relevance,
        metadata: {
          timestamp: formatTimestamp(sentAt),
-         channelName: doc.channelName || 'Desk',
+         channelName: doc.channelName,
        },
        searchContext: {
          messageId: doc.docId,
@@ -938,8 +938,8 @@ function transformCollection(
          conversationId: link?.conversationId,
          ticketId: link?.ticketId,
          xyneId: xyneIdPlain,
-         channelId: link?.channelId ?? doc.channelId,
-         channelTitle: doc.channelName || 'Desk',
+         channelId: doc.channelId,
+         channelTitle: doc.channelName,
          senderName,
          senderEmail,
          recipientCount,

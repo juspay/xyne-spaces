@@ -1395,12 +1395,9 @@ const SupportScreen = (): ReactElement => {
     const mailId = searchParams.get('mail');
     if (mailId) params.set('mail', mailId);
     const qs = params.toString();
-    // This is a URL normalisation, not a real navigation, so it must not discard
-    // the router state the caller arrived with — `fromSearch` (set by cmd+K and
-    // the search results screen) decides where Back goes, and this effect always
-    // runs for a mail deeplink, which is exactly how search opens a ticket.
+    // the router state the caller arrived with — `shouldNavigateBack` (set by cmd+K
+    // and the search results screen) decides where Back goes, and this effect always
     // Read from `window.history` rather than `location.state`: this effect
-    // rewrites that state, so depending on it would re-trigger the effect.
     const carriedState = (window.history.state as { usr?: Record<string, unknown> } | null)?.usr;
     void navigate(`${supportBase}/${selectedChannelId}/${xyneId}${qs ? `?${qs}` : ''}`, {
       replace: true,
@@ -1913,7 +1910,7 @@ const SupportScreen = (): ReactElement => {
             state: {
               conversationId: parentTicket.conversationId,
               ticketId: parentTicket.id,
-              fromDeskList: true,
+              shouldNavigateBack: true,
             },
           });
         }
@@ -2221,7 +2218,7 @@ const SupportScreen = (): ReactElement => {
         state: {
           conversationId: ticketData.conversationId,
           ticketId: ticketData.id,
-          fromDeskList: true,
+          shouldNavigateBack: true,
         },
       });
     },
@@ -3612,7 +3609,7 @@ const SupportScreen = (): ReactElement => {
                   availableStages={availableStages}
                   onTicketClick={ticket => {
                     void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId, fromDeskList: true },
+                      state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
                     });
                   }}
                 />
@@ -3738,7 +3735,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
-                              fromDeskList: true,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -3760,7 +3757,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
-                              fromDeskList: true,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -3787,7 +3784,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
-                              fromDeskList: true,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -4152,9 +4149,7 @@ export const SupportTicketDetail = ({
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
-    fromDeskList?: boolean;
-    /** Set by cmd+K / the search results screen; see goBackToTicketList. */
-    fromSearch?: boolean;
+    shouldNavigateBack?: boolean;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -4231,7 +4226,7 @@ export const SupportTicketDetail = ({
           void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`, {
             replace: true,
             state: {
-              ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(routerState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
               ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
             },
           });
@@ -4247,7 +4242,7 @@ export const SupportTicketDetail = ({
       channelIdParam,
       navigate,
       navBasePath,
-      routerState?.fromDeskList,
+      routerState?.shouldNavigateBack,
       routerState?.returnToUrl,
       supportBase,
     ],
@@ -4408,7 +4403,7 @@ export const SupportTicketDetail = ({
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
-        ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+        ...(routerState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
         ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
@@ -4469,7 +4464,7 @@ export const SupportTicketDetail = ({
     // the search results screen) as it pushes this entry, so its page is one Back
     // away — pop it rather than stacking a second copy.
     // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
-    if (routerState?.fromDeskList || routerState?.returnToUrl || routerState?.fromSearch) {
+    if (routerState?.shouldNavigateBack || routerState?.returnToUrl) {
       void navigate(-1);
       return;
     }
@@ -4481,9 +4476,8 @@ export const SupportTicketDetail = ({
     navBasePath,
     navigate,
     onBack,
-    routerState?.fromDeskList,
+    routerState?.shouldNavigateBack,
     routerState?.returnToUrl,
-    routerState?.fromSearch,
     supportBase,
   ]);
 
@@ -5705,7 +5699,7 @@ const EmailThreadItem = ({
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
   const emailRouterState = useLocation().state as {
-    fromDeskList?: boolean;
+    shouldNavigateBack?: boolean;
     returnToUrl?: string | null;
   } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
@@ -5753,7 +5747,7 @@ const EmailThreadItem = ({
               conversationId: response.data.newTicket.conversationId,
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
-              ...(emailRouterState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(emailRouterState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
               ...(emailRouterState?.returnToUrl
                 ? { returnToUrl: emailRouterState.returnToUrl }
                 : {}),
