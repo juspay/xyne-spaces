@@ -164,11 +164,22 @@ export function renderTwinFeedbackRecord(row: {
       body = `The Digital Twin proposed${reactNote}:\n"${draft}"\nThe user EDITED it before posting, to:\n"${final}"\nLearn from what the user changed — that delta is how their real voice differs from the draft.`;
       break;
     case "declined":
-      body = `The Digital Twin proposed a reply${reactNote}:\n"${draft}"\nThe user DECLINED it — this is NOT how they would respond here. Avoid this kind of response for this sender/topic.`;
+      // Phrased hard against a TRIAGE reading. The earlier wording ("avoid this
+      // kind of response for this sender/topic") was a suppression instruction:
+      // the curator's triage facet feeds the respond/ignore gate, so every
+      // decline taught the twin to stop drafting for that sender — and a run of
+      // declines silently trained it into permanent silence. A decline is
+      // feedback on the WORDS, not on whether the message deserved a reply.
+      body = `The Digital Twin drafted this reply${reactNote} on the user's behalf:\n"${draft}"\nThe user DECLINED the draft — the wording did not sound like them. This is feedback about the twin's VOICE, not about whether this message deserved a reply: the user was asked to approve a draft, and rejected THE DRAFT. Infer what about the phrasing, tone, length or register was wrong, so the next draft for a message like this sounds more like the user. Do NOT conclude that the user avoids this sender, channel, or topic, and do NOT emit a respond-vs-ignore (triage) pattern from this record — a rejected draft is not evidence of silence.`;
       break;
     case "ignored":
     default:
-      body = `The Digital Twin proposed a reply${reactNote}:\n"${draft}"\nThe user IGNORED the suggestion (took no action) — the proposal wasn't compelling enough to act on. Treat this as weak/negative signal for responding this way.`;
+      // Never say "IGNORED" here. That token is the curator's documented cue to
+      // mine a genuine non-response into a triage pattern, and this row is not
+      // that: it is auto-assigned after a 12h grace, so it mostly means the user
+      // did not open the approval DM in time. It is the highest-volume outcome,
+      // which made it the biggest single source of trigger suppression.
+      body = `The Digital Twin drafted this reply${reactNote} on the user's behalf:\n"${draft}"\nThe user did not act on the approval prompt within the grace window, so it expired undecided. This is a WEAK signal about the draft and NOT a decision by the user: an unopened approval says nothing about whether they wanted to reply. Prefer emitting nothing from this record. Never read it as the user staying silent on this sender, channel or topic, and never emit a respond-vs-ignore (triage) pattern from it.`;
       break;
   }
   return {
