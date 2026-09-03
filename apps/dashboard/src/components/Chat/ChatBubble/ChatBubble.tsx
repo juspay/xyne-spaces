@@ -659,14 +659,23 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const onCopyLink = (): void => {
     // Get conversation ID from conversation object or fallback to message
     const conversationId = conversation?.conversationId || message.conversationId;
+    // Include the message's createdAt (epoch ms) as a temporal anchor. Without it
+    // the receiver resolves the target via a Zero-cache ID lookup that is slow or
+    // misses for older, uncached messages, so the link lands at the bottom of the
+    // channel instead of on the linked message.
+    const linkCreatedAt = conversation?.createdAt ?? message.createdAt;
+    const createdAtParam =
+      typeof linkCreatedAt === 'number' && Number.isFinite(linkCreatedAt)
+        ? `&createdAt=${linkCreatedAt}`
+        : '';
     let messageLink = '';
     if (conversationId) {
       if (context === 'thread') {
         // Thread message: include full path with conversation + messageId in hash
-        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}${createdAtParam}`;
       } else {
         // Channel message: only channel in path, conversation in hash
-        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}${createdAtParam}`;
       }
     }
 
