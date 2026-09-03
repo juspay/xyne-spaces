@@ -103,7 +103,7 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
 };
 
 // Individual slide component - fetches its own file
-const SlideContent: React.FC<{
+export const SlideContent: React.FC<{
   file: FileItem;
   isActive: boolean;
   disableGestures?: boolean;
