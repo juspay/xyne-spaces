@@ -11,7 +11,14 @@ export interface EditCallData {
   title: string;
   startsAt: string | number | Date;
   endsAt: string | number | Date;
-  participants: Array<{ userId: string; email?: string | null; isExternal?: boolean | null }>;
+  participants: Array<{
+    userId: string;
+    email?: string | null;
+    isExternal?: boolean | null;
+    invitedBy?: string | null;
+  }>;
+  /** Organizer of the call. A non-organizer participant may only edit the invite list. */
+  organizerUserId?: string | null;
   channelId?: string | null;
   recurringSeriesId?: string | null;
   callUpdatesChannel?: string | null;
