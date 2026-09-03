@@ -948,7 +948,9 @@ model ScheduledMessage {
   title          String
   messageContent String   @db.Text
   channelId      String
-  daysOfWeek     String   // "0,1,2,3,4,5,6" for all days, "1,2,3,4,5" for weekdays (0=Sun...6=Sat)
+  daysOfWeek     String   // "0,1,2,3,4,5,6" for all days, "1,2,3,4,5" for weekdays (0=Sun...6=Sat); "-" = monthly
+  monthlyMode    String?  // "DAY_OF_MONTH" | "NTH_WEEKDAY"
+  monthlyValue   Int?     // encoded monthly schedule (see cronUtils)
   scheduledTime  String   // "HH:mm" in UTC
   isActive       Boolean  @default(true)
   createdBy      String
@@ -1242,6 +1244,7 @@ model PullRequests {
 
   @@index([workflowExecutionId])
   @@index([date])
+  @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
   @@map("pull_requests")
   @@schema("public")
 }
@@ -2650,8 +2653,8 @@ model Notification {
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
   type              String
-  title             String
-  message           String
+  title             String?                     @default("")
+  message           String?                     @default("")
   status            String                      @default("UNREAD")
   deliveryMethods   String[]
   metadata          Json?                       // Additional context data
@@ -3786,6 +3789,24 @@ model ApplicationReleaseTicket {
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "application_release_tickets_releaseId_createdAt_id_idx")
   @@map("application_release_tickets")
   @@schema("public")
+}
+
+model ReleaseRepository {
+  workspaceId        String
+  id                 String    @id @default(cuid())
+  releaseId          String
+  mainReleaseBoardId String
+  branch             String
+  deployedCommit     String
+  newCommit          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime? @updatedAt
+
+  @@unique([releaseId, mainReleaseBoardId])
+  @@index([releaseId])
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_repositories_releaseId_createdAt_id_idx")
+  @@map("release_repositories")
+  @@schema("non_zero")
 }
 
 // Captures all events tied to the release for audit trail

@@ -26,6 +26,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
+import { isRecording } from '@/utils/callTypeUtils';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -67,6 +68,10 @@ const UpdateHeadlessRecordingSchema = z
   .refine(value => Object.keys(value).length > 0, {
     message: 'At least one recording field is required',
   });
+
+const UpdateCallLabelsSchema = z.object({
+  labels: z.array(z.string().trim().min(1).max(80)).max(50),
+});
 
 const RegenerateHeadlessSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
@@ -1645,6 +1650,54 @@ export class CallController {
       }
       logger.error('Failed to update recording title:', error);
       res.status(500).json({ success: false, error: 'Failed to update recording' });
+    }
+  };
+
+  /**
+   * PATCH /api/calls/:callId/labels
+   * Replace a call's labels. HEADLESS recordings keep their own endpoint
+   * (updateRecordingTitle) because they update title/markedItems/template in the
+   * same request; this one only ever touches labels.
+   */
+  updateCallLabels = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = UpdateCallLabelsSchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (!call || isRecording(call) || !workspaceId || call.workspaceId !== workspaceId) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const labels = await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels);
+      await repositories.calls.update(call.id, { labels });
+
+      // Echo the resolved ids: the caller optimistically holds the raw text it
+      // typed, and the detail screen has no live query to correct it from.
+      res.json({ success: true, labels });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        return;
+      }
+      logger.error('Failed to update call labels:', error);
+      res.status(500).json({ success: false, error: 'Failed to update labels' });
     }
   };
 

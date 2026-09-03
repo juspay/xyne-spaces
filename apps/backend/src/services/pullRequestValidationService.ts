@@ -1,8 +1,18 @@
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
 import { BitbucketManager } from '@/bitbucket/apis';
-import { githubManager } from '@/git-providers/github/apis';
+import { githubManager, sanitizeForLog } from '@/git-providers/github/apis';
+import {
+  superpositionClient,
+  type ResolvedConfigDetails,
+} from '@/services/superpositionClient';
 import { logger } from '@/utils/logger';
+import {
+  filterEnforceableSections,
+  formatMissingSections,
+  REQUIRED_SPEC_SECTIONS,
+  validateSpecSections,
+} from '@/utils/specValidation';
 import { sanitizeProjectCode, isValidProjectCode, VCSProviderType } from '@xyne/shared';
 
 // PR validation constants (shared by the Bitbucket and GitHub webhook paths)
@@ -17,6 +27,14 @@ const PR_VALIDATION_CONFIG = {
     VALIDATION_PASSED: 'PR validation passed',
     INTERNAL_ERROR: 'Internal error during PR validation',
   },
+  SPEC_MESSAGES: {
+    MISSING: (ticketId: string) => `No specification on ${ticketId} - run /spec on the ticket`,
+    INCOMPLETE: (ticketId: string, missing: string) => `${ticketId} spec missing: ${missing}`,
+    NOT_CHECKED: 'Ticket not resolved - spec not checked',
+    NOT_EVALUATED: 'Spec not evaluated - validation error',
+    DISABLED: 'Spec check disabled',
+    VALIDATION_PASSED: 'Specification complete',
+  },
   BUILD_STATUS: {
     // Statuses are stored per COMMIT by both providers, so the key/context must
     // include the PR id: one branch can back several open PRs (e.g. the same
@@ -27,12 +45,24 @@ const PR_VALIDATION_CONFIG = {
     // Display name: Bitbucket build-status `name`, GitHub commit-status `context`.
     NAME: (prId: number) => `Ticket Validation (#${prId})`,
   },
+  // Keyed per PR for the same reason as above. No Bitbucket key: GitHub only.
+  SPEC_BUILD_STATUS: {
+    NAME: (prId: number) => `Spec Validation (#${prId})`,
+  },
+  SPEC_FLAGS: {
+    ENABLED: 'pr_spec_check_enabled',
+    REQUIRED_SECTIONS: 'pr_spec_required_sections',
+  },
 } as const;
 
 interface ValidationResult {
   isValid: boolean;
   errorMessage?: string;
   ticketId?: string;
+  /** Set when validation failed on infrastructure, not on the PR itself. */
+  failureKind?: 'internal-error';
+  xyneId?: string;
+  ticketDescription?: string | null;
 }
 
 /**
@@ -45,6 +75,53 @@ export type BuildStatusTarget =
 
 const DEFAULT_BUILD_STATUS_TARGET: BuildStatusTarget = { provider: VCSProviderType.BITBUCKET_SERVER };
 
+/** Named rather than positional: the middle of this list is five strings in a
+ *  row, where a transposition would typecheck and post against the wrong commit
+ *  or scope config to the wrong workspace. */
+export interface ValidatePullRequestParams {
+  prTitle: string;
+  prId: number;
+  commitHash: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  workspaceId: string;
+  repoName?: string;
+  repoUrl?: string;
+  prUrl?: string;
+  numberOfComments?: number;
+  target?: BuildStatusTarget;
+}
+
+// Superposition has no request timeout of its own - SUPERPOSITION_TIMEOUT is
+// plumbed into refreshStrategy.timeout, which the provider never reads, and the
+// bundled HTTP handler defaults to unbounded. This sits on the webhook response
+// path, which GitHub gives 10s, so it needs its own bound.
+const SPEC_CONFIG_TIMEOUT_MS = 2500; 
+
+const withTimeout = async <T>(work: Promise<T>, fallback: T, label: string): Promise<T> => {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>(resolve => {
+        timer = setTimeout(() => {
+          logger.warn(`[PR-Validation] ${label} timed out after ${SPEC_CONFIG_TIMEOUT_MS}ms`);
+          resolve(fallback);
+        }, SPEC_CONFIG_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+type BuildStatusState = 'success' | 'failure';
+
+const BITBUCKET_BUILD_STATE: Record<BuildStatusState, 'SUCCESSFUL' | 'FAILED'> = {
+  success: 'SUCCESSFUL',
+  failure: 'FAILED',
+};
+
 export class PullRequestValidationService {
   private ticketRepository: TicketRepository;
   private prMetricsRepository: PRMetricsRepository;
@@ -56,19 +133,33 @@ export class PullRequestValidationService {
     this.bitbucketManager = new BitbucketManager();
   }
 
-  async validatePullRequest(
-    prTitle: string,
-    prId: number,
-    commitHash: string,
-    sourceBranch: string,
-    destinationBranch: string,
-    workspaceId: string,
-    repoName?: string,
-    repoUrl?: string,
-    prUrl?: string,
-    numberOfComments?: number,
-    target: BuildStatusTarget = DEFAULT_BUILD_STATUS_TARGET,
+  async validatePullRequest(params: ValidatePullRequestParams): Promise<ValidationResult> {
+    const target = params.target ?? DEFAULT_BUILD_STATUS_TARGET;
+    const { commitHash, prId, workspaceId } = params;
+    const result = await this.runTicketValidation(params, target);
+    // Awaited so two events for the same commit cannot post out of order; the
+    // config read inside is time-bounded. Called here so no early return in
+    // runTicketValidation skips it.
+    await this.postSpecBuildStatus(target, commitHash, prId, workspaceId, result);
+    return result;
+  }
+
+  private async runTicketValidation(
+    params: ValidatePullRequestParams,
+    target: BuildStatusTarget
   ): Promise<ValidationResult> {
+    const {
+      prTitle,
+      prId,
+      commitHash,
+      sourceBranch,
+      destinationBranch,
+      workspaceId,
+      repoName,
+      repoUrl,
+      prUrl,
+      numberOfComments,
+    } = params;
     try {
       logger.debug(`[PR-Validation] Validating PR ${prId}: ${prTitle}`);
       const normalizedTitle = prTitle.trim();
@@ -96,13 +187,19 @@ export class PullRequestValidationService {
       if (!ticket) {
         const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.TICKET_NOT_FOUND(ticketId);
         await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
-        return { isValid: false, errorMessage, ticketId };
+        return { isValid: false, errorMessage, ticketId, xyneId: ticketId };
       }
 
       if (ticket.status === 'RESOLVED') {
         const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.TICKET_ALREADY_RESOLVED(ticketId);
         await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
-        return { isValid: false, errorMessage, ticketId };
+        return {
+          isValid: false,
+          errorMessage,
+          ticketId,
+          xyneId: ticketId,
+          ticketDescription: ticket.description,
+        };
       }
 
       const duplicatePR = await this.prMetricsRepository.findDuplicatePR(
@@ -142,7 +239,13 @@ export class PullRequestValidationService {
             );
             const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
             await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
-            return { isValid: false, errorMessage, ticketId };
+            return {
+              isValid: false,
+              errorMessage,
+              ticketId,
+              xyneId: ticketId,
+              ticketDescription: ticket.description,
+            };
           }
 
           // Update the PR with new details
@@ -167,14 +270,25 @@ export class PullRequestValidationService {
           // Post success and return valid
           const successMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
           await this.postSuccessfulBuildStatus(target, prId, commitHash, successMessage);
-          return { isValid: true, ticketId: resolvedTicketId };
+          return {
+            isValid: true,
+            ticketId: resolvedTicketId,
+            xyneId: ticketId,
+            ticketDescription: ticket.description,
+          };
         }
 
         // Duplicate PR is manual (no workflowExecutionId), reject it
         logger.debug(`[PR-Validation] Duplicate PR ${duplicatePR.prId} is manual, rejecting`);
         const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
         await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
-        return { isValid: false, errorMessage, ticketId };
+        return {
+          isValid: false,
+          errorMessage,
+          ticketId,
+          xyneId: ticketId,
+          ticketDescription: ticket.description,
+        };
       }
 
       const successMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
@@ -182,12 +296,17 @@ export class PullRequestValidationService {
       logger.info(`[PR-Validation] PR ${prId} passed validation for ticket ${ticketId}`);
 
       // Validation service only validates - storage is handled by webhook handlers
-      return { isValid: true, ticketId: ticket.id };
+      return {
+        isValid: true,
+        ticketId: ticket.id,
+        xyneId: ticketId,
+        ticketDescription: ticket.description,
+      };
     } catch (error) {
       logger.error('[PR-Validation] Unexpected error during validation:', error);
       const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR;
       await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
-      return { isValid: false, errorMessage };
+      return { isValid: false, errorMessage, failureKind: 'internal-error' };
     }
   }
   
@@ -197,7 +316,10 @@ export class PullRequestValidationService {
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(target, prId, commitHash, true, description);
+    await this.postBuildStatus(target, commitHash, 'success', description, {
+      NAME: PR_VALIDATION_CONFIG.BUILD_STATUS.NAME(prId),
+      KEY: PR_VALIDATION_CONFIG.BUILD_STATUS.KEY(prId),
+    });
   }
 
   private async postFailedBuildStatus(
@@ -206,7 +328,176 @@ export class PullRequestValidationService {
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(target, prId, commitHash, false, description);
+    await this.postBuildStatus(target, commitHash, 'failure', description, {
+      NAME: PR_VALIDATION_CONFIG.BUILD_STATUS.NAME(prId),
+      KEY: PR_VALIDATION_CONFIG.BUILD_STATUS.KEY(prId),
+    });
+  }
+
+  /**
+   * CAC is the only source; there is no env layer. Any CAC problem leaves the
+   * check off rather than guessing.
+   */
+  private async resolveSpecCheckConfig(
+    target: BuildStatusTarget,
+    workspaceId: string
+  ): Promise<{ enabled: boolean; configured: boolean; sections: string[] }> {
+    // `configured` distinguishes a workspace that switched the check off from one
+    // that never set the key: only the former can have a status left to clear.
+    const fallback = {
+      enabled: false,
+      configured: false,
+      sections: [...REQUIRED_SPEC_SECTIONS],
+    };
+
+    if (!superpositionClient.isReady()) {
+      logger.debug('[PR-Validation] Superposition not ready, spec check stays off');
+      return fallback;
+    }
+
+    try {
+      const context = {
+        workspaceId,
+        provider: target.provider,
+        ...(target.provider === VCSProviderType.GITHUB
+          ? { owner: target.owner, repo: target.repo }
+          : {}),
+      };
+
+      // One read for both keys: a per-flag lookup is a full config fetch.
+      const details = await withTimeout(
+        superpositionClient.resolveAllConfigDetails(context),
+        {} as ResolvedConfigDetails,
+        'spec-check config',
+      );
+
+      // The provider returns a flat map, the repo's type says wrapped. Both other
+      // consumers unwrap defensively (agents/config.ts, cacConfigService); assuming
+      // either shape makes the check silently never activate.
+      const unwrap = (key: string): unknown => {
+        const entry: unknown = details[key];
+        return entry && typeof entry === 'object' && 'value' in entry
+          ? (entry as { value: unknown }).value
+          : entry;
+      };
+
+      const enabledValue = unwrap(PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED);
+      const configured = enabledValue !== undefined && enabledValue !== null;
+      const enabled = typeof enabledValue === 'boolean' ? enabledValue : fallback.enabled;
+      if (!enabled) return { enabled: false, configured, sections: fallback.sections };
+
+      const sectionsValue = unwrap(PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS);
+      const rawSections =
+        typeof sectionsValue === 'string' ? sectionsValue : fallback.sections.join(',');
+
+      const sections = filterEnforceableSections(
+        rawSections.split(',').map(section => section.trim()).filter(Boolean),
+      );
+
+      if (!sections.length) {
+        logger.warn(
+          `[PR-Validation] ${PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS} has no ` +
+            `enforceable section, using defaults: ${sanitizeForLog(rawSections)}`
+        );
+        return { enabled, configured, sections: fallback.sections };
+      }
+
+      return { enabled, configured, sections };
+    } catch (error) {
+      logger.warn('[PR-Validation] Superposition lookup failed, spec check stays off:', error);
+      return fallback;
+    }
+  }
+
+  private async hasSpecStatus(
+    target: BuildStatusTarget,
+    commitHash: string,
+    prId: number
+  ): Promise<boolean> {
+    if (target.provider !== VCSProviderType.GITHUB) return false;
+    return githubManager.hasCommitStatus(
+      target.owner,
+      target.repo,
+      commitHash,
+      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME(prId),
+    );
+  }
+
+  /**
+   * Report whether the linked ticket carries a complete spec, under its own
+   * status so a spec failure is distinguishable from a ticket failure.
+   */
+  private async postSpecBuildStatus(
+    target: BuildStatusTarget,
+    commitHash: string,
+    prId: number,
+    workspaceId: string,
+    result: ValidationResult
+  ): Promise<void> {
+    // GitHub only. A Bitbucket build status can feed merge gates directly, while
+    // a GitHub status is inert until added to a ruleset, so this check is not
+    // posted there at all - which also means it can leave nothing stale behind.
+    if (target.provider !== VCSProviderType.GITHUB) return;
+
+    const { ticketDescription, xyneId } = result;
+    const resolvable = ticketDescription !== undefined && xyneId !== undefined;
+    const { enabled, configured, sections } = await this.resolveSpecCheckConfig(
+      target,
+      workspaceId,
+    );
+    const specStatus = { NAME: PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME(prId) };
+
+    // Clear a verdict left from when the check was on; stay silent on commits
+    // that never had one.
+    if (!enabled) {
+      if (configured && (await this.hasSpecStatus(target, commitHash, prId))) {
+        await this.postBuildStatus(
+          target,
+          commitHash,
+          'success',
+          PR_VALIDATION_CONFIG.SPEC_MESSAGES.DISABLED,
+          specStatus,
+        );
+      }
+      return;
+    }
+
+    // A non-verdict passes: the spec was never judged, so it must not hold up a
+    // merge, and an unfinalized state would linger on the commit.
+    if (!resolvable) {
+      const reason =
+        result.failureKind === 'internal-error'
+          ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_EVALUATED
+          : PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_CHECKED;
+      await this.postBuildStatus(target, commitHash, 'success', reason, specStatus);
+      return;
+    }
+
+    const spec = validateSpecSections(ticketDescription, sections);
+
+    if (spec.isValid) {
+      await this.postBuildStatus(
+        target,
+        commitHash,
+        'success',
+        PR_VALIDATION_CONFIG.SPEC_MESSAGES.VALIDATION_PASSED,
+        specStatus,
+      );
+      return;
+    }
+
+    const allMissing = spec.missing.length === spec.requiredCount && !spec.hasSpecHeading;
+    const errorMessage = allMissing
+      ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.MISSING(xyneId)
+      : PR_VALIDATION_CONFIG.SPEC_MESSAGES.INCOMPLETE(
+          xyneId,
+          formatMissingSections(spec.missing),
+        );
+    logger.info(
+      `[PR-Validation] Spec check failed for ${sanitizeForLog(xyneId)}: ` +
+        `missing ${sanitizeForLog(spec.missing.join(', '))}`
+    );
+    await this.postBuildStatus(target, commitHash, 'failure', errorMessage, specStatus);
   }
 
   /**
@@ -215,34 +506,44 @@ export class PullRequestValidationService {
    */
   private async postBuildStatus(
     target: BuildStatusTarget,
-    prId: number,
     commitHash: string,
-    success: boolean,
-    description: string
+    state: BuildStatusState,
+    description: string,
+    // Required: a default here would silently post under the wrong context. KEY is
+    // optional because a GitHub-only status has no Bitbucket build-status key.
+    buildStatus: { NAME: string; KEY?: string }
   ): Promise<void> {
     try {
+      // No target_url on GitHub: the repo is public, so a status link would put
+      // the internal frontend host in front of anyone who can see the PR.
       if (target.provider === VCSProviderType.GITHUB) {
         await githubManager.postCommitStatus(
           target.owner,
           target.repo,
           commitHash,
-          success ? 'success' : 'failure',
-          PR_VALIDATION_CONFIG.BUILD_STATUS.NAME(prId),
+          state,
+          buildStatus.NAME,
           description,
+        );
+        return;
+      }
+      if (!buildStatus.KEY) {
+        logger.error(
+          `[PR-Validation] ${buildStatus.NAME} has no Bitbucket key, not posted`
         );
         return;
       }
       await this.bitbucketManager.postBuildStatus(
         commitHash,
-        success ? 'SUCCESSFUL' : 'FAILED',
-        PR_VALIDATION_CONFIG.BUILD_STATUS.KEY(prId),
-        PR_VALIDATION_CONFIG.BUILD_STATUS.NAME(prId),
+        BITBUCKET_BUILD_STATE[state],
+        buildStatus.KEY,
+        buildStatus.NAME,
         process.env.FRONTEND_URL || '',
         description,
       );
     } catch (error) {
       logger.error(
-        `[PR-Validation] Failed to post ${success ? 'successful' : 'failed'} build status (${target.provider}):`,
+        `[PR-Validation] Failed to post ${state} ${buildStatus.NAME} status (${target.provider}):`,
         error
       );
     }

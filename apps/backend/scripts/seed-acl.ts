@@ -68,6 +68,11 @@ const ESSENTIAL_RESOURCES = [
     description:
       'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*). WRITE or ADMIN access lets a user trigger and manage backfill jobs.',
   },
+  {
+    name: 'RELEASE-MANAGER',
+    description:
+      'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.',
+  },
 ];
 
 // Default user groups with their permissions

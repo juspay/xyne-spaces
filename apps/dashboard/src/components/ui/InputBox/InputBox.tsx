@@ -71,6 +71,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
@@ -816,6 +817,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
+              // Keyboard sends are invisible to autocapture (click/change/submit
+              // only); emit it explicitly so keyboard vs button sends are visible.
+              posthogService.capture('message_send', {
+                trigger: 'keyboard',
+                keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
+              });
               void handleSend();
               return true;
             }
@@ -970,6 +977,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
+            // Keyboard sends are invisible to autocapture (click/change/submit
+            // only); emit it explicitly so keyboard vs button sends are visible.
+            posthogService.capture('message_send', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
             void handleSend();
             return true;
           }
@@ -1322,6 +1335,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const finalPlainText = editor?.getText().trim() || plainText;
 
         await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
         editor.commands.setContent('');
         setContent('');
         setAttachedCanvas(null);

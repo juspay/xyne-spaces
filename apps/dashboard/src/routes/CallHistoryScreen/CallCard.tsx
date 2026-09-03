@@ -15,6 +15,8 @@ import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import Button from '../../components/ui/Button';
 import { formatRelativeTimestamp } from '../../utils/dateUtils';
+import { normalizeRecordingTags } from '../../utils/recordingUtils';
+import { LabelChip } from '../../components/Labels/LabelPicker';
 import {
   Call,
   getParticipantDisplayData,
@@ -53,6 +55,10 @@ interface CallHistoryItemProps {
   onViewExternalChat?: (() => void) | undefined;
   isRecentCall?: boolean;
   onDetailClick?: (() => void) | undefined;
+  /** Confirmed labels on this call, shown as chips under the meta line. */
+  labels?: string[];
+  /** Resolves a label value (Tag id) to its display text. Defaults to identity. */
+  resolveLabel?: (label: string) => string;
 }
 
 const MAX_AVATARS_TO_SHOW = 3;
@@ -67,10 +73,13 @@ export const CallCard = ({
   onViewExternalChat,
   isRecentCall = false,
   onDetailClick,
+  labels = [],
+  resolveLabel = (label: string): string => label,
 }: CallHistoryItemProps) => {
   const allChannels = useAllChannels();
   const visibleChannels = useAllVisibleChannels();
   const { isMobile } = usePlatform();
+  const visibleLabels = normalizeRecordingTags(labels);
   const channel = allChannels.find(c => c.id === call.channelId);
   const isChannelCall = channel?.scopeType === ChannelScopeType.DEFAULT;
 
@@ -303,6 +312,13 @@ export const CallCard = ({
                 )}
                 <span className={cn('text-xs', iconColorClass)}>•</span>
                 <span className={cn('text-xs', iconColorClass)}>{statusText}</span>
+              </div>
+            )}
+            {visibleLabels.length > 0 && (
+              <div className='flex flex-wrap items-center gap-1.5 pt-1'>
+                {visibleLabels.map(label => (
+                  <LabelChip key={label} label={resolveLabel(label)} />
+                ))}
               </div>
             )}
           </div>

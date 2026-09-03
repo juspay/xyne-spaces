@@ -7,7 +7,6 @@ import { RailQuickNavEntry } from './RailQuickNav';
 import { ShortcutHint } from '../ui/ShortcutHint';
 import { useShortcutById } from '../../shortcuts';
 import { useAuth } from '../../hooks/useAuth';
-import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
 import {
   GraphTrendLine,
@@ -201,11 +200,17 @@ const AppSidebar = (): ReactElement => {
     return '/' + (pathname.split('/')[1] || '');
   };
 
-  const activeRoute = getActiveRoute(
+  const relativePath =
     workspaceId && location.pathname.startsWith(`/${workspaceId}`)
       ? location.pathname.slice(`/${workspaceId}`.length) || '/'
-      : location.pathname,
-  );
+      : location.pathname;
+
+  // Release Manager reuses the /listProjects/:id URL family; keep it highlighted there.
+  const inReleaseManager =
+    relativePath.startsWith('/listProjects/') &&
+    (relativePath.includes('/releases/') ||
+      (location.state as { from?: string } | null)?.from === 'releaseManager');
+  const activeRoute = inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
 
   const isSupportHome = SUPPORT_HOME_ROUTES.includes(activeRoute);
   const isSupportReused = SUPPORT_REUSED_ROUTES.includes(activeRoute);
@@ -316,9 +321,7 @@ const AppSidebar = (): ReactElement => {
     );
   }, [visibleChannels, unreadCounts]);
 
-  const handleNavigationClick = (label: string, openedInNewWindow = false): void => {
-    mixpanelService.track(EVENTS.NAVIGATION, { item: label, openedInNewWindow });
-  };
+  const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {};
 
   const railShortcuts = railShortcutsAvailable();
 
