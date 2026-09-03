@@ -22,16 +22,12 @@ import { queries } from '../../../zero/queries';
 import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import type { DynamicFieldQueryFilter } from '../../../utils/board/dynamicFieldFilters';
 
-/** Row cap for one rendered span — a 42-cell month at ~120 tickets/day. */
-const RANGE_LIMIT = 5000;
-
 type SupportTicketsArgs = Parameters<typeof queries.supportTicketsPageV3>[0];
 
-/**
- * Fetches and renders ONE span, mounted keyed by its query args: useFallbackHydratedQuery
- * holds its REST-seed state per component, not per query hash, so a single instance would
- * seed only the first span and could serve a previous span's rows as `complete`.
- */
+/** Row cap for one rendered span — supportTicketsPageV3's `limit` is required. */
+const RANGE_LIMIT = 50000;
+
+/** Mounted keyed by its query args so a span change never serves a stale span's cached rows. */
 const RangeCalendar = ({
   args,
   enabled,
@@ -84,16 +80,7 @@ interface DeskCalendarViewProps {
   onTicketsLoaded?: (tickets: Ticket[]) => void;
 }
 
-/**
- * DeskCalendarView — a full desk view (sibling to Kanban/List/Table) showing this
- * channel's tickets on a calendar. This is a thin data-adapter, nothing more: it fetches
- * tickets the exact same way every other Desk view does (`supportTicketsPageV3` +
- * `ticketFilter`) and renders the app's existing calendar pieces from
- * `components/Tickets/CalendarView` rather than reimplementing a month grid or ticket cards.
- * It drives the toolbar and views directly instead of their `CalendarView` wrapper, which
- * keeps the current date private: rows are ordered by lastEmailAt while the grid buckets by
- * createdAt, so an unscoped page is just the recently active tickets, not the days rendered.
- */
+/** Drives the toolbar/views directly (not the `CalendarView` wrapper) so it can own currentDate. */
 export const DeskCalendarView = ({
   channelId,
   isMember,
@@ -144,8 +131,7 @@ export const DeskCalendarView = ({
     isMember,
     ...restTicketFilter,
     ...(conversationIdWhitelist !== undefined ? { conversationIds: conversationIdWhitelist } : {}),
-    // Omitted when the span and the filter do not overlap: the zod refine rejects an inverted
-    // range by throwing while the query is built, which `enabled` is too late to prevent.
+    // Omitted on a non-overlapping span, since the zod refine throws on an inverted range.
     ...(hasOverlap ? { createdAtStart, createdAtEnd } : {}),
     limit: RANGE_LIMIT,
     start: null,

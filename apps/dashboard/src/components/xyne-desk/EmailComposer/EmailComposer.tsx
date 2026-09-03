@@ -66,7 +66,6 @@ import { useComposeDraftOperations, type ComposeDraftRecord } from '../../../hoo
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
-import { useDraftAgentOptions } from '../../../hooks/useDraftAgentOptions';
 
 import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
@@ -255,11 +254,8 @@ export const EmailComposer = ({
   const emails = propEmails;
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
   const clawAgents = useChannelClawAgents(channelId || null);
-  const { selectedAgent: draftAgent } = useDraftAgentOptions(
-    clawAgents,
-    channelPreference?.autoDraftAgentSlug ?? null,
-  );
-  const draftAgentName = draftAgent?.name ?? 'Xyne AI';
+  const draftAgentName =
+    clawAgents.find(a => a.slug === channelPreference?.autoDraftAgentSlug)?.name ?? 'Xyne AI';
   const deskContacts = useDeskContacts(channelId);
   const {
     saveDraft,
