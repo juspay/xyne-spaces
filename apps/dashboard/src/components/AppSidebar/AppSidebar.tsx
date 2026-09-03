@@ -244,6 +244,10 @@ const AppSidebar = (): ReactElement => {
     PreferenceSection | undefined
   >(undefined);
 
+  useEffect(() => {
+    setOpenQuickMenu(null);
+  }, [activeRoute]);
+
   const handleOpenPreferences = (): void => {
     setIsSettingsPopoverOpen(false);
     setPreferencesInitialSection(undefined);

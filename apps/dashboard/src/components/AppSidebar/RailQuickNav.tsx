@@ -1,4 +1,4 @@
-import { cloneElement, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, useEffect, type ReactElement, type ReactNode } from 'react';
 import { HoverCard } from '../ui/HoverCard';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 
@@ -26,13 +26,22 @@ export const RailQuickNavEntry = ({
   open,
   onOpenChange,
 }: {
-  trigger: ReactElement<{ onFocus?: (event: React.FocusEvent) => void }>;
+  trigger: ReactElement<{
+    onFocus?: (event: React.FocusEvent) => void;
+    onClick?: (event: React.MouseEvent) => void;
+  }>;
   menu: ReactNode;
   tooltip: ReactNode;
   showQuickMenu: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): ReactElement => {
+  useEffect(() => {
+    if (!showQuickMenu && open) {
+      onOpenChange(false);
+    }
+  }, [showQuickMenu, open, onOpenChange]);
+
   if (!showQuickMenu) {
     return (
       <Tooltip content={tooltip} side='right' delayDuration={0}>
@@ -51,7 +60,13 @@ export const RailQuickNavEntry = ({
       openDelay={200}
       closeDelay={120}
       className='w-56 rounded-xl p-1.5'
-      trigger={cloneElement(trigger, { onFocus: event => event.preventDefault() })}
+      trigger={cloneElement(trigger, {
+        onFocus: event => event.preventDefault(),
+        onClick: event => {
+          trigger.props.onClick?.(event);
+          onOpenChange(false);
+        },
+      })}
     >
       {menu}
     </HoverCard>
