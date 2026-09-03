@@ -26,13 +26,30 @@ interface ProviderRuntimeConfig {
   reasoningEffort?: string;
 }
 
-/** Per-provider model used when the credential row doesn't pin one. */
+/** Per-provider model used when the credential row doesn't pin one.
+ *
+ *  These ids GO STALE, and a stale one fails silently: the call errors in
+ *  ~300ms, `producedNothing` treats it as an empty completion, and the run
+ *  falls through to spaces/private-large-spaces with no ERROR logged. Users
+ *  still get answers — from the wrong model — so nobody notices.
+ *
+ *  Measured over 72h of prod before this change:
+ *    claude-sonnet-4-5     0 ok / 1425 fail   (100%)
+ *    gpt-4o                0 ok /   21 fail   (100%)
+ *    claude-opus-4-8    3033 ok /  191 fail   (5.9%)
+ *    claude-sonnet-4.6  2608 ok /   39 fail   (1.5%)
+ *
+ *  Keep this list in sync with agent-provider-config.ts, and re-check it
+ *  against llm_call ok-rates whenever a provider deprecates a model. */
 function defaultModelForProvider(provider: string): string {
-  if (provider === "copilot") return "gpt-4o";
+  // gpt-4o is NOT servable through Copilot OAuth here — every defaulted call
+  // failed and fell back to spaces.
+  if (provider === "copilot") return "claude-sonnet-4.6";
   // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (400
   // "model is not supported when using Codex with a ChatGPT account").
   if (provider === "codex") return "gpt-5.5";
-  return "claude-sonnet-4-5";
+  // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth path.
+  return "claude-opus-4-8";
 }
 
 /** Decrypt a credential row into the runtime config shape claw's /run expects.

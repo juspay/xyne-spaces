@@ -385,7 +385,7 @@ export class TestAuthController {
       // Set workspace-scoped JWT token (matches authV2Middleware expectation)
       res.cookie(`xyne_ws_${user.workspaceId}_token`, customToken, {
         ...cookieOptions,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       // Set last workspace pointer so authV2Middleware can find the right token

@@ -36,19 +36,28 @@ import { createLogger } from "./logger.js";
 const log = createLogger("user-memory-curator");
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
-const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
-// Model name passed to LiteLLM for the distill call. Reads from `LITELLM_MODEL`
-// to share the same env var with other LiteLLM-backed paths in this service
-// (avoids having to keep two model env vars in sync when we upgrade Haiku).
-const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
+// Background job: prefer the low-priority automation key so curator bursts
+// can't queue interactive agent turns on the main key's parallel-slot pool.
+const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
+// Model name passed to LiteLLM for the distill call. MUST resolve from the same
+// source as LITELLM_API_KEY above: LiteLLM keys are team-scoped and the teams'
+// allowed-model lists are DISJOINT, so sending the interactive `LITELLM_MODEL`
+// with the automation key is a hard 403 ("team not allowed to access model") —
+// prod 2026-08-14, automation team allowed `private-large` but not
+// `private-large-spaces`. Mirrors the key fallback order.
+const CURATOR_MODEL = process.env["LITELLM_AUTOMATION_MODEL"]?.trim()
+  || process.env["LITELLM_MODEL"]
+  || "claude-haiku-4-5-20251001";
 const CURATOR_TIMEOUT_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_MS"] ?? 600_000);
 // Per-retry timeout escalation: a slow LLM gateway is usually just slow, not
 // stuck, so give each retry more room. attempt 1 = base (10m), attempt 2 =
 // base+step (12m), attempt 3 = base+2·step (14m).
 const CURATOR_TIMEOUT_STEP_MS = Number(process.env["USER_MEMORY_CURATOR_TIMEOUT_STEP_MS"] ?? 120_000);
 
-/** Hard cap per batch — over this the prompt blows past Haiku's window. */
-const MAX_RECORDS_PER_BATCH = 50;
+/** Record-count backstop. The auth-side packer first enforces the ~80k-token
+ * record-text budget, so this mainly lets batches of short messages use the
+ * available context instead of stopping at the old 50-record ceiling. */
+const MAX_RECORDS_PER_BATCH = 200;
 const MAX_TEXT_CHARS_PER_RECORD = 1_500;
 /** Assembled conversation units (type="conversation") carry a whole thread and
  *  legitimately need far more room than a single message. This is now a
@@ -60,11 +69,10 @@ const MAX_TEXT_CHARS_PER_RECORD = 1_500;
  *  truncates a unit the packer already sized — the earlier 5k value re-clipped
  *  the very messages the 3k-per-message change was meant to preserve. */
 const MAX_CONVERSATION_CHARS = 320_000;
-/** Raised from 12 → 20: the enriched prompt scans a broad facet checklist
- *  (voice, response patterns, per-person tone, expertise, …) and a rich batch
- *  legitimately surfaces more distinct grounded facts than the old bland pass.
- *  The ≥0.7 signal bar + "merge near-duplicates" rule keep quantity honest. */
-const MAX_CANDIDATES_PER_BATCH = 20;
+/** A 200-record batch can contain many independent, grounded signals. Keep a
+ * high output ceiling so combining short records does not reduce recall; the
+ * ≥0.7 signal bar and "merge near-duplicates" rule still control quality. */
+const MAX_CANDIDATES_PER_BATCH = 100;
 
 const EMIT_CANDIDATES_TOOL = {
   type: "function" as const,
@@ -85,7 +93,7 @@ const EMIT_CANDIDATES_TOOL = {
               text: {
                 type: "string",
                 description:
-                  "Single concrete fact about the user, ≤ 1500 chars, written in third person ('the user…' or 'the user prefers…'). One fact per candidate. No generic statements; ground each in the records. For style/voice facts, embed a short real example or trigger in quotes (e.g. acks with 'on it', never 'I will get to it') — a voice fact with no example is too vague to use.",
+                  "Single concrete fact about the user, written in third person ('the user…' or 'the user prefers…'). Keep it concise but complete. One fact per candidate. No generic statements; ground each in the records. For style/voice facts, embed a short real example or trigger in quotes (e.g. acks with 'on it', never 'I will get to it') — a voice fact with no example is too vague to use.",
               },
               subsystem: {
                 type: "string",
@@ -227,7 +235,7 @@ GOOD: "Decided on 2026-05-22 to ship the workspaceId fix to /channel/openDm imme
 2. **Ground every fact** in record IDs from the input. If you can't cite ≥1 record, do not emit.
 3. **At least one specific entity OR one concrete, exampled communication pattern is required.** Skip vague ones even if they feel true.
 4. **Be comprehensive, not repetitive.** Cover every facet the batch evidences, but MERGE near-duplicate observations into the single most specific phrasing — don't emit five variations of "writes short replies".
-5. **Calibrate volume to signal density.** A rich batch may yield 12-20 candidates; a batch of routine one-word messages may yield 0-2. Never manufacture to hit a count.
+5. **Calibrate volume to signal density.** A rich 200-record batch may yield dozens of candidates (up to 100); a batch of routine one-word messages may yield 0-2. Never manufacture to hit a count.
 6. **Subsystem selection is constrained** to the eight fixed labels in the tool schema. Never invent one.
 7. **Third person + present tense.** "The user prefers X", "the user acks with …". Past tense only for dated decisions.
 8. **For style/voice facts, embed a short REAL example or trigger** (3-8 words, quoted) — "'on it', never 'I will get to it'". A voice fact without an example is usually too vague to use.
@@ -373,7 +381,17 @@ type AttemptResult =
       rawResponse: string;
       meta: AttemptMeta;
     }
-  | { ok: false; error: string; retryable: boolean; rawResponse?: string; meta: AttemptMeta };
+  | {
+      ok: false;
+      error: string;
+      retryable: boolean;
+      rawResponse?: string;
+      meta: AttemptMeta;
+      /** Present on "all-ungrounded": what the model emitted, so the caller can
+       *  fall back to batch-level provenance instead of losing the batch. */
+      emitted?: UserMemoryCuratorEmittedCandidate[];
+      salvageable?: UserMemoryCuratorEmittedCandidate[];
+    };
 
 /** One LLM call + parse + server-side filter. Never throws — always resolves to
  *  an AttemptResult so the retry loop can decide whether to try again. */
@@ -505,11 +523,20 @@ async function runDistillAttempt(
   }
 
   const recordIds = new Set(batch.map((r) => r.id));
+  /** Cited ids that match no record in this batch — kept for diagnostics, since
+   *  "the model cited something" and "the model cited OUR ids" are very
+   *  different failures and the logs could not previously tell them apart. */
+  const unknownCitedIds = new Set<string>();
   const subsystemSet = new Set<UserMemorySubsystem>(USER_MEMORY_SUBSYSTEMS);
   const out: UserMemoryCandidatePayload[] = [];
   const emitted: UserMemoryCuratorEmittedCandidate[] = [];
 
-  for (const c of parsed.candidates) {
+  if (parsed.candidates.length > MAX_CANDIDATES_PER_BATCH) {
+    log.warn(
+      `[user-memory-curator] candidate output truncated ${parsed.candidates.length} → ${MAX_CANDIDATES_PER_BATCH} userId=${userId}`,
+    );
+  }
+  for (const c of parsed.candidates.slice(0, MAX_CANDIDATES_PER_BATCH)) {
     // malformed = the entry isn't an object; we can't report its fields.
     if (!c || typeof c !== "object") {
       emitted.push({ text: "", verdict: "dropped", dropReason: "malformed" });
@@ -531,8 +558,8 @@ async function runDistillAttempt(
       groundedOnIds,
     };
 
-    if (!text || text.length > 1_500) {
-      emitted.push({ ...base, dropReason: "empty-or-too-long" });
+    if (!text) {
+      emitted.push({ ...base, dropReason: "empty" });
       continue;
     }
     if (typeof subsystem !== "string" || !subsystemSet.has(subsystem as UserMemorySubsystem)) {
@@ -545,6 +572,7 @@ async function runDistillAttempt(
     }
     const validIds = groundedOnIds.filter((id) => recordIds.has(id));
     if (validIds.length === 0) {
+      for (const id of groundedOnIds) unknownCitedIds.add(id);
       emitted.push({ ...base, dropReason: "ungrounded" });
       continue;
     }
@@ -557,6 +585,29 @@ async function runDistillAttempt(
     };
     out.push(kept);
     emitted.push({ ...base, verdict: "kept", groundedOnIds: validIds });
+  }
+
+  // Every candidate the model produced was otherwise valid but cited ids we do
+  // not recognise. That is a CITATION failure, not "the batch had nothing worth
+  // remembering" — and it used to look identical to the latter: ok:true with an
+  // empty list, no retry, a whole batch of good candidates silently gone.
+  // Surface it as retryable so the loop gets another attempt.
+  const ungroundedCount = emitted.filter((e) => e.dropReason === "ungrounded").length;
+  if (out.length === 0 && ungroundedCount > 0) {
+    log.warn(
+      `[user-memory-curator] all ${ungroundedCount} candidate(s) cited unknown record ids userId=${userId} ` +
+        `cited=[${Array.from(unknownCitedIds).slice(0, 5).join(", ")}] ` +
+        `expected=[${Array.from(recordIds).slice(0, 3).join(", ")}]`,
+    );
+    return {
+      ok: false,
+      error: "all-ungrounded",
+      retryable: true,
+      rawResponse: raw,
+      meta,
+      emitted,
+      salvageable: out.length === 0 ? emitted.filter((e) => e.dropReason === "ungrounded") : [],
+    };
   }
 
   return { ok: true, candidates: out, emitted, rawResponse: raw, meta };
@@ -659,12 +710,51 @@ export async function distillUserMemory(
   // Exhausted retries (or a permanent failure). Surface the last attempt's
   // context + the failing stage in the trace.
   const f = last as Extract<AttemptResult, { ok: false }>;
+
+  // SALVAGE: the model kept producing good candidates but never cited ids we
+  // recognise. Dropping the whole batch loses real memories over a citation
+  // formatting problem, so fall back to BATCH-level provenance: ground each
+  // candidate on every record in the batch. Coarser than per-record grounding
+  // (the reason it is a last resort, not the default), but the candidate
+  // demonstrably came from these records, and sourceRefs still resolve — which
+  // is what downstream event-timestamp picking needs.
+  if (f.error === "all-ungrounded" && f.salvageable?.length) {
+    const batchIds = batch.map((r) => r.id);
+    const salvaged: UserMemoryCandidatePayload[] = f.salvageable
+      .filter((e) => e.text && typeof e.subsystem === "string")
+      .map((e) => ({
+        text: e.text,
+        subsystem: e.subsystem as UserMemorySubsystem,
+        signalScore: Math.min(1, Math.max(0, e.signalScore ?? 0)),
+        groundedOnIds: batchIds,
+      }));
+    if (salvaged.length > 0) {
+      log.warn(
+        `[user-memory-curator] salvaged ${salvaged.length} candidate(s) with batch-level grounding ` +
+          `after ${attempts} attempt(s) userId=${userId}`,
+      );
+      return {
+        candidates: salvaged,
+        trace: {
+          ...traceBase(f.meta, attempts),
+          ...(f.rawResponse !== undefined ? { rawResponse: f.rawResponse.slice(0, TRACE_TEXT_CAP) } : {}),
+          emitted: (f.emitted ?? []).map((e) =>
+            e.dropReason === "ungrounded"
+              ? { ...e, verdict: "kept" as const, groundedOnIds: batchIds }
+              : e,
+          ),
+          error: "all-ungrounded-salvaged",
+        },
+      };
+    }
+  }
+
   return {
     candidates: [],
     trace: {
       ...traceBase(f.meta, attempts),
       ...(f.rawResponse !== undefined ? { rawResponse: f.rawResponse.slice(0, TRACE_TEXT_CAP) } : {}),
-      emitted: [],
+      emitted: f.emitted ?? [],
       error: f.error,
     },
   };

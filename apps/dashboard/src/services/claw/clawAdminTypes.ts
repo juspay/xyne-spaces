@@ -1,28 +1,8 @@
-export const GRANTABLE_ROLES = ['CLAW_ADMIN', 'SEARCH_EVAL_ACCESS'] as const;
-export type GrantableRole = (typeof GRANTABLE_ROLES)[number];
-
 export type AdminOrgScope = 'org' | 'all';
 
 export interface AdminAccessFlags {
   isAdmin: boolean;
   hasSearchEvalAccess: boolean;
-}
-
-export interface AdminRoleUser {
-  id: string;
-  email: string;
-  name?: string | null;
-  orgId?: string | null;
-  orgName?: string | null;
-}
-
-export interface AdminRole {
-  id: string;
-  userId: string;
-  role: string;
-  grantedBy?: string | null;
-  createdAt: string;
-  user: AdminRoleUser;
 }
 
 export type RequestTargetType = 'agent' | 'skill';

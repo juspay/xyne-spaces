@@ -13,6 +13,7 @@
  */
 
 import { Router } from "express";
+import { errMsg } from "../lib/errors.js";
 import type { Request, Response } from "express";
 import { gcsService } from "../services/storageService.js";
 import { redisService } from "../redis.js";
@@ -70,10 +71,12 @@ function isSafeRelativePath(p: string): boolean {
 
 /**
  * Allow only conversation IDs that look like ULIDs / UUIDs / similar.
- * Conservative: alphanumerics + hyphens + underscores, 8-100 chars.
+ * Keep this aligned with xyne-claw's isSafeId: store keys append the agent
+ * slug to a valid conversation id and may therefore exceed 100 characters.
+ * The runtime accepts these filesystem/GCS-safe identifiers through 128.
  */
-function isSafeConversationId(id: string): boolean {
-  return /^[A-Za-z0-9_-]{8,100}$/.test(id);
+export function isSafeConversationId(id: string): boolean {
+  return /^[A-Za-z0-9_-]{8,128}$/.test(id);
 }
 
 export const sessionsArchiveRouter = Router();
@@ -129,7 +132,7 @@ sessionsArchiveRouter.post("/archive", async (req: Request, res: Response) => {
     log.info(`[sessions-archive] archived conversationId=${conversationId} files=${uploaded}`);
     res.json({ success: true, uploaded });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.error(`[sessions-archive] archive failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }
@@ -172,7 +175,7 @@ sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: 
     log.info(`[sessions-archive] restored conversationId=${conversationId} files=${files.length}`);
     res.json({ success: true, files });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.error(`[sessions-archive] restore failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }

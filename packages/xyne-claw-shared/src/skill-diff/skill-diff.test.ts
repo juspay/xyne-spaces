@@ -7,6 +7,7 @@ import {
   formatSkillDiffForCard,
   resolveSkillUpdateApprover,
   authorizeSkillUpdateApproval,
+  authorizeSkillFileUpdate,
 } from "./index.js";
 
 describe("normalizeSkillContent", () => {
@@ -138,8 +139,12 @@ describe("authorizeSkillUpdateApproval", () => {
   it("allows an admin to approve a personal skill", () => {
     expect(authorizeSkillUpdateApproval({ ...base, approverUserId: "u1", requiresAdmin: false, callerUserId: "admin", callerIsAdmin: true }).ok).toBe(true);
   });
-  it("rejects a non-admin on a global (admin-gated) skill even if they are the notify target", () => {
+  it("allows the owner/promoter to approve their own global skill (non-admin)", () => {
     const r = authorizeSkillUpdateApproval({ ...base, approverUserId: "u1", requiresAdmin: true, callerUserId: "u1", callerIsAdmin: false });
+    expect(r).toEqual({ ok: true });
+  });
+  it("rejects a non-owner non-admin on a global (admin-gated) skill (403)", () => {
+    const r = authorizeSkillUpdateApproval({ ...base, approverUserId: "u1", requiresAdmin: true, callerUserId: "attacker", callerIsAdmin: false });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe(403);
   });
@@ -150,5 +155,31 @@ describe("authorizeSkillUpdateApproval", () => {
     const r = authorizeSkillUpdateApproval({ approverUserId: "u1", requiresAdmin: false, callerUserId: "u1", callerIsAdmin: false, currentContentHash: "NEW", baseContentHash: "OLD" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe(409);
+  });
+});
+
+
+describe("authorizeSkillFileUpdate", () => {
+  it("allows the owner to edit their own PERSONAL skill's files (non-admin)", () => {
+    expect(authorizeSkillFileUpdate({ ownerUserId: "u1", callerUserId: "u1", callerIsAdmin: false })).toEqual({ ok: true });
+  });
+  it("allows the owner to edit their own GLOBAL skill's files (non-admin) — the bug this fixes", () => {
+    // scope is irrelevant to the file-edit ACL: ownership is what matters.
+    expect(authorizeSkillFileUpdate({ ownerUserId: "u1", callerUserId: "u1", callerIsAdmin: false })).toEqual({ ok: true });
+  });
+  it("allows a CLAW_ADMIN to edit any skill's files, even a skill they do not own", () => {
+    expect(authorizeSkillFileUpdate({ ownerUserId: "u1", callerUserId: "admin", callerIsAdmin: true })).toEqual({ ok: true });
+  });
+  it("rejects a non-owner non-admin caller (403)", () => {
+    const r = authorizeSkillFileUpdate({ ownerUserId: "u1", callerUserId: "attacker", callerIsAdmin: false });
+    expect(r).toEqual({ ok: false, code: 403, reason: expect.any(String) });
+  });
+  it("rejects a non-admin when the skill has no owner (403)", () => {
+    const r = authorizeSkillFileUpdate({ ownerUserId: null, callerUserId: "u1", callerIsAdmin: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe(403);
+  });
+  it("allows an admin even when the skill has no owner", () => {
+    expect(authorizeSkillFileUpdate({ ownerUserId: null, callerUserId: "admin", callerIsAdmin: true })).toEqual({ ok: true });
   });
 });

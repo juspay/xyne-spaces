@@ -27,7 +27,17 @@ export type FlowComponentType =
   | 'pr'
   | 'pr_approval'
   | 'call_schedule'
-  | 'agent';
+  | 'user_question'
+  | 'code'
+  | 'diff'
+  | 'ticket'
+  | 'chart'
+  | 'agent'
+  | 'mcpConfigure'
+  | 'slash_command_artifact'
+  | 'agent_summary'
+  | 'mcp_suggest'
+
 
 export interface FlowComponent {
   id: string;
@@ -190,4 +200,3 @@ export function isFlowDefinition(obj: unknown): obj is FlowDefinition {
     Array.isArray((obj as Record<string, unknown>).components)
   );
 }
-

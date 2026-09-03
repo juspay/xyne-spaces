@@ -30,11 +30,6 @@ import AddChannelForm from '../AddChannelForm/AddChannelForm';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Dialog from '../../ui/Dialog';
 import ChannelCommandMenu from './ChannelCommandMenu';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu';
 
 import { useZero } from '../../../hooks/useZero';
@@ -68,9 +63,6 @@ const MobileChatDirectory = ({
   const createChannelMutation = useMutation({
     mutationFn: (data: CreateChannelFormData) => channelService.createChannel(data),
     onSuccess: response => {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.NEW_CHANNEL,
-      });
       setShowAddChannelForm(false);
       void navigate(`/chat/dir/${response.id}`);
       // Auto-open add people dialog after channel creation
@@ -81,16 +73,7 @@ const MobileChatDirectory = ({
 
   const createDmMutation = useMutation({
     mutationFn: (data: CreateDmRequest) => channelService.createDm(data),
-    onSuccess: (response, variables) => {
-      const isGroupDm = variables.participantIds.length > 1;
-
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: isGroupDm
-          ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
-          : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,
-        hasInitialMessage: !!variables.message,
-      });
-
+    onSuccess: response => {
       setShowAddDmForm(false);
       if (response.isExisting) {
         zero.mutate(mutators.channel.reopenDm({ channelId: response.id, updatedAt: Date.now() }));
@@ -229,6 +212,8 @@ const MobileChatDirectory = ({
                           e.stopPropagation();
                           setChannelSortOrder(ChannelSortOrder.UNREAD);
                         }}
+                        data-track-category='MOBILE_CHAT_DIRECTORY'
+                        data-track-name='SORT_CHANNELS_BY_UNREAD'
                         className='gap-2'
                       >
                         <NotificationBellOn size={14} className='shrink-0' />
@@ -242,6 +227,8 @@ const MobileChatDirectory = ({
                           e.stopPropagation();
                           setChannelSortOrder(ChannelSortOrder.RECENCY);
                         }}
+                        data-track-category='MOBILE_CHAT_DIRECTORY'
+                        data-track-name='SORT_CHANNELS_BY_RECENCY'
                         className='gap-2'
                       >
                         <ClockDefault size={14} className='shrink-0' />
@@ -255,6 +242,8 @@ const MobileChatDirectory = ({
                           e.stopPropagation();
                           setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
                         }}
+                        data-track-category='MOBILE_CHAT_DIRECTORY'
+                        data-track-name='SORT_CHANNELS_BY_ALPHABETICAL'
                         className='gap-2'
                       >
                         <ListSortAlphabetically size={14} className='shrink-0' />

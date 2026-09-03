@@ -1,5 +1,10 @@
 import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
-import { Calendar, User, Tag, Timer } from 'lucide-react';
+import {
+  CalendarDefault as Calendar,
+  UserDefault as User,
+  Tag,
+  TimerDefault as Timer,
+} from '@xyne/icons';
 import {
   BaseTicketType,
   isReleaseTicket,
@@ -8,7 +13,7 @@ import {
   TicketStatusV2,
   addSlaHours,
 } from '@xyne/shared';
-import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
+import { getPriorityIcon, formatEta, isEtaUrgent, isStageOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers, useSelf } from '../../../hooks/useUsers';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
@@ -24,6 +29,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableHelper';
+import { StagePicker } from '../TicketListView/StagePicker';
 import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -242,7 +248,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     !!userReadRow &&
     userReadRow.lastReadEmailAt >= lastEmailAt;
 
-  const isStageOverdue = isStageEtaOverdue(ticket);
+  const hasStageOverdue = isStageOverdue(ticket);
   const hasDueDate = !!ticket.eta;
   const hasTags = tags && tags.length > 0;
 
@@ -648,6 +654,14 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   {ticket.xyneId}
                 </span>
                 {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
+                {isCompact && (
+                  <StagePicker
+                    ticketId={ticket.id}
+                    stageName={ticket.stageName}
+                    stageLabel={ticket.stageName || 'To Do'}
+                    boardId={ticket.boardId}
+                  />
+                )}
               </div>
               <div className={cn('flex items-center', isCompact ? 'gap-0' : 'gap-[15px]')}>
                 {/*due date*/}
@@ -711,7 +725,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   </div>
                 )}
                 {/* Stage Overdue Badge */}
-                {isStageOverdue && (
+                {hasStageOverdue && (
                   <div className='flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 border border-red-200'>
                     <svg
                       width='12'

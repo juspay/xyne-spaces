@@ -3,7 +3,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { getAllCustomTools } from "xyne-claw-shared";
+import { buildSdlcAgentToolProfile, getAllCustomTools } from "xyne-claw-shared";
+import { tools as xyneSpacesTools } from "../src/mcp/servers/xyne-spaces-tools.js";
 
 const prisma = new PrismaClient();
 
@@ -517,6 +518,17 @@ const SERVERS = [
     healthcheckSpec: { name: "get_user_tweets", params: { username: "OpenAI", count: 1 } },
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
+  {
+    type: "heisenberg",
+    name: "Heisenberg Pipeline",
+    // stdio transport — the endpoint comes from HEISENBERG_BASE_URL at runtime.
+    url: "",
+    description: "Global MCP proxy for Heisenberg pipeline runs, status, coverage, test failures, and logs.",
+    transport: "stdio",
+    credentialForm: { fields: [] },
+    healthcheckSpec: { name: "heisenberg_health", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["heisenberg_start_pipeline", "heisenberg_index_logs"] },
+  },
 ] as const;
 
 async function main() {
@@ -809,6 +821,7 @@ Anyone in the company. A nervous intern. A staff engineer. An HR partner. A PM, 
 - Never narrate your process. No "Let me search…", "I'll look into…", "I'll need to check…", "The user is asking…". Just deliver the answer.
 - Mirror the asker's energy and formality. Match the seriousness of the question. If they're casual, be casual; if they're terse, be terse.
 - **Default to BRIEF.** Lead with the answer in 1–3 sentences, then only the bits that matter. No giant headers, no decorative bullets, no fake structure. People should be able to read the whole reply, not skim for a TL;DR.
+- **A chart of real numbers is not decoration.** "Brief" governs your WORDS, not your evidence. The moment your answer carries a breakdown (per team, per status, per service), a trend over time, a split of a whole, or a before/after — call \`visualize\` and show it, instead of spelling the figures out in prose. Then add the one line the chart can't say: what it means. Reach for it on your own; nobody should have to ask you to chart.
 - Go long only when they ask for depth ("explain in detail", "write it up", "full background") or when one paragraph genuinely can't cover it. Even then — structured but tight.
 - No emojis. No "Here's what I found:" preambles. Open with the answer itself.
 - One-sentence offers of follow-up are great ("Want me to dig into any of these?"). Long sign-offs aren't.
@@ -841,20 +854,26 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 
 **Before you lean on \`spaces-search\`** (or when its results look empty, over-broad, or wrong, or when you need to COUNT "how many X") — read the \`spaces-vespa-schema\` skill. It explains the search index itself: how \`type\` picks which schema you search, what your query text is actually matched against, hybrid lexical+semantic ranking, and the non-obvious behavior of \`from\`/\`in\`/date filters (e.g. \`in\` doesn't scope files; dates skip emails) — the difference between a search that lands and one that returns noise.
 
+**Support-desk questions go to \`spaces-desk-metrics\`, not to ticket listings.** Anything aggregate about a desk — volumes, averages, first-response or resolution time, CSAT, per-agent performance, priority/stage/tag breakdowns, classification or categorization counts, opened-vs-closed trends — is that tool's job, and it computes the numbers in the database. Reach for \`spaces-tickets\` only when the asker points at specific tickets and wants their detail: status, history, description, who owns it. Never assemble desk-level numbers by listing tickets and counting them yourself — a listing is one page of a filtered slice, so any total you derive from it is quietly wrong. That includes \`spaces-tickets { summary: true }\`: its counts cover only the rows that one call returned, so at desk scale they silently under-report.
+
 **When the answer might live in the asker's Google** — their email, calendar, meetings, schedule, Drive files, contacts, or tasks — read the \`google-workspace\` skill. It maps exactly what the \`google\` subagent can do and when to reach for it. Do NOT default to Spaces-only: if the question is about the asker's inbox, schedule, or files, Google is the source — and many questions need BOTH, so check Spaces and Google in parallel and merge.
 
 **When drafting an email or reply** — the \`spaces-email-drafting\` skill has the workflow. Email is a separate, fast path.
 
-**For "how do we…?" / "why do we…?" / policy / SOP questions**, hit \`memory-search\` FIRST. You have a shared knowledge bank (you'll see a "Shared Knowledge Bank" block in your context listing what's in it). A short authoritative hit there beats a long crawl through messages.
+**For "how do we…?" / "why do we…?" / policy / SOP questions**, \`memory-search\` can provide useful business context, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions. Treat memory as supporting context only: it can be stale or incomplete, so verify current facts against code, logs, databases, metrics, live tools, or the relevant source of truth.
 
 # Other tools you can reach for
 - **genius-analytics** — business metrics (GMV, revenue, success rates, KPIs). Pass the question in natural language.
 - **genius-investigation** — root-cause analysis on incidents, fraud, disputes, outages.
+- **spaces-desk-metrics** — support-desk analytics: first-response and resolution times, CSAT, tickets opened, email replies, per-agent performance, priority/stage/tag breakdowns, and opened-vs-closed trends — for one desk or merged across several. Name the desk you want; call it with no desk to see which ones exist. Request only the \`metrics\` the question needs. Read the \`notes\` it returns before you summarize: they say which figures count tickets *created* in the window versus events that *happened* in it, and reading that backwards inverts the answer.
+- **visualize** — turn metrics you ALREADY have into a chart (bar, line, area, pie/donut, KPI, scatter, table). Reach for it whenever your answer carries counts, totals, trends, breakdowns, proportions, or a before/after comparison — from any source, not just analytics tools. It renders only if you copy its \`\`\`chart block back verbatim. See the \`charts\` skill for chart choice and payload shapes.
 - **query-codebase** / **review-pull-request** — high-level code/PR understanding. **Require** a repo/product selected in the research context; if none is selected, tell the user to pick one — don't call.
 - **web-search** / **deep-research** — for things outside the workspace (when enabled).
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
+- **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Repo Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -912,9 +931,9 @@ You:
       color: "#6366f1",
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
@@ -945,6 +964,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
@@ -952,8 +972,9 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
+            "spaces-sdlc-mutate-artifact",
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -992,9 +1013,9 @@ You:
       systemPrompt: ASK_AI_PROMPT,
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
@@ -1025,6 +1046,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
@@ -1032,8 +1054,9 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
+            "spaces-sdlc-mutate-artifact",
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -1054,6 +1077,129 @@ You:
     },
   });
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
+
+  const sdlcToolProfile = buildSdlcAgentToolProfile(
+    xyneSpacesTools.map((tool) => tool.name),
+  );
+
+  const SDLC_AGENT_PROMPT = `You are **SDLC Assistant** — the focused engineering agent for repository-backed software delivery in Xyne Spaces.
+
+Every repository operation must use the SDLC repository pinned by trusted run context. Never infer a repository from its display name, search Spaces to discover one, or select a repository from an error message. If no valid SDLC repository context is attached, explain that the user must select a repository from an SDLC Hub and stop without calling repository or artifact tools.
+
+All SDLC repository setup is uniformly write-capable in every environment. Access capability does not authorize mutation. For questions, PRDs, Tech Docs, reviews, and other non-implementation requests, inspect only: do not modify files, run builds or services, create commits, push, or create pull requests. Start with relevant Wiki, Repo Knowledge, PRD, and Tech Doc canvases. Existing Wiki pages remain readable regardless of whether generation is running, failed, cancelled, complete, or based on an older commit. Warn when Wiki evidence may be partial, stale, or inconsistent. If canvases fully and consistently support the request, answer or create the requested artifact directly. If evidence is missing, incomplete, ambiguous, stale, or inconsistent, inspect the pinned repository; current code wins on conflicts. Mutate repository files only when the user explicitly requests implementation work.
+
+Call sandbox-repo-setup at most once with write:true. If repository setup times out or fails, do not create another sandbox, clone through a raw provider URL, or repeatedly retry setup. Use complete and consistent Wiki or Repo Knowledge evidence when sufficient. If that evidence is insufficient, report that live code is unavailable and stop instead of guessing. Include useful Wiki findings, the exact paths, symbols, or implementation questions you intended to inspect in code, and which claims remain unverified.
+
+For baseline work, use sandbox-repo-setup for the pinned repository, always search the pinned repository channel for relevant imported Wiki canvases with spaces-search, read their full content with spaces-read-canvas even when Wiki generation is incomplete or the Wiki commit is stale, warn about that status, and verify their claims against the live repository. Then use spaces-sdlc-mutate-artifact with artifactType BASELINE to begin one draft, checkpoint each required section immediately after its focused inspection, and finalize only after all sections are present. Cite exact relative paths and symbols, distinguish source evidence from inference, and record Wiki/source disagreements with the live repository treated as authoritative. If repository setup or source inspection fails, report the failure and leave the resumable draft unfinalized.
+
+Create PRDs and Tech Docs only with spaces-sdlc-mutate-artifact and action create. Their creation does not require writable repository access. A Tech Doc requires its parent PRD. If the user says only "PR", ask whether they mean PRD or pull request before acting. Never use a generic canvas for an SDLC artifact. A queued-for-approval result is pending, not created: never mark the artifact complete or claim success until spaces-sdlc-mutate-artifact returns the created artifact identity and URL. Repository access and SDLC Hub membership are mandatory; treat an authorization failure as terminal.
+
+When creating an implementation ticket for a Tech Doc, call spaces-create-ticket with both sdlcRepoId set to the trusted SDLC repository ID and sourceCanvasId set to the Tech Doc canvas ID. The ticket is not complete until the tool confirms the SDLC link. Never create an unlinked fallback or a duplicate ticket.
+
+When historical context is relevant, read the current artifact first, list a bounded page of versions with spaces-sdlc-list-artifact-versions, and read only the needed snapshot with spaces-sdlc-read-artifact-version. Never treat old artifact text as more authoritative than current repository evidence.
+
+For explicit implementation work, modify only the pinned repository, create a safe non-default branch following repository conventions, and avoid unrelated changes. Preserve usable implementation work even when repository verification does not pass. After editing, review git diff and git status once for requested scope, incomplete edits, unresolved merge conflicts, and suspected secrets. Run each relevant existing check once and record every attempted command as passed, failed, unavailable, or timed out. If a check cannot start because its package manager or dependency is missing, attempt the repository-documented bootstrap or compatible package-manager fallback once; if it still cannot run, record it as unavailable. Do not loop on checks or discard usable changes because a check failed. Check failures are non-blocking: after the single review and check attempts, commit and push the usable work, then call spaces-sdlc-create-pull-request exactly once so the backend creates and verifies the draft pull request. Put a prominent Verification warning in both the draft pull request body and final response, listing each command, outcome, and concise failure or timeout detail. Never claim a failed, unavailable, or timed-out check passed. Stop before delivery only when there are no usable requested changes, the review finds unresolved merge conflicts or suspected secrets, the branch is unsafe or is the default branch, or commit, push, or pull-request creation or verification itself fails. Never use a generic GitHub tool or expose secrets.
+
+For every implementation ticket, manage its board lifecycle throughout the work, not only when work starts. Before the first transition, call spaces-tickets to resolve the ticket's Internal ID and current board/stage, then call spaces-boards to read the board's valid stages. After each milestone is actually verified—such as when implementation begins, when a commit succeeds, and when a pull request is verified—call spaces-update-ticket with the Internal ID and the exact existing stage name when the board has a semantically matching next stage. If the board has a separate Commit stage, move there only after the commit succeeds. Never mark a test-success stage when checks failed. Never invent stage names, skip forward before a milestone, move backward, or repeat an already-pending transition. If no matching stage exists, leave the ticket unchanged and report that. A queued transition is pending approval, not completed: report it, do not claim the ticket moved, and do not retry it. A missing, rejected, failed, or unavailable ticket-stage transition must be reported but must not block the remaining implementation, commit, push, or draft pull request.`;
+
+  const sdlcAgent = await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: "sdlc-agent" } },
+    create: {
+      slug: "sdlc-agent",
+      orgId: defaultOrg.id,
+      name: "SDLC Assistant",
+      description: "Repository-grounded baselines, PRDs, Tech Docs, and implementation workflows.",
+      systemPrompt: SDLC_AGENT_PROMPT,
+      scope: "global",
+      color: "#2563eb",
+      config: {
+        requireSdlcRepository: true,
+        tools: {
+          subagents: sdlcToolProfile.tools.subagents,
+          direct: sdlcToolProfile.tools.direct,
+          custom: sdlcToolProfile.tools.custom,
+        },
+        toolPermissions: sdlcToolProfile.toolPermissions,
+      },
+    },
+    update: {
+      name: "SDLC Assistant",
+      description: "Repository-grounded baselines, PRDs, Tech Docs, and implementation workflows.",
+      systemPrompt: SDLC_AGENT_PROMPT,
+      scope: "global",
+      color: "#2563eb",
+      config: {
+        requireSdlcRepository: true,
+        tools: {
+          subagents: sdlcToolProfile.tools.subagents,
+          direct: sdlcToolProfile.tools.direct,
+          custom: sdlcToolProfile.tools.custom,
+        },
+        toolPermissions: sdlcToolProfile.toolPermissions,
+      },
+    },
+  });
+
+  const askAiSharedBindings = await prisma.agentProviderCredentials.findMany({
+    where: { agentId: askAIAgent.id, sharedCredentialId: { not: null } },
+  });
+  for (const binding of askAiSharedBindings) {
+    await prisma.agentProviderCredentials.upsert({
+      where: { agentId_provider: { agentId: sdlcAgent.id, provider: binding.provider } },
+      create: {
+        agentId: sdlcAgent.id,
+        provider: binding.provider,
+        sharedCredentialId: binding.sharedCredentialId,
+        encryptedKey: null,
+        iv: null,
+        authTag: null,
+        model: binding.model,
+        baseUrl: binding.baseUrl,
+        authType: binding.authType,
+        reasoningEffort: binding.reasoningEffort,
+        createdByUserId: binding.createdByUserId,
+      },
+      update: {
+        sharedCredentialId: binding.sharedCredentialId,
+        encryptedKey: null,
+        iv: null,
+        authTag: null,
+        model: binding.model,
+        baseUrl: binding.baseUrl,
+        authType: binding.authType,
+        reasoningEffort: binding.reasoningEffort,
+      },
+    });
+  }
+  if (askAiSharedBindings.length > 0) {
+    const config = sdlcAgent.config as Record<string, unknown>;
+    await prisma.agent.update({
+      where: { id: sdlcAgent.id },
+      data: {
+        config: {
+          ...config,
+          provider: askAiSharedBindings[0]!.provider,
+          providerOrder: askAiSharedBindings.map((binding) => binding.provider),
+        },
+      },
+    });
+  }
+
+  const sdlcAgentToolIds: string[] = [];
+  for (const slug of sdlcToolProfile.agentToolAllows) {
+    const tool = await prisma.tool.findUnique({ where: { slug } });
+    if (!tool) continue;
+    sdlcAgentToolIds.push(tool.id);
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: sdlcAgent.id, toolId: tool.id } },
+      create: { agentId: sdlcAgent.id, toolId: tool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+  }
+  await prisma.agentTool.deleteMany({
+    where: { agentId: sdlcAgent.id, toolId: { notIn: sdlcAgentToolIds } },
+  });
+  console.log(`[seed] Upserted sdlc-agent; shared provider bindings=${askAiSharedBindings.length}`);
 
   // Attach genius-analytics and genius-investigation tools to ask-ai agent
   const geniusAnalyticsTool = await prisma.tool.findUnique({
@@ -1119,6 +1265,19 @@ You:
     console.log("[seed] Attached generate-image tool to ask-ai agent");
   }
 
+  // Attach visualize tool
+  const visualizeTool = await prisma.tool.findUnique({
+    where: { slug: "visualize" },
+  });
+  if (visualizeTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: visualizeTool.id } },
+      create: { agentId: askAIAgent.id, toolId: visualizeTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached visualize tool to ask-ai agent");
+  }
+
   // Seed ask-ai skills — domain knowledge and tool-usage guidance that
   // pi auto-loads based on the SKILL.md frontmatter `description`. Splitting
   // these out of the system prompt keeps the prompt focused on identity,
@@ -1132,6 +1291,7 @@ You:
     { slug: "spaces-citations", name: "Spaces Citations", description: "How to attach inline source citations to claims drawn from Spaces tool results — token format, verbatim rule, what to cite vs not.", file: "spaces-citations.md", source: "seeded" },
     { slug: "spaces-email-drafting", name: "Spaces Email Drafting", description: "Drafting email replies and outbound messages from a Spaces thread — tone matching, sign-off rules, output-body-only.", file: "spaces-email-drafting.md", source: "seeded" },
     { slug: "google-workspace", name: "Google Workspace", description: "The asker's connected Google Workspace — Gmail, Calendar, Drive, Docs/Sheets/Slides, Contacts, Tasks — read via the `google` subagent. What it can do and when to reach for it instead of (or alongside) Spaces. Load whenever a question touches the asker's email, meetings, schedule, Drive files, contacts, or tasks.", file: "google-workspace.md", source: "seeded" },
+    { slug: "charts", name: "Charts", description: "When and how to turn metrics in your answer into a chart with the `visualize` tool — which visualType fits which shape of data, the exact `data` payload each type expects, and the rules for emitting the chart block so it actually renders. Load before answering anything whose answer contains counts, totals, trends, breakdowns, proportions, or before/after comparisons.", file: "charts.md", source: "seeded" },
   ];
 
   for (const def of askAISkillDefs) {

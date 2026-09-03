@@ -1,16 +1,15 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
+import { Archive } from 'lucide-react';
+import { SwapArrowVertical as ArrowUpDown, KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Activity,
-  ArrowUpDown,
-  Calendar,
-  CircleCheck,
+  CalendarDefault as Calendar,
+  CheckTickCircle as CircleCheck,
   FileText,
-  SquareKanban,
   Tag,
-  Archive,
-  GitMerge,
-  Mail,
-} from 'lucide-react';
+  Merge as GitMerge,
+  EnvelopeDefault as Mail,
+} from '@xyne/icons';
 import {
   ActivityType,
   TicketReferenceRelation,
@@ -68,6 +67,7 @@ type ActivityValue = Partial<
       rating?: string;
       score?: number | null;
       isAutomation?: boolean;
+      isAiClassification?: boolean;
     }
 >;
 
@@ -447,11 +447,26 @@ export const getActivityDescription = (
       };
     }
 
-    case ActivityType.SUBTICKET_CREATED: {
+    case ActivityType.SUBTICKET_CREATED:
+    case ActivityType.SUBTICKET_LINKED:
+    case ActivityType.SUBTICKET_UNLINKED: {
       const subTicketXyneId =
         value?.subTicketXyneId || value?.subTicketId?.substring(0, 8).toUpperCase();
+      // Newer rows carry the action in the activity type; older ones only in the value.
+      const subTicketAction =
+        activity.activityType === ActivityType.SUBTICKET_LINKED
+          ? 'linked'
+          : activity.activityType === ActivityType.SUBTICKET_UNLINKED
+            ? 'unlinked'
+            : value?.subTicketAction;
+      const description =
+        subTicketAction === 'linked'
+          ? 'linked subticket'
+          : subTicketAction === 'unlinked'
+            ? 'unlinked subticket'
+            : 'created subticket';
       return {
-        description: 'created subticket',
+        description,
         details: <span className='font-semibold'>{subTicketXyneId}</span>,
       };
     }
@@ -630,6 +645,8 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
     case ActivityType.STAGE_ETA:
       return <Calendar size={12} />;
     case ActivityType.SUBTICKET_CREATED:
+    case ActivityType.SUBTICKET_LINKED:
+    case ActivityType.SUBTICKET_UNLINKED:
       return <FileText size={12} className='text-blue-600' />;
     case ActivityType.BOARD:
       return <SquareKanban size={12} className='text-purple-600' />;
@@ -783,6 +800,7 @@ export const ActivityComponent = ({
 }) => {
   const activityUser = users?.find(u => u.id === activity.updatedBy);
   const isAutomationActivity = (activity.value as ActivityValue | null)?.isAutomation === true;
+  const isAiActivity = (activity.value as ActivityValue | null)?.isAiClassification === true;
   const { description, details, hideActorName } = getActivityDescription(
     activity,
     users,
@@ -831,9 +849,11 @@ export const ActivityComponent = ({
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
-              (isAutomationActivity
-                ? 'Automation'
-                : getUserDisplayName(activityUser) || 'Someone')}{' '}
+              (isAiActivity
+                ? 'AI classification'
+                : isAutomationActivity
+                  ? 'Automation'
+                  : getUserDisplayName(activityUser) || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>

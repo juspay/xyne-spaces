@@ -7,10 +7,11 @@ import { PrismaClient, Invitation, User } from '@prisma/client';
 import {
   GuestEntity,
   WorkspaceRole,
+  WorkspaceType,
   AuthProvider,
   ChannelRole,
   CanvasRole,
-  ChannelScopeType, OrgRole, UserStatus } from '@xyne/shared';
+  OrgRole, UserStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
@@ -56,10 +57,25 @@ export class InvitationService {
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
   }
 
-  private toEnterpriseOrgRole(role: WorkspaceRole): 'OWNER' | 'ADMIN' | 'MEMBER' {
-    if (role === WorkspaceRole.OWNER) return 'OWNER';
-    if (role === WorkspaceRole.ADMIN) return 'ADMIN';
-    return 'MEMBER';
+  private toEnterpriseOrgRole(role: WorkspaceRole): OrgRole {
+    if (role === WorkspaceRole.OWNER) return OrgRole.OWNER;
+    if (role === WorkspaceRole.ADMIN) return OrgRole.ADMIN;
+    if (role === WorkspaceRole.COMMUNITY_MEMBER) return OrgRole.COMMUNITY_MEMBER;
+    return OrgRole.MEMBER;
+  }
+
+  private async markInvitationAccepted(tx: TxClient, invitationId: string): Promise<void> {
+    const result = await tx.invitation.updateMany({
+      where: {
+        invitationId,
+        acceptedAt: null,
+      },
+      data: { acceptedAt: new Date() },
+    });
+
+    if (result.count !== 1) {
+      throw new Error('Invitation has already been accepted');
+    }
   }
 
   /**
@@ -93,7 +109,7 @@ export class InvitationService {
       orgId = derivedOrgId;
 
       // Ensure the invitee exists in the org_members table (any org)
-      if (role !== 'GUEST') {
+      if (role !== WorkspaceRole.GUEST && role !== WorkspaceRole.COMMUNITY_MEMBER) {
         // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
         // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
         // outside would execute the query after withWorkspaceScope has exited — back in the
@@ -128,19 +144,31 @@ export class InvitationService {
     // Validate role — provision flow (explicit orgId) allows OWNER; normal flow allows ADMIN/MEMBER
     const validRoles: WorkspaceRole[] = explicitOrgId
       ? [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]
-      : [WorkspaceRole.ADMIN, WorkspaceRole.MEMBER, WorkspaceRole.GUEST];
-    const invitationRole = role && validRoles.includes(role) ? role : 'MEMBER';
+      : [
+          WorkspaceRole.ADMIN,
+          WorkspaceRole.MEMBER,
+          WorkspaceRole.GUEST,
+          WorkspaceRole.COMMUNITY_MEMBER,
+        ];
+    const invitationRole = role && validRoles.includes(role) ? role : WorkspaceRole.MEMBER;
 
-    if (invitationRole === 'GUEST' && (!params.entityId || !params.entityType)) {
-      throw new Error('Guest invitations must target a project, channel, or canvas');
+    if (invitationRole === WorkspaceRole.COMMUNITY_MEMBER) {
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { workspaceType: true },
+      });
+
+      if (workspace?.workspaceType !== WorkspaceType.COMMUNITY) {
+        throw new Error('Community member invitations are only supported for community workspaces');
+      }
     }
 
-    if (invitationRole === 'GUEST' && params.entityType === GuestEntity.PROJECT && !params.channelId) {
-      throw new Error('Guest invitations to a project must specify a channel');
+    if (invitationRole === 'GUEST' && (!params.entityId || !params.entityType)) {
+      throw new Error('Guest invitations must target a channel or canvas');
     }
 
     if (invitationRole === 'GUEST' && params.entityId && params.entityType) {
-      await this.validateGuestEntity(params.entityId, params.entityType, workspaceId, params.channelId);
+      await this.validateGuestEntity(params.entityId, params.entityType, workspaceId);
     }
 
     const selectedOrg = await this.prisma.organization.findUnique({
@@ -421,7 +449,6 @@ export class InvitationService {
     entityId: string,
     entityType: string,
     workspaceId: string,
-    channelId?: string,
   ): Promise<void> {
     switch (entityType) {
       case GuestEntity.CHANNEL: {
@@ -466,33 +493,6 @@ export class InvitationService {
           });
           if (!creator) {
             throw new Error('Guest invitation target canvas is not in this workspace');
-          }
-        }
-        return;
-      }
-
-      case GuestEntity.PROJECT: {
-        const project = await this.prisma.project.findFirst({
-          where: { id: entityId, workspaceId },
-          select: { id: true },
-        });
-        if (!project) {
-          throw new Error('Guest invitation target project does not exist in this workspace');
-        }
-
-        if (channelId) {
-          const channel = await this.prisma.channel.findFirst({
-            where: {
-              id: channelId,
-              projectId: entityId,
-              workspaceId,
-              scopeType: { notIn: [ChannelScopeType.DM, ChannelScopeType.GROUP_DM] },
-              isArchived: false,
-            },
-            select: { id: true },
-          });
-          if (!channel) {
-            throw new Error('Guest invitation target channel does not exist in this project');
           }
         }
         return;
@@ -576,38 +576,6 @@ export class InvitationService {
       return `/${workspaceId}/chat/canvas/${entityId}`;
     }
 
-    if (entityType === GuestEntity.PROJECT) {
-      const project = await tx.project.findFirst({
-        where: { id: entityId, workspaceId },
-        select: { id: true },
-      });
-      if (!project) {
-        throw new Error('Guest invitation target project does not exist in this workspace');
-      }
-
-      const targetChannelId = invitation.channelId;
-      if (!targetChannelId) {
-        throw new Error('Guest invitation to project is missing the target channel');
-      }
-
-      const channel = await tx.channel.findFirst({
-        where: {
-          id: targetChannelId,
-          projectId: entityId,
-          workspaceId,
-          scopeType: { notIn: [ChannelScopeType.DM, ChannelScopeType.GROUP_DM] },
-          isArchived: false,
-        },
-        select: { id: true },
-      });
-      if (!channel) {
-        throw new Error('Guest invitation target channel does not exist in this project');
-      }
-
-      await this.ensureChannelGuestState(targetChannelId, userId, workspaceId, tx);
-      return `/${workspaceId}/chat/dir/${targetChannelId}`;
-    }
-
     throw new Error(`Unsupported guest invitation entity type: ${entityType}`);
   }
 
@@ -624,47 +592,46 @@ export class InvitationService {
       name: string;
       providerUserId: string;
       authProvider: string;
-    }
+    },
+    tx: TxClient,
   ): Promise<{ user: User; redirectPath: string | null }> {
-    return this.prisma.$transaction(async (tx) => {
-      const orgMember = await tx.orgMember.findUnique({
-        where: { email: userData.email.toLowerCase() },
-      });
-
-      if (orgMember && orgMember.leftAt) {
-        throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
-      }
-
-      const activeOrgMember = orgMember ?? await tx.orgMember.create({
-        data: {
-          orgId: invitation.orgId!,
-          email: userData.email.toLowerCase(),
-          role: OrgRole.GUEST,
-        },
-      });
-
-      if (!orgMember) {
-        logger.info(`[DEBUG] [handleGuestAcceptance] Created new orgMember with GUEST role id=${activeOrgMember.memberId}`);
-      }
-
-      const newWorkspaceUser = await tx.user.create({
-        data: {
-          email: userData.email,
-          name: userData.name,
-          providerUserId: userData.providerUserId,
-          authProvider: userData.authProvider as AuthProvider,
-          workspaceId: invitation.workspaceId!,
-          role: invitation.role,
-          status: UserStatus.ACTIVE,
-          orgMemberId: activeOrgMember.memberId,
-        },
-      });
-      logger.info(`[DEBUG] [handleGuestAcceptance] Created new workspace GUEST user id=${newWorkspaceUser.id}`);
-
-      const redirectPath = await this.grantGuestEntityAccess(newWorkspaceUser.id, invitation, tx);
-
-      return { user: newWorkspaceUser, redirectPath };
+    const orgMember = await tx.orgMember.findUnique({
+      where: { email: userData.email.toLowerCase() },
     });
+
+    if (orgMember && orgMember.leftAt) {
+      throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
+    }
+
+    const activeOrgMember = orgMember ?? await tx.orgMember.create({
+      data: {
+        orgId: invitation.orgId!,
+        email: userData.email.toLowerCase(),
+        role: OrgRole.GUEST,
+      },
+    });
+
+    if (!orgMember) {
+      logger.info(`[DEBUG] [handleGuestAcceptance] Created new orgMember with GUEST role id=${activeOrgMember.memberId}`);
+    }
+
+    const newWorkspaceUser = await tx.user.create({
+      data: {
+        email: userData.email,
+        name: userData.name,
+        providerUserId: userData.providerUserId,
+        authProvider: userData.authProvider as AuthProvider,
+        workspaceId: invitation.workspaceId!,
+        role: invitation.role,
+        status: UserStatus.ACTIVE,
+        orgMemberId: activeOrgMember.memberId,
+      },
+    });
+    logger.info(`[DEBUG] [handleGuestAcceptance] Created new workspace GUEST user id=${newWorkspaceUser.id}`);
+
+    const redirectPath = await this.grantGuestEntityAccess(newWorkspaceUser.id, invitation, tx);
+
+    return { user: newWorkspaceUser, redirectPath };
   }
 
   /**
@@ -704,6 +671,11 @@ export class InvitationService {
       throw new Error('Email does not match the invitation');
     }
 
+    if (invitation.acceptedAt) {
+      logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitationId} was already accepted at ${invitation.acceptedAt.toISOString()}`);
+      throw new Error('Invitation has already been accepted');
+    }
+
     logger.info(`[DEBUG] [acceptInvitation] Invitation valid. workspaceId=${invitation.workspaceId} orgId=${invitation.orgId ?? 'null'} role=${invitation.role}`);
 
     // Resolve orgId before user creation so a COMMUNITY_MEMBER org row can be
@@ -730,11 +702,16 @@ export class InvitationService {
     });
     logger.info(`[DEBUG] [acceptInvitation] User providerUserId=${userData.providerUserId} already in workspace ${invitation.workspaceId}: ${!!existingWorkspaceUser}`);
 
-    let newWorkspaceUser;
+    let newWorkspaceUser: User;
     let redirectPath: string | null = null;
+    let upgradeCommunityMemberId: string | null = null;
 
     if (!existingWorkspaceUser && invitation.role === 'GUEST') {
-      const guestResult = await this.handleGuestAcceptance(invitation, userData);
+      const guestResult = await this.prisma.$transaction(async (tx) => {
+        await this.markInvitationAccepted(tx, invitationId);
+        const result = await this.handleGuestAcceptance(invitation, userData, tx);
+        return result;
+      });
       newWorkspaceUser = guestResult.user;
       redirectPath = guestResult.redirectPath;
     } else if (existingWorkspaceUser) {
@@ -752,6 +729,7 @@ export class InvitationService {
         }
 
         const guestResult = await this.prisma.$transaction(async (tx) => {
+          await this.markInvitationAccepted(tx, invitationId);
           const reactivatedUser = await tx.user.update({
             where: { id: existingWorkspaceUser.id },
             data: {
@@ -766,105 +744,118 @@ export class InvitationService {
         redirectPath = guestResult.redirectPath;
         logger.info(`[DEBUG] [acceptInvitation] Granted existing guest user id=${newWorkspaceUser.id} access to invitation entity`);
       } else {
-        // User exists - reactivate them if they were removed (leftAt is set)
-        newWorkspaceUser = await this.prisma.user.update({
-          where: { id: existingWorkspaceUser.id },
-          data: {
-            leftAt: null,
-            role: invitation.role,
-            status: UserStatus.ACTIVE,
-          },
+        // User exists - reactivate + orgMember upsert + invitation accept in one transaction
+        newWorkspaceUser = await this.prisma.$transaction(async (tx) => {
+          await this.markInvitationAccepted(tx, invitationId);
+          const reactivatedUser = await tx.user.update({
+            where: { id: existingWorkspaceUser.id },
+            data: {
+              leftAt: null,
+              role: invitation.role,
+              status: UserStatus.ACTIVE,
+            },
+          });
+
+          if (resolvedOrgId) {
+            await tx.orgMember.upsert({
+              where: { email: userData.email.toLowerCase() },
+              create: {
+                orgId: resolvedOrgId,
+                email: userData.email.toLowerCase(),
+                role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
+              },
+              update: {
+                leftAt: null,
+                orgId: resolvedOrgId,
+                role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
+              },
+            });
+          }
+
+          return reactivatedUser;
         });
         logger.info(`[DEBUG] [acceptInvitation] Reactivated existing user id=${newWorkspaceUser.id}`);
       }
     } else {
+      // New user — orgMember create/update + user create + invitation accept in one transaction
       if (resolvedOrgId) {
         await organizationDomainService.assertOrgMemberLimit(resolvedOrgId, userData.email);
       }
 
-      // Fetch existing orgMember by email
-      const existingOrgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email.toLowerCase() },
-        select: { memberId: true, role: true }
+      newWorkspaceUser = await this.prisma.$transaction(async (tx) => {
+        await this.markInvitationAccepted(tx, invitationId);
+        const existingOrgMember = await tx.orgMember.findUnique({
+          where: { email: userData.email.toLowerCase() },
+          select: { memberId: true, role: true },
+        });
+
+        let orgMemberId: string;
+
+        if (!existingOrgMember) {
+          if (!resolvedOrgId) {
+            throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+          }
+
+          const created = await tx.orgMember.create({
+            data: {
+              orgId: resolvedOrgId,
+              email: userData.email.toLowerCase(),
+              role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
+            },
+            select: { memberId: true },
+          });
+          orgMemberId = created.memberId;
+        } else if (resolvedOrgId) {
+          const wasCommunityMember = existingOrgMember.role === 'COMMUNITY_MEMBER';
+          const updated = await tx.orgMember.update({
+            where: { memberId: existingOrgMember.memberId },
+            data: {
+              leftAt: null,
+              orgId: resolvedOrgId,
+              role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
+            },
+            select: { memberId: true },
+          });
+          orgMemberId = updated.memberId;
+
+          if (wasCommunityMember) {
+            upgradeCommunityMemberId = orgMemberId;
+          }
+        } else {
+          orgMemberId = existingOrgMember.memberId;
+        }
+
+        const createdUser = await tx.user.create({
+          data: {
+            email: userData.email,
+            name: userData.name,
+            providerUserId: userData.providerUserId,
+            authProvider: userData.authProvider as AuthProvider,
+            workspaceId: invitation.workspaceId!,
+            role: invitation.role,
+            status: UserStatus.ACTIVE,
+            orgMemberId,
+          },
+        });
+        logger.info(`[DEBUG] [acceptInvitation] Created new workspace user id=${createdUser.id}`);
+
+        return createdUser;
       });
+    }
 
-      let orgMember: { memberId: string };
+    // ── Post-commit side effects (best-effort, must not roll back the
+    //    transaction above). These are idempotent or error-swallowing. ──
 
-      if (!existingOrgMember) {
-        if (!resolvedOrgId) {
-          throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
-        }
-
-        orgMember = await this.prisma.orgMember.create({
-          data: {
-            orgId: resolvedOrgId,
-            email: userData.email.toLowerCase(),
-            role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
-          },
-          select: { memberId: true },
+    if (upgradeCommunityMemberId) {
+      try {
+        await aiProvisioningService.upgradeCommunityToEnterpriseBudget(upgradeCommunityMemberId);
+      } catch (error) {
+        logger.error('[InvitationService] Failed to upgrade community budget', {
+          memberId: upgradeCommunityMemberId,
+          error,
         });
-      } else if (resolvedOrgId) {
-        const wasCommunityMember = existingOrgMember.role === 'COMMUNITY_MEMBER';
-        orgMember = await this.prisma.orgMember.update({
-          where: { memberId: existingOrgMember.memberId },
-          data: {
-            leftAt: null,
-            orgId: resolvedOrgId,
-            role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
-          },
-          select: { memberId: true },
-        });
-
-        if (wasCommunityMember) {
-          await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
-        }
-      } else {
-        orgMember = { memberId: existingOrgMember.memberId };
       }
-
-      // Create new user in the workspace
-      newWorkspaceUser = await this.prisma.user.create({
-        data: {
-          email: userData.email,
-          name: userData.name,
-          providerUserId: userData.providerUserId,
-          authProvider: userData.authProvider as AuthProvider,
-          workspaceId: invitation.workspaceId!,
-          role: invitation.role,
-          status: UserStatus.ACTIVE,
-          orgMemberId: orgMember.memberId,
-        },
-      });
-      logger.info(`[DEBUG] [acceptInvitation] Created new workspace user id=${newWorkspaceUser.id}`);
     }
-
-    // Ensure an OrgMember entry exists for this email (upsert by email - now globally unique)
-    if (resolvedOrgId && invitation.role !== 'GUEST') {
-      await this.prisma.orgMember.upsert({
-        where: { email: userData.email.toLowerCase() },
-        create: {
-          orgId: resolvedOrgId,
-          email: userData.email.toLowerCase(),
-          role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
-        },
-        update: {
-          leftAt: null,
-          orgId: resolvedOrgId,
-          role: this.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
-        }, // reactivate and update orgId/role if needed
-      });
-      logger.info(`[DEBUG] [acceptInvitation] OrgMember upserted for email=${userData.email} orgId=${resolvedOrgId}`);
-    } else if (invitation.role !== 'GUEST') {
-      logger.warn(`[DEBUG] [acceptInvitation] ⚠️ Could not resolve orgId — OrgMember NOT created for email=${userData.email}`);
-    }
-
-    // Update invitation with acceptedAt timestamp instead of deleting
-    await this.prisma.invitation.update({
-      where: { invitationId: invitationId },
-      data: {
-        acceptedAt: new Date(),
-      },
-    });
 
     // Grant role-based resource permissions via the centralized permission matrix
     await grantPermissionsForRole(

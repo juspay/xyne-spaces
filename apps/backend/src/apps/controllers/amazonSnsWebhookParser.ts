@@ -1,4 +1,19 @@
-import type { FlowComponent, FlowDefinition, FlowState } from '@xyne/shared';
+import type { FlowComponent, FlowDefinition } from '@xyne/shared';
+import {
+  MAX_DESCRIPTION_LENGTH,
+  SEVERITY_STRIPE,
+  buildFields,
+  emptyFlowState,
+  fieldsToGrid,
+  isHttpUrl,
+  isRecord,
+  isScalar,
+  passthroughLabels,
+  toDisplayValue,
+  truncate,
+  withColorStripe,
+} from './alertWebhookShared';
+import type { AlertSeverity } from './alertWebhookShared';
 
 /**
  * Amazon SNS incoming-webhook parser.
@@ -42,7 +57,8 @@ export type SnsAlertSource =
   | 'eventbridge'
   | 'generic';
 
-export type SnsSeverity = 'critical' | 'warning' | 'info' | 'ok';
+/** Alias kept so existing SNS-specific imports keep working. */
+export type SnsSeverity = AlertSeverity;
 
 export interface SnsNormalizedPayload {
   source: SnsAlertSource;
@@ -64,99 +80,6 @@ export interface SnsNormalizedPayload {
  * has no outbound webhookUrl to proxy to.
  */
 export const SNS_CONFIRM_ACTION_ID = 'sns_confirm_subscription';
-
-const MAX_FIELDS = 16;
-const MAX_FIELD_VALUE_LENGTH = 400;
-const MAX_DESCRIPTION_LENGTH = 2000;
-
-/**
- * Labels that add noise rather than signal in a chat card.
- *
- * Ported from infra-switch's `BLACKLISTED_VM_LABELS`
- * (`src/InfraSwitch/Config.hs:274`), including its default list, and overridable
- * through the environment the same way.
- */
-const DEFAULT_BLACKLISTED_LABELS =
-  'uuid,node,instance,job,metrics_path,prometheus,prometheus_replica,severity,' +
-  'endpoint,alert_id,alert,alertgroup,alertname,user,older_receiver';
-
-function emptyFlowState(): FlowState {
-  return {
-    values: {},
-    touched: {},
-    errors: {},
-    submitting: false,
-    submitted: false,
-    history: [],
-    loadingComponentIds: [],
-  };
-}
-
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
-}
-
-/** Coerce an arbitrary JSON value into a single-line display string. */
-function toDisplayValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return 'N/A';
-  }
-  if (typeof value === 'string') {
-    return truncate(value.trim() || 'N/A', MAX_FIELD_VALUE_LENGTH);
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  try {
-    return truncate(JSON.stringify(value), MAX_FIELD_VALUE_LENGTH);
-  } catch {
-    return 'N/A';
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** A value that renders as a readable single line rather than a JSON blob. */
-function isScalar(value: unknown): boolean {
-  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
-}
-
-
-/** Drop empty/placeholder entries and cap the table length. */
-function buildFields(entries: Array<[string, unknown]>): Array<[string, string]> {
-  return entries
-    .map(([label, value]) => [label, toDisplayValue(value)] as [string, string])
-    .filter(([, value]) => value !== 'N/A' && value !== '')
-    .slice(0, MAX_FIELDS);
-}
-
-function blacklistedLabels(): Set<string> {
-  // Deliberately `||`, not `??`: an unset var and the empty value that ships in
-  // .env.example must both fall back to the default rather than disable the list.
-  const raw = process.env.SNS_BLACKLISTED_LABELS?.trim() || DEFAULT_BLACKLISTED_LABELS;
-  return new Set(
-    raw
-      .split(',')
-      .map(label => label.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
-/**
- * Every label that is not blacklisted, keyed uppercase.
- *
- * infra-switch renders the label bag as a deny-list rather than an allow-list
- * (`convertLabelsToSlackBlock`, `src/AlertProxy/Utils/Common.hs:477-482`), so
- * team-specific labels reach the card instead of being silently dropped.
- */
-function passthroughLabels(labels: Record<string, unknown>): Array<[string, unknown]> {
-  const blacklist = blacklistedLabels();
-  return Object.entries(labels)
-    .filter(([key]) => !blacklist.has(key.toLowerCase()))
-    .map(([key, value]) => [key.toUpperCase(), value] as [string, unknown]);
-}
 
 /**
  * Split an SNS topic ARN into its region and account id.
@@ -437,27 +360,6 @@ export function parseSnsMessage(envelope: SnsEnvelope): SnsNormalizedPayload {
 // FLOW BUILDERS
 // ============================================================================
 
-function isHttpUrl(value: string | null): value is string {
-  if (!value) {
-    return false;
-  }
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Left-edge stripe colour per severity.
- *
- * infra-switch drives this off `SlackAttachment.color`
- * (`src/AlertProxy/Utils/Common.hs:447-449`): green when the alert state maps to
- * OK/RESOLVED/UP, red otherwise. The warning and info shades come from Slack's
- * named palette as resolved in `slackBlockKitToFlowJSON.ts:449-454`, so alerts
- * arriving straight from SNS match ones relayed through infra-switch.
- */
 /**
  * Leading text of the header line, per source. infra-switch renders
  * `<Source> Alert | <name> | <account>` as a single hyperlink
@@ -480,50 +382,6 @@ function buildHeaderLabel(payload: SnsNormalizedPayload): string {
   return [`🚨 ${SOURCE_HEADER[payload.source]}`, payload.title, account]
     .filter(Boolean)
     .join(' | ');
-}
-
-const SEVERITY_STRIPE: Record<SnsSeverity, string> = {
-  critical: '#d91009',
-  warning: '#ECB22E',
-  ok: '#04ba1c',
-  info: '#d1d5db',
-};
-
-/**
- * Wrap card content in the Slack-style coloured left border.
- * Mirrors `withColorStripe` (`slackBlockKitToFlowJSON.ts:482-489`).
- */
-function withColorStripe(id: string, children: FlowComponent[], color: string): FlowComponent {
-  return {
-    id,
-    type: 'column',
-    style: { borderLeft: `4px solid ${color}`, padding: '2px 0 2px 10px' },
-    children,
-  };
-}
-
-/**
- * Lay fields out as a 2-column grid that wraps onto new rows, the way Slack
- * renders `section.fields`. Mirrors `fieldsToGrid`
- * (`slackBlockKitToFlowJSON.ts:497-509`) — a grid rather than our previous
- * label/value table, so the two render paths agree.
- */
-function fieldsToGrid(fields: Array<[string, string]>, columns = 2): FlowComponent {
-  const rows: FlowComponent[] = [];
-
-  for (let i = 0; i < fields.length; i += columns) {
-    const cells: FlowComponent[] = fields.slice(i, i + columns).map(([label, value], cell) => ({
-      id: `sns-field-${i + cell}`,
-      type: 'column',
-      children: [
-        { id: `sns-field-${i + cell}-label`, type: 'text', props: { content: label, bold: true } },
-        { id: `sns-field-${i + cell}-value`, type: 'text', props: { content: value } },
-      ],
-    }));
-    rows.push({ id: `sns-field-row-${i / columns}`, type: 'row', children: cells });
-  }
-
-  return rows.length === 1 ? rows[0] : { id: 'sns-fields', type: 'column', children: rows };
 }
 
 export function buildAmazonSnsFlow(payload: SnsNormalizedPayload): FlowDefinition {
@@ -552,7 +410,7 @@ export function buildAmazonSnsFlow(payload: SnsNormalizedPayload): FlowDefinitio
   }
 
   if (payload.fields.length > 0) {
-    children.push(fieldsToGrid(payload.fields));
+    children.push(fieldsToGrid(payload.fields, 'sns'));
   }
 
   return {
@@ -595,7 +453,7 @@ export function buildSubscriptionConfirmationFlow(envelope: SnsEnvelope): FlowDe
           : 'A topic asked to deliver alerts to this channel. Alerts will not arrive until an admin confirms the subscription.',
       },
     },
-    fieldsToGrid([['Topic', envelope.TopicArn]]),
+    fieldsToGrid([['Topic', envelope.TopicArn]], 'sns'),
   ];
 
   if (isHttpUrl(envelope.SubscribeURL ?? null)) {
@@ -694,7 +552,7 @@ export function buildUnsubscribeConfirmationFlow(envelope: SnsEnvelope): FlowDef
                   variant: 'warning',
                 },
               },
-              fieldsToGrid([['Topic', envelope.TopicArn]]),
+              fieldsToGrid([['Topic', envelope.TopicArn]], 'sns'),
             ],
             SEVERITY_STRIPE.info,
           ),

@@ -1,6 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { denyGuestWhere, isGuestContext } from './channel-access-helper'
 
 /**
  * OrgMembers ACL for Python Query Service
@@ -15,10 +14,6 @@ export class OrgMembersACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.OrgMemberWhereInput> {
-    if (isGuestContext(this.ctx)) {
-      return denyGuestWhere('memberId')
-    }
-
     // Without a memberId, scope to nothing so results stay bounded to the caller's org.
     if (!this.ctx.memberId) {
       return { memberId: { in: [] } }

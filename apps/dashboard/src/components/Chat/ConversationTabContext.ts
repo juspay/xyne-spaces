@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { createContext } from 'react';
 
 export const ConversationTabContext = createContext<{
@@ -5,9 +6,12 @@ export const ConversationTabContext = createContext<{
   setSkipMarkAsRead: (skip: boolean) => void;
   skipMarkAsReadRef: React.MutableRefObject<boolean> | null;
 }>({
-  setActiveTab: () => {},
+  setActiveTab: () => undefined,
   setSkipMarkAsRead: () => {
-    console.warn('setSkipMarkAsRead called outside ConversationTabContext provider');
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('setSkipMarkAsRead called outside ConversationTabContext provider'),
+    });
   },
   skipMarkAsReadRef: null,
 });

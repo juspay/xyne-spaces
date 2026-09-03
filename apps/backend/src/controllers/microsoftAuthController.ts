@@ -22,6 +22,11 @@ import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper'
 import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendingAuth';
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
+import { setOnboardingCookie } from '@/utils/onboardingCookie';
+
+const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
+const workspaceOutcome = (count: number): string =>
+  count === 0 ? 'no_workspace' : count === 1 ? 'single_workspace' : 'multi_workspace';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -155,12 +160,13 @@ export class MicrosoftAuthController {
   }
 
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
-    const requestId = `MS_LOGIN_${Date.now()}`;
+    const flowId = randomUUID();
+    const tag = (): string => authTag(flowId);
 
     try {
       if (this.oauthClient) {
         // return an error that MS auth not setup
-        logger.info(`[${requestId}] Initiating Microsoft OAuth login`);
+        logger.info(`${tag()} Microsoft OAuth login initiated`);
 
         const platformQuery = req.query.platform;
         const platform: 'mobile' | 'electron' | 'web' =
@@ -169,6 +175,7 @@ export class MicrosoftAuthController {
             : platformQuery === 'electron'
               ? 'electron'
               : 'web';
+        logger.info(`${tag()} Platform detected: ${platform}`);
 
         const codeVerifier = pkceServiceV2.generateCodeVerifier();
         const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
@@ -204,6 +211,7 @@ export class MicrosoftAuthController {
           undefined,
           invitationId,
           enterpriseLogin,
+          flowId,
         );
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
@@ -222,7 +230,7 @@ export class MicrosoftAuthController {
 
         const redirectUri = this.getMicrosoftRedirectUri(req);
 
-        logger.info('[OAuth] Redirect URI:', redirectUri);
+        logger.info(`${tag()} Redirect URI: ${redirectUri}`);
 
         const authorizationUri = this.oauthClient.authorizeURL({
           redirect_uri: redirectUri,
@@ -233,10 +241,10 @@ export class MicrosoftAuthController {
           prompt: 'select_account',
         } as Record<string, string | string[]>);
 
-        logger.info(`[${requestId}] Redirecting to Microsoft OAuth`);
+        logger.info(`${tag()} Redirecting to Microsoft OAuth`);
         res.redirect(authorizationUri);
       } else {
-        logger.error(`[${requestId}] Microsoft OAuth client not configured`);
+        logger.error(`${tag()} Microsoft OAuth not configured`);
         const frontendUrl = getFrontendUrl(req);
         res.redirect(
           `${frontendUrl}?error=microsoft_not_configured&message=${encodeURIComponent('Microsoft SSO is not configured')}`
@@ -244,7 +252,7 @@ export class MicrosoftAuthController {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`[${requestId}] Error initiating Microsoft login: ${errorMessage}`);
+      logger.error(`${tag()} Microsoft OAuth login initiate failed: ${errorMessage}`);
 
       const frontendUrl = getFrontendUrl(req);
       res.redirect(
@@ -270,27 +278,29 @@ export class MicrosoftAuthController {
   }
 
   handleCallback = async (req: Request, res: Response): Promise<void> => {
-    const requestId = `MS_CALLBACK_${Date.now()}`;
     let resolvedPlatform: string = 'web';
     let peekedState: Awaited<ReturnType<typeof oauthStateServiceV2.validateState>> = null;
+    let flowId = 'web-login';
+    const tag = (): string => authTag(flowId);
 
     try {
       if (this.oauthClient && this.userService && this.userSessionService) {
         const { code, state, error } = req.query;
 
-        logger.info(`[${requestId}] Microsoft OAuth callback received`);
+        logger.info(`${tag()} Microsoft OAuth callback received`);
 
         // Peek at state early to determine platform for error redirects
         if (state) {
           peekedState = await oauthStateServiceV2.validateState(state as string, false);
           if (peekedState) {
             resolvedPlatform = peekedState.platform;
+            flowId = peekedState.flowId ?? `${resolvedPlatform}-login`;
           }
         }
-        logger.info(`[${requestId}] STATE_PEEK: platform=${peekedState?.platform || 'NULL'}, provider=${peekedState?.provider || 'NULL'}, invitationId=${peekedState?.invitationId || 'NULL'}, stateFound=${!!peekedState}`);
+        logger.info(`${tag()} Microsoft OAuth state validated (platform=${resolvedPlatform}, stateFound=${!!peekedState}, invitationId=${peekedState?.invitationId || 'none'})`);
 
         if (error) {
-          logger.error(`[${requestId}] Microsoft OAuth error: ${error}`);
+          logger.error(`${tag()} Microsoft OAuth provider returned error: ${error}`);
           if (state) await oauthStateServiceV2.deleteState(state as string);
           res.redirect(
             this.getRedirectUrl(req, resolvedPlatform, {
@@ -302,7 +312,7 @@ export class MicrosoftAuthController {
         }
 
         if (!code || !state) {
-          logger.error(`[${requestId}] Missing code or state`);
+          logger.error(`${tag()} Missing code or state`);
           res.redirect(
             this.getRedirectUrl(req, resolvedPlatform, {
               error: 'missing_params',
@@ -329,7 +339,7 @@ export class MicrosoftAuthController {
             launchParams.set('invitationId', peekedState.invitationId);
           }
           const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
-          logger.info(`[${requestId}] ELECTRON_REDIRECT: invitationId_appended=${!!peekedState?.invitationId}, invitationId=${peekedState?.invitationId || 'NULL'}, launchUrl=${launchUrl}`);
+          logger.info(`${tag()} Microsoft OAuth login handed off to Electron (outcome=electron_handoff) — redirecting to launch page: ${launchUrl}`);
           res.redirect(launchUrl);
           return;
         }
@@ -342,7 +352,7 @@ export class MicrosoftAuthController {
           const boundState = req.cookies?.oauth_state as string | undefined;
           res.clearCookie('oauth_state', { path: '/' });
           if (!boundState || boundState !== state) {
-            logger.error(`[${requestId}] OAuth state cookie missing or mismatched — rejecting`);
+            logger.error(`${tag()} OAuth state cookie missing or mismatched — rejecting`);
             await oauthStateServiceV2.deleteState(state as string);
             res.redirect(
               this.getRedirectUrl(req, resolvedPlatform, {
@@ -360,7 +370,7 @@ export class MicrosoftAuthController {
         // Get and delete code verifier for PKCE (atomic operation)
         const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state as string);
         if (!codeVerifier) {
-          logger.error(`[${requestId}] Code verifier not found`);
+          logger.error(`${tag()} PKCE verifier not found`);
           res.redirect(
             this.getRedirectUrl(req, resolvedPlatform, {
               error: 'pkce_error',
@@ -380,7 +390,7 @@ export class MicrosoftAuthController {
           code_verifier: codeVerifier,
         };
 
-        logger.info(`[${requestId}] Exchanging code for tokens`);
+        logger.info(`${tag()} Exchanging code for tokens`);
         const tokenResult = await this.oauthClient.getToken(tokenParams);
         const { token } = tokenResult;
 
@@ -447,7 +457,7 @@ export class MicrosoftAuthController {
         const existingIdentity = await this.userService.findAuthIdentityByEmail(microsoftUserData.email);
         if (existingIdentity && existingIdentity.providerUserId !== microsoftUserData.providerUserId) {
           logger.warn(
-            `[${requestId}] Provider mismatch for ${microsoftUserData.email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
+            `${tag()} Provider mismatch for ${microsoftUserData.email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
           );
           res.redirect(
             this.getRedirectUrl(req, resolvedPlatform, {
@@ -459,11 +469,12 @@ export class MicrosoftAuthController {
           return;
         }
 
+        logger.info(`${tag()} Microsoft auth success for: ${microsoftUserData.email}`);
         const workspaces = this.getEnterpriseAwareWorkspaces(
           await this.userService.getWorkspacesByEmail(microsoftUserData.email),
           peekedState?.enterpriseLogin,
         );
-        logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
+        logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 
         const refreshToken = token.refresh_token as string | undefined;
         const isProduction = process.env.NODE_ENV === 'production';
@@ -496,7 +507,7 @@ export class MicrosoftAuthController {
 
           const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
           logger.info(
-            `[${requestId}] Pending invitation ${pendingInvitationId} found — redirecting to invite page for ${microsoftUserData.email}`,
+            `${tag()} Microsoft OAuth login succeeded (platform=${resolvedPlatform}, outcome=pending_invitation, invitationId=${pendingInvitationId})`,
           );
           res.clearCookie('pending_invitation_id', { path: '/' });
           const inviteParams = new URLSearchParams({
@@ -578,13 +589,13 @@ export class MicrosoftAuthController {
           }
 
           logger.info(
-            `[${requestId}] No workspace found for ${microsoftUserData.email}; redirecting with pending auth for org creation`,
+            `${tag()} Microsoft OAuth login succeeded (platform=${resolvedPlatform}, outcome=no_workspace, count=0) — redirecting for org creation`,
           );
           res.redirect(`${frontendUrl}?${params.toString()}`);
           return;
         }
 
-        logger.info(`[${requestId}] Finding/creating user: ${microsoftUserData.email}`);
+        logger.info(`${tag()} Finding/creating user: ${microsoftUserData.email}`);
         const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
           provider: AuthProvider.MICROSOFT,
           providerUserId: microsoftUserData.providerUserId,
@@ -597,7 +608,7 @@ export class MicrosoftAuthController {
         await this.userService.ensureUserPresence(user.id, user.workspaceId);
 
         logger.info(
-          `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
+          `${tag()} User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
         );
 
         // Generate custom JWT token
@@ -610,39 +621,7 @@ export class MicrosoftAuthController {
           memberId: user.orgMemberId ?? undefined,
         });
 
-        // Create user session
-        let sessionId = null;
-
-        if (refreshToken) {
-          try {
-            logger.info(`[${requestId}] Creating user session with refresh token`);
-
-            const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-            const session = await this.userSessionService.createSession({
-              userId: user.id,
-              refreshToken: refreshToken,
-              refreshTokenExpiry,
-              accessToken: accessToken,
-              accessTokenExpiry,
-              deviceInfo: JSON.stringify({
-                userAgent: req.headers['user-agent'],
-                acceptLanguage: req.headers['accept-language'],
-                timestamp: new Date().toISOString(),
-              }),
-              ipAddress: req.ip || req.socket.remoteAddress || undefined,
-            });
-
-            sessionId = session.id;
-            logger.info(`[${requestId}] Session created`);
-          } catch (sessionError) {
-            logger.error(`[${requestId}] Error creating user session:`, sessionError);
-            // Continue without session creation - not critical for login
-          }
-        }
-
-        // Handle mobile platform: redirect to app deep link with token
+        // Handle mobile platform: relay to app deep link with the token (no server session needed).
         if (resolvedPlatform === 'mobile') {
           const mobileParams = new URLSearchParams({
             success: 'true',
@@ -653,14 +632,11 @@ export class MicrosoftAuthController {
           });
 
           const mobileRedirectUrl = `xyne-spaces://auth/microsoft/callback?${mobileParams.toString()}`;
-          logger.info(`[${requestId}] Redirecting to mobile app: xyne-spaces://auth/microsoft/callback`);
+          logger.info(`${tag()} Microsoft OAuth login succeeded (platform=mobile, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length}) — redirecting to mobile app`);
           res.redirect(mobileRedirectUrl);
           return;
         }
 
-        const userExistsButRemoved = workspaces.length === 0
-          ? await this.userService.userExistsButNoActiveWorkspaces(microsoftUserData.email)
-          : false;
 
         const cookieOptions = {
           httpOnly: true,
@@ -669,7 +645,7 @@ export class MicrosoftAuthController {
           path: '/',
         };
 
-        // Keep provider identity in the signed cookie and provider tokens in Redis.
+        // Pending identity cookie (bridge for loginWorkspace / create-org) — set for BOTH paths.
         const tokenKey = await this.storePendingOAuthTokens(
           refreshToken,
           accessToken,
@@ -687,40 +663,70 @@ export class MicrosoftAuthController {
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
         });
 
-        // Set session ID cookie
-        if (sessionId) {
-          res.cookie('user_session_id', sessionId, {
-            ...cookieOptions,
-            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-          });
-        }
-
-        // Set new user cookie for onboarding
-        if (isNewUser) {
-          res.cookie('is_new_user', 'true', {
-            ...cookieOptions,
-            maxAge: 24 * 60 * 60 * 1000, // 24 hours
-          });
-        }
-
-        // Redirect to frontend with success
         const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
-
         const params = new URLSearchParams({
           success: 'true',
           email: microsoftUserData.email,
           name: microsoftUserData.name,
           picture: microsoftUserData.picture || '',
           workspaces: JSON.stringify(workspaces),
-          userExistsButRemoved: String(userExistsButRemoved),
+          userExistsButRemoved: 'false',
         });
-        if (workspaces.length === 1) {
-          params.set('autoLoginWorkspace', workspaces[0]!.id);
-        }
 
+        if (workspaces.length === 1) {
+          const workspaceId = workspaces[0]!.id;
+          let sessionId: string | null = null;
+          try {
+            const refreshTokenExpiry = new Date();
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
+            const session = await this.userSessionService.createSession({
+              userId: user.id,
+              refreshToken: refreshToken || randomUUID(),
+              refreshTokenExpiry,
+              accessToken,
+              accessTokenExpiry,
+              deviceInfo: JSON.stringify({
+                userAgent: req.headers['user-agent'],
+                acceptLanguage: req.headers['accept-language'],
+                timestamp: new Date().toISOString(),
+              }),
+              ipAddress: req.ip || req.socket.remoteAddress || undefined,
+            });
+            sessionId = session.id;
+            logger.info(`${tag()} Session created`);
+          } catch (sessionError) {
+            logger.error(`${tag()} Error creating user session:`, sessionError);
+          }
+
+          res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
+            ...cookieOptions,
+            maxAge: config.jwt.expirationSeconds * 1000,
+          });
+          res.cookie('xyne_last_workspace', workspaceId, {
+            ...cookieOptions,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+          });
+          if (sessionId) {
+            res.cookie('user_session_id', sessionId, {
+              ...cookieOptions,
+              maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+            });
+          }
+          setOnboardingCookie(res, isNewUser, {
+            secure: isProduction,
+            sameSite: 'lax' as const,
+            maxAge: 24 * 60 * 60 * 1000,
+          });
+
+          params.set('autoLoginWorkspace', workspaceId);
+          logger.info(`${tag()} Microsoft OAuth login succeeded (platform=web, outcome=single_workspace, count=1)`);
+          res.redirect(`${frontendUrl}?${params.toString()}`);
+          return;
+        }
+        logger.info(`${tag()} Microsoft OAuth login succeeded (platform=web, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
         res.redirect(`${frontendUrl}?${params.toString()}`);
       } else {
-        logger.error(`[${requestId}] Microsoft OAuth client not configured`);
+        logger.error(`${tag()} Microsoft OAuth not configured`);
         res.redirect(
           this.getRedirectUrl(req, resolvedPlatform, {
             error: 'microsoft_not_configured',
@@ -730,7 +736,7 @@ export class MicrosoftAuthController {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`[${requestId}] Microsoft OAuth callback failed: ${errorMessage}`);
+      logger.error(`${tag()} Microsoft OAuth login failed (platform=${resolvedPlatform}): ${errorMessage}`);
 
       if (resolvedPlatform !== 'mobile' && peekedState?.redirectTo) {
         const params = new URLSearchParams({
@@ -761,11 +767,12 @@ export class MicrosoftAuthController {
    * Set-Cookie headers that Electron applies to its session.
    */
   exchangeElectron = async (req: Request, res: Response): Promise<void> => {
-    const requestId = `MS_EXCHANGE_ELECTRON_${Date.now()}`;
+    let flowId = 'electron-login';
+    const tag = (): string => authTag(flowId);
 
     try {
       if (!this.oauthClient || !this.userService || !this.userSessionService) {
-        logger.error(`[${requestId}] Microsoft OAuth client not configured`);
+        logger.error(`${tag()} Microsoft OAuth not configured`);
         res.status(500).json({
           success: false,
           error: 'microsoft_not_configured',
@@ -778,10 +785,10 @@ export class MicrosoftAuthController {
       const state = (req.body?.state as string | undefined)?.trim();
       const bodyInvitationId = (req.body?.invitationId as string | undefined)?.trim();
 
-      logger.info(`[${requestId}] EXCHANGE_ELECTRON_BODY: code=${code ? code.substring(0, 12) + '...' : 'NULL'}, state=${state ? state.substring(0, 12) + '...' : 'NULL'}, bodyInvitationId=${bodyInvitationId || 'NULL'}`);
+      logger.info(`${tag()} Microsoft OAuth callback received (electron exchange)`);
 
       if (!code || !state) {
-        logger.error(`[${requestId}] Missing code or state`);
+        logger.error(`${tag()} Missing code or state`);
         res.status(400).json({
           success: false,
           error: 'missing_params',
@@ -792,7 +799,7 @@ export class MicrosoftAuthController {
 
       const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code);
       if (isCodeUsed) {
-        logger.error(`[${requestId}] Authorization code already used`);
+        logger.error(`${tag()} Authorization code already used`);
         res.status(409).json({
           success: false,
           error: 'code_already_used',
@@ -804,7 +811,7 @@ export class MicrosoftAuthController {
       // Validate + consume state
       const stateData = await oauthStateServiceV2.validateState(state);
       if (!stateData) {
-        logger.error(`[${requestId}] Invalid or expired state`);
+        logger.error(`${tag()} Invalid or expired state`);
         res.status(401).json({
           success: false,
           error: 'invalid_state',
@@ -813,8 +820,11 @@ export class MicrosoftAuthController {
         return;
       }
 
+      flowId = stateData.flowId ?? 'electron-login';
+      logger.info(`${tag()} Microsoft OAuth state validated (platform=${stateData.platform})`);
+
       if (stateData.platform !== 'electron') {
-        logger.error(`[${requestId}] Invalid platform: ${stateData.platform}`);
+        logger.error(`${tag()} Invalid platform: ${stateData.platform}`);
         res.status(400).json({
           success: false,
           error: 'invalid_platform',
@@ -823,13 +833,9 @@ export class MicrosoftAuthController {
         return;
       }
 
-      logger.info(`[${requestId}] STATE_DATA: platform=${stateData.platform}, provider=${stateData.provider || 'NULL'}, invitationId=${stateData.invitationId || 'NULL'}`);
-
-
-
       const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state);
       if (!codeVerifier) {
-        logger.error(`[${requestId}] PKCE verifier not found`);
+        logger.error(`${tag()} PKCE verifier not found`);
         res.status(401).json({
           success: false,
           error: 'pkce_failed',
@@ -842,7 +848,7 @@ export class MicrosoftAuthController {
 
       const redirectUri = this.getMicrosoftRedirectUri(req);
 
-      logger.info(`[${requestId}] Exchanging code for tokens`);
+      logger.info(`${tag()} Exchanging code for tokens`);
       const tokenResult = await this.oauthClient.getToken({
         code,
         redirect_uri: redirectUri,
@@ -901,7 +907,7 @@ export class MicrosoftAuthController {
       const existingIdentity = await this.userService.findAuthIdentityByEmail(email);
       if (existingIdentity && existingIdentity.providerUserId !== profile.id) {
         logger.warn(
-          `[${requestId}] Provider mismatch for ${email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
+          `${tag()} Provider mismatch for ${email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
         );
         res.status(403).json({
           success: false,
@@ -912,13 +918,13 @@ export class MicrosoftAuthController {
         return;
       }
 
+      logger.info(`${tag()} Microsoft auth success for: ${email}`);
       const workspaces = this.getEnterpriseAwareWorkspaces(
         await this.userService.getWorkspacesByEmail(email),
         stateData.enterpriseLogin,
       );
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
-      logger.info(`[${requestId}] User has ${workspaces.length} workspace(s), userExistsButRemoved: ${userExistsButRemoved}`);
-      logger.info(`[${requestId}] PROFILE: email=${email}, msId=${profile.id}, verifiedOid=${idTokenClaims.oid ?? 'NULL'}, workspaceCount=${workspaces.length}`);
+      logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 
       const isProduction = process.env.NODE_ENV === 'production';
 
@@ -927,7 +933,7 @@ export class MicrosoftAuthController {
       // path can redirect to /invite and acceptInvitation will have the identity cookie.
       // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
-        logger.info(`[${requestId}] User has no workspaces and no invitation - setting google_access_token and returning no-access`);
+        logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=no_workspace, count=0) — no workspaces/invitation, returning no-access`);
         const tokenKey = await this.storePendingOAuthTokens(
           token.refresh_token as string | undefined,
           accessToken,
@@ -947,7 +953,7 @@ export class MicrosoftAuthController {
           path: '/',
           maxAge: 10 * 60 * 1000,
         });
-        logger.info(`[${requestId}] NO_WORKSPACE_COOKIE_SET: google_access_token set for potential invite redirect (sameSite=lax, maxAge=10min)`);
+        logger.info(`${tag()} google_access_token set for potential invite redirect (sameSite=lax, maxAge=10min)`);
         res.status(200).json({
           success: true,
           workspaces: [],
@@ -964,9 +970,9 @@ export class MicrosoftAuthController {
       // will navigate to /invite?loginComplete=true inside the app — no browser involvement.
       // Combine state and body invitation IDs (same as Google flow)
       const effectiveInvitationId = stateData.invitationId || bodyInvitationId;
-      logger.info(`[${requestId}] INVITATION_CHECK: stateData.invitationId=${stateData.invitationId || 'NULL'}, bodyInvitationId=${bodyInvitationId || 'NULL'}, effectiveInvitationId=${effectiveInvitationId || 'NULL'} → path=${effectiveInvitationId ? 'INVITATION' : 'WORKSPACE_LOGIN'}`);
+      logger.info(`${tag()} Invitation check: effectiveInvitationId=${effectiveInvitationId || 'none'} → path=${effectiveInvitationId ? 'INVITATION' : 'WORKSPACE_LOGIN'}`);
       if (effectiveInvitationId) {
-        logger.info(`[${requestId}] Invitation detected (${effectiveInvitationId}) — returning hasInvitation signal to Electron`);
+        logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=pending_invitation, invitationId=${effectiveInvitationId})`);
         // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
         // from the renderer (localhost:5173) to backend (localhost:3001)
         const tokenKey = await this.storePendingOAuthTokens(
@@ -988,7 +994,7 @@ export class MicrosoftAuthController {
           path: '/',
           maxAge: 10 * 60 * 1000,
         });
-        logger.info(`[${requestId}] INVITATION_COOKIE_SET: google_access_token set (provider=microsoft, hasRefreshToken=${!!(token.refresh_token)}, hasAccessToken=${!!accessToken}, sameSite=lax, maxAge=10min)`);
+        logger.info(`${tag()} google_access_token set for invitation (provider=microsoft, hasRefreshToken=${!!(token.refresh_token)}, sameSite=lax, maxAge=10min)`);
         res.status(200).json({
           success: true,
           hasInvitation: true,
@@ -1001,7 +1007,7 @@ export class MicrosoftAuthController {
         return;
       }
 
-      logger.info(`[${requestId}] NO_INVITATION: falling through to workspace login (workspaces=${workspaces.length}, userExistsButRemoved=${userExistsButRemoved})`);
+      logger.info(`${tag()} No invitation — proceeding to workspace login (workspaces=${workspaces.length}, userExistsButRemoved=${userExistsButRemoved})`);
       
       /**
        * AUTO-LOGIN SINGLE WORKSPACE USERS (Electron)
@@ -1009,8 +1015,8 @@ export class MicrosoftAuthController {
        */
       if (workspaces.length === 1) {
         const workspaceId = workspaces[0]!.id;
-        logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
-        
+        logger.info(`${tag()} Single workspace detected - auto-logging in to ${workspaceId}`);
+
         const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
           provider: AuthProvider.MICROSOFT,
           providerUserId: profile.id,
@@ -1022,7 +1028,7 @@ export class MicrosoftAuthController {
         await this.userService.ensureUserPresence(user.id, user.workspaceId);
 
         logger.info(
-          `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
+          `${tag()} User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
         );
 
         const customToken = jwtService.generateToken({
@@ -1034,35 +1040,35 @@ export class MicrosoftAuthController {
           memberId: user.orgMemberId ?? undefined,
         });
 
+        // Always create a session (fall back to a generated refresh token if Microsoft omitted one)
+        // so user_session_id is always issued.
         let sessionId: string | null = null;
         const refreshToken = token.refresh_token as string | undefined;
 
-        if (refreshToken) {
-          try {
-            const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
 
-            const session = await this.userSessionService.createSession({
-              userId: user.id,
-              refreshToken,
-              refreshTokenExpiry,
-              accessToken,
-              accessTokenExpiry,
-              deviceInfo: JSON.stringify({
-                userAgent: req.headers['user-agent'],
-                acceptLanguage: req.headers['accept-language'],
-                timestamp: new Date().toISOString(),
-                platform: 'electron',
-              }),
-              ipAddress: req.ip || req.socket.remoteAddress || undefined,
-            });
+          const session = await this.userSessionService.createSession({
+            userId: user.id,
+            refreshToken: refreshToken || randomUUID(),
+            refreshTokenExpiry,
+            accessToken,
+            accessTokenExpiry,
+            deviceInfo: JSON.stringify({
+              userAgent: req.headers['user-agent'],
+              acceptLanguage: req.headers['accept-language'],
+              timestamp: new Date().toISOString(),
+              platform: 'electron',
+            }),
+            ipAddress: req.ip || req.socket.remoteAddress || undefined,
+          });
 
-            sessionId = session.id;
-            logger.info(`[${requestId}] Session created`);
-          } catch (sessionError) {
-            logger.error(`[${requestId}] Error creating user session:`, sessionError);
-            // Continue without session creation - not critical for login
-          }
+          sessionId = session.id;
+          logger.info(`${tag()} Session created`);
+        } catch (sessionError) {
+          logger.error(`${tag()} Error creating user session:`, sessionError);
+          // Continue without session creation - not critical for login
         }
 
         const cookieOptions = {
@@ -1089,15 +1095,11 @@ export class MicrosoftAuthController {
           });
         }
 
-        if (isNewUser) {
-          res.cookie('is_new_user', 'true', {
-            httpOnly: false,
-            secure: isProduction,
-            sameSite: 'strict',
-            path: '/',
-            maxAge: 24 * 60 * 60 * 1000,
-          });
-        }
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
 
         const tokenKey = await this.storePendingOAuthTokens(
           refreshToken,
@@ -1119,7 +1121,7 @@ export class MicrosoftAuthController {
           maxAge: 10 * 60 * 1000,
         });
 
-        logger.info(`[${requestId}] Electron auto-login complete - cookies set: user_session_id, google_access_token`);
+        logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=single_workspace, count=1) — auto-login, cookies set`);
 
         // Return JSON with workspaces (Electron expects this for renderer to handle)
         res.status(200).json({
@@ -1133,57 +1135,11 @@ export class MicrosoftAuthController {
         return;
       }
 
-      // Multiple workspaces (or new user): create user without workspace assignment
-      // Return workspaces array so Electron can show workspace selector
-      const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
-        provider: AuthProvider.MICROSOFT,
-        providerUserId: profile.id,
-        email,
-        name: profile.displayName,
-        picture: undefined,
-      }, workspaces[0]?.id ?? '');
-
-      await this.userService.ensureUserPresence(user.id, user.workspaceId);
-
-      logger.info(
-        `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser}, workspaces: ${workspaces.length})`
-      );
-
-      // Create session for multi-workspace users too (same as single workspace)
-      let sessionId: string | null = null;
-      const refreshToken = token.refresh_token as string | undefined;
-
-      if (refreshToken) {
-        try {
-          const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
-
-          const session = await this.userSessionService.createSession({
-            userId: user.id,
-            refreshToken,
-            refreshTokenExpiry,
-            accessToken,
-            accessTokenExpiry,
-            deviceInfo: JSON.stringify({
-              userAgent: req.headers['user-agent'],
-              acceptLanguage: req.headers['accept-language'],
-              timestamp: new Date().toISOString(),
-              platform: 'electron',
-            }),
-            ipAddress: req.ip || req.socket.remoteAddress || undefined,
-          });
-
-          sessionId = session.id;
-          logger.info(`[${requestId}] Session created`);
-        } catch (sessionError) {
-          logger.error(`[${requestId}] Error creating user session:`, sessionError);
-          // Continue without session creation - not critical for login
-        }
-      }
-
-      // Store pending auth data for later loginWorkspace / acceptInvitation call
+      // MULTIPLE workspaces (or removed user) → SELECTION (Path B): pending cookie ONLY. No session
+      // and no user_session_id here — the renderer shows the picker and loginWorkspace mints the 3
+      // cookies. Mirrors Google's exchangeElectronCode multi branch (no user creation either).
       const tokenKey = await this.storePendingOAuthTokens(
-        refreshToken,
+        token.refresh_token as string | undefined,
         accessToken,
         accessTokenExpiry,
       );
@@ -1202,38 +1158,18 @@ export class MicrosoftAuthController {
         maxAge: 10 * 60 * 1000,
       });
 
-      if (sessionId) {
-        res.cookie('user_session_id', sessionId, {
-          httpOnly: true,
-          secure: isProduction,
-          sameSite: 'strict',
-          path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-        });
-      }
-
-      if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: isProduction,
-          sameSite: 'strict',
-          path: '/',
-          maxAge: 24 * 60 * 60 * 1000,
-        });
-      }
-
-      logger.info(`[${requestId}] Multiple workspaces (${workspaces.length}) detected - returning to selector`);
+      logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length}) — returning to selector`);
       res.status(200).json({
         success: true,
-        email: user.email,
-        name: user.name,
-        picture: user.picture ?? undefined,
+        email,
+        name: profile.displayName,
+        picture: undefined,
         workspaces,
         userExistsButRemoved: workspaces.length === 0,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`[${requestId}] Microsoft electron exchange failed: ${errorMessage}`);
+      logger.error(`${tag()} Microsoft OAuth login failed (platform=electron): ${errorMessage}`);
       res.status(500).json({
         success: false,
         error: 'exchange_failed',
@@ -1255,11 +1191,13 @@ export class MicrosoftAuthController {
    * Body: { code: string, code_verifier: string, redirect_uri: string }
    */
   exchangeMobile = async (req: Request, res: Response): Promise<void> => {
-    const requestId = `MS_EXCHANGE_MOBILE_${Date.now()}`;
+    const flowId = 'native-mobile';
+    const tag = (): string => authTag(flowId);
 
     try {
+      logger.info(`${tag()} Microsoft OAuth callback received (mobile exchange, native)`);
       if (!this.oauthClient || !this.userService || !this.userSessionService) {
-        logger.error(`[${requestId}] Microsoft OAuth client not configured`);
+        logger.error(`${tag()} Microsoft OAuth not configured`);
         res.status(500).json({
           success: false,
           error: 'microsoft_not_configured',
@@ -1273,7 +1211,7 @@ export class MicrosoftAuthController {
       const redirectUri = (req.body?.redirect_uri as string | undefined)?.trim();
 
       if (!code || !codeVerifier || !redirectUri) {
-        logger.error(`[${requestId}] Missing code, code_verifier, or redirect_uri`);
+        logger.error(`${tag()} Missing code, code_verifier, or redirect_uri`);
         res.status(400).json({
           success: false,
           error: 'missing_params',
@@ -1286,7 +1224,7 @@ export class MicrosoftAuthController {
       // Bypass simple-oauth2 here and call Microsoft's token endpoint directly
       // with application/x-www-form-urlencoded which is what Microsoft requires.
       // simple-oauth2 defaults to JSON body which causes a 401 from Microsoft.
-      logger.info(`[${requestId}] Exchanging code for tokens`);
+      logger.info(`${tag()} Exchanging code for tokens`);
       const tokenParams = new URLSearchParams({
         grant_type: 'authorization_code',
         client_id: this.clientId!,
@@ -1310,7 +1248,7 @@ export class MicrosoftAuthController {
         const msError = tokenBody.error as string | undefined;
         const msDesc = tokenBody.error_description as string | undefined;
         logger.error(
-          `[${requestId}] Microsoft token endpoint error: ${tokenResponse.status} ${msError} - ${msDesc}`
+          `${tag()} Microsoft token endpoint error: ${tokenResponse.status} ${msError} - ${msDesc}`
         );
         throw new Error(`Microsoft token exchange failed: ${msError} - ${msDesc}`);
       }
@@ -1327,7 +1265,7 @@ export class MicrosoftAuthController {
       }
 
       const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
-      logger.info(`[${requestId}] Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
+      logger.info(`${tag()} Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
 
       // const emailIsDomainVerified = idTokenClaims.xms_edov === true;
       // if (!emailIsDomainVerified) {
@@ -1376,7 +1314,7 @@ export class MicrosoftAuthController {
       const existingIdentity = await this.userService.findAuthIdentityByEmail(email);
       if (existingIdentity && existingIdentity.providerUserId !== profile.id) {
         logger.warn(
-          `[${requestId}] Provider mismatch for ${email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
+          `${tag()} Provider mismatch for ${email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
         );
         res.status(403).json({
           success: false,
@@ -1387,60 +1325,10 @@ export class MicrosoftAuthController {
         return;
       }
 
+      logger.info(`${tag()} Microsoft auth success for: ${email}`);
       const workspaces = await this.userService.getWorkspacesByEmail(email);
-      logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
+      logger.info(`${tag()} User has ${workspaces.length} workspace(s)`);
 
-      logger.info(`[${requestId}] Finding/creating user: ${email}`);
-      const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
-        provider: AuthProvider.MICROSOFT,
-        providerUserId: profile.id,
-        email,
-        name: profile.displayName,
-        picture: undefined,
-      }, workspaces[0]?.id ?? '');
-
-      await this.userService.ensureUserPresence(user.id, user.workspaceId);
-
-      logger.info(
-        `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
-      );
-
-      // Create a user session with the Microsoft refresh token (held on the
-      // backend so it can refresh access tokens without involving the mobile app).
-      let sessionId: string | null = null;
-      const refreshToken = token.refresh_token as string | undefined;
-      if (refreshToken) {
-        try {
-          const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
-
-          const expiresIn = token.expires_in as number | undefined;
-          const session = await this.userSessionService.createSession({
-            userId: user.id,
-            refreshToken,
-            refreshTokenExpiry,
-            accessToken,
-            accessTokenExpiry: expiresIn
-              ? new Date(Date.now() + expiresIn * 1000)
-              : undefined,
-            deviceInfo: JSON.stringify({
-              userAgent: req.headers['user-agent'],
-              acceptLanguage: req.headers['accept-language'],
-              timestamp: new Date().toISOString(),
-              platform: 'mobile',
-            }),
-            ipAddress: req.ip || req.socket.remoteAddress || undefined,
-          });
-
-          sessionId = session.id;
-          logger.info(`[${requestId}] Session created`);
-        } catch (sessionError) {
-          logger.error(`[${requestId}] Error creating user session:`, sessionError);
-          // Continue without session creation - not critical for login
-        }
-      }
-
-      // Set the same cookies that the Google mobile exchange endpoint sets
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieOptions: {
         httpOnly: boolean;
@@ -1454,11 +1342,14 @@ export class MicrosoftAuthController {
         path: '/',
       };
 
-      // Keep provider identity in the signed cookie and provider tokens in Redis.
+      const refreshToken = token.refresh_token as string | undefined;
       const mobileExpiresIn = token.expires_in as number | undefined;
       const mobileAccessTokenExpiry = mobileExpiresIn
         ? new Date(Date.now() + mobileExpiresIn * 1000)
         : undefined;
+
+      // Always set the pending identity cookie (bridge for loginWorkspace / create-org). Provider
+      // tokens live in Redis; the cookie holds only the lookup key.
       const tokenKey = await this.storePendingOAuthTokens(
         refreshToken,
         accessToken,
@@ -1476,29 +1367,102 @@ export class MicrosoftAuthController {
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });
 
-      if (sessionId) {
-        res.cookie('user_session_id', sessionId, {
+      // SINGLE workspace → AUTO-LOGIN (Path A): create the session + set all 3 real cookies and
+      // return userId, so the shared mobile resolver treats it as authenticated (no picker).
+      if (workspaces.length === 1) {
+        const workspaceId = workspaces[0]!.id;
+
+        const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
+          provider: AuthProvider.MICROSOFT,
+          providerUserId: profile.id,
+          email,
+          name: profile.displayName,
+          picture: undefined,
+        }, workspaceId);
+        await this.userService.ensureUserPresence(user.id, user.workspaceId);
+
+        const customToken = jwtService.generateToken({
+          sub: user.id,
+          email: user.email,
+          name: user.name,
+          picture: user.picture ?? undefined,
+          workspaceId: user.workspaceId ?? undefined,
+          memberId: user.orgMemberId ?? undefined,
+        });
+        
+        let sessionId: string | null = null;
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          const session = await this.userSessionService.createSession({
+            userId: user.id,
+            refreshToken: refreshToken || randomUUID(),
+            refreshTokenExpiry,
+            accessToken,
+            accessTokenExpiry: mobileAccessTokenExpiry,
+            deviceInfo: JSON.stringify({
+              userAgent: req.headers['user-agent'],
+              acceptLanguage: req.headers['accept-language'],
+              timestamp: new Date().toISOString(),
+              platform: 'mobile',
+            }),
+            ipAddress: req.ip || req.socket.remoteAddress || undefined,
+          });
+          sessionId = session.id;
+          logger.info(`${tag()} Session created`);
+        } catch (sessionError) {
+          logger.error(`${tag()} Error creating user session:`, sessionError);
+        }
+
+        res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
+          ...cookieOptions,
+          maxAge: config.jwt.expirationSeconds * 1000,
+        });
+        res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieOptions,
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
-      }
-
-      if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          ...cookieOptions,
+        if (sessionId) {
+          res.cookie('user_session_id', sessionId, {
+            ...cookieOptions,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+          });
+        }
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'lax' as const,
           maxAge: 24 * 60 * 60 * 1000,
         });
+
+        logger.info(`${tag()} Microsoft OAuth login succeeded (platform=mobile, outcome=single_workspace, count=1)`);
+        res.json({
+          success: true,
+          userId: user.id,
+          sessionId,
+          isNewUser,
+          email: user.email,
+          name: user.name,
+          workspaces,
+          userExistsButRemoved: false,
+        });
+        return;
       }
 
+      // 0 or MULTIPLE workspaces → SELECTION / ORG-CREATION (Path B): pending cookie only. Return the
+      // workspaces list WITHOUT a userId or session so the shared mobile resolver shows the picker
+      // (multi) or the create-org flow (0). loginWorkspace mints the real cookies after the pick.
+      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
+      logger.info(`${tag()} Microsoft OAuth login succeeded (platform=mobile, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
       res.json({
         success: true,
-        userId: user.id,
-        sessionId,
-        isNewUser,
+        email,
+        name: profile.displayName,
+        workspaces,
+        userExistsButRemoved,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`[${requestId}] Microsoft mobile exchange failed: ${errorMessage}`);
+      logger.error(`${tag()} Microsoft OAuth login failed (platform=mobile): ${errorMessage}`);
       res.status(500).json({
         success: false,
         error: 'exchange_failed',

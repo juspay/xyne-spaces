@@ -36,6 +36,10 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug,
       metricsEnabled,
       frtStageNames,
+      appWebhookDeliveryEnabled,
+      deskReportEnabled,
+      deskReportAgentSlug,
+      deskReportRangeDays,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -48,6 +52,10 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug?: string | null;
       metricsEnabled?: boolean;
       frtStageNames?: string | null;
+      appWebhookDeliveryEnabled?: boolean;
+      deskReportEnabled?: boolean;
+      deskReportAgentSlug?: string | null;
+      deskReportRangeDays?: number;
     }): Promise<void> => {
       zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -64,6 +72,12 @@ export function useUpdateEmailChannelPreference() {
             : {}),
           ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
           ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+          ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
+          ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
+          ...(deskReportAgentSlug !== undefined
+            ? { deskReportAgentSlug: deskReportAgentSlug || null }
+            : {}),
+          ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
         }),
       );
       return Promise.resolve();

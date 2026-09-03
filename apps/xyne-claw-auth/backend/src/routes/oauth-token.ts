@@ -11,6 +11,7 @@
  */
 
 import { buildOAuthTokenRouter, type OAuthTokenProvider } from "../lib/oauth-token-endpoint.js";
+import { isOAuthServer } from "../lib/oauth-server-types.js";
 import { googleOAuthProvider } from "./google-oauth.js";
 import { microsoftOAuthProvider } from "./microsoft-oauth.js";
 import { docusignOAuthProvider } from "./docusign-oauth.js";
@@ -50,6 +51,24 @@ const PROVIDERS_BY_TYPE = new Map(ALL_OAUTH_PROVIDERS.map((p) => [p.serverType, 
  */
 export function getOAuthProvider(serverType: string): OAuthTokenProvider | undefined {
   return PROVIDERS_BY_TYPE.get(serverType);
+}
+
+/**
+ * Complete "is this connector OAuth?" predicate — the single source of truth
+ * the API/UI should use instead of the static {@link isOAuthServer} set alone.
+ *
+ * A connector authenticates via OAuth if EITHER:
+ *   1. it has a registered {@link OAuthTokenProvider} (all self-serve OAuth
+ *      connectors: google, microsoft, calendly, docusign, … — the authoritative
+ *      13-entry registry above), OR
+ *   2. the DB declares it via the built-in set / `connectorMeta.authMethod`
+ *      (kept for admin-registered custom OAuth connectors that ship no provider).
+ *
+ * `isOAuthServer` alone only recognised google/microsoft, so every self-serve
+ * OAuth connector was mislabelled `oauth: false` by the /servers route.
+ */
+export function isOAuthConnector(serverType: string, connectorMeta?: unknown, isOauth?: boolean): boolean {
+  return getOAuthProvider(serverType) !== undefined || isOAuthServer(serverType, connectorMeta, isOauth);
 }
 
 export const oauthTokenRouter = buildOAuthTokenRouter(ALL_OAUTH_PROVIDERS);

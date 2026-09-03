@@ -177,10 +177,26 @@ subagents (`SubagentSkill`).
 ## 7. Knowledge base
 
 `kbScope`: **COLLECTIONS** (agent allowlists specific Spaces collections via
-`AgentCollection`) or **USER** (inherits the calling user's full KB). KB tools
-(`kb-search`, `kb-list-resources`, `kb-read-file`, `kb-get-chunks`,
-`kb-search-within-doc`) auto-surface only when the agent has grants or USER scope.
+`AgentCollection`) or **USER** (inherits the calling user's full KB). Six read-only
+tools auto-surface when the agent has grants or USER scope: `kb-list-resources`
+(top-level inventory), **`kb-list-files`** (the `ls` — files *and* sub-folders;
+takes a collection **or folder** id, plus `depth`: 1 = collapsed children,
+N = expand N levels, -1 = whole subtree, capped at 400 rows), `kb-search`
+(Vespa over names + chunks), `kb-read-file`, `kb-search-within-doc`, `kb-get-chunks`.
 Flag a COLLECTIONS-scope agent with zero grants that clearly needs documents.
+
+Navigation: `kb-list-resources` → `kb-list-files` to map the layout →
+`kb-search` / `kb-search-within-doc` to locate → `kb-read-file` / `kb-get-chunks`
+to read. `kb-list-resources` is **top-level only** — a collection whose documents all
+live in sub-folders looks empty there, so check its `file_count` (recursive) and
+`folder_count` before concluding the KB is empty. File rows carry a root-relative
+`path`, which is the only way to tell apart the repeated names a
+convention-based layout produces (`services/<area>/service.md`).
+
+Grants nest: a whole-collection grant covers every file at or below it, at any
+depth (`services/` covers `services/release-deploy/service.md`). A single-file
+grant exposes that file plus the folders on its path, nothing else. Both layers
+still apply on every call — the allowlist, then the caller's live Spaces access.
 
 ---
 

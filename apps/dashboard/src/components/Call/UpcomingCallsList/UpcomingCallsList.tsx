@@ -1,9 +1,7 @@
 import { format } from 'date-fns';
+import { CallStatus } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
-import {
-  isScheduledCallJoinable,
-  type Call,
-} from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
+import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import Button from '../../ui/Button';
 import { GroupedList } from './GroupedList';
 
@@ -54,7 +52,8 @@ export function UpcomingCallsList({
         const startsAt = call.startsAt ? new Date(call.startsAt) : new Date();
         const endsAt = call.endsAt ? new Date(call.endsAt) : null;
         const title = call.title ?? 'Scheduled Call';
-        const joinable = isScheduledCallJoinable(call);
+        const isActive =
+          call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS;
 
         const startTime = format(startsAt, 'h:mm a');
         const endTime = endsAt ? format(endsAt, 'h:mm a') : null;
@@ -65,7 +64,7 @@ export function UpcomingCallsList({
             className={cn(
               'group flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4',
               'pl-3 border-l-2 transition-colors duration-150 rounded-r-sm',
-              joinable ? 'border-status-success' : 'border-primary/25 hover:border-primary/50',
+              isActive ? 'border-status-success' : 'border-primary/25 hover:border-primary/50',
             )}
           >
             <div className='flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1 sm:py-2'>
@@ -84,12 +83,14 @@ export function UpcomingCallsList({
               variant='outline'
               size='sm'
               onClick={() => onJoinCall(call)}
-              tabIndex={joinable ? 0 : -1}
+              data-track-category='CALLS'
+              data-track-name='JOIN_UPCOMING_CALL'
+              tabIndex={0}
               className={cn(
                 'w-full justify-center sm:w-auto sm:shrink-0 transition-opacity duration-150',
-                joinable
+                isActive
                   ? 'border-status-success text-status-success hover:bg-accent opacity-100'
-                  : 'opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto',
+                  : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
               Join Call

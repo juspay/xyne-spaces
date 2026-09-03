@@ -3,8 +3,8 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
-import { API_BASE_URL, isTestEnv } from '../config';
+import { posthogService } from '../services/Analytics/posthogService';
+import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -19,7 +19,7 @@ import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
 import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
-import { dropAllDatabases } from '@rocicorp/zero';
+import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
 
 export interface User {
   id: string;
@@ -727,7 +727,7 @@ export const authMachine = createMachine(
       authenticated: {
         entry: ({ context }) => {
           if (context.user?.id) {
-            mixpanelService.identify(context.user);
+            posthogService.identify(context.user);
           }
         },
         on: {
@@ -900,6 +900,23 @@ export const authMachine = createMachine(
                   workspaces: getWorkspaces(output),
                   pendingUserData: output?.pendingUserData || null,
                   selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              // Single-workspace auto-login (e.g. email login with exactly one workspace):
+              // skip the picker and log straight into the returned workspace, mirroring OAuth.
+              guard: 'hasAutoLoginWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: output?.autoLoginWorkspace || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
                   error: null,
                 };
@@ -1307,17 +1324,11 @@ export const authMachine = createMachine(
       }),
       trackLoginSuccess: ({ context }) => {
         if (context.user?.id) {
-          mixpanelService.identify(context.user);
-          mixpanelService.track(EVENTS.AUTHENTICATION, {
-            type: EVENT_PROPERTIES.AUTH_TYPES.LOGIN,
-          });
+          posthogService.identify(context.user);
         }
       },
       trackLogoutSuccess: () => {
-        mixpanelService.track(EVENTS.AUTHENTICATION, {
-          type: EVENT_PROPERTIES.AUTH_TYPES.LOGOUT,
-        });
-        mixpanelService.reset();
+        posthogService.reset();
       },
     },
     actors: {
@@ -1338,7 +1349,9 @@ export const authMachine = createMachine(
           /* empty */
         }
 
-        await dropAllDatabases();
+        // Logout is the one place a cross-lane drop is right: both bundles are going
+        // away. The lane must not take out its host's store, so it only drops its own.
+        await (isSdlcSurface ? dropZeroDatabases() : dropAllZeroDatabases());
         await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {

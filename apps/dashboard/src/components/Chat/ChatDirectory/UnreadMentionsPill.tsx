@@ -86,7 +86,7 @@ const UnreadMentionsPill = ({
   return (
     <button
       type='button'
-      className='pointer-events-auto flex shrink-0 items-center gap-1.5 rounded-full bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground shadow-md transition-colors hover:opacity-90'
+      className='pointer-events-auto flex shrink-0 items-center gap-1.5 rounded-full bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground shadow-md'
       onClick={() => target.scrollIntoView({ block: 'start', behavior: 'smooth' })}
       data-track-category='CHAT_SIDEBAR'
       data-track-name='JUMP_TO_UNREAD_MENTION'

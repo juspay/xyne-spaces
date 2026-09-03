@@ -204,6 +204,25 @@ get_non_zero_definitions() {
     ' "$schema_file"
 }
 
+# Extract Prisma models explicitly excluded from the Zero generator.
+# These backend-only tables should not be required in the shared Zero schema.
+get_zero_excluded_models() {
+    local schema_file="$1"
+
+    get_schema_content "$schema_file" | awk '
+        $1 == "generator" && $2 == "zero" { in_generator=1; next }
+        in_generator && /^[[:space:]]*}/ { exit }
+        in_generator && /excludeTables[[:space:]]*=/ {
+            line=$0
+            while (match(line, /"[^"]+"/)) {
+                model=substr(line, RSTART + 1, RLENGTH - 2)
+                print model
+                line=substr(line, RSTART + RLENGTH)
+            }
+        }
+    '
+}
+
 # Check if a name is present in a newline-separated list.
 # Arguments: $1 = name, $2 = list
 in_list() {
@@ -238,6 +257,8 @@ validate_prisma_zero_sync() {
     non_zero_models=$(get_non_zero_definitions "$prisma_schema" "model")
     local non_zero_enums
     non_zero_enums=$(get_non_zero_definitions "$prisma_schema" "enum")
+    local zero_excluded_models
+    zero_excluded_models=$(get_zero_excluded_models "$prisma_schema")
 
     # Extract newly added Prisma model names from the staged diff
     local new_prisma_models
@@ -262,13 +283,20 @@ validate_prisma_zero_sync() {
                 log_info "  ⏭ Prisma model '$model' is in the non_zero schema — skipping Zero sync check"
                 continue
             fi
-            # Case-insensitive grep to handle both PascalCase and snake_case table names
-            if ! grep -qi "table(.*${model}" "$zero_schema"; then
+            if in_list "$model" "$zero_excluded_models"; then
+                log_info "  ⏭ Prisma model '$model' is excluded from the Zero generator — skipping Zero sync check"
+                continue
+            fi
+            # Match the PascalCase model name or its @@map'd snake_case table name.
+            local mapped_table
+            mapped_table=$(get_mapped_model_name "$prisma_schema" "$model")
+            if grep -qi "table(.*${model}" "$zero_schema" || \
+               { [ -n "$mapped_table" ] && grep -qiE "table\([\"']${mapped_table}[\"']" "$zero_schema"; }; then
+                log_info "  ✓ Prisma model '$model' found in $zero_schema"
+            else
                 log_error "Prisma model '$model' added to schema.prisma but no matching table() found in $zero_schema"
                 log_error "  → Add a corresponding table definition in $zero_schema"
                 has_errors=true
-            else
-                log_info "  ✓ Prisma model '$model' found in $zero_schema"
             fi
         done <<< "$new_prisma_models"
     fi

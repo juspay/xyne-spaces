@@ -13,8 +13,9 @@ import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisi
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
-import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -35,6 +36,11 @@ import {
   DEFAULT_RECORDING_SUMMARY_FIELDS,
   RECORDING_DETAILED_SUMMARY_PROMPT,
 } from './recordingSummaryTemplates';
+import {
+  extractMarkedItemsFromRecordingSummary,
+  stripRecordingSummaryMarkedItemAnnotations,
+  type RecordingSummaryMarkedItem,
+} from './recordingSummaryMarkedItems';
 import { summaryTemplateService } from './summaryTemplateService';
 
 // PRD Document structure
@@ -63,7 +69,7 @@ interface CanvasSideEffectContext {
   workspaceId: string;
 }
 
-import { executeStreamingLlmRequest } from './callLlmRetry';
+import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -79,6 +85,33 @@ function sanitizeInput(input: string | null): string {
   // Limit length to prevent excessive token usage (adjust as needed)
   const maxLength = 100000; // ~100K chars
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
+}
+
+/**
+ * Some legacy custom-template prompts cause the model to copy the template
+ * prompt-generation response shape and return { "systemPrompt": "..." }.
+ * Accept that response defensively, but keep ordinary Markdown untouched.
+ */
+function normalizeDetailedSummaryMarkdown(content: string): string {
+  const trimmed = content.trim();
+  const fencedJson = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+  const candidate = fencedJson ?? trimmed;
+
+  try {
+    const parsed: unknown = JSON.parse(candidate);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>).systemPrompt === 'string'
+    ) {
+      return ((parsed as Record<string, unknown>).systemPrompt as string).trim();
+    }
+  } catch {
+    // Normal Markdown is not JSON and should pass through unchanged.
+  }
+
+  return content;
 }
 
 function renderPromptTemplate(template: string, values: Record<string, string>): string {
@@ -349,6 +382,21 @@ export async function buildParticipantMap(channelId: string): Promise<Map<string
   return participantMap;
 }
 
+/** Return the distinct people who actually contributed speech to a formatted transcript. */
+function extractTranscriptSpeakers(transcript: string): string[] {
+  const speakers = new Map<string, string>();
+  const speakerLine = /^\s*(?:\[\d+\]\s*)?\[[^\]]+\]\s*([^:\n]+):/gm;
+
+  for (const match of transcript.matchAll(speakerLine)) {
+    const speaker = match[1].trim();
+    if (speaker && speaker.toLowerCase() !== 'unknown') {
+      speakers.set(speaker.toLowerCase(), speaker);
+    }
+  }
+
+  return Array.from(speakers.values());
+}
+
 // PRD Generation prompt
 const PRD_GENERATION_PROMPT = `You are a senior product manager creating a Product Requirements Document (PRD) from a call transcript.
 
@@ -416,6 +464,11 @@ MARKDOWN TEMPLATE:
 - If a name in the transcript seems close to a participant name, use the correct version from the list
 - For @mentions in Action Items, use the full correct name (e.g., @Mayank Bansal)
 
+**CALL CREATOR:**
+- In the CALL PARTICIPANTS list above, the person who created/initiated the call is annotated with "{HOST}".
+- In the Call Overview Participants line, keep that "{HOST}" marker immediately after their name.
+- Do not add a "{HOST}" marker to anyone who is not annotated as such in the list above.
+
 **INSTRUCTIONS:**
 - Determine call length from transcript and use appropriate number of phases (1-7)
 - Short/quick calls should have FEWER phases - don't force many phases on a brief discussion
@@ -428,18 +481,28 @@ MARKDOWN TEMPLATE:
 - In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
 
-**CITATIONS (IMPORTANT):**
+**CITATIONS (ACCURACY IS CRITICAL):**
 - Each transcript line is prefixed with a segment number in square brackets, e.g. "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
-- After any specific claim, decision, action item, number, date, name, or quote you draw from the transcript, cite the segment(s) it came from INLINE using the exact token [clf-N], where N is that segment's number. Example: "The team agreed to ship the API redesign in Q4 [clf-12]."
-- Cite the MOST specific segment(s) that support the statement. You may place up to 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]".
-- Copy the number EXACTLY from the transcript. Do NOT invent segment numbers. Do NOT use ranges like [clf-8-11]. Only cite segment numbers that actually appear in the transcript above; if a line has no bracketed number, do not cite it.
+- After any specific claim, decision, action item, number, date, name, or quote you draw from the transcript, cite the segment(s) it came from INLINE using the exact token [clf-N]. Example: "The team agreed to ship the API redesign in Q4 [clf-12]."
+- A citation is a PROOF POINTER, not decoration. [clf-N] asserts: "the words that make this statement true are inside segment N." The reader clicks it and is taken to that exact moment in the transcript.
+- BEFORE writing [clf-N], find line N in the TRANSCRIPT below and confirm its text actually states what you just wrote. If you cannot point to the specific words in that line, do NOT cite it.
+- Topic proximity is NOT support. A segment that merely discusses the same subject, or sits near the moment you have in mind, does not support the claim. Never cite "roughly where it was discussed".
+- Never estimate, guess, round, shift, or reconstruct a segment number from memory of where something appeared. Read the number off the line itself. If you are not certain of the number, leave the statement uncited.
+- Attribution must match: if the statement says who said, wanted, offered, agreed to, or committed to something, the cited segment must be that person's line, or a line that explicitly states their position.
+- Each token in a group must independently support the statement. Never pad with extra numbers to look thorough — one exact citation beats three approximate ones. At most 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]", most direct evidence first.
+- For a roll-up statement that synthesises several moments (typical of Key Takeaways): cite only the 1-3 segments where that point is most explicitly stated. If no segment states it, RE-WORD the statement so it matches what a segment actually says — never attach an approximate citation just to satisfy the format.
+- An uncited statement is acceptable. A wrongly cited statement is a serious error, because it looks verified and is not.
+- Copy the number EXACTLY. Do NOT invent segment numbers. Do NOT use ranges like [clf-8-11]. Only cite segment numbers that actually appear in the transcript below; if a line has no bracketed number, do not cite it.
 - Write ONLY the bare token [clf-N] — never a link, URL, footnote, or a separate "Citations"/"Sources" section.
+- FINAL CHECK before you output: re-read every [clf-N] you wrote, look the segment up again, and delete or re-word any citation whose segment does not contain the claim it is attached to.
 
 Only output valid Markdown.
 No extra text.
 
 TRANSCRIPT:
 {transcript}
+
+FINAL REMINDER — CITATIONS: every [clf-N] you write must point at a numbered segment above whose text actually states the claim it is attached to. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
 `;
 
 const EDIT_SUMMARY_PROMPT = `You are an assistant that edits a MARKDOWN SECTION TEMPLATE used to generate call summaries. You will be given the CURRENT TEMPLATE and a USER INSTRUCTION, and you must return the UPDATED TEMPLATE.
@@ -457,6 +520,7 @@ HOW IT IS USED (so your edits stay valid):
   - Output language is forced to English.
   - Brand-name correction: speech-to-text mis-hearings of "Xyne" (Zain/Zine/Xine/Zyne) are auto-corrected.
   - Phase count scales with call length (short calls get fewer phases).
+  - Inline transcript citations: the generating LLM already appends [clf-N] tokens pointing at the transcript segments that support each claim, and is already told to verify them. Do NOT add, restate, or relax citation instructions, and do NOT add a "Citations"/"Sources" section to the template.
   - Name accuracy & mentions: in Action Items, people who attended the call are written as @ + their FULL NAME (e.g. @Mayank Bansal) so they become real user mentions in the channel; people NOT in the call are written plainly with "(not in channel)". Preserve this convention if the template references assignees/owners.
 
 RULES FOR YOUR EDIT:
@@ -588,8 +652,7 @@ async function convertMarkdownToBlockNote(
   citationCtx?: CitationContext,
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   try {
-    const editor = ServerBlockNoteEditor.create();
-    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+    const parsed = await withServerEditor((editor) => editor.tryParseMarkdownToBlocks(markdown));
 
     // Collect mentioned IDs during the mention-processing pass
     const mentionedIds = new Set<string>();
@@ -949,7 +1012,13 @@ export class CallDocumentService {
     callId: string,
     templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
-  ): Promise<{ summary: string; template: SummaryTemplate } | null> {
+    citationSegments?: CitationContext['segments'],
+    modelType?: SummaryModelType,
+  ): Promise<{
+    summary: string;
+    template: SummaryTemplate;
+    markedItems: RecordingSummaryMarkedItem[];
+  } | null> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call?.workspaceId) return null;
 
@@ -983,7 +1052,7 @@ export class CallDocumentService {
       return null;
     }
 
-    const summary = await this.generateDetailedSummary(
+    const rawSummary = await this.generateDetailedSummary(
       transcript,
       callId,
       template.autoTriggerPrompt ?? undefined,
@@ -991,10 +1060,25 @@ export class CallDocumentService {
       template.systemPrompt,
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
-      onDelta,
+      onDelta
+        ? accumulated => onDelta(
+            stripRecordingSummaryMarkedItemAnnotations(
+              normalizeDetailedSummaryMarkdown(accumulated),
+            ),
+          )
+        : undefined,
+      modelType,
     );
 
-    return summary ? { summary, template } : null;
+    if (!rawSummary) return null;
+
+    const normalizedSummary = normalizeDetailedSummaryMarkdown(rawSummary);
+    const markedItems = citationSegments
+      ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
+      : [];
+    const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
+
+    return { summary, template, markedItems };
   }
 
   /**
@@ -1009,35 +1093,47 @@ export class CallDocumentService {
     promptTemplate = DETAILED_SUMMARY_PROMPT,
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
-    // Resolve channelId and build participant map once (expensive DB lookups)
+    // Use people who actually spoke in the transcript. A channel roster can contain
+    // members who never joined or contributed to this particular call.
     const call = await repositories.calls.findByExternalId(callId);
-    const channelId = call?.channelId;
+    const spokenParticipantNames = extractTranscriptSpeakers(transcript);
+    const callParticipants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
+    const participantByName = new Map(
+      callParticipants.map((participant) => [participant.userName.toLowerCase(), participant]),
+    );
+    const callCreator = call
+      ? await repositories.users.findById(call.createdByUserId)
+      : null;
 
-    const participantMap: Map<string, ParticipantInfo> = channelId
-      ? await buildParticipantMap(channelId)
-      : new Map<string, ParticipantInfo>();
-
-    if (!channelId && call) {
-      const callParticipants = await repositories.calls.getCallParticipantsWithUserDetails(callId);
-      for (const participant of callParticipants) {
-        participantMap.set(participant.userName.toLowerCase(), {
-          userId: participant.userId,
-          username: participant.userName,
-          userEmail: participant.userEmail,
-          userPicture: participant.userPicture || undefined,
-        });
-      }
-    }
-
-    const participantList = Array.from(participantMap.values())
-      .map(p => `- ${p.username}`)
+    // Resolve transcript labels to known user names when possible, then annotate
+    // the creator only when they were one of the speakers.
+    const callCreatorUserId = call?.createdByUserId;
+    const participantList = spokenParticipantNames
+      .map((speaker) => {
+        const participant = participantByName.get(speaker.toLowerCase());
+        const isCallCreator = participant?.userId === callCreatorUserId
+          || (!participant
+            && callCreator
+            && speaker.toLowerCase() === (callCreator.displayName || callCreator.name).toLowerCase());
+        const name = participant?.userName || speaker;
+        return `- ${name}${isCallCreator ? ' {HOST}' : ''}`;
+      })
       .join('\n');
 
     const sanitizedTranscript = sanitizeInput(transcript);
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
     const sanitizedSystemPrompt = systemPrompt ? sanitizeInput(systemPrompt) : '';
+    const effectiveSystemPrompt = sanitizedSystemPrompt
+      ? `${sanitizedSystemPrompt}
+
+MANDATORY OUTPUT CONTRACT:
+- Return only the completed meeting summary as Markdown.
+- Never wrap the summary in JSON or emit a systemPrompt, summary, content, or markdown property.
+- Follow the section structure, formatting, citation, and marked-item requirements in the user prompt.`
+      : '';
 
     const buildPrompt = () => {
       let prompt = renderPromptTemplate(promptTemplate, {
@@ -1056,12 +1152,15 @@ export class CallDocumentService {
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
-      ...(sanitizedSystemPrompt ? { systemPrompt: sanitizedSystemPrompt } : {}),
+      ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
+      ...(modelType ? { modelType } : {}),
       onDelta,
     });
 
     if (!result.ok) {
-      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: result.reason });
+      // Diagnostic for the LLM step itself; the caller that gives up on the
+      // summary emits the alertable detailed_summary_generation_failed event.
+      logger.error(`[${callId}] detailed_summary_llm_request_failed`, { reason: result.reason });
       return null;
     }
 
@@ -1223,7 +1322,7 @@ export class CallDocumentService {
       });
 
       // Initialize Y-Sweet for collaborative editing
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, content);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, content, createdByUserId);
       if (!ysweetInitialized) {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for PRD canvas ${canvasId}`);
       }
@@ -1257,7 +1356,10 @@ export class CallDocumentService {
     callTitle?: string | null,
     citationCtx?: CitationContext,
     workspaceIdOverride?: string,
-    options: { deferInsertSideEffects?: boolean } = {},
+    options: {
+      deferInsertSideEffects?: boolean;
+      summaryModelPreference?: 'fast' | 'thinking';
+    } = {},
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1318,6 +1420,12 @@ export class CallDocumentService {
               generatedAt: now.toISOString(),
               mentionedUserIds, // Store mentioned users for side effect handler
               version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+              // Recording summary LLM tier the client carried from its
+              // localStorage at recording start; read back on the headless
+              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
+              ...(options.summaryModelPreference
+                ? { summaryModelPreference: options.summaryModelPreference }
+                : {}),
             },
           },
         });
@@ -1334,7 +1442,7 @@ export class CallDocumentService {
       });
 
       // Initialize Y-Sweet for collaborative editing
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[], createdByUserId);
       if (!ysweetInitialized) {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for detailed summary canvas ${canvasId}`);
       }
@@ -1376,17 +1484,20 @@ export class CallDocumentService {
     currentVersion: number,
     callId: string,
     callTitle?: string | null,
-    citationCtx?: CitationContext
+    citationCtx?: CitationContext,
+    callStartedAt?: Date
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
       const now = new Date();
 
-      // Prepare canvas content (title, content, mentions, citations)
+      // Prepare canvas content (title, content, mentions, citations). Falls back to
+      // a timestamp-based title (instead of the bare "(Updated)" placeholder) when
+      // callTitle isn't ready yet — e.g. AI title generation is still racing this update.
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
-        undefined,
+        callStartedAt,
         callTitle,
         citationCtx
       );
@@ -1397,7 +1508,7 @@ export class CallDocumentService {
       // DB version/metadata — return null so the caller reports the failure
       // instead of leaving a canvas whose recorded version doesn't match its
       // (unchanged) content.
-      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[], updatedByUserId);
       if (!ysweetSynced) {
         logger.error(`[CallDocumentService] Y-Sweet sync failed for canvas ${canvasId}; aborting update`);
         return null;
@@ -1468,7 +1579,7 @@ export class CallDocumentService {
 
       // Y-Sweet is the source of truth; write the authoritative content first and
       // bail out if it fails rather than reporting a success that never landed.
-      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[], updatedByUserId);
       if (!ysweetSynced) {
         logger.error(`[CallDocumentService] Final Y-Sweet sync failed for canvas ${canvasId}`);
         return false;
@@ -1530,6 +1641,7 @@ export class CallDocumentService {
   async syncStreamingDetailedSummaryCanvas(
     canvasId: string,
     markdownSummary: string,
+    updatedByUserId: string,
     citationCtx?: CitationContext,
   ): Promise<boolean> {
     try {
@@ -1543,6 +1655,7 @@ export class CallDocumentService {
       return await syncToYSweet(
         canvasId,
         sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+        updatedByUserId,
       );
     } catch (error) {
       logger.error(
@@ -1582,7 +1695,8 @@ export class CallDocumentService {
         existingCanvas.version,
         callId,
         callTitle,
-        citationCtx
+        citationCtx,
+        callStartedAt
       );
 
       return {
@@ -1886,6 +2000,7 @@ A comprehensive detailed summary has been generated from this call.
     canvasId: string,
     conversationId: string,
     callId: string,
+    userId: string,
   ): Promise<void> {
     logger.warn(`[CallDocumentService] Cleaning up failed detailed summary canvas ${canvasId} for call ${callId}`);
 
@@ -1910,7 +2025,7 @@ A comprehensive detailed summary has been generated from this call.
     // This is not physical deletion: CRDT history remains subject to Y-Sweet's
     // own retention policy until its SDK exposes a supported delete operation.
     try {
-      const ysweetCleared = await syncToYSweet(canvasId, []);
+      const ysweetCleared = await syncToYSweet(canvasId, [], userId);
       if (!ysweetCleared) {
         logger.warn(`[CallDocumentService] Cleanup: failed to clear Y-Sweet canvas ${canvasId}`);
       }
@@ -2031,6 +2146,9 @@ A comprehensive detailed summary has been generated from this call.
     // Tracks a brand-new, lazily-created streaming canvas so any failure after
     // its first chunk can tear down the canvas and published message.
     let newCanvasId: string | null = null;
+    // Mirrors xyneAutomaticBot.id outside the try block's scope so the outer
+    // catch can still identify the actor for cleanup after a mid-generation failure.
+    let xyneAutomaticBotId: string | undefined;
     try {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
@@ -2081,6 +2199,7 @@ A comprehensive detailed summary has been generated from this call.
       if (!xyneAutomaticBot) {
         throw new Error('Xyne Automatic bot not found');
       }
+      xyneAutomaticBotId = xyneAutomaticBot.id;
 
       let resolvedCallTitle = call.title;
       const callTitlePromise = (options.callTitlePromise ?? Promise.resolve(null))
@@ -2116,6 +2235,7 @@ A comprehensive detailed summary has been generated from this call.
           channel.callSummaryPrompt ?? undefined,
         );
         if (!detailedSummaryMarkdown) {
+          logDetailedSummaryFailed(callId, 'generation_failed');
           return { success: false, error: 'Failed to generate detailed summary' };
         }
 
@@ -2140,6 +2260,7 @@ A comprehensive detailed summary has been generated from this call.
           citationCtx,
         );
         if (!canvasId) {
+          logDetailedSummaryFailed(callId, 'canvas_update_failed');
           return { success: false, error: 'Failed to update detailed summary canvas' };
         }
 
@@ -2184,6 +2305,7 @@ A comprehensive detailed summary has been generated from this call.
             const synced = await syncToYSweet(
               newCanvasId,
               sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+              xyneAutomaticBot.id,
             );
             if (!synced) {
               throw new Error('Y-Sweet sync returned false');
@@ -2308,8 +2430,9 @@ A comprehensive detailed summary has been generated from this call.
       }
 
       if (!detailedSummaryMarkdown) {
+        logDetailedSummaryFailed(callId, 'generation_failed');
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBot.id);
         }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
@@ -2322,8 +2445,9 @@ A comprehensive detailed summary has been generated from this call.
       }
       const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId || !canvasUrl) {
+        logDetailedSummaryFailed(callId, 'canvas_create_failed', initializationFailure);
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBot.id);
         }
         return {
           success: false,
@@ -2350,7 +2474,8 @@ A comprehensive detailed summary has been generated from this call.
         sideEffectContextPromise ?? undefined,
       );
       if (!finalized) {
-        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId);
+        logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
+        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId, xyneAutomaticBot.id);
         return { success: false, error: 'Failed to write final detailed summary content' };
       }
 
@@ -2377,11 +2502,16 @@ A comprehensive detailed summary has been generated from this call.
 
       return { success: true, canvasUrl: finalizedCanvasUrl };
     } catch (error) {
-      logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
+      logDetailedSummaryFailed(callId, 'unexpected_error', error);
       // If a brand-new canvas + link was already published before the throw,
       // tear it down so an exception doesn't leave a dangling canvas/message.
       if (newCanvasId) {
-        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+        if (!xyneAutomaticBotId) {
+          throw new Error(
+            `[CallDocumentService] Cannot clean up canvas ${newCanvasId}: xyneAutomaticBotId was never resolved`,
+          );
+        }
+        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBotId);
       }
       return {
         success: false,

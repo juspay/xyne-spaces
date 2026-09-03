@@ -134,12 +134,12 @@ export class TicketService {
         // For WEBHOOK source with PR data, we still need to call repository to create PR activity
         // even if the stage hasn't changed
         if (source === ActivitySource.WEBHOOK && prActivityData) {
-          console.info(
+          logger.info(
             `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Creating PR activity only.`
           );
           // Proceed to create PR activity without stage change
         } else {
-          console.info(
+          logger.info(
             `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Skipping update.`
           );
           return;

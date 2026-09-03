@@ -1,4 +1,7 @@
-import { Router, type Request, type Response } from "express";
+import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
+import { Router, type Request, type RequestHandler, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
+import { isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -7,9 +10,11 @@ import path from "node:path";
 import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
+import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
@@ -25,10 +30,13 @@ import {
 import { appendCitations, collectCitationIconUrls } from "../lib/citations.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
+import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
+import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
 
@@ -140,6 +148,18 @@ const internalRouter = Router();
 const REDACTED_TOOL_RESULT = "[result hidden — another user's run]";
 
 /**
+ * An awakened run (heartbeat / reflex) is owned by the agent's own bot
+ * identity, not by a person, so there is no user privacy for the cross-user
+ * redaction to protect — and an admin needs to read exactly what it did.
+ * See lib/agent-owned-runs.ts.
+ */
+function shouldRedactRun(crossUser: boolean, runUserId: string | null | undefined, requesterId: string, triggerSource?: string | null): boolean {
+  if (!crossUser) return false;
+  if (runUserId === requesterId) return false;
+  return !isAgentOwnedRun(triggerSource);
+}
+
+/**
  * Strip RESULT bodies from a run's tool invocations while preserving every
  * other field (name, args, isError, status, subagent nesting). Used when an
  * admin inspects a run they don't own.
@@ -213,6 +233,15 @@ interface PendingStream {
   /** Parent ref the assistant placeholder was created under. Echoed in `done`
    *  so the frontend can stitch the optimistic message into the tree. */
   assistantParentId?: string;
+  /** Whether this subscriber may receive `debug` frames.
+   *
+   *  The debug frame carries the agent's full system prompt, instructions and
+   *  tool-use policy. The stored-history endpoint already withholds it from
+   *  callers without elevated access; the live stream did not, so the same
+   *  content was readable by any user who could start a run. Resolved once when
+   *  the stream is opened — the callback handler that forwards frames runs on
+   *  an S2S request from xyne-claw and has no end-user identity of its own. */
+  allowDebug?: boolean;
 }
 const pendingStreams = new Map<string, PendingStream>();
 
@@ -292,7 +321,12 @@ function ensureChatEventsSubscriber(): void {
     const stream = pendingStreams.get(msg.callbackId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
-      for (const e of msg.events) stream.sendEvent(e.event, e.data);
+      // Same withholding as the same-pod path above: the pod that owns the
+      // subscriber is the only one that knows whether it may see `debug`.
+      for (const e of msg.events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
       return;
     }
     stream.sendEvent("debug_artifacts_ready", {
@@ -399,12 +433,37 @@ async function persistAssistantResult(args: {
 
         const inlineMeta = att.metadata && typeof att.metadata === "object" ? att.metadata : undefined;
         const fallbackSlide = fallbackSlides.get(att.fileName);
-        const attachmentMetadata: Record<string, unknown> | undefined =
+        let attachmentMetadata: Record<string, unknown> | undefined =
           inlineMeta && Object.keys(inlineMeta).length > 0
             ? inlineMeta
             : fallbackSlide
               ? { slideJson: fallbackSlide }
               : undefined;
+
+        // A conversation owns ONE app: the first generated artifact creates it,
+        // every later one becomes a version of it. Done here rather than in the
+        // tool because the tool runs in xyne-claw with no database. The ids are
+        // stamped onto the manifest so the chat card can address the app (and
+        // its version history) instead of only the raw attachment.
+        const reactArtifact = attachmentMetadata?.["reactArtifact"];
+        if (reactArtifact && typeof reactArtifact === "object") {
+          const session = await attachArtifactToSessionApp({
+            conversationId: args.conversationId,
+            userId: args.userId,
+            payload: buffer,
+          });
+          if (session) {
+            attachmentMetadata = {
+              ...attachmentMetadata,
+              reactArtifact: {
+                ...(reactArtifact as Record<string, unknown>),
+                appId: session.appId,
+                versionId: session.versionId,
+                versionNumber: session.versionNumber,
+              },
+            };
+          }
+        }
 
         const row = await prisma.chatAttachment.create({
           data: {
@@ -570,7 +629,7 @@ router.post(
   uploadMiddleware.fields([
     { name: "files", maxCount: 10 },
     { name: "thumbnails", maxCount: 10 },
-  ]),
+  ]) as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
     try {
       const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
@@ -762,7 +821,7 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       return;
     }
 
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, getOrgId(req), getRequesterId(req));
     if (!agent) {
       log.warn(`[agent-chat/context-search] agent org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
@@ -770,8 +829,12 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
     }
 
     const rawType = String(req.query["type"] ?? "all").trim() as ContextSearchType;
-    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call") {
-      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call" });
+    if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call" && rawType !== "repository") {
+      res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
+      return;
+    }
+    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
+      res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }
 
@@ -793,6 +856,39 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
   }
 });
 
+// Platform fallback for the model picker: list models off claw's platform
+// LiteLLM key (S2S — the key never leaves claw). Fail-soft: any failure yields
+// an empty list so the picker hides instead of erroring the chat page.
+async function listPlatformModels(): Promise<{
+  success: true;
+  data: Array<{ id: string; name: string }>;
+  defaultModel: string | null;
+  pinProvider: "spaces";
+}> {
+  const empty = { success: true as const, data: [], defaultModel: null, pinProvider: "spaces" as const };
+  if (!CONFIG.xyneClawS2sKey) return empty;
+  try {
+    const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/litellm/models`;
+    const upstream = await fetch(url, {
+      headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => "");
+      log.error(`[agent-chat] platform models via claw failed: ${upstream.status} ${text.slice(0, 200)}`);
+      return empty;
+    }
+    const payload = (await upstream.json()) as { data?: Array<{ id?: string; name?: string }>; defaultModel?: string | null };
+    const data = (payload.data ?? [])
+      .filter((m): m is { id: string; name?: string } => Boolean(m.id))
+      .map((m) => ({ id: m.id, name: m.name ?? m.id }));
+    return { success: true, data, defaultModel: payload.defaultModel ?? null, pinProvider: "spaces" };
+  } catch (err) {
+    log.error("[agent-chat] platform models via claw error:", err);
+    return empty;
+  }
+}
+
 // GET /:slug/litellm-models — models the agent's shared LiteLLM credential can
 // access, for the per-chat model switcher. Any authenticated chat participant
 // may call this (the router is mounted under requireAuth): it lists models off
@@ -808,14 +904,42 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       res.status(401).json({ success: false, error: "x-user-id header is required" });
       return;
     }
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, getOrgId(req), getRequesterId(req));
     if (!agent) {
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
     const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, "litellm").catch(() => null);
-    if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
-      res.json({ success: true, data: [], defaultModel: null });
+    const hasCred = Boolean(cred?.encryptedKey && cred?.iv && cred?.authTag);
+
+    // The picker follows the agent's provider ORDER: whichever of spaces /
+    // litellm would serve a no-pin run supplies both the model list and the
+    // "Recommended" default, so the label always matches what actually runs.
+    //   [spaces, litellm…]    → platform list; default = modelSettings.model
+    //                           (the agent's Spaces model) ?? platform default
+    //   [litellm, …] + cred   → the credential's list; default = cred.model
+    //   no order + cred       → litellm (bare-credential fallback, mirrors
+    //                           resolveAgentProviderConfigs)
+    //   otherwise             → spaces (keyless platform default, via claw —
+    //                           LITELLM_API_KEY stays on the claw pod, same
+    //                           pattern as entity-llm). pinProvider tells the
+    //                           composer which providerOverride a pick rides.
+    const agentCfg = (agent.config ?? {}) as Record<string, unknown>;
+    const rawOrder = agentCfg["providerOrder"];
+    const order = Array.isArray(rawOrder) ? rawOrder.filter((e): e is string => typeof e === "string") : [];
+    const relevant = order.filter((e) => e === "spaces" || (e === "litellm" && hasCred));
+    // No order → the platform default serves (strict ranking: a credential
+    // that was saved but never selected as a provider never routes a run).
+    // Legacy config.provider = "litellm" still counts as an explicit selection.
+    const legacyProvider = typeof agentCfg["provider"] === "string" ? agentCfg["provider"] : undefined;
+    const primary = relevant[0] ?? (order.length === 0 && legacyProvider === "litellm" && hasCred ? "litellm" : "spaces");
+
+    if (primary === "spaces" || !cred?.encryptedKey || !cred.iv || !cred.authTag) {
+      const platform = await listPlatformModels();
+      const ms = agentCfg["modelSettings"] as Record<string, unknown> | undefined;
+      const rawSpacesModel = ms?.["model"];
+      const spacesModel = typeof rawSpacesModel === "string" && rawSpacesModel.trim() ? rawSpacesModel.trim() : null;
+      res.json({ ...platform, defaultModel: spacesModel ?? platform.defaultModel });
       return;
     }
     const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
@@ -834,10 +958,14 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       .filter((m): m is { id: string } => Boolean(m.id))
       .map((m) => ({ id: m.id, name: m.id }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    res.json({ success: true, data: models, defaultModel: cred.model ?? null });
+    res.json({ success: true, data: models, defaultModel: cred.model ?? null, pinProvider: "litellm" });
   } catch (err) {
     log.error("[agent-chat] litellm-models error:", err);
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Failed to fetch models" });
+    // fetch() network failures bury the real reason (ENOTFOUND, ECONNREFUSED)
+    // in err.cause — surface it so a prod 500 body is diagnosable on sight.
+    const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+    const message = err instanceof Error ? err.message : "Failed to fetch models";
+    res.status(500).json({ success: false, error: `${message}${cause}` });
   }
 });
 
@@ -858,6 +986,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       editedUserMessageId,
       disableTools,
       additionalInstructions,
+      studioMode,
+      designArtifactAttachmentId,
+      designSelection,
+      researchContext,
+      speed: rawSpeed,
+      thinkingLevel: rawThinkingLevel,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -878,8 +1012,33 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       editedUserMessageId?: string;
       disableTools?: boolean;
       additionalInstructions?: string;
+      studioMode?: "design";
+      designArtifactAttachmentId?: string;
+      designSelection?: unknown;
+      researchContext?: { type?: unknown; id?: unknown; name?: unknown } | null;
+      /** Per-message provider fast mode (composer toggle). Rides the agent's
+       *  modelSettings.speed for this run only — same credential, same model,
+       *  Anthropic's faster tier. Omitted = agent default. */
+      speed?: "standard" | "fast";
+      /** Per-message thinking level (the composer's model menu). Rides the
+       *  agent's modelSettings.thinkingLevel for this run only. */
+      thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const speedOverride: "standard" | "fast" | undefined =
+      rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
+    if (rawSpeed !== undefined && !speedOverride) {
+      res.status(400).json({ success: false, error: 'speed must be "standard" or "fast"' });
+      return;
+    }
+    const CHAT_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
+    const thinkingOverride = typeof rawThinkingLevel === "string" && (CHAT_THINKING_LEVELS as readonly string[]).includes(rawThinkingLevel)
+      ? rawThinkingLevel as (typeof CHAT_THINKING_LEVELS)[number]
+      : undefined;
+    if (rawThinkingLevel !== undefined && !thinkingOverride) {
+      res.status(400).json({ success: false, error: `thinkingLevel must be one of: ${CHAT_THINKING_LEVELS.join(", ")}` });
+      return;
+    }
 
     if (!message || typeof message !== "string" || !message.trim()) {
       res.status(400).json({ success: false, error: "message is required" });
@@ -889,11 +1048,89 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
+    if (studioMode !== undefined && studioMode !== "design") {
+      res.status(400).json({ success: false, error: "Unknown studioMode" });
+      return;
+    }
+    if (
+      designArtifactAttachmentId !== undefined &&
+      (studioMode !== "design" || typeof designArtifactAttachmentId !== "string" || designArtifactAttachmentId.length > 200)
+    ) {
+      res.status(400).json({ success: false, error: "Invalid Design Studio artifact" });
+      return;
+    }
 
-    const agent = await agentRepository.findBySlug(slug, getOrgId(req));
+    const normalizedDesignSelection = (() => {
+      if (studioMode !== "design" || !designSelection || typeof designSelection !== "object") return null;
+      const value = designSelection as Record<string, unknown>;
+      const scope = value["scope"];
+      const selector = value["selector"];
+      const tagName = value["tagName"];
+      if (
+        (scope !== "element" && scope !== "component" && scope !== "design-system") ||
+        typeof selector !== "string" || !selector.trim() || selector.length > 600 ||
+        typeof tagName !== "string" || !tagName.trim() || tagName.length > 80
+      ) return null;
+      const strings = (input: unknown, limit: number, itemLimit: number): string[] =>
+        Array.isArray(input)
+          ? input.filter((item): item is string => typeof item === "string").slice(0, limit).map((item) => item.slice(0, itemLimit))
+          : [];
+      const styles = Object.fromEntries(
+        Object.entries(value["styles"] && typeof value["styles"] === "object" ? value["styles"] as Record<string, unknown> : {})
+          .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+          .slice(0, 30)
+          .map(([key, styleValue]) => [key.slice(0, 80), styleValue.slice(0, 240)]),
+      );
+      return {
+        scope,
+        selector: selector.trim(),
+        tagName: tagName.trim(),
+        label: typeof value["label"] === "string" ? value["label"].slice(0, 240) : tagName.trim(),
+        id: typeof value["id"] === "string" ? value["id"].slice(0, 160) : undefined,
+        classes: strings(value["classes"], 16, 120),
+        text: typeof value["text"] === "string" ? value["text"].slice(0, 1200) : "",
+        ancestors: strings(value["ancestors"], 6, 600),
+        styles,
+      };
+    })();
+
+    const designSelectionInstruction = normalizedDesignSelection
+      ? [
+          "## Design Studio selection (captured by the preview inspector)",
+          `- Edit scope: ${normalizedDesignSelection.scope}`,
+          `- Stable selector: ${normalizedDesignSelection.selector}`,
+          `- Node: ${normalizedDesignSelection.tagName}`,
+          `- Label: ${normalizedDesignSelection.label}`,
+          ...(normalizedDesignSelection.id ? [`- ID: ${normalizedDesignSelection.id}`] : []),
+          ...(normalizedDesignSelection.classes.length ? [`- Classes: ${normalizedDesignSelection.classes.join(" ")}`] : []),
+          ...(normalizedDesignSelection.ancestors.length ? [`- Ancestors: ${normalizedDesignSelection.ancestors.join(" -> ")}`] : []),
+          ...(normalizedDesignSelection.text ? [`- Current text: ${normalizedDesignSelection.text}`] : []),
+          `- Computed styles: ${JSON.stringify(normalizedDesignSelection.styles)}`,
+          "Apply the user's instruction to this exact node. For component scope, update the reusable component/pattern behind it. " +
+            "For design-system scope, update shared tokens/rules and every semantically matching instance; do not merely patch one inline style.",
+        ].join("\n")
+      : "";
+
+    const agent = await agentRepository.findBySlugVisibleTo(slug, getOrgId(req), userId);
     if (!agent) {
       log.warn(`[agent-chat/chat] agent org-scoped miss slug=${slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    // Invocation whitelist — dashboard chat surface. Same rule as every other
+    // entry point; refused like a disabled/absent agent.
+    if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
+      log.warn(`[agent-chat/chat] invocation denied (not whitelisted) slug=${slug} userId=${userId}`);
+      res.status(403).json({ success: false, error: `agent "${slug}" is restricted — you don't have access to it` });
+      return;
+    }
+    const conversationId = existingConvId ?? `chat-${randomUUID()}`;
+
+    const sdlcResolution = slug === "sdlc-agent"
+      ? await resolveSdlcRepositoryForUser(userId, researchContext, conversationId)
+      : { ok: true as const, repository: undefined };
+    if (!sdlcResolution.ok) {
+      res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;
     }
 
@@ -919,7 +1156,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
     }
 
-    const conversationId = existingConvId ?? `chat-${randomUUID()}`;
     const normalized = normalizeAttachedContext(attachedContext);
     if (normalized.error) {
       res.status(400).json({ success: false, error: normalized.error });
@@ -959,6 +1195,25 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     let cloneSourcePiConversationId: string | null = null;
     let cloneBranchMode: "lastUser" | "beforeLastUser" = "lastUser";
     let hydratedAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    let designArtifactAttachment: { fileName: string; mimeType: string; data: string } | null = null;
+
+    if (studioMode === "design" && designArtifactAttachmentId) {
+      const [artifact] = await chatAttachmentRepository.findManyByIdsForUser([designArtifactAttachmentId], userId);
+      if (!artifact || (!artifact.mimeType.toLowerCase().includes("html") && !artifact.originalFilename.toLowerCase().endsWith(".html"))) {
+        res.status(400).json({ success: false, error: "Design Studio artifact is unavailable" });
+        return;
+      }
+      if (artifact.size > 10 * 1024 * 1024) {
+        res.status(400).json({ success: false, error: "Design Studio artifact exceeds the 10 MB HTML limit" });
+        return;
+      }
+      const buf = await gcsService.getFileBuffer(artifact.url);
+      designArtifactAttachment = {
+        fileName: artifact.originalFilename,
+        mimeType: "text/html",
+        data: buf.toString("base64"),
+      };
+    }
 
     if (isRegenerate && parentUserMessageId) {
       const userMsgRow = existingMessages.find((m) => m.id === parentUserMessageId && m.role === "user");
@@ -1012,6 +1267,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: requestedParent?.id ?? null,
         orgId: agent.orgId,
+        ...(attachedContextItems.length > 0 ? { attachedContext: attachedContextItems } : {}),
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
@@ -1027,6 +1283,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: userParentId,
         orgId: agent.orgId,
+        ...(attachedContextItems.length > 0 ? { attachedContext: attachedContextItems } : {}),
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
@@ -1040,6 +1297,16 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           return { fileName: r.originalFilename, mimeType: r.mimeType, data: buf.toString("base64") };
         }));
       }
+    }
+
+    // A delivered design belongs to the previous assistant message, so never
+    // relink it to this new user turn. Rehydrate a user-owned HTML copy only
+    // for the run input; this keeps revisions working after sandbox expiry.
+    if (
+      designArtifactAttachment &&
+      !hydratedAttachments.some((attachment) => attachment.fileName === designArtifactAttachment.fileName)
+    ) {
+      hydratedAttachments.push(designArtifactAttachment);
     }
 
     // Pre-create the running assistant placeholder. Its id powers PI session
@@ -1088,12 +1355,36 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Set up SSE
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
     });
+
+    // Whether this subscriber may receive `debug` frames. Same predicate the
+    // stored-history endpoint uses for `debugEvents`, so a caller sees the same
+    // debug content live as it would on replay. Resolved here, before the SSE
+    // promise, because the callback that forwards frames arrives on a separate
+    // S2S request with no end-user identity of its own.
+    const debugIsAdmin = await isClawAdmin(userId);
+    const debugEditAccess = debugIsAdmin ? null : await getAgentEditAccess(userId, slug, getOrgId(req));
+    const allowDebug = debugIsAdmin || Boolean(debugEditAccess?.canEdit);
 
     // Send conversationId immediately
     res.write(`event: meta\ndata: ${JSON.stringify({ conversationId })}\n\n`);
+
+    // Heartbeat: every LB/proxy hop kills idle SSE connections, and tool-heavy
+    // runs (/design sandbox creation, long generations) go 60s+ with no events
+    // — the browser then freezes on the last event with no error while the run
+    // continues server-side (prod 2026-08-08). SSE comment frames are invisible
+    // to EventSource parsers, so this keeps every hop's idle timer at zero with
+    // no client change. res "close" fires on ALL end paths (server res.end()
+    // and client disconnect), so the interval can never leak.
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded && !res.destroyed) {
+        try { res.write(":hb\n\n"); } catch { /* client gone; close handler clears */ }
+      }
+    }, 15_000);
+    res.on("close", () => clearInterval(heartbeat));
 
     const callbackId = randomUUID();
 
@@ -1119,6 +1410,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         resolve,
         setClosed: () => { closed = true; },
         assistantMessageId: assistantMsg.id,
+        allowDebug,
         ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
         ...(assistantParentId ? { assistantParentId } : {}),
       });
@@ -1156,13 +1448,24 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const rawPersonalProvider = userAgentConfig?.provider;
     // "spaces" is the platform-default sentinel, not a real personal credential —
     // saving it should not override the agent-level providerOrder/credentials.
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
-    const agentLevelProvider = (agent.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
-    const rawProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
+    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider) ? undefined : selectedPersonalProvider;
+    // Effective speed for THIS run: the composer toggle wins, else the agent
+    // default. Fast mode may resolve against its own provider profile
+    // (config.fastModeProfile) — same credential keys, possibly different
+    // providers/models. See lib/agent-provider-config.ts.
+    const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agent.config);
+    const speedConfig = providerConfigForSpeed(agent.config, effectiveSpeed);
+    const agentLevelProvider = speedConfig["provider"] as string | undefined;
+    const rawProviderOrder = speedConfig["providerOrder"];
     const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
       ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
+      : [];
+    const rawConfiguredProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
+    const configuredProviderOrder: string[] = Array.isArray(rawConfiguredProviderOrder)
+      ? rawConfiguredProviderOrder.filter((p): p is string => typeof p === "string")
       : [];
     const userProvider = personalProvider ?? agentLevelProvider;
 
@@ -1189,6 +1492,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       const cfg = buildProviderConfig(row.provider, row);
       if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "agent"; }
     }
+    applyFastModeModels(providerConfigs, agent.config, effectiveSpeed);
 
     // Refresh Claude OAuth before use (short-lived token; see webhook.ts for the
     // rationale). Mutates the resolved config's apiKey and persists the rotated
@@ -1217,9 +1521,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Resolution: personal user provider always wins. Otherwise providerOrder
     // (canonical) takes over, with legacy config.provider as fallback for
     // agents that haven't migrated yet.
+    // STRICT RANKING — top first. "spaces" is keyless and can always serve,
+    // so an explicit spaces entry wins over lower-ranked saved credentials
+    // (mirrors resolveAgentProviderConfigs).
     let resolvedParentProvider = personalProvider;
     if (!resolvedParentProvider && agentProviderOrder.length > 0) {
-      resolvedParentProvider = agentProviderOrder.find((p) => providerConfigs[p]) ?? agentProviderOrder[0];
+      resolvedParentProvider = agentProviderOrder.find((p) => p === "spaces" || providerConfigs[p]) ?? agentProviderOrder[0];
     }
     if (!resolvedParentProvider && agentLevelProvider) {
       resolvedParentProvider = agentLevelProvider;
@@ -1233,6 +1540,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // their config's model. providerOrder is cleared so a quota fallback can't
     // silently swap providers mid-eval.
     let runAgentConfig = agent?.config as Record<string, unknown> | undefined;
+    if (sdlcResolution.repository) {
+      runAgentConfig = {
+        ...(runAgentConfig ?? {}),
+        sdlcContext: sdlcResolution.repository.agentContext,
+      };
+    }
     if (override?.provider) {
       if (override.provider === "spaces") {
         resolvedParentProvider = "spaces";
@@ -1258,10 +1571,49 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           resolvedParentProvider = override.provider;
           if (override.model?.trim()) providerConfigs[override.provider] = { ...cfg, model: override.model.trim() };
           runtimeProviderOrder = [];
+        } else if (override.provider === "litellm" && override.model?.trim()) {
+          // No agent litellm credential — the pick came off the platform
+          // allowed-model list (litellm-models' claw fallback). Apply it as a
+          // "spaces" pin so it still takes effect instead of silently no-oping.
+          resolvedParentProvider = "spaces";
+          runAgentConfig = {
+            ...(runAgentConfig ?? {}),
+            modelSettings: {
+              ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+              model: override.model.trim(),
+            },
+          };
+          runtimeProviderOrder = [];
         }
       }
     }
 
+    // Per-message fast-mode / thinking overrides win over the agent's saved
+    // modelSettings for this run only (not persisted to the agent). The
+    // thinking pick also outranks the fast profile's thinking override —
+    // claw overlays fastModeProfile.modelSettings over modelSettings on fast
+    // runs, so mirror the choice into the profile too when one exists.
+    if (speedOverride || thinkingOverride) {
+      runAgentConfig = {
+        ...(runAgentConfig ?? {}),
+        modelSettings: {
+          ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+          ...(speedOverride ? { speed: speedOverride } : {}),
+          ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
+        },
+      };
+      const profile = runAgentConfig["fastModeProfile"];
+      if (thinkingOverride && profile && typeof profile === "object" && !Array.isArray(profile)
+          && (profile as Record<string, unknown>)["modelSettings"]) {
+        runAgentConfig["fastModeProfile"] = {
+          ...(profile as Record<string, unknown>),
+          modelSettings: {
+            ...((profile as Record<string, unknown>)["modelSettings"] as Record<string, unknown>),
+            thinkingLevel: thinkingOverride,
+          },
+        };
+      }
+    }
     const effectiveAgentConfig = disableTools
       ? {
           ...(runAgentConfig ?? {}),
@@ -1275,7 +1627,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       userId,
       userName: user?.name,
       userEmail: user?.email,
-      task: message.trim(),
+      task: studioMode === "design" ? `/design ${message.trim()}` : message.trim(),
       conversationId,
       orgId: agent.orgId,
       ...(piConversationId !== conversationId ? { piSessionConversationId: piConversationId } : {}),
@@ -1295,6 +1647,14 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       ...(additionalInstructions && additionalInstructions.trim()
         ? { additionalInstructions: additionalInstructions.trim() }
         : {}),
+      ...(designSelectionInstruction
+        ? {
+            additionalInstructions: [additionalInstructions?.trim(), designSelectionInstruction]
+              .filter(Boolean)
+              .join("\n\n"),
+          }
+        : {}),
+      ...(researchContext ? { researchContext } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled, toolPermissions,
       // skillTriggers, promptInjections, custom-tool config values.
@@ -1303,6 +1663,16 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
       fastMode: fastModeEnabled,
     };
+
+    const localTarget = await resolveLocalHarnessTarget({
+      userId,
+      orgId: agent.orgId,
+      providerOrder: configuredProviderOrder,
+      personalProvider: rawPersonalProvider,
+    }).catch((err: unknown) => {
+      log.warn("[agent-chat] local-harness resolution failed — using server run:", err instanceof Error ? err.message : err);
+      return undefined;
+    });
 
     // SSE consumer path. We send Accept: text/event-stream so the /run proxy
     // routes us through SSE pass-through (one ordered TCP connection from
@@ -1316,7 +1686,24 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // run-stream.ts — so all the finalize + persistAssistantResult + resolve
     // wiring stays in one place.
     let runBody: { success: boolean; sessionId?: string; error?: string; deferred?: boolean };
-    if (CONFIG.clawSseTransport) {
+    if (localTarget) {
+      const dispatched = await dispatchLocalHarnessRun({
+        target: localTarget,
+        userId,
+        orgId: agent.orgId,
+        conversationId,
+        agentSlug: slug,
+        agentName: agent.name,
+        systemPrompt: agent.systemPrompt,
+        model: pinnedModelForProvider(runAgentConfig, localTarget.provider),
+        task: message.trim(),
+        context: resolvedContext.promptPrefix || null,
+        progressUrl,
+        callbackUrl,
+        serverFallbackBody: forwardBody,
+      });
+      runBody = { success: true, sessionId: dispatched.sessionId };
+    } else if (CONFIG.clawSseTransport) {
       runBody = await runAgentChatViaSse({
         forwardBody,
         callbackId,
@@ -1466,21 +1853,11 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       return;
     }
 
-    const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // S2S key is now required (xyne-claw fails closed). x-user-id lets
-        // xyne-claw enforce object-level authz on the cancel (ownership was
-        // already checked above, this pins it across the hop).
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
-      },
-    });
-
-    if (!cancelRes.ok) {
-      const body = (await cancelRes.json().catch(() => ({}))) as { error?: string };
-      res.status(502).json({ success: false, error: body.error ?? `Cancel failed: HTTP ${cancelRes.status}` });
+    // Ownership was checked above; preserve it across the S2S hop.
+    try {
+      await cancelRunSession(sessionId, userId);
+    } catch (err) {
+      res.status(502).json({ success: false, error: errMsg(err) });
       return;
     }
 
@@ -1501,14 +1878,16 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
 // assistant under the same user message.
 router.post("/:slug/chat/:convId/regenerate", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
-    const { convId } = req.params;
+    const { slug, convId } = req.params;
     const userId = getRequesterId(req);
     if (!userId) {
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
 
-    const messages = await chatMessageRepository.findByConversation(convId);
+    const messages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant) {
       res.status(400).json({ success: false, error: "No assistant message found" });
@@ -1575,7 +1954,14 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
 
   if (events.length > 0 && callbackId) {
     if (stream) {
-      for (const e of events) stream.sendEvent(e.event, e.data);
+      // `debug` is withheld unless the subscriber was resolved as elevated when
+      // the stream opened. Filtered at delivery rather than at construction
+      // because the same `events` array is also published cross-pod, where the
+      // receiving pod owns the subscriber and applies this same check.
+      for (const e of events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
     } else {
       publishChatEvent({ kind: "progress", callbackId, events });
     }
@@ -1683,7 +2069,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   let includeCitations = false;
   try {
     const agentRow = callbackOrgId
-      ? await agentRepository.findBySlug(req.params.slug, callbackOrgId)
+      ? await agentRepository.findBySlugVisibleTo(req.params.slug, callbackOrgId, userId)
       : null;
     const replyOpts = (agentRow?.config as { replyOptions?: { includeCitations?: boolean } } | undefined)?.replyOptions;
     if (replyOpts && replyOpts.includeCitations === true) includeCitations = true;
@@ -1761,7 +2147,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   let persisted: { messageId: string; persistedAttachments: PersistedAttachment[] } | null = null;
   if (userId && callbackOrgId) {
     try {
-      const agent = await agentRepository.findBySlug(req.params.slug, callbackOrgId);
+      const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, callbackOrgId, userId);
       if (!agent) {
         log.warn(`[agent-chat/result] agent org-scoped miss slug=${req.params.slug} orgId=${callbackOrgId ?? "none"} userId=${userId ?? "none"} sessionId=${req.params.convId}`);
         res.status(404).json({ success: false, error: "Agent not found" });
@@ -1828,6 +2214,89 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   }
 });
 
+// POST /agents/:slug/chat/:convId/fork — copy a finished conversation into a
+// NEW conversation owned by the requesting user.
+router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const { slug, convId } = req.params;
+    const { targetConversationId } = (req.body ?? {}) as { targetConversationId?: string };
+    if (!targetConversationId || typeof targetConversationId !== "string") {
+      res.status(400).json({ success: false, error: "targetConversationId is required" });
+      return;
+    }
+
+    const sourceMessages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
+    if (sourceMessages.length === 0) {
+      res.status(404).json({ success: false, error: "Source conversation is empty" });
+      return;
+    }
+
+    // Refuse to write into a conversation that already holds messages — a
+    // retried fork would otherwise duplicate the whole history.
+    const existingTarget = await chatMessageRepository.findByConversationAndAgent(targetConversationId, slug);
+    if (existingTarget.length > 0) {
+      res.status(409).json({ success: false, error: "Target conversation already has messages" });
+      return;
+    }
+
+    // Which PI session backs this conversation: the base id when the tree is
+    // linear, else the deepest non-first assistant's branch suffix.
+    const tree = sourceMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parentId: (m as { parentId?: string | null }).parentId ?? null,
+      createdAt: m.createdAt,
+    }));
+    const leafId = tree[tree.length - 1]?.id ?? null;
+    const sourcePiConversationId = resolvePiConversationIdForPath(tree, leafId, convId);
+
+    const cloned = await cloneBranchSession({
+      sourceConversationId: piSessionStoreKey(sourcePiConversationId, slug),
+      targetConversationId: piSessionStoreKey(targetConversationId, slug),
+      branchMode: "full",
+    });
+    if (!cloned.success) {
+      log.warn(`[agent-chat/fork] session clone failed ${convId} → ${targetConversationId}: ${cloned.error ?? "unknown"}`);
+      res.status(502).json({ success: false, error: cloned.error ?? "Failed to clone session" });
+      return;
+    }
+
+    // Copy the visible history, chained linearly so the tree stays on the
+    // first-child rail — otherwise resolvePiConversationIdForPath would read
+    // the fork as a branch and the follow-up would open a fresh PI session,
+    // discarding the context we just cloned.
+    let parentId: string | null = null;
+    let copied = 0;
+    for (const msg of sourceMessages) {
+      const created = await chatMessageRepository.create({
+        conversationId: targetConversationId,
+        agentSlug: slug,
+        userId,
+        role: msg.role,
+        content: msg.content ?? "",
+        ...(msg.reasoning ? { reasoning: msg.reasoning } : {}),
+        parentId,
+        orgId: (msg as { orgId: string }).orgId,
+      });
+      parentId = created.id;
+      copied += 1;
+    }
+
+    log.info(`[agent-chat/fork] ${convId} → ${targetConversationId} slug=${slug} owner=${userId} copied=${copied}`);
+    res.json({ success: true, conversationId: targetConversationId, copied });
+  } catch (err) {
+    log.error(`[agent-chat/fork] ${req.params.convId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    res.status(500).json({ success: false, error: "Failed to fork conversation" });
+  }
+});
+
 // GET /agents/:slug/chat/:convId/messages — get conversation history
 router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
@@ -1874,16 +2343,25 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       ? await agentRunRepository.listByConversation(req.params.convId, userId)
       : await agentRunRepository.listByUser(userId || "", { conversationId: req.params.convId });
 
-    // Strip internal GCS paths from attachment metadata before sending to client
+    // Strip internal GCS paths from attachment metadata before sending to client.
+    // `reactArtifact` is the one metadata key allowed through: it is the small
+    // manifest (title/entry/file paths/dep names) the dashboard's artifact card
+    // renders from, and it carries no storage paths. Everything else — including
+    // slideJson, which has its own ACL'd endpoint — stays server-side. Keep this
+    // an explicit allowlist: passing `a.metadata` wholesale would leak `url`.
     const serialized = messages.map((m) => {
-      const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null }> }).attachments ?? [];
-      const attachments = attachmentsRaw.map((a) => ({
-        id: a.id,
-        mimeType: a.mimeType,
-        originalFilename: a.originalFilename,
-        width: a.width,
-        height: a.height,
-      }));
+      const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null; metadata?: Record<string, unknown> | null }> }).attachments ?? [];
+      const attachments = attachmentsRaw.map((a) => {
+        const reactArtifact = a.metadata && typeof a.metadata === "object" ? a.metadata["reactArtifact"] : undefined;
+        return {
+          id: a.id,
+          mimeType: a.mimeType,
+          originalFilename: a.originalFilename,
+          width: a.width,
+          height: a.height,
+          ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
+        };
+      });
       return { ...m, attachments };
     });
 
@@ -1924,7 +2402,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         const visibleInvocations = withoutFollowUpRecorderInvocations(invocations as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[linkedId] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -1961,7 +2439,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         // chips sharing the Spaces mark cost one copy, not N.
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2001,6 +2479,51 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
 // mid-run is covered by an initial Postgres snapshot, since Redis pub/sub has no
 // replay. ACL matches /messages: scoped by agentSlug; non-admins only get events
 // for runs they triggered; tool results are redacted for admins viewing others.
+
+/**
+ * Real cancel for an in-flight chat run. The input-bar Stop button previously
+ * only aborted the CLIENT fetch — the run kept burning sandbox + LLM server-
+ * side by design (req close ≠ cancel). This endpoint kills the run itself:
+ * recovery first (so the watchdog can't resurrect it), then the runtime's
+ * per-session cancel. Ownership: the AgentRun row must belong to the caller.
+ */
+router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
+  try {
+    const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const sessionId = typeof (req.body as { sessionId?: unknown }).sessionId === "string"
+      ? ((req.body as { sessionId: string }).sessionId).trim()
+      : "";
+    if (!userId || !sessionId || sessionId.length > 200) {
+      res.status(400).json({ success: false, error: "userId and sessionId are required" });
+      return;
+    }
+    const run = await prisma.agentRun.findFirst({
+      where: { sessionId, userId },
+      select: { sessionId: true, status: true },
+    });
+    if (!run) {
+      res.status(404).json({ success: false, error: "Run not found" });
+      return;
+    }
+    await cancelRunRecovery(sessionId).catch(() => {});
+    const cancelRes = await fetch(
+      `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          "x-user-id": userId,
+        },
+      },
+    ).catch(() => null);
+    res.json({ success: true, data: { cancelled: cancelRes?.ok ?? false } });
+  } catch (err) {
+    log.error("[agent-chat] cancel failed", err);
+    res.status(500).json({ success: false, error: "Failed to cancel run" });
+  }
+});
+
 router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   if (!CONFIG.liveToolCallsEnabled) {
     res.status(404).json({ success: false, error: "Live streaming disabled" });
@@ -2026,6 +2549,13 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
   });
   res.write(`event: open\ndata: ${JSON.stringify({ conversationId: convId })}\n\n`);
+  // Same idle-timeout protection as the chat stream: comment-frame heartbeat.
+  const liveHeartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) {
+      try { res.write(":hb\n\n"); } catch { /* close handler clears */ }
+    }
+  }, 15_000);
+  res.on("close", () => clearInterval(liveHeartbeat));
   log.info(`[agent-chat] /live connected: conv=${convId} agent=${slug} user=${userId} admin=${isAdmin}`);
 
   // Only cross-user (admin + All Runs) viewers receive events for other users'
@@ -2059,7 +2589,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(invs as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2075,7 +2605,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(
           r.toolInvocations as unknown[],
         );
-        return crossUser && r.userId !== userId
+        return shouldRedactRun(crossUser, r.userId, userId, r.triggerSource)
           ? redactToolResults(visibleInvocations)
           : visibleInvocations;
       });
@@ -2095,7 +2625,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
       })}\n\n`,
     );
   } catch (err) {
-    log.warn("[agent-chat] live snapshot failed:", err instanceof Error ? err.message : String(err));
+    log.warn("[agent-chat] live snapshot failed:", errMsg(err));
   }
 
   // 2) Subscribe to live deltas (cross-pod via Redis). Buffer-free: write as they arrive.
@@ -2103,7 +2633,10 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     if (evt.agentSlug && evt.agentSlug !== slug) return; // scope to this agent
     if (!allow(evt.userId)) return;
     let data: LiveEvent = evt;
-    if (evt.type === "invocation" && crossUser && evt.userId !== userId) {
+    // Same rule as the stored transcript above — without this an awakened run
+    // streamed its tool results pre-redacted and only became readable after it
+    // completed and the viewer refetched from Postgres.
+    if (evt.type === "invocation" && shouldRedactRun(crossUser, evt.userId, userId, evt.triggerSource)) {
       data = { ...evt, toolInvocation: redactToolResults([evt.toolInvocation])[0] };
     }
     try {
@@ -2318,11 +2851,21 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         aclRuns.filter((r) => r.usedUserToken && r.userId !== requesterId).map((r) => r.sessionId),
       );
       const ownerBySession = new Map(aclRuns.map((r) => [r.sessionId, r.userId]));
-      const ownsSession = (sid: string | undefined): boolean => !!sid && ownerBySession.get(sid) === requesterId;
+      // Awakened runs have no human owner, so "readable" for them means the
+      // admin can read them — that IS the audit trail for an agent acting
+      // unattended. See lib/agent-owned-runs.ts.
+      const agentOwnedSessions = new Set(
+        aclRuns.filter((r) => isAgentOwnedRun(r.triggerSource)).map((r) => r.sessionId),
+      );
+      const readable = (sid: string | undefined, ownerUserId?: string | null): boolean =>
+        ownerUserId === requesterId ||
+        (!!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId));
+      const ownsSession = (sid: string | undefined): boolean =>
+        !!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId);
 
       const d = body.data;
       const hideDebugSession = d.debugSession?.sessionId ? hiddenSessionIds.has(d.debugSession.sessionId) : false;
-      const debugSessionOwned = d.debugSession?.userId === requesterId;
+      const debugSessionOwned = readable(d.debugSession?.sessionId, d.debugSession?.userId);
       body.data = {
         ...d,
         debugSession: hideDebugSession
@@ -2338,7 +2881,9 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         runs: (d.runs ?? [])
           .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
           .map((r) =>
-            r.data?.userId === requesterId ? r : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
+            readable(r.data?.sessionId, r.data?.userId)
+              ? r
+              : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
           ),
         subagents: (d.subagents ?? [])
           .filter((s) => !hiddenSessionIds.has(s.data?.parentSessionId ?? ""))
@@ -2508,9 +3053,14 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // Get all messages for this user+agent, grouped by conversation
     const allMessages = await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
 
-    // Group by conversationId
+    // Group by conversationId, skipping artifact-app threads. Those are real,
+    // durable conversations, but their prompts are written by app code on the
+    // user's behalf — surfacing them here would bury the user's own chats under
+    // machine-generated ones. They stay visible in the Agent Control Center via
+    // triggerSource "app". The id prefix is the marker, same as "scheduled_".
     const convMap = new Map<string, typeof allMessages>();
     for (const msg of allMessages) {
+      if (msg.conversationId.startsWith("app_")) continue;
       const list = convMap.get(msg.conversationId) ?? [];
       list.push(msg);
       convMap.set(msg.conversationId, list);
@@ -2564,7 +3114,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     }
 
     // Only the intended user can approve an action (XYNE-12145 — same rule as
-    // the Spaces Flow UI flow in flow-action.ts / legacy frontmatter in app-callback.ts).
+    // the Spaces Flow UI flow in flow-action.ts).
     if (callerUserId !== action.userId) {
       res.status(403).json({ success: false, error: "Only the intended user can approve this action" });
       return;
@@ -2696,8 +3246,23 @@ async function runAgentChatViaSse(
             onPlan: (_sid, todos) => {
               pendingStreams.get(callbackId)?.sendEvent("plan", { todos });
             },
+            onUiWidget: (_sid, widget) => {
+              // Keep the existing plan event stable for current clients while
+              // exposing the generic envelope for every other widget type.
+              if (widget.type === "plan") {
+                pendingStreams.get(callbackId)?.sendEvent("plan", { todos: widget.payload.todos });
+              } else {
+                pendingStreams.get(callbackId)?.sendEvent("ui-widget", { widget });
+              }
+            },
             onDebug: (_sid, debugEvent) => {
-              pendingStreams.get(callbackId)?.sendEvent("debug", { debugEvent });
+              // Same gate as the legacy /progress path (line ~325/1901): debug
+              // frames carry the full system prompt / tool policy, so only the
+              // agent's editors or a Claw admin may receive them. Without this
+              // check the SSE transport (CLAW_SSE_TRANSPORT=on) re-opens PY-JP-012.
+              const debugStream = pendingStreams.get(callbackId);
+              if (!debugStream?.allowDebug) return;
+              debugStream.sendEvent("debug", { debugEvent });
             },
             onCancelled: (_sid, reason) => {
               // Distinct cancel signal so the v3 chat UI can drop its typing
@@ -2746,7 +3311,7 @@ async function runAgentChatViaSse(
               log.warn(`[agent-chat/sse] /callback returned ${cbRes.status}: ${text.slice(0, 300)}`);
             }
           } catch (err) {
-            log.error(`[agent-chat/sse] /callback POST failed (callbackId=${callbackId}): ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`[agent-chat/sse] /callback POST failed (callbackId=${callbackId}): ${errMsg(err)}`);
           }
         } else {
           // No done frame ever arrived — synthesise a failed callback so the
@@ -2768,7 +3333,7 @@ async function runAgentChatViaSse(
           } catch { /* nothing else we can do */ }
         }
       } catch (err) {
-        log.error(`[agent-chat/sse] consumeClawStream failed (slug=${slug}, conv=${conversationId}, callbackId=${callbackId}): ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`[agent-chat/sse] consumeClawStream failed (slug=${slug}, conv=${conversationId}, callbackId=${callbackId}): ${errMsg(err)}`);
         // If we never handed off, surface the failure synchronously so the
         // outer handler can short-circuit with the proper error message.
         if (!handed) {

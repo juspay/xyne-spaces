@@ -1,4 +1,5 @@
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 import { cancelRunRecovery, handleRunCompletion } from "../queue/run-recovery-worker.js";
 
@@ -17,7 +18,7 @@ export async function finalizeOrphanedRun(
   logPrefix = "orphan-finalizer",
 ): Promise<boolean> {
   await cancelRunRecovery(run.sessionId).catch((err) =>
-    log.warn(`[${logPrefix}] cancelRunRecovery failed for ${run.sessionId}: ${err instanceof Error ? err.message : String(err)}`),
+    log.warn(`[${logPrefix}] cancelRunRecovery failed for ${run.sessionId}: ${errMsg(err)}`),
   );
 
   const updated = await prisma.agentRun.updateMany({
@@ -32,7 +33,7 @@ export async function finalizeOrphanedRun(
   if (updated.count === 0) return false;
 
   await handleRunCompletion(run.sessionId, "failed", error).catch((err) =>
-    log.warn(`[${logPrefix}] handleRunCompletion failed for orphan ${run.sessionId}: ${err instanceof Error ? err.message : String(err)}`),
+    log.warn(`[${logPrefix}] handleRunCompletion failed for orphan ${run.sessionId}: ${errMsg(err)}`),
   );
   return true;
 }

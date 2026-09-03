@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
-import { useActiveUserSearch, useSelf, useUser, useUsers } from '../../../../hooks/useUsers';
+import { useActiveUserSearch, useUser, useUsers } from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { useAllChannels, useChannel } from '../../../../hooks/useChannels';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
@@ -329,7 +329,6 @@ function BoardField({ value, onChange, placeholder }: FieldProps): React.ReactEl
 
 function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
-  const me = useSelf();
   const users = useUsers();
   const selectedUser = useUser(value ?? '');
 
@@ -339,19 +338,11 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
       lower.length === 0 || label.toLowerCase().includes(lower);
 
     const out: SelectorOption[] = [];
-    if (me) {
-      const label = `${getUserDisplayName(me)} (you)`;
-      if (matches(label) || matches(me.email ?? '')) {
-        out.push({
-          value: me.id,
-          label,
-          subtitle: me.email ?? undefined,
-          icon: <UserAvatar userId={me.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
-        });
-      }
-    }
+    // Automations may only post as a non-human (bot/app) identity — humans are
+    // rejected by the backend send/reply steps (impersonation). So the picker
+    // offers bot and app/agent accounts only, never a human user.
     for (const u of users) {
-      if (u.userType !== UserType.BOT) continue;
+      if (u.userType !== UserType.BOT && u.userType !== UserType.APP) continue;
       const label = getUserDisplayName(u);
       if (!matches(label) && !matches(u.email ?? '')) continue;
       out.push({
@@ -362,7 +353,7 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
       });
     }
     return out;
-  }, [me, users, search]);
+  }, [users, search]);
 
   const optionsWithSelected = useMemo(() => {
     if (!value || !selectedUser) return options;
@@ -373,7 +364,7 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
         label: getUserDisplayName(selectedUser),
         subtitle: selectedUser.email ?? undefined,
         icon:
-          selectedUser.userType === UserType.BOT ? (
+          selectedUser.userType === UserType.BOT || selectedUser.userType === UserType.APP ? (
             <Bot className='size-4 text-muted-foreground' />
           ) : (
             <UserAvatar
@@ -393,7 +384,7 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search you or a bot…'
+      searchPlaceholder='Search bots…'
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton

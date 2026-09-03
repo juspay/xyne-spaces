@@ -30,6 +30,7 @@ import {
   downloadAttachment,
   getFileIcon,
   truncateFileName,
+  buildAttachmentViewerPayload,
 } from './utils';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
@@ -47,6 +48,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+import { Button } from '../../ui/Button/Button';
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
 import axios from 'axios';
@@ -511,6 +513,8 @@ const InlineTextFile: React.FC<{
   channelId?: string;
   replyCount?: number;
   extraActions?: React.ReactNode;
+  allThreadAttachments?: AttachmentRef[];
+  allAttachments?: QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'];
   parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
@@ -520,6 +524,8 @@ const InlineTextFile: React.FC<{
   channelId,
   replyCount,
   extraActions,
+  allThreadAttachments,
+  allAttachments,
   parentMessage,
 }) => {
   const [fileData, setFileData] = useState<File | null>(null);
@@ -605,7 +611,20 @@ const InlineTextFile: React.FC<{
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+    const payload = buildAttachmentViewerPayload({
+      targetId: attachmentId,
+      fallback: attachment,
+      ...(allThreadAttachments && { allThreadAttachments }),
+      ...(allAttachments && { allAttachments }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
+    });
+    attachmentViewerActor.send({
+      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
+      ...payload,
+    });
   };
 
   if (isLargeFile) {
@@ -624,12 +643,14 @@ const InlineTextFile: React.FC<{
             <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
             <span className='ml-1 text-xs text-muted-foreground'>(click to view)</span>
           </button>
-          <button
+          <Button
+            variant='ghost'
             type='button'
             onClick={e => {
               e.stopPropagation();
               void downloadAttachment(attachmentId, fileName);
             }}
+            trackId='download_text_file'
             className='p-2 hover:bg-accent rounded-lg transition-colors'
             title='Download file'
             data-track-category='MESSAGE'
@@ -637,7 +658,7 @@ const InlineTextFile: React.FC<{
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
           >
             <Download className='h-4 w-4 text-muted-foreground' />
-          </button>
+          </Button>
           {extraActions}
         </div>
       </div>
@@ -662,12 +683,14 @@ const InlineTextFile: React.FC<{
             {isExpanded ? '[Hide]' : '[View]'}
           </span>
         </button>
-        <button
+        <Button
+          variant='ghost'
           type='button'
           onClick={e => {
             e.stopPropagation();
             void downloadAttachment(attachmentId, fileName);
           }}
+          trackId='download_text_file_inline'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
           data-track-category='MESSAGE'
@@ -675,7 +698,7 @@ const InlineTextFile: React.FC<{
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <Download className='h-4 w-4 text-muted-foreground' />
-        </button>
+        </Button>
         {extraActions}
       </div>
 
@@ -726,6 +749,8 @@ const InlineCodeFile: React.FC<{
   conversationId?: string;
   channelId?: string;
   replyCount?: number;
+  allThreadAttachments?: AttachmentRef[];
+  allAttachments?: QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'];
   parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
@@ -734,6 +759,8 @@ const InlineCodeFile: React.FC<{
   conversationId,
   channelId,
   replyCount,
+  allThreadAttachments,
+  allAttachments,
   parentMessage,
 }) => {
   const windowWidth = useWindowWidth();
@@ -751,7 +778,20 @@ const InlineCodeFile: React.FC<{
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+    const payload = buildAttachmentViewerPayload({
+      targetId: attachmentId,
+      fallback: attachment,
+      ...(allThreadAttachments && { allThreadAttachments }),
+      ...(allAttachments && { allAttachments }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
+    });
+    attachmentViewerActor.send({
+      type: attachmentViewerActor.getSnapshot().value !== 'closed' ? 'UPDATE' : 'OPEN',
+      ...payload,
+    });
   };
 
   return (
@@ -769,12 +809,14 @@ const InlineCodeFile: React.FC<{
           <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
           <span className='ml-1 text-xs text-muted-foreground'>[View]</span>
         </button>
-        <button
+        <Button
+          variant='ghost'
           type='button'
           onClick={e => {
             e.stopPropagation();
             void downloadAttachment(attachmentId, fileName);
           }}
+          trackId='download_code_file'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
           data-track-category='MESSAGE'
@@ -782,7 +824,7 @@ const InlineCodeFile: React.FC<{
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <Download className='h-4 w-4 text-muted-foreground' />
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -820,6 +862,8 @@ const InlineVideoPlayer: React.FC<{
   channelId?: string;
   replyCount?: number;
   duration?: number | undefined;
+  allThreadAttachments?: AttachmentRef[];
+  allAttachments?: QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'];
   parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
@@ -835,6 +879,8 @@ const InlineVideoPlayer: React.FC<{
   channelId,
   replyCount,
   duration,
+  allThreadAttachments,
+  allAttachments,
   parentMessage,
 }) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
@@ -894,6 +940,12 @@ const InlineVideoPlayer: React.FC<{
   const { canDelete, handleDelete } = useAttachmentDelete(attachmentId, fileName, uploadedBy);
 
   const openModal = ({ startPlayback = false }: { startPlayback?: boolean } = {}) => {
+    const snapshot = attachmentViewerActor.getSnapshot();
+    const current = snapshot.context.attachments[snapshot.context.currentIndex];
+    const viewerOpen = snapshot.value !== 'closed';
+    const sameVideoOpen = viewerOpen && current?.attachmentId === attachmentId;
+    if (sameVideoOpen) return;
+
     // Exit fullscreen if active before opening modal
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {
@@ -903,20 +955,44 @@ const InlineVideoPlayer: React.FC<{
     // Capture current video time before opening modal
     const currentTime = videoRef.current?.currentTime;
     const isPlayingInline = videoRef.current ? !videoRef.current.paused : false;
+    const shouldAutoPlay = startPlayback || isPlayingInline || viewerOpen;
     const attachment: AttachmentRef = {
       attachmentId,
       fileName,
       fileUrl: '', // Not used for videos
       mimeType,
       fileSize,
-      autoPlay: startPlayback || isPlayingInline,
+      autoPlay: shouldAutoPlay,
       ...(currentTime !== undefined && { initialTime: currentTime }),
       ...(conversationId && { conversationId }),
       ...(channelId && { channelId }),
       ...(replyCount !== undefined && { replyCount }),
       ...(parentMessage && { parentMessage }),
     };
-    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+    const payload = buildAttachmentViewerPayload({
+      targetId: attachmentId,
+      fallback: attachment,
+      ...(allThreadAttachments && { allThreadAttachments }),
+      ...(allAttachments && { allAttachments }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
+      overlay: {
+        autoPlay: shouldAutoPlay,
+        ...(currentTime !== undefined && { initialTime: currentTime }),
+      },
+    });
+    attachmentViewerActor.send({
+      type: viewerOpen ? 'UPDATE' : 'OPEN',
+      ...payload,
+    });
+  };
+
+  const handleThumbnailOpen = (e: React.MouseEvent<HTMLDivElement>): void => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, [role="menuitem"]')) return;
+    openModal({ startPlayback: true });
   };
 
   const dimensions = useMemo(() => {
@@ -1046,7 +1122,22 @@ const InlineVideoPlayer: React.FC<{
           {loading ? (
             <div className='bg-muted animate-pulse flex items-center justify-center w-full h-full' />
           ) : !hasClickedPlay || isMobile ? (
-            <div className='relative h-full'>
+            <div
+              className='relative h-full cursor-pointer'
+              role='button'
+              tabIndex={0}
+              aria-label={`Open ${fileName} preview`}
+              data-track-category='MESSAGE'
+              data-track-name='OPEN_ATTACHMENT_PREVIEW'
+              data-track-metadata={JSON.stringify({ fileName, attachmentId })}
+              onClick={handleThumbnailOpen}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openModal({ startPlayback: true });
+                }
+              }}
+            >
               {thumbnailBlobUrl && !thumbnailError ? (
                 <img src={thumbnailBlobUrl} alt={fileName} className='w-full h-full object-cover' />
               ) : (
@@ -1064,7 +1155,8 @@ const InlineVideoPlayer: React.FC<{
                 onTouchStart={e => e.stopPropagation()}
               >
                 <button
-                  onClick={() => {
+                  onClick={e => {
+                    e.stopPropagation();
                     if (isMobile) {
                       openModal({ startPlayback: true });
                     } else {
@@ -1090,7 +1182,10 @@ const InlineVideoPlayer: React.FC<{
               {!isMobile && (
                 <div className='absolute bottom-4 right-3 opacity-0 group-hover:opacity-100 transition-opacity'>
                   <button
-                    onClick={() => openModal()}
+                    onClick={e => {
+                      e.stopPropagation();
+                      openModal();
+                    }}
                     className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                     title='Expand video'
                     aria-label='Expand video'
@@ -1175,48 +1270,31 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   const isImage = isImageFile(attachment.mimetype);
 
   const handleCardClick = (): void => {
-    // Use thread attachments if available, otherwise build from message attachments
-    const attachments: AttachmentRef[] =
-      allThreadAttachments ||
-      (allAttachments || [attachment]).map(att => {
-        const ref: AttachmentRef = {
-          attachmentId: att.id,
-          fileName: att.originalFilename,
-          fileUrl: `/attachments/${att.id}/download`,
-          mimeType: att.mimetype,
-          fileSize: att.size,
-          thumbnailUrl: att.thumbnailUrl,
-        };
-        if (conversationId) ref.conversationId = conversationId;
-        if (channelId) ref.channelId = channelId;
-        if (replyCount !== undefined) ref.replyCount = replyCount;
-        // Include parent message for synthetic thread panel rendering
-        if (parentMessage) ref.parentMessage = parentMessage;
-        return ref;
-      });
-
-    // Find starting index based on the attachment's position in the array
-    // Try multiple matching strategies to ensure we find the correct attachment
-    let startIndex = attachments.findIndex(att => att.attachmentId === attachment.id);
-
-    // If not found by ID, try matching by fileName and fileSize as fallback
-    if (startIndex === -1) {
-      startIndex = attachments.findIndex(
-        att =>
-          att.fileName === attachment.originalFilename &&
-          att.fileSize === attachment.size &&
-          att.mimeType === attachment.mimetype,
-      );
-    }
-
-    // Fallback to 0 if attachment not found in the array
-    const safeStartIndex = startIndex === -1 ? 0 : startIndex;
-
-    // Use UPDATE if viewer is already open, otherwise OPEN
+    const fallback: AttachmentRef = {
+      attachmentId: attachment.id,
+      fileName: attachment.originalFilename,
+      fileUrl: `/attachments/${attachment.id}/download`,
+      mimeType: attachment.mimetype,
+      fileSize: attachment.size,
+      thumbnailUrl: attachment.thumbnailUrl,
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
+    };
+    const payload = buildAttachmentViewerPayload({
+      targetId: attachment.id,
+      fallback,
+      ...(allThreadAttachments && { allThreadAttachments }),
+      ...(allAttachments && { allAttachments }),
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
+    });
     attachmentViewerActor.send({
       type: isOpen ? 'UPDATE' : 'OPEN',
-      attachments,
-      startIndex: safeStartIndex,
+      ...payload,
     });
   };
 
@@ -1239,6 +1317,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
         {...(extraActions && { extraActions })}
+        {...(allThreadAttachments && { allThreadAttachments })}
+        {...(allAttachments && { allAttachments })}
         {...(parentMessage && { parentMessage })}
       />
     );
@@ -1254,6 +1334,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
+        {...(allThreadAttachments && { allThreadAttachments })}
+        {...(allAttachments && { allAttachments })}
         {...(parentMessage && { parentMessage })}
       />
     );
@@ -1277,6 +1359,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
+        {...(allThreadAttachments && { allThreadAttachments })}
+        {...(allAttachments && { allAttachments })}
         {...(parentMessage && { parentMessage })}
       />
     );

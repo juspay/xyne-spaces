@@ -11,17 +11,23 @@ import {
   useCreateBlockNote,
   SuggestionMenuController,
   FormattingToolbarController,
+  FilePanelController,
+  LinkToolbarController,
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { getMathSlashMenuItems } from '@blocknote/math-block';
 import type {
+  Block,
   BlockNoteEditor,
   BlockSchema,
   InlineContentSchema,
   PartialBlock,
   StyleSchema,
 } from '@blocknote/core';
+import { withCollaboration } from '@blocknote/core/yjs';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { en } from '@blocknote/core/locales';
@@ -34,6 +40,7 @@ import {
 } from '../../../hooks/useCanvasYjsProvider';
 import { useAuth } from '../../../hooks/useAuth';
 import { useSelf, useUsers, searchUsers } from '../../../hooks/useUsers';
+import { Button } from '../../ui/Button';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
@@ -55,6 +62,8 @@ import { filterSuggestionItems } from '@blocknote/core/extensions';
 import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
+import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
+import { withHeadingsTogether } from '../canvasSlashMenu';
 import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
@@ -75,16 +84,32 @@ import { AnimatePresence } from 'framer-motion';
 
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
+import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
-const canvasDictionary = {
+const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
+const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
+const RECORDING_SUMMARY_TEXT_BLOCK_TYPES = new Set([
+  'paragraph',
+  'bulletListItem',
+  'numberedListItem',
+  'checkListItem',
+  'toggleListItem',
+  'quote',
+  'heading',
+]);
+
+const buildCanvasDictionary = (placeholder: string): typeof en => ({
   ...en,
   placeholders: {
     ...en.placeholders,
-    default: "Write something, or press '/' for commands",
-    emptyDocument: "Write something, or press '/' for commands",
+    default: placeholder,
+    emptyDocument: placeholder,
   },
-};
+});
+
+const canvasDictionary = buildCanvasDictionary(DEFAULT_CANVAS_PLACEHOLDER);
 
 interface CollaborativeCanvasEditorProps {
   canvasId: string;
@@ -106,6 +131,8 @@ interface CollaborativeCanvasEditorProps {
   onOpenCommentCountChange?: (count: number) => void;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
+  /** Recording summaries render generated body copy muted; local edits mark touched blocks foreground. */
+  trackEditedRecordingSummaryBlocks?: boolean;
   /** Optional preloaded canvas participants to avoid duplicate query */
   canvasParticipants?: CanvasParticipant[] | undefined;
   /** Optional preloaded canvas creator */
@@ -124,7 +151,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       channelId,
       title,
       editable = true,
-      placeholder: _placeholder,
+      placeholder,
       className = '',
       onFileUpload,
       onChange,
@@ -135,6 +162,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       initialCommentThreadId,
       onOpenCommentCountChange,
       autoFocus,
+      trackEditedRecordingSummaryBlocks = false,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
@@ -159,15 +187,23 @@ export const CollaborativeCanvasEditor = forwardRef<
       'Anonymous';
     const currentUserColor = generateUserColor(currentUserId);
 
-    const { fragment, provider, awareness, collaborators, connectionStatus, isReadOnly } =
-      useCanvasYjsProvider({
-        canvasId,
-        userId: currentUserId,
-        userName: currentUserName,
-        userColor: currentUserColor,
-        channelId,
-        title,
-      });
+    const {
+      fragment,
+      provider,
+      awareness,
+      collaborators,
+      connectionStatus,
+      isReadOnly,
+      connectionFailed,
+      reconnect,
+    } = useCanvasYjsProvider({
+      canvasId,
+      userId: currentUserId,
+      userName: currentUserName,
+      userColor: currentUserColor,
+      channelId,
+      title,
+    });
 
     useEffect(() => {
       onCollaboratorsChange?.(collaborators);
@@ -186,16 +222,26 @@ export const CollaborativeCanvasEditor = forwardRef<
     }
 
     const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
+    const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
 
-    const editorOptions = {
+    const dictionary = useMemo(
+      () => (placeholder ? buildCanvasDictionary(placeholder) : canvasDictionary),
+      [placeholder],
+    );
+
+    const baseEditorOptions = {
       schema: canvasSchema,
-      dictionary: canvasDictionary,
+      dictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,
       _tiptapOptions: canvasTiptapOptions,
-      ...(shouldUseCollaboration
-        ? {
+    };
+
+    const editorOptions =
+      shouldUseCollaboration && provider && fragment
+        ? withCollaboration({
+            ...baseEditorOptions,
             collaboration: {
               fragment,
               user: {
@@ -205,15 +251,29 @@ export const CollaborativeCanvasEditor = forwardRef<
               },
               provider,
             },
-          }
-        : {}),
-    };
+          })
+        : baseEditorOptions;
 
     const editor = useCreateBlockNote(editorOptions as Parameters<typeof useCreateBlockNote>[0], [
       canvasId,
       awareness,
+      fragment,
+      provider,
       shouldUseCollaboration,
     ]);
+
+    // Editor mount marker — log once per canvas when the editor is live, to bound
+    // load timing between query complete and an interactive editor.
+    const editorMountedIdRef = useRef<string | null>(null);
+    useEffect(() => {
+      if (!canMountEditor || !editor) return;
+      if (editorMountedIdRef.current === canvasId) return;
+      editorMountedIdRef.current = canvasId;
+      logger.info(Event.CANVAS_EDITOR_MOUNTED, {
+        canvasId,
+        collaborative: shouldUseCollaboration,
+      });
+    }, [canMountEditor, editor, canvasId, shouldUseCollaboration]);
 
     // Presentation state and handlers
     const {
@@ -266,23 +326,32 @@ export const CollaborativeCanvasEditor = forwardRef<
       const whiteboardItems = getWhiteboardSlashMenuItems(
         editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
       );
+      const mathItems = getMathSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
+      const diagramItems = getDiagramSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
 
-      return [...whiteboardItems];
+      return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
-    // Get slash menu items with custom blocks
+    // Every slash item, each already showing the key that reaches it.
+    const allSlashItems = useMemo(() => {
+      if (!editor) return [];
+      const defaultItems = getDefaultReactSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
+      return withBlockShortcutBadges(withHeadingsTogether([...defaultItems, ...customSlashItems]));
+    }, [editor, customSlashItems]);
+
     const getSlashMenuItems = useCallback(
-      (query: string): Promise<DefaultReactSuggestionItem[]> => {
-        if (!editor) return Promise.resolve([]);
-        const defaultItems = getDefaultReactSlashMenuItems(
-          editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
-        );
-        return Promise.resolve(
-          filterSuggestionItems([...defaultItems, ...customSlashItems], query),
-        );
-      },
-      [editor, customSlashItems],
+      (query: string): Promise<DefaultReactSuggestionItem[]> =>
+        Promise.resolve(filterSuggestionItems(allSlashItems, query)),
+      [allSlashItems],
     );
+
+    useCanvasBlockShortcuts(editor, allSlashItems);
 
     const users = useUsers();
     const allUserGroups = useUserGroups();
@@ -562,6 +631,50 @@ export const CollaborativeCanvasEditor = forwardRef<
       onChange?.(editor.document as PartialBlock[]);
     }, [debouncedExtractHeadings, editor, onChange, refreshCommentHighlights]);
 
+    const isApplyingRecordingSummaryEditColorRef = useRef(false);
+    useEffect(() => {
+      if (!editor || !trackEditedRecordingSummaryBlocks || !editable || isReadOnly) return;
+
+      const editorTyped = editor as unknown as BlockNoteEditor<
+        BlockSchema,
+        InlineContentSchema,
+        StyleSchema
+      >;
+
+      const unsubscribe = editorTyped.onChange((_changedEditor, context) => {
+        if (isApplyingRecordingSummaryEditColorRef.current) return;
+
+        const changedBlocks = context
+          .getChanges()
+          .filter(change => change.type === 'insert' || change.type === 'update')
+          .map(change => change.block)
+          .filter(
+            (block): block is Block<BlockSchema, InlineContentSchema, StyleSchema> =>
+              RECORDING_SUMMARY_TEXT_BLOCK_TYPES.has(String(block.type)) &&
+              block.props?.['textColor'] !== RECORDING_SUMMARY_EDITED_TEXT_COLOR,
+          );
+
+        if (changedBlocks.length === 0) return;
+
+        isApplyingRecordingSummaryEditColorRef.current = true;
+        try {
+          changedBlocks.forEach(block => {
+            editorTyped.updateBlock(block.id, {
+              props: {
+                textColor: RECORDING_SUMMARY_EDITED_TEXT_COLOR,
+              },
+            } as unknown as PartialBlock<BlockSchema, InlineContentSchema, StyleSchema>);
+          });
+        } finally {
+          queueMicrotask(() => {
+            isApplyingRecordingSummaryEditColorRef.current = false;
+          });
+        }
+      }, false);
+
+      return unsubscribe;
+    }, [editable, editor, isReadOnly, trackEditedRecordingSummaryBlocks]);
+
     const handleHeadingClick = useCallback((id: string) => {
       scrollToHeading(id, containerRef.current);
     }, []);
@@ -644,6 +757,14 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
+        {connectionFailed && (
+          <div className='flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive'>
+            <span>Connection to the canvas failed. Your changes may not be saved.</span>
+            <Button size='sm' variant='outline' onClick={reconnect}>
+              Reconnect
+            </Button>
+          </div>
+        )}
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div
             className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
@@ -660,7 +781,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                 overflowWrap: 'break-word',
               }}
             >
-              {editor && (
+              {editor && canMountEditor && (
                 <CanvasMentionContext.Provider value={mentionContextValue}>
                   <BlockNoteView
                     editor={
@@ -675,9 +796,14 @@ export const CollaborativeCanvasEditor = forwardRef<
                     formattingToolbar={false}
                     tableHandles={editable && !isReadOnly}
                     slashMenu={false}
+                    linkToolbar={false}
+                    filePanel={false}
                     onChange={handleCollaborativeChange}
                   >
                     <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                    <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
+                    <CanvasPastedLinkToolbar />
+                    <FilePanelController filePanel={CanvasFilePanel} />
                     <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
                     <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
                   </BlockNoteView>
@@ -751,7 +877,14 @@ export const CollaborativeCanvasEditor = forwardRef<
         )}
 
         {/* Copy button overlay for code blocks */}
-        <CanvasCodeCopyButton containerRef={containerRef} />
+        {editor && (
+          <CanvasCodeCopyButton
+            containerRef={containerRef}
+            editor={
+              editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>
+            }
+          />
+        )}
       </div>
     );
   },

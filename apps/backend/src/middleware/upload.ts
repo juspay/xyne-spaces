@@ -2,9 +2,106 @@ import multer from 'multer';
 import { logger } from '../utils/logger';
 import { storageService } from '../services/storage';
 import { AppError } from './errorHandler';
+import { db } from '../database/client';
+import { AttachmentUploadStatus } from '@xyne/shared';
 
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
+
+/**
+ * File types refused at upload: Windows executables and server-side scripts, which are
+ * delivered to other people in a channel rather than rendered by the app. Documents and
+ * markup are deliberately allowed — every serving path types them as an opaque download
+ * (see setSafeDownloadHeaders), and images render under a script-blocking policy (see
+ * setSafeInlineImageHeaders).
+ *
+ * Mobile build artifacts (.apk, .ipa) and shell scripts (.sh, .bash) are NOT listed:
+ * sharing builds and ops scripts in a channel is an established workflow here, and
+ * refusing them would break it. `.com` is likewise absent — it matches the content-id
+ * filenames Outlook gives inline images far more often than any real executable.
+ *
+ * Keyed on extension: file.mimetype is supplied by the client, and a large share of real
+ * uploads arrive as application/octet-stream because the client could not determine a type.
+ * The MIME set below is a second pass for the cases where a type is declared.
+ */
+const BLOCKED_UPLOAD_EXTENSIONS = new Set([
+  '.exe', '.dll', '.msi', '.scr', '.bat', '.cmd', '.ps1',
+  '.php', '.phtml',
+]);
+
+const BLOCKED_UPLOAD_MIME_TYPES = new Set([
+  'application/x-msdownload',
+  'application/x-msdos-program',
+  'application/x-httpd-php',
+]);
+
+export function isBlockedUpload(mimetype?: string, originalName?: string): boolean {
+  const mime = (mimetype ?? '').split(';')[0].trim().toLowerCase();
+  if (BLOCKED_UPLOAD_MIME_TYPES.has(mime)) return true;
+
+  const name = (originalName ?? '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  if (dot === -1) return false;
+  return BLOCKED_UPLOAD_EXTENSIONS.has(name.slice(dot));
+}
+
+/**
+ * Skips a refused file rather than failing the request: returning an error to multer
+ * discards every file in the same multipart upload, which on the inbound-email path would
+ * drop the message entirely. Callers see the file missing from req.files.
+ */
+const uploadFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  if (isBlockedUpload(file.mimetype, file.originalname)) {
+    logger.warn('[UPLOAD] Rejected file type', {
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+    });
+    cb(null, false);
+    return;
+  }
+  cb(null, true);
+};
+
+/**
+ * office-conversion is single-purpose (shell the upload out to LibreOffice's
+ * `soffice --convert-to pdf`), so unlike the generic uploadFileFilter above —
+ * a denylist covering every other upload path in the app — this one is an
+ * allowlist: only the office document types the FileViewer actually sends
+ * (apps/dashboard/src/components/FileViewer/utils.ts) are accepted, not
+ * "anything not explicitly blocked".
+ */
+const OFFICE_CONVERSION_EXTENSIONS = new Set([
+  '.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls',
+]);
+
+const OFFICE_CONVERSION_MIME_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+  'application/vnd.ms-powerpoint', // .ppt
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/msword', // .doc
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.ms-excel', // .xls
+]);
+
+const officeConversionFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  // Extension-primary, same as isBlockedUpload above: file.mimetype is
+  // client-supplied and often generic (application/octet-stream) even for a
+  // real office document.
+  const name = (file.originalname ?? '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const ext = dot === -1 ? '' : name.slice(dot);
+  const mime = (file.mimetype ?? '').split(';')[0].trim().toLowerCase();
+
+  if (!OFFICE_CONVERSION_EXTENSIONS.has(ext) && !OFFICE_CONVERSION_MIME_TYPES.has(mime)) {
+    logger.warn('[UPLOAD] Rejected non-office file for conversion', {
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+    });
+    cb(null, false);
+    return;
+  }
+  cb(null, true);
+};
 
 // Generic streaming storage engine for message attachments.
 // Streams directly to object storage without buffering in memory.
@@ -96,6 +193,7 @@ const streamingStorage: multer.StorageEngine = {
 // Common multer configuration for file uploads
 export const uploadConfig = multer({
   storage: multer.memoryStorage(),
+  fileFilter: uploadFileFilter,
   limits: {
     fileSize: MAX_FILE_SIZE_BYTES,
     files: 10 // Max 10 files per request
@@ -143,17 +241,28 @@ function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEng
 
 export const collectionUpload = multer({
   storage: makeCollectionStreamingStorage('collectionId'),
+  fileFilter: uploadFileFilter,
   limits: { fileSize: 100 * 1024 * 1024, files: 50 },
 });
 
 export const versionUpload = multer({
   storage: makeCollectionStreamingStorage('itemId'),
+  fileFilter: uploadFileFilter,
   limits: { fileSize: 100 * 1024 * 1024 },
+});
+
+// In-memory (not GCS-streamed): the file is transient input to a conversion,
+// never stored.
+export const officeConversionUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: officeConversionFileFilter,
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
 });
 
 const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>
   multer({
     storage: streamingStorage,
+    fileFilter: uploadFileFilter,
     limits: {
       fileSize: fileSizeBytes,
       files: maxFiles,
@@ -243,6 +352,26 @@ export const uploadSingle = (options: UploadSingleOptions = {}) => {
   };
 };
 
+/**
+ * A disconnect mid-upload leaves the client-created attachment rows PENDING with no
+ * object behind them. The ids arrive as text fields ahead of the file bodies, so they
+ * are already parsed here and the rows can be parked in FAILED. Best-effort.
+ */
+const markUploadedAttachmentsFailed = async (req: any): Promise<void> => {
+  const raw = req.body?.attachmentIds;
+  if (!raw) return;
+  try {
+    const ids: string[] = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    await db.messageAttachment.updateMany({
+      where: { id: { in: ids }, url: '' },
+      data: { uploadStatus: AttachmentUploadStatus.FAILED },
+    });
+  } catch (error) {
+    logger.error('[MULTER] Failed to mark interrupted attachments as failed:', error);
+  }
+};
+
 // Custom uploadMultiple that proxies multipart file streams directly to object storage
 export const uploadMultiple = (req: any, res: any, next: any) => {
   logger.info('fixingAttachment 🗂️ [MULTER] Starting multipart stream proxy...');
@@ -255,6 +384,7 @@ export const uploadMultiple = (req: any, res: any, next: any) => {
   multerMiddleware(req, res, (err: any) => {
     if (err) {
       logger.error('fixingAttachment ❌ [MULTER] Upload middleware error:', err.message);
+      void markUploadedAttachmentsFailed(req);
       return next(normalizeMulterError(err, MAX_FILE_SIZE_BYTES));
     }
 

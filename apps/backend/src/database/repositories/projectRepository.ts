@@ -1,3 +1,4 @@
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Project } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
@@ -175,6 +176,19 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
   }
 
   async delete(id: string): Promise<Project> {
+    // Only repositories in a hub block deletion: an unattached one has nothing to
+    // detach and no UI to detach it from.
+    const attachedSdlcRepository = await this.db.sdlcEntityLink.findFirst({
+      where: {
+        relationType: SDLC_MEMBERSHIP_RELATION,
+        targetType: 'REPOSITORY',
+        channel: { projectId: id },
+      },
+      select: { id: true },
+    });
+    if (attachedSdlcRepository) {
+      throw new Error('Detach SDLC repositories before deleting their project');
+    }
     const result = await this.db.project.delete({
       where: { id }
     });
@@ -183,7 +197,6 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     // try {
     //   await queueProjectIngestion({ id: result.id }, 'delete');
     // } catch (error) {
-    //   console.error(`[VESPA-FLOW] Failed to queue project deletion for Vespa: ${result.id}`, error);
     //   // Don't throw - project is still deleted in DB
     // }
 

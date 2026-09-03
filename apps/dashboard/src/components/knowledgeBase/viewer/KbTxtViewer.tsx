@@ -1,13 +1,11 @@
 import React from 'react';
 import TxtViewer from '../../FileViewer/TxtViewer';
 import type { BaseViewerProps } from '../../FileViewer/utils';
-import './fileViewerOverrides.css';
 
-// KB-only wrapper. See KbCodeViewer for the rationale — same shell class
-// triggers `fileViewerOverrides.css`, leaving the shared TxtViewer used
-// elsewhere (chat attachments, citations) untouched.
+// KB-only wrapper. See KbCodeViewer for the rationale — the shell div only
+// supplies the full-size box; the surface comes from the shared TxtViewer.
 export const KbTxtViewer: React.FC<BaseViewerProps> = props => (
-  <div className='kb-file-viewer h-full w-full'>
+  <div className='h-full w-full'>
     <TxtViewer {...props} />
   </div>
 );

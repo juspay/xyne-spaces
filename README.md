@@ -349,6 +349,7 @@ xyne-spaces/
 | [AI providers](docs/setup/ai-providers.md) | Configuring model access |
 | [Troubleshooting](docs/setup/troubleshooting.md) | When setup goes wrong |
 | [API reference](API_DOCUMENTATION.md) | REST API documentation |
+| [MCP Gateway integration](apps/xyne-claw-auth/docs/mcp-gateway-integration.md) | Claw Auth MCP gateway integration guide |
 
 ---
 

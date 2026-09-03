@@ -10,6 +10,7 @@
  */
 
 import { redisService } from "../redis.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("run-scalars");
@@ -33,7 +34,7 @@ export async function storeRunScalars(sessionId: string, scalars: RunScalars): P
   try {
     await redisService.getConnection().set(key(sessionId), JSON.stringify(scalars), "EX", TTL_SECONDS);
   } catch (err) {
-    log.warn(`[run-scalars] store failed for ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[run-scalars] store failed for ${sessionId}:`, errMsg(err));
   }
 }
 
@@ -45,7 +46,7 @@ export async function loadRunScalars(sessionId: string): Promise<RunScalars> {
     const parsed = JSON.parse(raw) as RunScalars;
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
-    log.warn(`[run-scalars] load failed for ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[run-scalars] load failed for ${sessionId}:`, errMsg(err));
     return {};
   }
 }

@@ -334,7 +334,7 @@ services:
       - GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - DEFAULT_ADMIN_EMAIL=sandbox@xyne.ai
-      - JWT_EXPIRATION_SECONDS=1800
+      - JWT_EXPIRATION_SECONDS=86400
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${name}-backend.rule=Host(\`${name}.localhost\`) && PathPrefix(\`/api\`)"

@@ -23,6 +23,7 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -390,6 +391,7 @@ class LiveKitWebhookController {
         const callType = roomMetadata.callType;
         const callOrigin = roomMetadata.callOrigin;
         const existingConversationId = roomMetadata.conversationId;
+        const artifactMessageId = roomMetadata.artifactMessageId;
         const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
 
         if (!channelId) {
@@ -477,6 +479,7 @@ class LiveKitWebhookController {
           messageId,
           now,
           callOrigin,
+          ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
         }).catch((txError) => {
           logger.error('[LiveKit Webhook] call_record_creation_failed', {
             stage: 'call_record_creation',
@@ -496,6 +499,67 @@ class LiveKitWebhookController {
         if (!result) return;
 
         call = result.call;
+
+        // SDLC linking: the initiator validated this context; now that the call
+        // and its conversation exist, record the entity mapping. Owner is a
+        // canvas or a track — either way the same two links are written:
+        //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
+        const sdlcLink = (roomMetadata as {
+          sdlcLink?: { ownerType?: string; ownerId?: string };
+        }).sdlcLink;
+        if (sdlcLink?.ownerType && sdlcLink.ownerId) {
+          try {
+            const linkWorkspaceId = channelRecord?.workspaceId ?? null;
+            const ownerValid =
+              sdlcLink.ownerType === 'CANVAS'
+                ? Boolean(
+                    await this.db.canvas.findFirst({
+                      where: { id: sdlcLink.ownerId, channelId },
+                      select: { id: true },
+                    }),
+                  )
+                : sdlcLink.ownerType === 'TRACK'
+                  ? await isTrackInChannel(this.db, sdlcLink.ownerId, channelId)
+                  : false;
+            if (linkWorkspaceId && ownerValid) {
+              await this.db.sdlcEntityLink.createMany({
+                data: [
+                  {
+                    workspaceId: linkWorkspaceId,
+                    channelId,
+                    sourceType: sdlcLink.ownerType,
+                    sourceId: sdlcLink.ownerId,
+                    targetType: 'CALL',
+                    targetId: callId,
+                    relationType: 'CALL',
+                    createdBy,
+                  },
+                  {
+                    workspaceId: linkWorkspaceId,
+                    channelId,
+                    sourceType: sdlcLink.ownerType,
+                    sourceId: sdlcLink.ownerId,
+                    targetType: 'CONVERSATION',
+                    targetId: conversationId,
+                    relationType: 'DISCUSSION',
+                    createdBy,
+                  },
+                ],
+                skipDuplicates: true,
+              });
+              logger.info(
+                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
+              );
+            }
+          } catch (sdlcLinkError) {
+            // Linking must never break call creation.
+            logger.warn('[LiveKit Webhook] sdlc_link_failed', {
+              room: roomName,
+              call: callId,
+              error: sdlcLinkError,
+            });
+          }
+        }
 
         // Emit call-started automation event when the first participant creates the call
         if (call) {

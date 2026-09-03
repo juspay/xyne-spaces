@@ -1,8 +1,26 @@
+import { createHmac } from "node:crypto";
+import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
+
 const requiredEnv = (name: string): string => {
   const val = process.env[name];
   if (!val) throw new Error(`Missing required env: ${name}`);
   return val;
 };
+
+const rootEncryptionKey = Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex");
+if (rootEncryptionKey.length !== 32) {
+  throw new Error("ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hex characters");
+}
+
+const dataEncryptionKey = derivePurposeKey(rootEncryptionKey, "data-encryption/aes-256-gcm/v1");
+const actionSigningKey = derivePurposeKey(rootEncryptionKey, "action-approval/hmac-sha256/v1");
+const sessionSigningKey = derivePurposeKey(rootEncryptionKey, "session-token/hmac-sha256/v1");
+const oauthStateSigningKey = derivePurposeKey(rootEncryptionKey, "oauth-state/hmac-sha256/v1");
+const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("xyne-claw-auth/session-token/v1").digest();
+
+// Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
+// the derived data key; reads fall back to the legacy root during migration.
+registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
@@ -13,7 +31,13 @@ export const CONFIG = {
   // traffic off the public ingress (~100k+ progress events/day in prod).
   // Falls back to `selfUrl` so single-node / dev deployments keep working.
   internalUrl: process.env["AUTH_SERVICE_INTERNAL_URL"] ?? process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
-  encryptionKey: Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex"),
+  encryptionKey: dataEncryptionKey,
+  actionSigningKey,
+  sessionSigningKey,
+  oauthStateSigningKey,
+  legacyActionSigningKey: rootEncryptionKey,
+  legacySessionSigningKey,
+  legacyOauthStateSigningKey: rootEncryptionKey,
   // Spaces' AES-256-CBC key — must equal xyne-spaces backend's ENCRYPTION_KEY
   // value (the two services are independently keyed). Used ONLY to decrypt
   // `installed_apps.signingSecret` read from the Spaces DB during the
@@ -46,7 +70,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -64,6 +88,14 @@ export const CONFIG = {
   cliTokensEnabled: ["1", "true", "on", "yes"].includes(
     (process.env["CLI_TOKENS_ENABLED"] ?? "").trim().toLowerCase(),
   ),
+  localHarnessEnabled: ["1", "true", "on", "yes"].includes(
+    (process.env["LOCAL_HARNESS_ENABLED"] ?? "").trim().toLowerCase(),
+  ),
+  localHarnessDefaultAll: ["1", "true", "on", "yes"].includes(
+    (process.env["LOCAL_HARNESS_DEFAULT_ALL"] ?? "").trim().toLowerCase(),
+  ),
+  localHarnessPollTimeoutMs: Number(process.env["LOCAL_HARNESS_POLL_TIMEOUT_MS"] ?? 25_000),
+  localHarnessRunTimeoutMs: Number(process.env["LOCAL_HARNESS_RUN_TIMEOUT_MS"] ?? 900_000),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
@@ -123,6 +155,12 @@ export const CONFIG = {
   dailyBriefRateDurationMs: Number(process.env["DAILY_BRIEF_RATE_DURATION_MS"] ?? 1000),
   dailyBriefCronUtcHour: Number(process.env["DAILY_BRIEF_CRON_UTC_HOUR"] ?? 0),
   dailyBriefCronUtcMinute: Number(process.env["DAILY_BRIEF_CRON_UTC_MINUTE"] ?? 30),
+  // OTLP/HTTP metrics → the shared collector (same one the spaces backend and
+  // dashboard export to). Set ENABLE_OTEL_METRICS=false where no collector runs.
+  otelMetricsEnabled: (process.env["ENABLE_OTEL_METRICS"] ?? "true").trim().toLowerCase() !== "false",
+  otelBaseUrl: (process.env["OTEL_BASE_URL"] ?? "http://localhost:4318").replace(/\/+$/, ""),
+  otelServiceName: process.env["OTEL_SERVICE_NAME"] ?? "xyne-claw-auth",
+  otelExportIntervalMs: Number(process.env["OTEL_EXPORT_INTERVAL_MS"] ?? 60_000),
   redisHost: process.env["REDIS_HOST"] ?? "localhost",
   redisPort: Number(process.env["REDIS_PORT"] ?? 6379),
   redisPassword: process.env["REDIS_PASSWORD"] || undefined,
@@ -139,6 +177,13 @@ export const CONFIG = {
   // releases (incident 2026-06-09 euler-doctor session dea1f67c).
   runRecoveryTimeoutMs: Number(process.env["RUN_RECOVERY_TIMEOUT_MS"] ?? 1_200_000),
   runRecoveryBackoffMs: Number(process.env["RUN_RECOVERY_BACKOFF_MS"] ?? 30000),
+  /** Poll cadence for a WRITE sandbox to free up. The agent-sandbox operator
+   *  keeps reconciling the (still-alive) SandboxClaim and the kata node pool may
+   *  be scaling in, so a modest fixed delay re-dispatches until one binds. */
+  sandboxRetryDelayMs: Number(process.env["SANDBOX_RETRY_DELAY_MS"] ?? 60_000),
+  /** Hard cap on sandbox_unavailable deferrals (default ~15 x 60s = 15 min of
+   *  waiting). Guards against a run parking forever if capacity never frees. */
+  maxSandboxDeferrals: Number(process.env["MAX_SANDBOX_DEFERRALS"] ?? 15),
   gcsProjectId: process.env["GCS_PROJECT_ID"] ?? "",
   gcsBucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   fakeGcsHost: process.env["FAKE_GCS_HOST"] ?? "",
@@ -196,12 +241,63 @@ export const CONFIG = {
   vespaNamespace: process.env["VESPA_NAMESPACE"] ?? "namespace",
   vespaCluster: process.env["VESPA_CLUSTER"] ?? "my_content",
   /**
+   * Vespa CONFIG SERVER endpoint (port 19071, distinct from the query port
+   * above) — used only to fetch each schema's deployed .sd text
+   * (GET .../content/schemas/<schema>.sd) so rank-profile names can be read
+   * live off the running deployment instead of hand-maintained in code (see
+   * vespa-schema-profiles.ts). Defaults to VESPA_QUERY_ENDPOINT's host on
+   * port 19071 — query and config server are normally the same pod.
+   * Tenant/application/environment/region/instance default to "default",
+   * matching this app's own deployed session scripts (reindex.sh) for a
+   * plain single-node `vespa deploy`.
+   */
+  vespaConfigEndpoint: (() => {
+    const explicit = process.env["VESPA_CONFIG_ENDPOINT"];
+    if (explicit) return explicit.replace(/\/+$/, "");
+    try {
+      const u = new URL(process.env["VESPA_QUERY_ENDPOINT"] ?? "http://localhost:8081");
+      u.port = "19071";
+      return u.toString().replace(/\/+$/, "");
+    } catch {
+      return "http://localhost:19071";
+    }
+  })(),
+  vespaConfigTenant: process.env["VESPA_CONFIG_TENANT"] ?? "default",
+  vespaConfigApplication: process.env["VESPA_CONFIG_APPLICATION"] ?? "default",
+  vespaConfigEnvironment: process.env["VESPA_CONFIG_ENVIRONMENT"] ?? "default",
+  vespaConfigRegion: process.env["VESPA_CONFIG_REGION"] ?? "default",
+  vespaConfigInstance: process.env["VESPA_CONFIG_INSTANCE"] ?? "default",
+  /**
    * Pause (ms) the search-eval-run-worker inserts after each row's Vespa
    * query, in BOTH permission modes — a large sheet (hundreds/thousands of
    * rows) run at full QUERY_CONCURRENCY would otherwise hammer the Vespa
    * pod with sustained parallel query load. Default 500ms.
    */
   searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
+  /**
+   * EnterpriseRAG-Bench (Onyx) eval harness — targets a SEPARATE Vespa cluster
+   * holding the benchmark corpus, never the prod-connected one above.
+   *
+   *   ONYX_EVAL_VESPA_ENDPOINT  benchmark Vespa query endpoint — used ONLY by
+   *                             the harness's gold-material fetch by id
+   *                             (§5.3 search); the agent-under-test NEVER
+   *                             touches this — retrieval runs via spaces-search
+   *                             (the prod code path).
+   *   ONYX_EVAL_WORKSPACE_ID    workspaceId stamped on every benchmark doc —
+   *                             used verbatim as the YQL `workspaceId contains`
+   *                             filter for the gold fetch (Vespa only, is a
+   *                             string literal there; no DB validates it).
+   *   ONYX_EVAL_CLAW_TIMEOUT_MS the claw run timeout applied to the S2S call.
+   *
+   * The dispatch fires the SEEDED "onyx-ask-ai" agent row — slug hardcoded in
+   * the worker; bench tool narrowing (onyx-bench-search only) is also
+   * programmatic. Retrieval reaches the benchmark Vespa DIRECTLY
+   * (CONFIG.onyxVespaEndpoint) from the tool child — no spaces backend in the
+   * path.
+   */
+  onyxVespaEndpoint: (process.env["ONYX_EVAL_VESPA_ENDPOINT"] ?? "").replace(/\/+$/, ""),
+  onyxWorkspaceId: process.env["ONYX_EVAL_WORKSPACE_ID"] ?? "",
+  onyxEvalClawTimeoutMs: Number(process.env["ONYX_EVAL_CLAW_TIMEOUT_MS"] ?? 300_000),
   /**
    * Entity extraction — reads a channel's threads/tickets out of Vespa and
    * discovers the entity types the org talks about. The completions run on
@@ -260,7 +356,23 @@ export const CONFIG = {
   researchAgentMcpApiKey: process.env["RESEARCH_AGENT_MCP_API_KEY"]
     ?? process.env["research_agent_mcp_api_key"]
     ?? "",
+  /** Global, credentialless Heisenberg pipeline REST API proxied by its MCP server. */
+  heisenbergBaseUrl: (
+    process.env["HEISENBERG_BASE_URL"] ??
+    "<heisenberg-url>"
+  ).replace(/\/+$/, ""),
 } as const;
+
+// Prod safety gate: the claw-auth → session-MCP relay and the run callbacks
+// authenticate to xyne-claw with x-s2s-key. If the local harness is enabled in
+// production without that shared secret, every relay/callback would be sent
+// UNAUTHENTICATED — fail fast at boot instead of shipping an open bridge.
+if (CONFIG.localHarnessEnabled && CONFIG.isProduction && !CONFIG.xyneClawS2sKey) {
+  throw new Error(
+    "LOCAL_HARNESS_ENABLED=true in production requires XYNE_CLAW_S2S_KEY to be set " +
+    "(the local-harness MCP relay and run callbacks must be S2S-authenticated).",
+  );
+}
 
 // Grafana → error auto-fix pipeline (lives here — claw stays stateless; the
 // queues + fix records ride this service's existing Redis).
@@ -277,3 +389,20 @@ export const ERROR_PIPELINE = {
   agentUserId: process.env["ERROR_PIPELINE_AGENT_USER_ID"] ?? "",
   agentTimeoutMs: 30 * 60 * 1000,
 } as const;
+
+export const CLAUDE_OAUTH = {
+  clientId: process.env["CLAUDE_OAUTH_CLIENT_ID"] ?? "",
+  authorizeUrl: process.env["CLAUDE_OAUTH_AUTHORIZE_URL"] ?? "",
+  tokenUrl: process.env["CLAUDE_OAUTH_TOKEN_URL"] ?? "",
+  redirectUri: process.env["CLAUDE_OAUTH_REDIRECT_URI"] ?? "",
+  scopes: process.env["CLAUDE_OAUTH_SCOPES"] ?? "",
+  pkcePrefix: process.env["CLAUDE_OAUTH_PKCE_PREFIX"] ?? "claude-pkce-user:",
+} as const;
+
+export const claudeOAuthConfigured = (): boolean =>
+  Boolean(
+    CLAUDE_OAUTH.clientId &&
+      CLAUDE_OAUTH.authorizeUrl &&
+      CLAUDE_OAUTH.tokenUrl &&
+      CLAUDE_OAUTH.redirectUri,
+  );

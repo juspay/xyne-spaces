@@ -235,6 +235,39 @@ export const linkComponentSchema = baseComponentSchema.extend({
   }).strict(),
 });
 
+/**
+ * Roster summary — "you have N agents", with a link into the agent library.
+ *
+ * Counts only; the individual agents are the `agent` card's job. Emitted when a
+ * user asks what agents exist, where a prose list of 30 names is unreadable and
+ * the library page is the real answer. The route is NOT carried in props: the
+ * dashboard's router already knows the workspace, so the node builds its own
+ * link and a payload can never point this CTA somewhere else.
+ */
+export const agentSummaryComponentSchema = baseComponentSchema.extend({
+  type: z.literal('agent_summary'),
+  props: z
+    .object({
+      total: z.number().int().nonnegative(),
+      global: z.number().int().nonnegative().optional(),
+      personal: z.number().int().nonnegative().optional(),
+      label: z.string().optional(),
+      /** Sample rows, each opening the agent's own page. Server-picked. */
+      agents: z
+        .array(
+          z
+            .object({
+              slug: z.string().min(1),
+              name: z.string().min(1),
+              description: z.string().optional(),
+            })
+            .strict(),
+        )
+        .optional(),
+    })
+    .strict(),
+});
+
 export const tableComponentSchema = baseComponentSchema.extend({
   type: z.literal('table'),
   props: z.object({
@@ -526,6 +559,145 @@ export type DurationMinutes = z.infer<typeof durationMinutesSchema>;
 export type CallScheduleProps = z.infer<typeof callSchedulePropsSchema>;
 export type CallSchedulePhase = CallScheduleProps['phase'];
 
+/** A bare label, or a label plus the secondary line the option card renders under it. */
+export const userQuestionOptionSchema = z.union([
+  z.string().min(1),
+  z.object({ label: z.string().min(1), description: z.string().min(1).optional() }).strict(),
+]);
+
+export const userQuestionItemSchema = z.discriminatedUnion('type', [
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('single_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('multiple_choice'), options: z.array(userQuestionOptionSchema).min(2).max(9), required: z.boolean().optional() }).strict(),
+  z.object({ id: z.string().min(1), label: z.string().min(1).optional(), question: z.string().min(1), type: z.literal('open_ended'), placeholder: z.string().optional(), required: z.boolean().optional() }).strict(),
+]);
+
+export const userQuestionPropsSchema = z.object({
+  title: z.string().min(1),
+  questions: z.array(userQuestionItemSchema).min(1).max(8),
+  // Absent on cards posted before terminal question states were introduced;
+  // the renderer interprets absence as `pending`.
+  phase: z.enum(['pending', 'answered', 'declined']).optional(),
+  answers: z.record(z.union([z.string(), z.array(z.string())])).optional(),
+  /** Optional notes are scoped to the individual prompt id. */
+  notes: z.record(z.string()).optional(),
+  decidedAt: z.string().optional(),
+  submitAction: flowActionSchema.optional(),
+  dismissAction: flowActionSchema.optional(),
+}).strict();
+
+export const userQuestionComponentSchema = baseComponentSchema.extend({ type: z.literal('user_question'), props: userQuestionPropsSchema });
+export type UserQuestionItem = z.infer<typeof userQuestionItemSchema>;
+export type UserQuestionOption = z.infer<typeof userQuestionOptionSchema>;
+export type UserQuestionProps = z.infer<typeof userQuestionPropsSchema>;
+
+export const codePropsSchema = z
+  .object({
+    code: z.string().min(1),
+    language: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const codeComponentSchema = baseComponentSchema.extend({
+  type: z.literal('code'),
+  props: codePropsSchema,
+});
+
+export const diffPropsSchema = z
+  .object({
+    path: z.string().min(1),
+    patch: z.string().min(1),
+  })
+  .strict();
+
+export const diffComponentSchema = baseComponentSchema.extend({
+  type: z.literal('diff'),
+  props: diffPropsSchema,
+});
+
+export const ticketStatusSchema = z.enum(['TODO', 'STARTED', 'PAUSED', 'CANCELLED', 'COMPLETED']);
+export const ticketPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+
+export const ticketPropsSchema = z
+  .object({
+    xyneId: z.string().min(1).optional(),
+    ticketId: z.string().min(1).optional(),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    status: ticketStatusSchema,
+    priority: ticketPrioritySchema,
+    stageName: z.string().min(1).optional(),
+    eta: z.string().optional(),
+    url: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    conversationId: z.string().min(1).optional(),
+    assigneeId: z.string().min(1).optional(),
+    phase: z.enum(['proposed', 'created']).optional(),
+    approveAction: flowActionSchema.optional(),
+    approveContinueAction: flowActionSchema.optional(),
+    declineAction: flowActionSchema.optional(),
+  })
+  .strict();
+
+export const ticketComponentSchema = baseComponentSchema.extend({
+  type: z.literal('ticket'),
+  props: ticketPropsSchema,
+});
+
+export const chartPointSchema = z
+  .object({ label: z.string().min(1), value: z.number().finite() })
+  .strict();
+
+export const chartSeriesPointSchema = z
+  .object({
+    x: z.string().min(1),
+    y: z.number().finite(),
+    series: z.string().min(1).optional(),
+  })
+  .strict();
+
+const CHART_MAX_POINTS = 200;
+
+const categoryChartSchema = <T extends 'bar' | 'pie' | 'donut'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      points: z.array(chartPointSchema).min(1).max(24),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+const seriesChartSchema = <T extends 'line' | 'area'>(type: T) =>
+  z
+    .object({
+      type: z.literal(type),
+      series: z.array(chartSeriesPointSchema).min(1).max(CHART_MAX_POINTS),
+      caption: z.string().min(1).optional(),
+    })
+    .strict();
+
+export const chartPropsSchema = z.discriminatedUnion('type', [
+  categoryChartSchema('bar'),
+  categoryChartSchema('pie'),
+  categoryChartSchema('donut'),
+  seriesChartSchema('line'),
+  seriesChartSchema('area'),
+]);
+
+export const chartComponentSchema = baseComponentSchema.extend({
+  type: z.literal('chart'),
+  props: chartPropsSchema,
+});
+
+export type CodeProps = z.infer<typeof codePropsSchema>;
+export type DiffProps = z.infer<typeof diffPropsSchema>;
+export type TicketProps = z.infer<typeof ticketPropsSchema>;
+export type TicketArtifactStatus = z.infer<typeof ticketStatusSchema>;
+export type TicketArtifactPriority = z.infer<typeof ticketPrioritySchema>;
+export type ChartProps = z.infer<typeof chartPropsSchema>;
+export type ChartType = ChartProps['type'];
+export type ChartPoint = z.infer<typeof chartPointSchema>;
+export type ChartSeriesPoint = z.infer<typeof chartSeriesPointSchema>;
+
 // ── Agent artifact ────────────────────────────────────────────────────────────
 // ONE node renders every agent surface. The identity block (name / slug /
 // description / model / capabilities / system prompt) is INVARIANT across
@@ -577,6 +749,12 @@ export const agentIdentitySchema = z
     slug: z.string().min(1),
     /** Handle credited under the name ("Built by @fractal-agent") — who authored it. */
     builtBy: z.string().optional(),
+    /** Owner's display name, credited in the chin ("Created by @aryan.pidiha"). */
+    ownedBy: z.string().optional(),
+    /** Owner's user id — renders their avatar beside the credit. */
+    ownedById: z.string().optional(),
+    /** Reach: 'global' is org-wide, 'personal' belongs to one user. */
+    scope: z.enum(['personal', 'global']).optional(),
     description: z.string().optional(),
     /** Full system prompt — revealed in the expanded view, never the card body. */
     systemPrompt: z.string().optional(),
@@ -648,6 +826,139 @@ export type AgentDraftProps = Extract<AgentProps, { variant: 'draft' }>;
 export type AgentDraftPhase = AgentDraftProps['phase'];
 export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
 
+// ── Slash-command artifact ────────────────────────────────────────────────
+// A slash command can emit a persistent, structured message card. Message
+// content carries ONLY the command identifier and the body: presentation and
+// side-effect policy (badge, labels, who gets notified) are resolved from the
+// registry in utils/slashCommandArtifact.ts. Message content is authored by
+// the client, so anything it declared about its own audience would be
+// self-granted privilege. Lifecycle state (active/completed, linked call)
+// likewise lives only on the `message_artifacts` row.
+// Unknown props are stripped rather than rejected so artifacts written by an
+// older client still render.
+export const slashCommandArtifactEndedCallSchema = z.object({
+  durationMs: z.number().int().nonnegative(),
+  joinedCount: z.number().int().nonnegative(),
+});
+
+export const slashCommandArtifactClosedSchema = z.object({
+  closedAt: z.number().int().nonnegative(),
+  closedBy: z.string(),
+});
+
+export const slashCommandArtifactPropsSchema = z.object({
+  command: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+  /**
+   * Summary of the last call this artifact ran, written by the server exactly
+   * once when that call ends. It lives here rather than on `message_artifacts`
+   * because an ended call has already left the client's active-call
+   * subscription, and this is the same shape the standard call system message
+   * uses (content rewritten once at end-of-call).
+   *
+   * Only trusted when no live artifact row contradicts it — message content is
+   * client-authored, so a crafted client could ship a message that already
+   * claims a call ended.
+   */
+  endedCall: slashCommandArtifactEndedCallSchema.optional(),
+  /**
+   * Written once when the message's author closes the artifact without ever
+   * running — or after having run — a call. Same reasoning as `endedCall`: a
+   * closed artifact drops out of the ACTIVE-only artifact subscription, so the
+   * card would otherwise fall back to looking brand new.
+   *
+   * Only trusted when no live artifact row contradicts it.
+   */
+  closed: slashCommandArtifactClosedSchema.optional(),
+});
+
+export type SlashCommandArtifactEndedCall = z.infer<
+  typeof slashCommandArtifactEndedCallSchema
+>;
+
+export type SlashCommandArtifactClosed = z.infer<
+  typeof slashCommandArtifactClosedSchema
+>;
+
+export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
+  type: z.literal('slash_command_artifact'),
+  props: slashCommandArtifactPropsSchema,
+  // The message body is a normal Flow text node, which keeps mentions and
+  // formatting consistent with every other FlowJSON message.
+  children: z.array(textComponentSchema).min(1).max(1),
+});
+
+export type SlashCommandArtifactProps = z.infer<
+  typeof slashCommandArtifactPropsSchema
+>;
+
+// ── MCP configure card ────────────────────────────────────────────────────────
+// The agent asks for an account it needs but the user hasn't connected. It posts
+// this card; the USER types the credentials in the dashboard and they go
+// browser → claw-auth directly.
+//
+// INVARIANT: no secret ever appears in these props. `fields` describes WHICH
+// inputs to render (name/label/type), never their values — a credential passed
+// as a tool argument would land in the model's context, the run transcript and
+// the logs. `mcpServerId` is the only thing the server acts on, and the whole
+// flowJSON round-trips through the client, so props are untrusted regardless.
+export const mcpCredentialFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    label: z.string().min(1),
+    type: z.enum(['text', 'password']),
+    placeholder: z.string().optional(),
+    optional: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpConfigurePropsSchema = z
+  .object({
+    serverType: z.string().min(1),
+    serverName: z.string().min(1),
+    mcpServerId: z.string().min(1),
+    reason: z.string().optional(),
+    fields: z.array(mcpCredentialFieldSchema).min(1),
+  })
+  .strict();
+
+
+export const mcpSuggestItemSchema = z
+  .object({
+    serverType: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    connected: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpSuggestPropsSchema = z
+  .object({
+    title: z.string().optional(),
+    reason: z.string().optional(),
+    connectors: z.array(mcpSuggestItemSchema).min(1),
+    /** Roster mode: render a "Browse MCPs" footer into the connector library. */
+    browseAll: z.boolean().optional(),
+    /** Total connectors available, so the footer can say what is not shown. */
+    totalCount: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const mcpSuggestComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcp_suggest'),
+  props: mcpSuggestPropsSchema,
+});
+
+export type McpSuggestItem = z.infer<typeof mcpSuggestItemSchema>;
+export type McpSuggestProps = z.infer<typeof mcpSuggestPropsSchema>;
+
+export const mcpConfigureComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcpConfigure'),
+  props: mcpConfigurePropsSchema,
+});
+
+export type McpCredentialField = z.infer<typeof mcpCredentialFieldSchema>;
+export type McpConfigureProps = z.infer<typeof mcpConfigurePropsSchema>;
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -664,11 +975,20 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     imageComponentSchema,
     linkComponentSchema,
     tableComponentSchema,
+    agentSummaryComponentSchema,
     planComponentSchema,
     prComponentSchema,
     prApprovalComponentSchema,
     callScheduleComponentSchema,
+    userQuestionComponentSchema,
+    codeComponentSchema,
+    diffComponentSchema,
+    ticketComponentSchema,
+    chartComponentSchema,
     agentComponentSchema,
+    mcpConfigureComponentSchema,
+    mcpSuggestComponentSchema,
+    slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),
@@ -683,6 +1003,44 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
       children: z.array(z.lazy(() => flowComponentSchema)).optional(),
     }),
   ]),
+);
+
+// TEMPORARY — remove once every deploy target ships the same @xyne/shared.
+//
+// The union above is a HARD gate: an unrecognised `type` fails validation for
+// the WHOLE flow, and this same schema runs on Spaces' postMessage ingest. So a
+// card emitted by a newer claw against an older backend is not partially
+// rendered — the entire message is rejected and nothing reaches the thread, with
+// no error the user can see. That is how the `agent` card (PR #279) went dark:
+// the emitter shipped, the schema did not.
+//
+// Until shared/backend/dashboard are deployed in lockstep, an unknown component
+// is allowed through as an opaque passthrough node. Known types keep their
+// strict validation — this only widens the door for types this build has never
+// heard of. The renderer degrades them to a readable JSON block.
+// Component types THIS build knows. The lenient branch must refuse these —
+// otherwise a malformed `text` node (say, one missing `content`) stops failing
+// validation and quietly degrades to an "unsupported card" instead, which is a
+// worse bug than the one this shim fixes.
+const KNOWN_COMPONENT_TYPES = new Set([
+  'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
+  'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
+  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'row', 'column', 'card',
+]);
+
+const unknownComponentSchema = baseComponentSchema
+  .extend({
+    type: z
+      .string()
+      .min(1)
+      .refine((t) => !KNOWN_COMPONENT_TYPES.has(t), {
+        message: 'known component type must satisfy its own schema',
+      }),
+  })
+  .passthrough();
+
+export const flowComponentSchemaLenient: z.ZodType<any> = z.lazy(() =>
+  z.union([flowComponentSchema, unknownComponentSchema]),
 );
 
 // ============================================================================
@@ -707,7 +1065,9 @@ export const flowDefinitionSchema = z.object({
   version: z.literal('2.0'),
   screenId: z.string().min(1),
   title: z.string().optional(),
-  components: z.array(flowComponentSchema).min(1),
+  // Lenient on purpose — see flowComponentSchemaLenient. A single unknown
+  // component must not reject the entire message at ingest.
+  components: z.array(flowComponentSchemaLenient).min(1),
   data: z.record(z.unknown()).optional(),
   state: flowStateSchema,
 });

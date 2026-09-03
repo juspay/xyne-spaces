@@ -25,6 +25,7 @@ module.exports = {
     'prefer-const': 'error',
     'no-var': 'error',
     'no-case-declarations': 'off',
+    'no-console': 'error',
     'no-restricted-imports': ['error', {
       paths: [
         {

@@ -20,7 +20,7 @@ import type {
   PriorityClassificationResult,
 } from '../types/classification.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
 const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
@@ -100,12 +100,14 @@ export class EmailClassificationService {
 
     try {
       // Run category and priority classification in PARALLEL
-      const categoryPromise = this.runClassificationAgent(
-        config.classificationPrompt,
-        userMessage,
-        modelName,
-        config.ownerUserId,
-      );
+      const categoryPromise = config.classificationEnabled
+        ? this.runClassificationAgent(
+            config.classificationPrompt,
+            userMessage,
+            modelName,
+            config.ownerUserId,
+          )
+        : Promise.resolve(null);
 
       const priorityPromise = config.priorityClassificationEnabled
         ? this.classifyPriority(
@@ -123,15 +125,18 @@ export class EmailClassificationService {
         priorityPromise,
       ]);
 
-      const category = this.extractField(rawOutput, config.categoryField) ?? 'Other';
-      const subCategory = config.subCategoryField
+      // Empty category intentionally matches no user-group mapping (priority-only mode).
+      const category = rawOutput
+        ? (this.extractField(rawOutput, config.categoryField) ?? 'Other')
+        : '';
+      const subCategory = rawOutput && config.subCategoryField
         ? (this.extractField(rawOutput, config.subCategoryField) ?? null)
         : null;
 
       const result: ClassificationResult & { priority?: PriorityClassificationResult } = {
         category,
         subCategory,
-        rawOutput,
+        rawOutput: rawOutput ?? {},
       };
 
       if (priorityResult) {
@@ -251,7 +256,8 @@ export class EmailClassificationService {
   async storeOnTicket(
     ticketId: string,
     result: ClassificationResult & { priority?: PriorityClassificationResult },
-    resolvedGroupId: string | null
+    resolvedGroupId: string | null,
+    opts: { config?: { categoryField?: string; subCategoryField?: string | null }; actorId?: string | null } = {},
   ): Promise<void> {
     const ticket = await this.repo.findTicketById(ticketId);
     if (!ticket) return;
@@ -278,7 +284,13 @@ export class EmailClassificationService {
     await this.repo.updateTicketClassificationData(ticketId, classificationData);
 
     // Populate Additional Form Fields generically from raw AI output
-    await this.populateFormFields(ticketId, result.rawOutput).catch((err) => {
+    await this.populateFormFields(ticketId, result.rawOutput, {
+      // The category/sub-category keys already have dedicated storage (ticket.aiCategory /
+      // aiSubCategory) and their own UI. Writing them into a same-named form field too would
+      // silently clobber whatever else owns that field (e.g. an automation).
+      skipFieldNames: [opts.config?.categoryField, opts.config?.subCategoryField],
+      actorId: opts.actorId ?? null,
+    }).catch((err) => {
       logger.warn('[Classification] populateFormFields failed (non-fatal)', {
         ticketId,
         error: err instanceof Error ? err.message : err,
@@ -339,7 +351,11 @@ export class EmailClassificationService {
    * Generic: looks up the form attached to the ticket's board, then matches
    * rawOutput keys against field names — no hardcoding required.
    */
-  async populateFormFields(ticketId: string, rawOutput: ClassificationRawOutput): Promise<void> {
+  async populateFormFields(
+    ticketId: string,
+    rawOutput: ClassificationRawOutput,
+    opts: { skipFieldNames?: (string | null | undefined)[]; actorId?: string | null } = {},
+  ): Promise<void> {
     if (!rawOutput || Object.keys(rawOutput).length === 0) return;
 
     const db = DatabaseClient.getInstance();
@@ -366,7 +382,12 @@ export class EmailClassificationService {
     if (formFields.length === 0) return;
 
     const now = new Date();
-    const writableFields = formFields.filter(field => !AI_FORM_FIELD_SKIP_KEYS.has(field.fieldName));
+    const skipKeys = new Set(AI_FORM_FIELD_SKIP_KEYS);
+    for (const name of opts.skipFieldNames ?? []) {
+      const trimmed = name?.trim();
+      if (trimmed) skipKeys.add(trimmed);
+    }
+    const writableFields = formFields.filter(field => !skipKeys.has(field.fieldName));
 
     // Resolve current visit version so revisits don't overwrite prior-visit form values.
     // Compute the max in code (NULL = version 1): the version column is nullable with no DB
@@ -374,9 +395,17 @@ export class EmailClassificationService {
     // row would masquerade as the latest version.
     const existingValues = await db.formEntityValues.findMany({
       where: { entityId: ticketId, entityType: 'TICKET', contextId: ticket.boardId },
-      select: { version: true },
+      select: { version: true, fieldId: true, fieldValue: true },
     });
     const currentVersion = existingValues.reduce((max, v) => Math.max(max, v.version ?? 1), 1);
+
+    // Prior values at the version we are about to write, so the activity log can show from → to.
+    const previousValueByFieldId = new Map(
+      existingValues
+        .filter(v => (v.version ?? 1) === currentVersion)
+        .map(v => [v.fieldId, v.fieldValue]),
+    );
+    const changes: { fieldName: string; oldValue: string | null; newValue: string }[] = [];
 
     for (const field of writableFields) {
       const aiValue = rawOutput[field.fieldName];
@@ -384,6 +413,9 @@ export class EmailClassificationService {
 
       const valueStr = String(aiValue).trim();
       if (!valueStr) continue;
+
+      const previousValue = previousValueByFieldId.get(field.id) ?? null;
+      if (previousValue === valueStr) continue; // no-op — don't rewrite or log
 
       // actualFieldValue: arrays for MULTI_SELECT/USER, scalar otherwise
       const isMulti = field.fieldType === FormFieldType.MULTI_SELECT || field.fieldType === FormFieldType.USER;
@@ -420,10 +452,39 @@ export class EmailClassificationService {
             updatedAt: now,
           },
         });
+        changes.push({ fieldName: field.fieldName, oldValue: previousValue, newValue: valueStr });
       } catch (err) {
         logger.warn('[Classification] Failed to upsert form field value', {
           ticketId,
           fieldName: field.fieldName,
+          error: err instanceof Error ? err.message : err,
+        });
+      }
+    }
+
+    // Audit trail: without this the ticket's Activity log still credits whoever wrote the
+    // value previously (e.g. "Automation set Category ..."), which is misleading once the AI
+    // has overwritten it. Mirrors the shape used by the UPDATE_FORM_FIELDS automation step.
+    if (changes.length > 0 && opts.actorId) {
+      try {
+        await db.ticketActivity.createMany({
+          data: changes.map(change => ({
+            ticketId,
+            workspaceId: ticket.workspaceId,
+            updatedBy: opts.actorId as string,
+            activityType: ActivityType.METADATA,
+            value: {
+              field: 'customField',
+              fieldName: change.fieldName,
+              oldValue: change.oldValue,
+              newValue: change.newValue,
+              isAiClassification: true,
+            },
+          })),
+        });
+      } catch (err) {
+        logger.warn('[Classification] Failed to log form field activity', {
+          ticketId,
           error: err instanceof Error ? err.message : err,
         });
       }
@@ -467,6 +528,7 @@ export class EmailClassificationService {
       },
       defaultModel: modelName,
       temperature: 0.1,
+      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
     });
 
     logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
@@ -555,6 +617,7 @@ export class EmailClassificationService {
       },
       defaultModel: modelName,
       temperature: 0.1,
+      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
     });
 
     logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');

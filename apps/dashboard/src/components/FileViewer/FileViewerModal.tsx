@@ -13,6 +13,7 @@ import { cn } from '../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import { PreviewSplitDialog, PreviewThreadPanel } from '../ui/PreviewSplitDialog';
 import { ChatBubble } from '../Chat/ChatBubble/ChatBubble';
+import { EditSurfaceScope } from '../../providers/EditProvider';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
@@ -24,6 +25,7 @@ import {
 } from '../../machines/attachmentViewerMachine';
 import { ZoomState } from './utils';
 import { FileSearchControls, FileSearchProvider, useFileSearchContext } from './search';
+import { Button } from '../ui/Button/Button';
 
 export interface FileItem {
   fileName: string;
@@ -46,6 +48,12 @@ interface FilePreviewModalProps {
   files?: FileItem[];
   currentIndex?: number;
   onNavigate?: (index: number) => void;
+  /**
+   * Tailwind z-index class for the overlay and content. Raise it when the modal
+   * is opened from inside a higher-stacked surface — the Cmd+K palette sits at
+   * z-[9999], so the default would render the preview behind it.
+   */
+  zIndexClass?: string;
 }
 
 // Inline Loading Component
@@ -110,7 +118,16 @@ const SlideContent: React.FC<{
   initialTime?: number | undefined;
   autoPlay?: boolean;
   onInteractionStateChange?: (state: ZoomState) => void;
-}> = ({ file, isActive, disableGestures, initialTime, autoPlay, onInteractionStateChange }) => {
+  onExpand?: () => void;
+}> = ({
+  file,
+  isActive,
+  disableGestures,
+  initialTime,
+  autoPlay,
+  onInteractionStateChange,
+  onExpand,
+}) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,6 +189,7 @@ const SlideContent: React.FC<{
             fileName={file.fileName}
             attachmentId={file.attachmentId}
             autoPlay={Boolean(autoPlay)}
+            {...(onExpand && { onExpand })}
             {...(initialTime !== undefined && { initialTime })}
             {...(isCarouselMode && { disableGestures: true })}
             {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
@@ -187,7 +205,7 @@ const SlideContent: React.FC<{
           onClick={() => {
             void downloadFile(file.fileUrl, file.fileName);
           }}
-          data-track-category='FILE_VIEWER'
+          data-track-category='FileViewer'
           data-track-name='DownloadVideo'
           className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
         >
@@ -232,15 +250,17 @@ const ErrorState: React.FC<{
       <div className='text-red-300 text-sm mb-4'>{error}</div>
     </div>
     <div className='flex gap-2'>
-      <button
+      <Button
         onClick={onRetry}
+        variant='ghost'
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 transition-colors text-sm backdrop-blur-sm'
         data-track-category='FileViewer'
         data-track-name='RETRY_LOAD_FILE'
         data-track-metadata={JSON.stringify({ error })}
+        trackId='retry_load_file'
       >
         Try Again
-      </button>
+      </Button>
       <button
         onClick={onDownload}
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'
@@ -290,6 +310,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   files,
   currentIndex = 0,
   onNavigate,
+  zIndexClass = 'z-[56]',
 }) => {
   // Simple state - service handles all caching and complexity
   const [fileData, setFileData] = useState<File | null>(null);
@@ -606,6 +627,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={onClose}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 {...(index === currentFileIndex && {
                   onInteractionStateChange: (state: ZoomState) => {
@@ -736,7 +758,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             aria-label='Previous file'
             title='Previous (←)'
             type='button'
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='PreviousFile'
           >
             <ChevronLeft className='h-6 w-6' />
@@ -754,7 +776,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             aria-label='Next file'
             title='Next (→)'
             type='button'
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NextFile'
           >
             <ChevronRight className='h-6 w-6' />
@@ -774,9 +796,11 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[56]' />
+        <Dialog.Overlay
+          className={`fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 ${zIndexClass}`}
+        />
         <Dialog.Content
-          className={`fixed z-[56] bg-black focus:outline-none
+          className={`fixed ${zIndexClass} bg-black focus:outline-none
           data-[state=closed]:fade-out transition-all ease-in-out duration-300
           data-[state=open]:fade-in overflow-hidden
           ${
@@ -1190,7 +1214,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           <p className='text-gray-400'>Video cannot be streamed</p>
           <button
             onClick={() => void handleDownload()}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='DownloadVideo'
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
           >
@@ -1359,6 +1383,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={() => attachmentViewerActor.send({ type: 'CLOSE' })}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 // Pass initialTime to active video
                 initialTime={initialTime}
@@ -1411,7 +1436,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           {isImage && (
             <button
               onClick={() => void handleCopyImageGallery()}
-              data-track-category='FILE_VIEWER'
+              data-track-category='FileViewer'
               data-track-name='CopyImageGallery'
               title='Copy Image'
               className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
@@ -1425,7 +1450,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           )}
           <button
             onClick={() => void handleDownload()}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='DownloadFile'
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
@@ -1435,7 +1460,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             <Dialog.Close asChild>
               <button
                 onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
-                data-track-category='FILE_VIEWER'
+                data-track-category='FileViewer'
                 data-track-name='Close'
                 className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
                 aria-label='Close'
@@ -1460,7 +1485,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {canGoPrevious && (
           <button
             onClick={handlePrevious}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NavigatePrevious'
             className={cn(
               'absolute left-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
@@ -1476,7 +1501,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {canGoNext && (
           <button
             onClick={handleNext}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NavigateNext'
             className={cn(
               'absolute right-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
@@ -1519,17 +1544,19 @@ const AttachmentGalleryModalInner: React.FC = () => {
     };
 
     return (
-      <div className='flex-1 overflow-auto py-4'>
-        <ChatBubble
-          message={message as unknown as Parameters<typeof ChatBubble>[0]['message']}
-          channelId={currentAttachment?.channelId || ''}
-          showAvatar={true}
-          context='thread'
-          isFirstInThread={true}
-          isTicketThread={false}
-          disableAskAI={true}
-        />
-      </div>
+      <EditSurfaceScope>
+        <div className='flex-1 overflow-auto py-4'>
+          <ChatBubble
+            message={message as unknown as Parameters<typeof ChatBubble>[0]['message']}
+            channelId={currentAttachment?.channelId || ''}
+            showAvatar={true}
+            context='thread'
+            isFirstInThread={true}
+            isTicketThread={false}
+            disableAskAI={true}
+          />
+        </div>
+      </EditSurfaceScope>
     );
   };
 

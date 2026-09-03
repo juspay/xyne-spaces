@@ -19,7 +19,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PATHS, SERVER } from "./config.js";
-import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsSessionUpdatedAt, type SessionDiskFile } from "./storage.js";
+import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsDeleteSession, gcsSessionUpdatedAt, type SessionDiskFile } from "./storage.js";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -93,7 +93,11 @@ export async function ensureSessionDebugDir(conversationId: string): Promise<str
   return dir;
 }
 
-/** Delete a specific session */
+/** Delete a specific session — BOTH the local dir AND the GCS archive.
+ *  Deleting only local disk left the GCS snapshot behind, so the next message
+ *  resumed the archived session from storage — making `/clear` unable to rescue
+ *  a poisoned thread (prod 2026-08-24: an unsupported image block kept 400-ing
+ *  every provider through `/clear` because the archive was re-restored). */
 export async function deleteSession(conversationId: string): Promise<void> {
   const dir = sessionDir(conversationId);
   try {
@@ -101,6 +105,14 @@ export async function deleteSession(conversationId: string): Promise<void> {
     log.info(`[session-store] Deleted session ${conversationId}`);
   } catch {
     // ignore
+  }
+  // Purge the archive too so a resume-from-GCS can't bring the session back.
+  // Best-effort: on GKE with ADC this deletes directly; if direct storage is
+  // unavailable the local delete still stands and the archive expires by TTL.
+  try {
+    await gcsDeleteSession(conversationId);
+  } catch (err) {
+    log.warn(`[session-store] GCS archive delete failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
   }
 }
 

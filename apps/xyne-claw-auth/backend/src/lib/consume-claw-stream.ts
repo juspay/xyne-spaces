@@ -16,7 +16,15 @@
 //
 // Auth: same `x-s2s-key` header that the legacy POST path uses. No handshake.
 
-import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo } from "xyne-claw-shared";
+import { Agent } from "undici";
+import { errMsg } from "./errors.js";
+import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo, type UiWidget } from "xyne-claw-shared";
+
+// An SSE run goes silent between frames while the model composes; undici's
+// default 300s bodyTimeout severs the socket mid-stream ("terminated"). Every
+// claw-auth → claw streaming fetch must use this dispatcher. connectTimeout
+// stays so a dead engine still fails fast.
+export const streamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 export interface ClawStreamHandlers {
   onStarted?: (sessionId: string) => void | Promise<void>;
@@ -27,6 +35,7 @@ export interface ClawStreamHandlers {
   onSandboxPreview?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "sandbox-preview" }>["payload"]) => void | Promise<void>;
   onPlan?: (sessionId: string, todos: Todo[]) => void | Promise<void>;
   onPr?: (sessionId: string, pr: Extract<ClawStreamEvent, { event: "pr" }>["pr"]) => void | Promise<void>;
+  onUiWidget?: (sessionId: string, widget: UiWidget) => void | Promise<void>;
   onProgressLabel?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "progress-label" }>["payload"]) => void | Promise<void>;
   onDebug?: (sessionId: string, debugEvent: unknown) => void | Promise<void>;
   onCancelled?: (sessionId: string, reason: string | undefined) => void | Promise<void>;
@@ -81,12 +90,14 @@ export async function consumeClawStream(opts: ConsumeClawStreamOptions): Promise
     ...(opts.extraHeaders ?? {}),
   };
 
-  const fetchInit: RequestInit = {
+  const fetchInit = {
     method: "POST",
     headers,
     body: JSON.stringify(opts.body),
+    // `dispatcher` is an undici extension not in the DOM RequestInit type.
+    dispatcher: streamDispatcher,
     ...(opts.signal ? { signal: opts.signal } : {}),
-  };
+  } as unknown as RequestInit;
 
   const response = await fetch(opts.url, fetchInit);
   if (!response.ok) {
@@ -177,6 +188,9 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
       case "pr":
         await handlers.onPr?.(event.sessionId, event.pr);
         return;
+      case "ui-widget":
+        await handlers.onUiWidget?.(event.sessionId, event.widget);
+        return;
       case "progress-label":
         await handlers.onProgressLabel?.(event.sessionId, event.payload);
         return;
@@ -198,13 +212,13 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
 }
 
 function logHandlerError(eventName: string, err: unknown): void {
-  console.warn(`[consume-claw-stream] handler for "${eventName}" threw: ${err instanceof Error ? err.message : String(err)}`);
+  console.warn(`[consume-claw-stream] handler for "${eventName}" threw: ${errMsg(err)}`);
 }
 
 // ── SSE-to-legacy-POSTs bridge ─────────────────────────────────────────────
 //
 // Used by the /internal/run proxy when the caller did NOT request SSE itself
-// (i.e. it's webhook.ts / agent-chat.ts / app-callback.ts / chain-workflows.ts /
+// (i.e. it's webhook.ts / agent-chat.ts / flow-action.ts / chain-workflows.ts /
 // flow-action.ts / scheduled-jobs-worker / run-recovery-worker). The proxy
 // still opens SSE to claw (so the wire from claw-auth → claw is unified) and
 // this helper translates each SSE frame back into the JSON POST body the
@@ -253,7 +267,7 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {
-      console.warn(`[${tag}] progress POST failed (session=${sid}): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[${tag}] progress POST failed (session=${sid}): ${errMsg(err)}`);
     }
   };
 
@@ -285,6 +299,9 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         onPr: async (sessionId, pr) => {
           await postProgress({ sessionId, kind: "pr", pr });
         },
+        onUiWidget: async (sessionId, widget) => {
+          await postProgress({ sessionId, kind: "ui-widget", widget });
+        },
         onProgressLabel: async (sessionId, payload) => {
           await postProgress({ sessionId, ...payload });
         },
@@ -307,11 +324,11 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
           body: JSON.stringify({ ...result.result, sessionId: sid }),
         });
       } catch (err) {
-        console.warn(`[${tag}] callback POST failed (session=${sid}): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[${tag}] callback POST failed (session=${sid}): ${errMsg(err)}`);
       }
     }
   } catch (err) {
-    console.error(`[${tag}] bridge failed (session=${sid}): ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[${tag}] bridge failed (session=${sid}): ${errMsg(err)}`);
     // Surface failure to the caller as a final callback POST so their run
     // tracker doesn't hang in "running" forever. Matches the failure-callback
     // claw's catch handler would have sent in the legacy path.

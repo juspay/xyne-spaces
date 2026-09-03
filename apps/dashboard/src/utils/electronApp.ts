@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 import type { CSSProperties } from 'react';
 import type { ElectronAPI } from '../types/electron';
 import type { NavigateFunction } from 'react-router-dom';
@@ -110,6 +111,24 @@ export interface StandaloneNavigateOptions {
   replace?: boolean;
 }
 
+type ModifierEvent = Pick<MouseEvent, 'metaKey' | 'ctrlKey'>;
+
+export const openInAppWindow = (prefixedPath: string, event?: ModifierEvent): boolean => {
+  if (!isElectronApp()) return false;
+  if (!event || !(event.metaKey || event.ctrlKey)) return false;
+
+  const opened = window.open(prefixedPath, '_blank');
+  if (!opened) {
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'app_window_blocked',
+      message: `Failed to open app window for ${prefixedPath}`,
+    });
+    return false;
+  }
+  opened.focus();
+  return true;
+};
+
 export const standaloneNavigate = (
   navigate: NavigateFunction,
   path: string,
@@ -125,7 +144,10 @@ export const standaloneNavigate = (
     if (newWindow) {
       newWindow.focus();
     } else {
-      console.warn('Failed to open new window,PopUp may be blocked');
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to open new window,PopUp may be blocked'),
+      });
     }
     return;
   }
@@ -138,13 +160,64 @@ export const standaloneNavigate = (
   void navigate(normalizedPath, navigateOptions);
 };
 
+export const shouldOpenInNewWindow = (event?: { metaKey: boolean; ctrlKey: boolean }): boolean =>
+  Boolean(event && (event.metaKey || event.ctrlKey) && isElectronApp());
+
+const standaloneWindows = new Map<string, Window>();
+
+const STANDALONE_WINDOW_PREFIX = 'xyne-window:';
+
+let standaloneOpenCount = 0;
+
+const standaloneWindowTarget = (key: string): string => {
+  if (!isElectronApp()) {
+    return `${STANDALONE_WINDOW_PREFIX}${key}`;
+  }
+  standaloneOpenCount += 1;
+  return `${STANDALONE_WINDOW_PREFIX}${key}#${standaloneOpenCount}`;
+};
+
+export const openStandaloneWindow = (path: string, key?: string): boolean => {
+  if (typeof window === 'undefined' || !path) {
+    return false;
+  }
+
+  if (key && !isElectronApp()) {
+    const existing = standaloneWindows.get(key);
+    if (existing && !existing.closed) {
+      existing.focus();
+      return true;
+    }
+    standaloneWindows.delete(key);
+  }
+
+  const opened = window.open(toStandalonePath(path), key ? standaloneWindowTarget(key) : '_blank');
+  if (!opened) {
+    if (key && isElectronApp() && standaloneWindows.has(key)) {
+      return true;
+    }
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('Failed to open standalone window; popup may be blocked'),
+    });
+    return false;
+  }
+  if (key) {
+    standaloneWindows.set(key, opened);
+  }
+  opened.focus();
+  return true;
+};
+
 export interface CreateTicketPopoutDraft {
   popoutId: string;
   workspaceId?: string | null | undefined;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   tab?: string | null | undefined;
   sourceConversationId?: string | null | undefined;
+  sourceMessageId?: string | null | undefined;
+  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK'; sourceId: string } | null | undefined;
   initialMessageId?: string | null | undefined;
   parentTicketId?: string | null | undefined;
   isFromSubTicket?: boolean | undefined;
@@ -203,7 +276,10 @@ export const openCreateTicketWindow = (draft: CreateTicketPopoutDraft): boolean 
   } catch {
     // ignore
   }
-  console.warn('Failed to open create-ticket window; popup may be blocked');
+  logger.warn(LogEvent.FRONTEND_ERROR, {
+    type: 'migrated_console_warn',
+    message: String('Failed to open create-ticket window; popup may be blocked'),
+  });
   return false;
 };
 
@@ -229,6 +305,7 @@ const POPOUT_TICKET_CHANNEL = 'xyne-create-ticket-popout';
 export interface PopOutTicketResult {
   id: string;
   conversationId?: string;
+  channelId?: string;
   xyneId?: string;
   workflowType?: string;
 }
@@ -257,7 +334,7 @@ export const subscribeCreateTicketResult = (
   timeoutMs = 15 * 60 * 1000,
 ): (() => void) => {
   if (typeof BroadcastChannel === 'undefined' || !popoutId) {
-    return () => {};
+    return () => undefined;
   }
 
   let channel: BroadcastChannel | null = null;

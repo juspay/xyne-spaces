@@ -114,6 +114,8 @@ export const UserGroupListItem = ({
             size='iconSm'
             className='size-5 p-0 text-muted-foreground hover:text-foreground'
             onClick={handleCopyId}
+            data-track-category='UserGroups'
+            data-track-name='COPY_USER_GROUP_ID'
             title='Copy user group ID'
             aria-label='Copy user group ID'
           >

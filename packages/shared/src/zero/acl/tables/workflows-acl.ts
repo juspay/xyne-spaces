@@ -17,11 +17,20 @@ export class WorkflowsACL extends BaseQueryACL<'workflows'> {
       );
     }
 
-    return query.where(({ or, cmp, exists }) =>
-      or(
-        cmp('ticketId', 'IS', null),
-        exists('ticket', (t) => t.where('workspaceId', '=', this.ctx.workspaceId))
-      )
-    );
+    // DeskAutomations are owner-scoped personal rules managed via REST only —
+    // never sync them to Zero clients (including other workspace agents).
+    return query
+      .where(({ or, cmp, and, exists }) =>
+        and(
+          or(
+            cmp('workflowType', 'IS', null),
+            cmp('workflowType', '!=', 'DeskAutomations'),
+          ),
+          or(
+            cmp('ticketId', 'IS', null),
+            exists('ticket', t => t.where('workspaceId', '=', this.ctx.workspaceId)),
+          ),
+        ),
+      );
   }
 }

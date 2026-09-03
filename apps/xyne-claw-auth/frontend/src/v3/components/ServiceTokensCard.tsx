@@ -13,6 +13,7 @@ import { Button } from "./ui/Button";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Dialog } from "./ui/Dialog";
 import { SelectField } from "./ui/SelectField";
+import { Switch } from "./ui/Switch";
 import { TextField } from "./ui/TextField";
 import { useSnackbar } from "./ui/Snackbar";
 
@@ -29,6 +30,7 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
   const [boundUserId, setBoundUserId] = useState(org.members[0]?.userId ?? "");
   const [expiry, setExpiry] = useState("");
   const [agentSlugsInput, setAgentSlugsInput] = useState("");
+  const [allowChannelPost, setAllowChannelPost] = useState(false);
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState<MintedServiceAccessToken | null>(null);
   const [copied, setCopied] = useState(false);
@@ -59,6 +61,8 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
     setCopied(false);
     setName("");
     setExpiry("");
+    setAgentSlugsInput("");
+    setAllowChannelPost(false);
   }
 
   async function handleMint() {
@@ -71,6 +75,7 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
         name: name.trim(),
         userId: boundUserId,
         expiresAt: expiry ? new Date(expiry).toISOString() : null,
+        allowChannelPost,
       });
       setMinted(result);
       await loadTokens();
@@ -134,6 +139,9 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
                     <span className="truncate text-[13px] font-medium text-xyne-fg-primary">{token.name || "Unnamed token"}</span>
                     <code className="text-[11px] text-xyne-fg-muted">{token.prefix}…</code>
                     {inactive && <span className="text-[11px] font-medium text-xyne-error-fg">{token.revokedAt ? "Revoked" : "Expired"}</span>}
+                    {(token.scopes ?? []).includes("spaces:channels:post") && (
+                      <span className="rounded bg-xyne-surface-subtle px-1.5 py-0.5 text-[10px] font-medium text-xyne-fg-secondary">Channel post</span>
+                    )}
                   </div>
                   <div className="mt-1 text-[11px] text-xyne-fg-muted">
                     Runs as {member?.name || member?.email || token.userId} · Last used {formatDate(token.lastUsedAt)} · Expires {formatDate(token.expiresAt)}
@@ -183,6 +191,15 @@ export function ServiceTokensCard({ userId, org }: { userId: string; org: OrgDet
             <SelectField label="Run as member" value={boundUserId} options={memberOptions} onValueChange={(value) => setBoundUserId(value ?? "")} />
             <TextField label="Allowed agents" value={agentSlugsInput} placeholder="euler-doctor, doctor-agent" onChange={(event) => setAgentSlugsInput(event.target.value)} hint="Comma-separated agent slugs this token may invoke. Required — the token can call nothing else." />
             <TextField label="Expiry (optional)" type="datetime-local" value={expiry} onChange={(event) => setExpiry(event.target.value)} hint="Leave blank for no expiry." />
+            <div className="mt-1 flex items-start justify-between gap-3 rounded-lg border border-xyne-border-subtle p-3">
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium text-xyne-fg-primary">Allow posting to Spaces channels</p>
+                <p className="mt-1 text-[11px] text-xyne-fg-muted">
+                  Grants the <code>spaces:channels:post</code> scope so runs from this token can deliver results and human-approval cards into a Spaces channel (the agent&apos;s app must be a member of that channel). Leave off for callback-only tokens.
+                </p>
+              </div>
+              <Switch checked={allowChannelPost} onChange={setAllowChannelPost} disabled={minting} />
+            </div>
           </>
         )}
       </Dialog>

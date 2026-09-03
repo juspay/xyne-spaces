@@ -299,7 +299,8 @@ export async function extractGroupMentionsFromContent(
 export async function extractAllUsersForNotification(
   content: string,
   workspaceId: string, // Optional workspace context for group lookups
-  channelId?: string // Optional channel context for @channel and @here
+  channelId?: string, // Optional channel context for @channel and @here
+  forceChannelMention?: boolean
 ): Promise<ExtractedMentionForNotification[]> {
   const allUsersToNotify: ExtractedMentionForNotification[] = [];
   const processedUserIds = new Set<string>(); // Prevent duplicate notifications
@@ -367,8 +368,11 @@ export async function extractAllUsersForNotification(
       hasBroadcastToken: content.includes('<broadcast:channel>'),
     });
 
-    if (specialMentions.hasChannel) {
-      logger.info(`🏷️ [SPECIAL-MENTION] Expanding @channel for channel ${channelId}`);
+    if (specialMentions.hasChannel || forceChannelMention) {
+      logger.info(
+        `🏷️ [SPECIAL-MENTION] Expanding @channel for channel ${channelId}` +
+          (forceChannelMention && !specialMentions.hasChannel ? ' (forced by message type)' : ''),
+      );
       const channelUsers = await getChannelParticipantsForMention(channelId);
 
       channelUsers.forEach(user => {

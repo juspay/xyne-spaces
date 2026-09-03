@@ -20,6 +20,30 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
     return this.ctx.orgRole === OrgRole.ADMIN || this.ctx.orgRole === OrgRole.OWNER;
   }
 
+  /**
+   * Bind the action to the caller's OWN organization.
+   *
+   * QueryContext carries orgRole but NOT the caller's orgId, so an ADMIN/OWNER role
+   * check alone does not prove the target member lives in the caller's org. Without
+   * this, an admin of org A can update/delete/insert members of org B (cross-org
+   * privilege escalation). Resolve the caller's active membership from ctx.memberId
+   * and require the target org to match.
+   */
+  private async assertActorInOrg(targetOrgId: string, tx: Transaction<Schema>): Promise<void> {
+    const self = await tx.run(
+      zql.org_members
+        .where('memberId', this.ctx.memberId)
+        .where('leftAt', 'IS', null)
+        .one(),
+    );
+    if (!self || self.orgId !== targetOrgId) {
+      throw new MutationACLError(
+        'Organization member operation failed: target member belongs to a different organization',
+        'org_members',
+      );
+    }
+  }
+
   // NOTE: read-then-check, not atomic — two concurrent demote/remove requests can
   // both observe count == 2 and both proceed, leaving zero admins. Same pattern as
   // UsersACL.verifyLastAdmin (not new to this ACL). A real fix needs a DB-level
@@ -65,6 +89,10 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
       throw new MutationACLError('Organization member insert failed: only admins or owners can add members', 'org_members');
     }
 
+    // An admin/owner may only add members to their OWN org, never inject a member
+    // into another organization.
+    await this.assertActorInOrg(args.orgId, tx);
+
     // One-org-per-email constraint
     const existingMembership = await tx.run(
       zql.org_members.where('email', args.email).where('leftAt', 'IS', null).one(),
@@ -96,6 +124,9 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
     if (!this.isAdminOrOwner()) {
       throw new MutationACLError('Organization member update failed: only admins or owners can modify member roles', 'org_members');
     }
+
+    // Admin/owner authority is scoped to the caller's OWN org — reject cross-org edits.
+    await this.assertActorInOrg(targetMember.orgId, tx);
 
     // Only an OWNER can mint another OWNER — an ADMIN can promote/demote at ADMIN
     // level but shouldn't be able to hand out ownership.
@@ -144,6 +175,9 @@ export class OrgMembersACL extends BaseACL<'org_members'> {
     if (!this.isAdminOrOwner()) {
       throw new MutationACLError('Organization member delete failed: only admins or owners can remove other members', 'org_members');
     }
+
+    // Admin/owner authority is scoped to the caller's OWN org — reject cross-org deletes.
+    await this.assertActorInOrg(memberData.orgId, tx);
 
     // Defensive: no mutator currently issues a hard delete (org_members uses the
     // leftAt soft-delete via canUpdate above), but guard it the same way in case

@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { pingModel, reportPing } from "./ping-llm.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -262,8 +263,12 @@ async function configureAi() {
 
     console.log("");
     for (const file of touched) console.log(` ✓ Updated ${file}`);
-    console.log("\n Verify the endpoint answers before starting the apps:");
-    console.log("   docs/setup/ai-providers.md#verify-before-you-restart-the-app");
+    console.log("\n Checking the endpoint answers...");
+    const ping = await pingModel(baseUrl, apiKey, bestModel);
+    reportPing(ping);
+    if (!ping.ok) {
+      console.log("   The values above are saved — fix them and re-check with `pnpm run doctor:llm`.");
+    }
   } catch (error) {
     // stdin closing mid-prompt (Ctrl+D, a piped heredoc running out, a runner that
     // detaches the terminal) rejects the pending question. Treat it as "skip" —

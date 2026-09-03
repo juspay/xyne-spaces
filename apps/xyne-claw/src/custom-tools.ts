@@ -9,9 +9,11 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { getAllCustomTools, parseToolsConfig, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
-import { SERVER } from "./config.js";
+import { SERVER, PATHS } from "./config.js";
+import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
+import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -42,8 +44,15 @@ const ATTACHMENT_GLOBAL_RE = /\[ATTACHMENT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]
 // the model can see the image) — they are NOT pushed into allAttachments and
 // will NOT be delivered to the user. Use when the agent needs to look at a
 // file for self-verification without leaking it to the chat thread.
-const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)$/;
+const INSPECT_RE = /^\[INSPECT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)(?:\n([\s\S]*))?$/;
 const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
+// create-react-artifact's manifest marker. Same contract as SLIDE_JSON: the
+// artifact's FULL source rides the attachment bytes, while this small manifest
+// (title/entry/file paths/dep names) travels here so it lands on
+// ChatAttachment.metadata for the dashboard's inline card. Unlike SLIDE_JSON it
+// is also stripped from the text handed back to the model — the model just
+// authored the project and re-reading a listing of it buys nothing.
+const REACT_ARTIFACT_RE = /REACT_ARTIFACT_START\s*([\s\S]+?)\s*REACT_ARTIFACT_END/;
 
 // PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
 // truth — also enforced at the xyne-claw-auth /run boundary). See that module
@@ -138,7 +147,8 @@ export function loadCustomTools(
   sessionToken?: string,
   parentToolCallId?: string,
   providerConfig?: ToolExecutionContext["providerConfig"],
-  emitPlan?: ToolExecutionContext["emitPlan"],
+  emitUiWidget?: ToolExecutionContext["emitUiWidget"],
+  forcedCustomSlugs: readonly string[] = [],
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
@@ -151,7 +161,11 @@ export function loadCustomTools(
   // tool sets that aren't tied to a specific agent slug — primarily Google
   // and Microsoft, which only need their OAuth token to be available.
   const toolsConfig = parseToolsConfig(agentConfig ?? undefined);
-  const selectedCustom = new Set(toolsConfig?.custom ?? []);
+  const selectedCustom = new Set([
+    ...(toolsConfig?.custom ?? []),
+    ...forcedCustomSlugs,
+  ]);
+  const forcedCustom = new Set(forcedCustomSlugs);
   // Google + Microsoft are no longer loaded as in-process custom tools — they
   // run as claw-auth-hosted stdio MCP connectors (type "google"/"microsoft"),
   // resolved through the normal MCP credential path. See mcp/servers/google-server.ts
@@ -182,7 +196,7 @@ export function loadCustomTools(
     else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
-    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai";
+    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai" || forcedCustom.has(ct.slug);
     else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
 
     return allowed;
@@ -191,6 +205,36 @@ export function loadCustomTools(
   const allPendingQuestions: PendingQuestion[] = [];
   const allPendingActions: Array<Record<string, unknown>> = [];
   const allPendingResponses: PendingResponse[] = [];
+
+  // One widget publisher for every custom tool. Legacy runs POST the same
+  // typed envelope to progressUrl; SSE runs inject an in-process emitter from
+  // routes/run.ts. Widget implementations never need to know which transport
+  // is active, and future widgets do not require more plumbing here.
+  const publishUiWidget: ToolExecutionContext["emitUiWidget"] = emitUiWidget ?? (
+    progressUrl && sessionId
+      ? async (widget) => {
+          const response = await fetch(progressUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+            },
+            body: JSON.stringify({
+              sessionId,
+              kind: "ui-widget",
+              widget,
+              ...(meta?.["conversationId"] ? { conversationId: meta["conversationId"] } : {}),
+              ...(meta?.["agentSlug"] ? { agentSlug: meta["agentSlug"] } : {}),
+            }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!response.ok) {
+            const detail = await response.text().catch(() => "");
+            throw new Error(`UI widget delivery failed: HTTP ${response.status}${detail ? ` ${detail.slice(0, 160)}` : ""}`);
+          }
+        }
+      : undefined
+  );
 
   // Captures the user-visible summary text emitted alongside each
   // [ATTACHMENT:...] block. When the agent's final assistant turn comes back
@@ -207,8 +251,16 @@ export function loadCustomTools(
   const pinnedSandboxRepo = typeof agentConfig?.["sandboxRepo"] === "string"
     ? (agentConfig["sandboxRepo"] as string).trim()
     : "";
-  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo)
-    ? { ...(meta ?? {}), ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}) }
+  // Absolute root of THIS run's materialized skills (`<dataDir>/session-skills/<sessionId>`).
+  // Injected so `sandbox-copy-in` can stream a skill's companion file into the
+  // sandbox server-side, confined to this root (mirrors the agent's skill read root).
+  const skillsRoot = sessionId ? join(PATHS.dataDir, "session-skills", sessionId) : "";
+  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo || skillsRoot)
+    ? {
+        ...(meta ?? {}),
+        ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}),
+        ...(skillsRoot ? { skillsRoot } : {}),
+      }
     : undefined;
 
   const tools = customTools.map((ct) => {
@@ -221,7 +273,7 @@ export function loadCustomTools(
       pendingQuestions: allPendingQuestions,
       pendingResponses: allPendingResponses,
       ...(progressUrl ? { progressUrl } : {}),
-      ...(emitPlan ? { emitPlan } : {}),
+      ...(publishUiWidget ? { emitUiWidget: publishUiWidget } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(s2sKey ? { s2sKey } : {}),
       ...(sessionToken ? { sessionToken } : {}),
@@ -277,7 +329,22 @@ export function loadCustomTools(
           log.error(`[custom-tool] ${ct.slug} threw:`, errMsg);
           result = `Error: ${errMsg}`;
         }
-        log.info(`[custom-tool] ${ct.slug} result: ${result.slice(0, 300)}`);
+
+        // Sandbox-capacity deferral (flag-gated, default off): the inner catch
+        // above stringifies every tool throw and hands it to the LLM, which for a
+        // failed WRITE-sandbox provision would just give up and end the run with no
+        // retry signal. When sandbox-repo-setup emits the `sandbox_unavailable`
+        // sentinel, rethrow a typed error so it propagates to run.ts's terminal
+        // catch → run ends with error:"sandbox_unavailable" → run-recovery defers
+        // and auto-resumes. See apps/xyne-claw/docs/sbx-availability-signal.md.
+        if (
+          isSandboxUnavailableDeferEnabled() &&
+          ct.slug === "sandbox-repo-setup" &&
+          isSandboxUnavailable(result)
+        ) {
+          log.info(`[custom-tool] ${ct.slug} sandbox_unavailable — deferring run for auto-resume`);
+          throw new SandboxUnavailableError(result.slice("Error: ".length));
+        }
 
         // INSPECT marker — image goes into agent's content for self-verification
         // but is NOT pushed to allAttachments (user does not receive the file).
@@ -288,12 +355,17 @@ export function loadCustomTools(
           const fileName = inspectMatch[1]!;
           const mimeType = inspectMatch[2]!;
           const data = inspectMatch[3]!;
+          const inspectionSummary = inspectMatch[4]?.trim();
           const isImage = mimeType.startsWith("image/");
           log.info(`[inspect] ${ct.slug} fileName=${fileName} mime=${mimeType} bytes=${data.length} (NOT delivered to user)`);
           if (isImage) {
             return {
               content: [
-                { type: "text" as const, text: `Inspected ${fileName} (visible to you only — call sandbox-deliver-files to send it to the user).` },
+                {
+                  type: "text" as const,
+                  text: inspectionSummary ||
+                    `Inspected ${fileName} (visible to you only — call sandbox-deliver-files to send it to the user).`,
+                },
                 { type: "image" as const, data, mimeType },
               ],
               details: {},
@@ -336,6 +408,14 @@ export function loadCustomTools(
                 log.warn(`[custom-tool] ${ct.slug} slide JSON parse failed:`, err instanceof Error ? err.message : err);
               }
             }
+            const artifactMatch = trailingText.match(REACT_ARTIFACT_RE);
+            if (artifactMatch?.[1]) {
+              try {
+                metadata["reactArtifact"] = JSON.parse(artifactMatch[1]);
+              } catch (err) {
+                log.warn(`[custom-tool] ${ct.slug} react artifact manifest parse failed:`, err instanceof Error ? err.message : err);
+              }
+            }
           }
 
           const attachment: Attachment = {
@@ -356,11 +436,14 @@ export function loadCustomTools(
           // any SLIDE_JSON block so the fallback text doesn't include
           // metadata the user shouldn't see.
           if (trailingText && trailingText.length > 0) {
-            const visibleSummary = trailingText.replace(SLIDE_JSON_RE, "").trim();
+            const visibleSummary = trailingText.replace(SLIDE_JSON_RE, "").replace(REACT_ARTIFACT_RE, "").trim();
             if (visibleSummary.length > 0) lastAttachmentSummary = visibleSummary;
           }
-          const responseText = trailingText && trailingText.length > 0
-            ? `Rendered and attached ${singleMatch[1]}\n\n${trailingText}`
+          // No-op for every existing tool (only create-react-artifact emits the
+          // marker), so the model-facing text is unchanged for create-ppt et al.
+          const modelFacingText = trailingText ? trailingText.replace(REACT_ARTIFACT_RE, "").trim() : "";
+          const responseText = modelFacingText.length > 0
+            ? `Rendered and attached ${singleMatch[1]}\n\n${modelFacingText}`
             : `Rendered and attached ${singleMatch[1]}`;
 
           const isImage = singleMatch[2]!.startsWith("image/");

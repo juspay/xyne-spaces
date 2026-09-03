@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { CalendarClock } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
@@ -34,7 +35,11 @@ const ScheduledMessageScreen = (): ReactElement => {
       const messages = await scheduledMessageApi.list();
       setScheduledMessages(messages);
     } catch (error) {
-      console.error('[ScheduledMessageScreen] Failed to fetch scheduled messages:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[ScheduledMessageScreen] Failed to fetch scheduled messages:'),
+        error: error,
+      });
       setScheduledMessages([]);
     }
   }, []);
@@ -149,7 +154,7 @@ const ScheduledMessageScreen = (): ReactElement => {
             </div>
             <Button
               onClick={handleCreateClick}
-              data-track-category='ScheduledMessages'
+              data-track-category='scheduled-message'
               data-track-name='CreateScheduledMessage'
             >
               Create Scheduled Message

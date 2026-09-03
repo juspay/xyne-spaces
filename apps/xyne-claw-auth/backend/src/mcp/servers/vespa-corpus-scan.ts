@@ -158,6 +158,7 @@ export function buildCorpusScanYql(
   const ts = area.timestampField;
   if (scope.after) conditions.push(`${ts} >= "${scope.after}"`);
   if (scope.before) conditions.push(`${ts} < "${scope.before}"`);
+  if (conditions.length === 0) conditions.push("true");
 
   // max(200) comfortably covers year buckets (decades) and month buckets
   // (16+ years) while bounding a pathological grouping.

@@ -1,8 +1,10 @@
 import React, { ReactElement } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { PhoneDefault, PhoneCancel } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { cn } from '../../../utils/classNames';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -19,6 +21,7 @@ interface CallTriggerProps {
   participantCount?: number | undefined;
   callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
   conversationId?: string; // Optional: for thread-initiated calls
+  sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link the call to
   isMember: boolean; // Whether the current user is a member of the channel
 }
 
@@ -43,6 +46,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   participantCount,
   callDisplayName,
   conversationId,
+  sdlcLink,
   isMember,
 }) => {
   const {
@@ -56,6 +60,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
     targetUserIds,
     callDisplayName,
     conversationId,
+    sdlcLink,
   });
 
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
@@ -102,7 +107,19 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   // Default Button trigger
   return (
     <>
-      <Tooltip content={tooltipContent} side='left'>
+      <Tooltip
+        content={
+          isAlone || isNotMember ? (
+            tooltipContent
+          ) : (
+            <span className='flex items-center gap-2'>
+              {tooltipContent}
+              <ShortcutHint shortcut='huddle.toggle' />
+            </span>
+          )
+        }
+        side='left'
+      >
         <button
           onClick={handleButtonClick}
           disabled={isAlone || isNotMember}

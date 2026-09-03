@@ -180,6 +180,14 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               isMobile ? 'flex-col-reverse gap-1' : 'flex-col',
             )}
             onClick={onClick}
+            {...(onClick
+              ? {
+                  'data-track-category': 'MESSAGE',
+                  'data-track-name': 'OPEN_MY_MESSAGE_BUBBLE_MOBILE',
+                  // Static label: the auto-label would capture message content.
+                  'data-track-label': 'message_bubble',
+                }
+              : {})}
             onKeyDown={
               onClick
                 ? e => {
@@ -322,6 +330,14 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                     message={isWorkflowMessage ? 'Workflow created' : message.content}
                     showEdited={message.edited}
                     maxHeight={500}
+                    messageId={message.messageId}
+                    conversationId={message.conversationId}
+                    slashCommandArtifactContext={{
+                      ...(channelId && { channelId }),
+                      senderId: message.senderId,
+                      createdAt: message.createdAt,
+                      surface: context === 'thread' ? 'thread' : 'channel',
+                    }}
                   />
                 </div>
               )

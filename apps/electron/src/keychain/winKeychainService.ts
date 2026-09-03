@@ -1,3 +1,4 @@
+import log from 'electron-log/main';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -73,7 +74,7 @@ class WinKeychainService implements IKeychain {
     }
 
     async generateKeyPair(_label: string): Promise<void> {
-        console.log("Not needed on Windows - CSR generation creates the key pair automatically.");
+        log.info("Not needed on Windows - CSR generation creates the key pair automatically.");
         return;
     }
 
@@ -263,7 +264,7 @@ class WinKeychainService implements IKeychain {
             }
 
             // 2. Install (Will trigger UI Prompt)
-            console.log("Installing Root CA...");
+            log.info("Installing Root CA...");
             const importCmd = `Import-Certificate -FilePath "${tmpPath}" -CertStoreLocation Cert:\\CurrentUser\\Root`;
             await this.runPowerShellCommand(importCmd);
             
@@ -292,8 +293,8 @@ class WinKeychainService implements IKeychain {
      * Deletes a certificate identity from Windows Certificate Store
      */
     async deleteIdentity(commonName: string): Promise<void> {
-        console.log(`Deleting identity for "${commonName}"...`);
-        
+        log.info(`Deleting identity for "${commonName}"...`);
+
         try {
             // Remove by FriendlyName OR Subject to be thorough
             const cmd = `

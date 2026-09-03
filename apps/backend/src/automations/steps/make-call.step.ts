@@ -225,13 +225,6 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       );
     }
 
-    // Fetch channel details for room metadata (projectId is needed by the
-    // transcription agent and by the webhook when re-hydrating call context).
-    const channel = await db.channel.findUnique({
-      where: { id: channelId },
-      select: { projectId: true, scopeType: true },
-    });
-
     // uuidv4() is synchronous and CPU-local; sequential generation is
     // intentional and avoids pretending there is useful async work to parallelize.
     const externalId = uuidv4();
@@ -248,7 +241,6 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     // transaction rolls back; it auto-expires via LiveKit's emptyTimeout.
     const roomMetadata = JSON.stringify({
       channelId,
-      projectId: channel?.projectId,
       callOrigin: CallOrigin.CHANNEL,
       callType,
       sttModel: 'azure',

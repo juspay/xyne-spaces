@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { Platform, TriggerType, ActivityEventPayload } from '@xyne/shared';
 import { websocketService } from '../clients/socketClient';
 import { authActor } from '../../machines/authMachine';
@@ -40,7 +41,10 @@ class GlobalClickTracker {
 
   initialize(): void {
     if (this.isInitialized) {
-      console.warn('GlobalClickTracker is already initialized');
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('GlobalClickTracker is already initialized'),
+      });
       return;
     }
 
@@ -118,9 +122,10 @@ class GlobalClickTracker {
     const target = event.target as HTMLElement;
     if (!target) return;
 
+    // Passwords are excluded entirely — not even their length is recorded.
     const isTextInput =
       (target instanceof HTMLInputElement &&
-        ['text', 'search', 'url', 'number', 'email', 'tel', 'password'].includes(target.type)) ||
+        ['text', 'search', 'url', 'number', 'email', 'tel'].includes(target.type)) ||
       target instanceof HTMLTextAreaElement;
 
     if (!isTextInput) return;
@@ -131,9 +136,11 @@ class GlobalClickTracker {
     const trackingData = this.parseTrackingData(trackedElement);
     if (!trackingData) return;
 
+    // Never record the typed content — only that the field was filled.
     const el = target;
     this.trackEvent(trackingData, TriggerType.BLUR, {
-      input: el.value || '',
+      input_length: el.value.length,
+      filled: el.value.length > 0,
     });
   };
 
@@ -212,7 +219,11 @@ class GlobalClickTracker {
       try {
         contextMetadata = JSON.parse(metadataAttr) as Record<string, unknown>;
       } catch (error) {
-        console.warn('[ActivityTracking] Invalid metadata JSON:', error);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[ActivityTracking] Invalid metadata JSON:'),
+          context: [error],
+        });
       }
     }
 
@@ -229,6 +240,24 @@ class GlobalClickTracker {
     }
 
     return result;
+  }
+
+  // For surfaces the DOM listener cannot reach (portalled toasts, native
+  // notification actions, third-party modals that drop data-* attributes).
+  trackManualEvent(
+    eventCategory: string,
+    eventName: string,
+    eventLabel?: string,
+    contextMetadata?: Record<string, unknown>,
+  ): void {
+    const data: ParsedTrackingData = { eventCategory, eventName };
+    if (eventLabel !== undefined) {
+      data.eventLabel = eventLabel;
+    }
+    if (contextMetadata !== undefined) {
+      data.contextMetadata = contextMetadata;
+    }
+    this.trackEvent(data, TriggerType.CLICK);
   }
 
   private trackEvent(
@@ -269,7 +298,11 @@ class GlobalClickTracker {
         websocketService.emit(WS_ACTIVITY_EVENT, event);
       }
     } catch (error) {
-      console.error('[ActivityTracking] Failed to track event:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[ActivityTracking] Failed to track event:'),
+        error: error,
+      });
     }
   }
 }

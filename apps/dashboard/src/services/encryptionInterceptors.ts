@@ -1,6 +1,7 @@
 import { InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { encryptField, decryptField, isEncryptedField, decryptionCache } from '@xyne/shared';
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
+import { logger } from '../utils/logger';
 
 /**
  * Recursively encrypt all string fields in an object.
@@ -106,7 +107,7 @@ export async function encryptionRequestInterceptor(
   const encryptedData = await encryptObject(config.data);
 
   if (encryptedData !== config.data) {
-    console.log('[encryption] Encrypted request body', {
+    logger.info('[encryption] Encrypted request body', {
       url: config.url,
       method: config.method,
     });
@@ -128,6 +129,15 @@ export async function encryptionResponseInterceptor(
     return response;
   }
 
+  // A Blob/ArrayBuffer response has `typeof === 'object'` but no enumerable
+  // own properties, so decryptObject's Object.entries() walk would silently
+  // replace it with `{}` instead of leaving it alone — skip binary response
+  // types outright rather than only guarding on the value's shape.
+  const responseType = response.config.responseType;
+  if (responseType === 'blob' || responseType === 'arraybuffer' || responseType === 'stream') {
+    return response;
+  }
+
   // Only decrypt JSON responses
   if (!response.data || typeof response.data !== 'object') {
     return response;
@@ -136,7 +146,7 @@ export async function encryptionResponseInterceptor(
   const decryptedData: unknown = await decryptObject(response.data);
 
   if (decryptedData !== response.data) {
-    console.log('[encryption] Decrypted response body', {
+    logger.info('[encryption] Decrypted response body', {
       url: response.config.url,
       status: response.status,
     });

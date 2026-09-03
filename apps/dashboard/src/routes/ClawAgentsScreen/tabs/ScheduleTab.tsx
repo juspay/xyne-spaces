@@ -71,6 +71,8 @@ const EditableJob = ({
               size='iconSm'
               disabled={busy}
               onClick={onDelete}
+              data-track-category='Claw Agents'
+              data-track-name='DELETE_SCHEDULED_JOB'
               aria-label='Delete scheduled job'
               className='text-muted-foreground hover:text-destructive'
             >

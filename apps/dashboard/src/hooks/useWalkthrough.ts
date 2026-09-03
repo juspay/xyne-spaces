@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useCallback, useEffect } from 'react';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
@@ -20,23 +21,37 @@ export const useWalkthrough = ({
 }: UseWalkthroughOptions): { startWalkthrough: (forceReplay?: boolean) => void } => {
   const startWalkthrough = useCallback(
     (forceReplay = false): void => {
-      console.log(
-        `[Walkthrough] Attempting to start feature: ${feature}, forceReplay: ${forceReplay}`,
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(
+          `[Walkthrough] Attempting to start feature: ${feature}, forceReplay: ${forceReplay}`,
+        ),
+      });
 
       const hasSeen = localStorage.getItem(`walkthrough_${feature}`);
       if (!forceReplay && hasSeen === 'true') {
-        console.log(`[Walkthrough] Skipped because it was already seen. localStorage check: true`);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(
+            `[Walkthrough] Skipped because it was already seen. localStorage check: true`,
+          ),
+        });
         return;
       }
 
       const steps = walkthroughConfig[feature];
       if (!steps || steps.length === 0) {
-        console.log(`[Walkthrough] No steps configured for feature: ${feature}`);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(`[Walkthrough] No steps configured for feature: ${feature}`),
+        });
         return;
       }
 
-      console.log(`[Walkthrough] Initializing driver.js with ${steps.length} steps.`);
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(`[Walkthrough] Initializing driver.js with ${steps.length} steps.`),
+      });
 
       const driverObj = driver({
         showProgress: true,
@@ -47,7 +62,10 @@ export const useWalkthrough = ({
             !driverObj.hasNextStep() ||
             confirm('Are you sure you want to skip the walkthrough?')
           ) {
-            console.log(`[Walkthrough] Marking as seen in localStorage.`);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String(`[Walkthrough] Marking as seen in localStorage.`),
+            });
             localStorage.setItem(`walkthrough_${feature}`, 'true');
             driverObj.destroy();
           }
@@ -64,7 +82,10 @@ export const useWalkthrough = ({
 
   useEffect(() => {
     if (autoPlay) {
-      console.log(`[Walkthrough] autoPlay is true for ${feature}, setting up trigger...`);
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(`[Walkthrough] autoPlay is true for ${feature}, setting up trigger...`),
+      });
       // Use requestAnimationFrame or longer timeout to ensure paint
       const timeout = setTimeout((): void => {
         const firstStepElem = walkthroughConfig[feature]?.[1]?.element;
@@ -74,15 +95,21 @@ export const useWalkthrough = ({
           typeof firstStepElem === 'string' &&
           !document.querySelector(firstStepElem)
         ) {
-          console.log(
-            `[Walkthrough] Element ${firstStepElem} not found in DOM yet. Trying anyway but Driver.js might fail.`,
-          );
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String(
+              `[Walkthrough] Element ${firstStepElem} not found in DOM yet. Trying anyway but Driver.js might fail.`,
+            ),
+          });
         }
         startWalkthrough(false);
       }, 1000); // Increased wait time to 1 second
       return (): void => clearTimeout(timeout);
     } else {
-      console.log(`[Walkthrough] autoPlay is false for ${feature}.`);
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(`[Walkthrough] autoPlay is false for ${feature}.`),
+      });
     }
     return undefined;
   }, [autoPlay, startWalkthrough, feature]);

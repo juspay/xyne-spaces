@@ -10,6 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
+import Highlight from '@tiptap/extension-highlight';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
@@ -29,6 +30,7 @@ import { all, createLowlight } from 'lowlight';
 import { Plus, Loader2, X, Ticket, FileText, Clock } from 'lucide-react';
 import { ArrowUp, AtMark, ChevronBigDown, FontAa, Hashtag, PaperclipSlant } from '@xyne/icons';
 import Tooltip from '../Tooltip/Tooltip';
+import { ShortcutHint } from '../ShortcutHint';
 import Avatar from '../Avatar/Avatar';
 import {
   DropdownMenu,
@@ -69,6 +71,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
@@ -79,7 +82,7 @@ import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { LinkSyncPlugin } from '../TipTapExtensions/LinkSyncPlugin';
 import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
 import type { Canvas } from '../../Canvas';
-import { CanvasVisibility } from '@xyne/shared';
+import { CanvasVisibility, getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { VoiceInput } from './VoiceInput';
@@ -131,6 +134,67 @@ const MaxListDepthPlugin = Extension.create({
           if (!transaction.docChanged) return true;
           const maxDepth = getMaxListDepth(transaction.doc);
           return maxDepth <= MAX_LIST_DEPTH;
+        },
+      }),
+    ];
+  },
+});
+
+/**
+ * When an ordered list is directly preceded by another ordered list of the same
+ * style, continue its numbering instead of restarting at 1.
+ *
+ * ProseMirror keeps split/pasted ordered lists as separate `<ol>` nodes, and the
+ * second one has no `start` attribute, so the browser renders it from 1 again.
+ * This happens when a middle list item is lifted out on Enter (splitting one list
+ * into two) or when two ordered lists end up adjacent. We reconcile the `start`
+ * attribute so the visible numbering stays continuous.
+ */
+const OrderedListContinuationPlugin = Extension.create({
+  name: 'orderedListContinuation',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('orderedListContinuation'),
+        appendTransaction: (transactions, _oldState, newState) => {
+          if (!transactions.some(tr => tr.docChanged)) return null;
+          const orderedList = newState.schema.nodes['orderedList'];
+          if (!orderedList) return null;
+
+          const tr = newState.tr;
+          let modified = false;
+
+          const visit = (parent: PMNode, contentStart: number) => {
+            let prev: { node: PMNode; effStart: number } | null = null;
+            parent.forEach((child, offset) => {
+              const childPos = contentStart + offset;
+              if (child.type === orderedList) {
+                let effStart = (child.attrs['start'] as number) ?? 1;
+                if (
+                  prev &&
+                  prev.node.type === orderedList &&
+                  (prev.node.attrs['type'] ?? null) === (child.attrs['type'] ?? null)
+                ) {
+                  const desired = prev.effStart + prev.node.childCount;
+                  if (((child.attrs['start'] as number) ?? 1) !== desired) {
+                    tr.setNodeMarkup(childPos, undefined, {
+                      ...child.attrs,
+                      start: desired,
+                    });
+                    modified = true;
+                  }
+                  effStart = desired;
+                }
+                prev = { node: child, effStart };
+              } else {
+                prev = null;
+              }
+              if (child.childCount) visit(child, childPos + 1);
+            });
+          };
+
+          visit(newState.doc, 0);
+          return modified ? tr : null;
         },
       }),
     ];
@@ -193,9 +257,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideVoiceInput = false,
       compact = false,
       sendDisabled = false,
+      sendDisabledReason,
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
+      slashCommandArtifactCommand,
+      slashCommandArtifactChannelLabel,
+      onCancelSlashCommandArtifact,
     },
 
     ref,
@@ -251,7 +319,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           const map = getDroppedFilesForEntity(channelId, conversationId ?? null);
           setAttachmentsMap(map);
         } catch (error) {
-          console.error('Failed to load attachments:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to load attachments:'),
+            error: error,
+          });
           logger.error(Event.DRAFT_ATTACHMENTS_LOAD_FAILED, {
             error: error instanceof Error ? error.message : String(error),
             channelId,
@@ -361,6 +433,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       return () => document.removeEventListener('keydown', onKeyDown, true);
     }, [isVoiceRecording]);
 
+    const artifactComposerDefinition = getSlashCommandArtifactDefinition(
+      slashCommandArtifactCommand,
+    );
+
+    useEffect(() => {
+      if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
+      const onKeyDown = (event: KeyboardEvent): void => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancelSlashCommandArtifact();
+      };
+      document.addEventListener('keydown', onKeyDown, true);
+      return () => document.removeEventListener('keydown', onKeyDown, true);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
+
     const handleTyping = onTyping;
 
     // Helper function to upload a single file as draft attachment
@@ -392,7 +480,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         try {
           await providerAddDroppedFiles(files, channelId, conversationId);
         } catch (error) {
-          console.error('Failed to upload file:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to upload file:'),
+            error: error,
+          });
           logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
             error: error instanceof Error ? error.message : String(error),
             channelId,
@@ -560,7 +652,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
           },
         }),
+        Highlight.configure({
+          HTMLAttributes: {
+            class: 'chat-text-highlight',
+          },
+        }),
         MaxListDepthPlugin,
+        OrderedListContinuationPlugin,
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
@@ -694,10 +792,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               const channelMentionState = channelMentionPluginKey.getState(view.state);
               const commandState = commandPluginKey.getState(view.state);
               const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
+              if (commandState?.isOpen && commandState.items.length > 0) {
+                event.preventDefault();
+                view.dispatch(
+                  view.state.tr.setMeta(commandPluginKey, {
+                    shouldSelect: true,
+                  }),
+                );
+                return true;
+              }
               if (
                 (mentionState?.isOpen && mentionState.items.length > 0) ||
                 (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-                (commandState?.isOpen && commandState.items.length > 0) ||
                 (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
               ) {
                 return false;
@@ -711,6 +817,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
+              // Keyboard sends are invisible to autocapture (click/change/submit
+              // only); emit it explicitly so keyboard vs button sends are visible.
+              posthogService.capture('message_send', {
+                trigger: 'keyboard',
+                keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
+              });
               void handleSend();
               return true;
             }
@@ -821,11 +933,23 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             const commandState = commandPluginKey.getState(view.state);
             const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
 
+            // editorProps.handleKeyDown runs before extension plugins. Select the
+            // highlighted slash command here and consume Enter so it cannot fall
+            // through to the message-send branch.
+            if (commandState?.isOpen && commandState.items.length > 0) {
+              event.preventDefault();
+              view.dispatch(
+                view.state.tr.setMeta(commandPluginKey, {
+                  shouldSelect: true,
+                }),
+              );
+              return true;
+            }
+
             // If any menu is open, let it handle the Enter key
             if (
               (mentionState?.isOpen && mentionState.items.length > 0) ||
               (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-              (commandState?.isOpen && commandState.items.length > 0) ||
               (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
             ) {
               return false;
@@ -853,6 +977,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
+            // Keyboard sends are invisible to autocapture (click/change/submit
+            // only); emit it explicitly so keyboard vs button sends are visible.
+            posthogService.capture('message_send', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
             void handleSend();
             return true;
           }
@@ -1125,7 +1255,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const handleSend = useCallback(async () => {
-      if (!editor || isSending || sendDisabled) return;
+      if (!editor || isSending) return;
+      if (sendDisabled) {
+        // The button is disabled, but Enter still lands here — say why rather than
+        // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+        // tooltip carrying the same reason never opens.
+        if (sendDisabledReason) toast.warning(sendDisabledReason);
+        return;
+      }
 
       // If a voice stream is active, finalize it for send first: this strips any
       // unfinalized interim text and aborts the stream (discarding in-flight results)
@@ -1169,7 +1306,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         // and @group → <groupid:xyneId> instead of bare display names.
         const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
         const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
-        if (matchedCmd) {
+        if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
           editor.commands.setContent('');
           setContent('');
           editor.commands.focus();
@@ -1198,6 +1335,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const finalPlainText = editor?.getText().trim() || plainText;
 
         await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
         editor.commands.setContent('');
         setContent('');
         setAttachedCanvas(null);
@@ -1216,6 +1354,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       attachedCanvas,
       hasSendableContent,
       sendDisabled,
+      sendDisabledReason,
       commandItems,
       onCommandSelect,
       disableDraftUpload,
@@ -1448,7 +1587,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
           <div
-            className='flex items-center min-w-0'
+            className='flex items-center min-w-0 h-5 w-full bg-background px-[var(--composer-px)] pb-0.5'
             style={{ display: agentVisible ? 'flex' : 'none' }}
           >
             {agentSlot}
@@ -1466,15 +1605,43 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             overflow-hidden transition-all flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
-              !isMobile && isFocused
-                ? 'border-chat-composer-border-active'
-                : !isMobile
-                  ? 'border-chat-composer-border'
-                  : ''
+              !isMobile && artifactComposerDefinition
+                ? 'border-orange-500 ring-1 ring-orange-500'
+                : !isMobile && isFocused
+                  ? 'border-chat-composer-border-active'
+                  : !isMobile
+                    ? 'border-chat-composer-border'
+                    : ''
             }
             ${isSending ? 'opacity-60 pointer-events-none' : ''}
           `}
           >
+            {artifactComposerDefinition && (
+              <div className='flex h-11 items-center justify-between border-b border-orange-200 bg-orange-50/80 px-3 text-orange-700 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-300'>
+                <div className='flex min-w-0 items-center gap-2 text-sm font-semibold'>
+                  <span className='rounded bg-orange-500 px-2 py-0.5 text-xs font-bold text-white'>
+                    {artifactComposerDefinition.badge}
+                  </span>
+                  <span className='truncate'>
+                    {artifactComposerDefinition.composerLabel}
+                    {slashCommandArtifactChannelLabel
+                      ? ` in ${slashCommandArtifactChannelLabel}`
+                      : ''}
+                  </span>
+                </div>
+                <button
+                  type='button'
+                  onClick={onCancelSlashCommandArtifact}
+                  data-track-category='CHAT_INPUT'
+                  data-track-name='CANCEL_SLASH_COMMAND_ARTIFACT'
+                  className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
+                  aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
+                >
+                  <span className='hidden sm:inline'>esc to cancel</span>
+                  <X className='size-3.5' />
+                </button>
+              </div>
+            )}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
             {isMobile && !hideVoiceInput && (
               <VoiceInput
@@ -1691,30 +1858,46 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <div className='flex min-w-0 items-center gap-1'>
                   {!hideComposerTools && features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type='button'
-                          className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                          aria-label='Add content'
-                          disabled={disabled || isSending}
-                        >
-                          <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
-                        </button>
-                      </DropdownMenuTrigger>
+                      <Tooltip
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Attach files
+                            <ShortcutHint keys='mod+o' />
+                          </span>
+                        }
+                        side='top'
+                        delayDuration={300}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type='button'
+                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            aria-label='Add content'
+                            disabled={disabled || isSending}
+                          >
+                            <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </Tooltip>
                       <DropdownMenuContent side='top' align='start' className={overlayZIndex}>
                         <DropdownMenuItem
                           onClick={() => {
                             handleAttachClick();
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_FILE'
                         >
                           <Plus className='h-4 w-4' /> Upload Files
+                          <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => {
                             setIsTranscriptSelectorOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_TRANSCRIPT'
                         >
                           <FileText className='h-4 w-4' /> Add Call Summary
                         </DropdownMenuItem>
@@ -1723,6 +1906,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsCanvasAttachmentModalOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_CANVAS'
                         >
                           <FileText className='h-4 w-4' /> Canvas
                         </DropdownMenuItem>
@@ -1774,6 +1959,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('@').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_USER_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
@@ -1796,6 +1983,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('#').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_CHANNEL_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
@@ -1815,6 +2004,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={() => setShowFormatToolbar(prev => !prev)}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='TOGGLE_FORMAT_TOOLBAR'
                         className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
@@ -1857,6 +2048,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={onCancel}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='CANCEL_EDITING'
                         className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
@@ -1883,12 +2076,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
-                              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                              ? artifactComposerDefinition
+                                ? 'bg-orange-500 text-white hover:bg-orange-600'
+                                : 'bg-primary text-primary-foreground hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -1940,6 +2135,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     onCreateTicket(editor?.getText().trim() || '');
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='CREATE_TICKET_FROM_INPUT'
                                 >
                                   <Ticket className='h-4 w-4' /> Create a ticket
                                 </DropdownMenuItem>
@@ -1950,6 +2147,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     openScheduleDialog();
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='OPEN_SCHEDULE_DIALOG'
                                 >
                                   <Clock className='h-4 w-4' /> Schedule message
                                 </DropdownMenuItem>
@@ -1962,12 +2161,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <div
                           className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent
-                              ? 'bg-primary text-white hover:bg-primary/90'
+                              ? artifactComposerDefinition
+                                ? 'bg-orange-500 text-white hover:bg-orange-600'
+                                : 'bg-primary text-white hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2013,6 +2214,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   void handleSend();
                                   setIsSendMenuOpen(false);
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='SEND_FROM_MENU'
                               >
                                 <ArrowUp className='h-4 w-4' /> Send now
                               </DropdownMenuItem>
@@ -2021,6 +2224,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   setIsSendMenuOpen(false);
                                   openScheduleDialog();
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='OPEN_SCHEDULE_DIALOG'
                               >
                                 <Clock className='h-4 w-4' /> Schedule message
                               </DropdownMenuItem>
@@ -2029,7 +2234,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         </div>
                       ) : (
                         <Tooltip
-                          content='Send message'
+                          content={sendDisabledReason ?? 'Send message'}
                           side='top'
                           delayDuration={1000}
                           skipDelayDuration={1000}

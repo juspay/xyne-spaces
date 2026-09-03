@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { validateS2SKey } from '@/middleware/validateS2SKey';
-import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 
 const router = Router();
 
@@ -44,7 +44,6 @@ interface PRCheckRequestedPayload {
  */
 async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: string } | null> {
   try {
-    // Find the Varys bot user by email (source of truth)
     const botUser = await db.user.findFirst({
       where: { email: VARYS_BOT_EMAIL },
     });
@@ -54,9 +53,9 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
       return null;
     }
 
-    // Find installed app entry by userId
     const installedApp = await db.installedApps.findFirst({
       where: { userId: botUser.id },
+      select: { webhookUrl: true, userId: true },
     });
 
     if (!installedApp || !installedApp.webhookUrl) {
@@ -79,17 +78,16 @@ async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: st
  */
 async function sendVarysWebhook(
   webhookUrl: string,
-  payload: PRCheckRequestedPayload
+  payload: PRCheckRequestedPayload,
 ): Promise<void> {
-  // Reject webhook URLs whose host resolves to an internal/private address.
-  await assertWebhookUrlSafe(webhookUrl);
+  const { url, headers } = await prepareAppWebhookDispatch(webhookUrl, {
+    'Content-Type': 'application/json',
+    'X-Xyne-Event': 'PR_CHECK_REQUESTED',
+  });
 
-  const response = await fetch(webhookUrl, {
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Xyne-Event': 'PR_CHECK_REQUESTED',
-    },
+    headers,
     body: JSON.stringify(payload),
     redirect: 'manual',
     // Fail fast if Varys stalls — this runs inside a user-facing request.

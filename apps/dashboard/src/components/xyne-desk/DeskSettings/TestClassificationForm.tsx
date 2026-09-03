@@ -1,5 +1,6 @@
 import { Play } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { Button } from '../../ui/Button/Button';
 
 export interface TestClassificationFormProps {
   title: string;
@@ -75,17 +76,19 @@ export const TestClassificationForm: React.FC<TestClassificationFormProps> = ({
           data-track-name={bodyTrackName}
         />
       </div>
-      <button
+      <Button
         type='button'
+        variant='ghost'
+        trackId='run_classification_preview'
         onClick={onRunPreview}
         disabled={isPreviewing || !subjectValue.trim() || !bodyValue.trim()}
-        className='flex items-center gap-1.5 rounded-lg bg-desk-accent px-3 py-1.5 text-sm text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
+        className='flex h-auto items-center gap-1.5 rounded-lg bg-desk-accent px-3 py-1.5 text-sm text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
         data-track-category={trackCategory}
         data-track-name={runTrackName}
       >
         <Play size={14} />
         {isPreviewing ? runningButtonLabel : runButtonLabel}
-      </button>
+      </Button>
 
       {children}
     </div>

@@ -11,6 +11,8 @@ import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { v4 as uuidv4 } from 'uuid';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
+import { usePlatform } from '../../hooks/usePlatform';
 import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
 import { recordingService } from '../../services/Recording/recordingService';
 import { canvasService } from '../../services/Canvas/canvasService';
@@ -122,6 +124,7 @@ const CanvasCreationFallback = ({
 const MAX_ASK_AI_SELECTION = 5;
 
 export default function RecordingsScreen(): ReactElement {
+  const { isMobile } = usePlatform();
   const [error, setError] = useState<string | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [showTitleModal, setShowTitleModal] = useState(false);
@@ -153,6 +156,8 @@ export default function RecordingsScreen(): ReactElement {
   const notesCanvasId = useRecordingStore(ctx => ctx.notesCanvasId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
   const autoStartRequestedAt = useRecordingStore(ctx => ctx.autoStartRequestedAt);
+  const pendingConversationId = useRecordingStore(ctx => ctx.pendingConversationId);
+  const pendingChannelId = useRecordingStore(ctx => ctx.pendingChannelId);
   const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
   const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
   const room = useRecordingStore(ctx => ctx.room);
@@ -201,7 +206,13 @@ export default function RecordingsScreen(): ReactElement {
   const handleStartRecording = (): void => {
     const defaultLayout = getRecordingDefaultLayout();
     sendRecordingEvent({ type: 'clearTranscripts' });
-    sendRecordingEvent({ type: 'startRecording', sttModel, defaultLayout });
+    sendRecordingEvent({
+      type: 'startRecording',
+      sttModel,
+      defaultLayout,
+      ...(pendingConversationId && { conversationId: pendingConversationId }),
+      ...(pendingChannelId && { channelId: pendingChannelId }),
+    });
   };
 
   // Auto-start recording when triggered from the meeting popup, tray or shortcut
@@ -506,6 +517,14 @@ export default function RecordingsScreen(): ReactElement {
       data-testid='recordings-page'
       className='flex flex-col h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
     >
+      {/* Floated rather than in-flow so the list keeps the full viewport height.
+          `w-fit` gives the shrink-to-fit box a definite width for the navigator's
+          own `w-full`. */}
+      {!isMobile && (
+        <div className='absolute left-0 top-0 z-30 hidden h-[52px] w-fit md:block'>
+          <AppNavigator />
+        </div>
+      )}
       {/* ─── Main Area (list + workspace overlay) ───── */}
       <div className='flex-1 relative overflow-hidden'>
         {/* List View — always rendered, stays behind the workspace overlay */}

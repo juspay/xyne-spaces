@@ -4,6 +4,7 @@ import hljs from 'highlight.js';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import ReadmeViewer from './ReadmeViewer';
 import { injectMarks, useLineSearch, useMatchScroll } from './search';
+import { Button } from '../ui/Button/Button';
 
 // Static lookup map — O(1) vs sequential if-chain
 const EXTENSION_TO_LANGUAGE: Record<string, string> = {
@@ -76,14 +77,16 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
       <p className='text-red-800 dark:text-red-200 font-semibold mb-2'>Unable to display file</p>
       <p className='text-red-600 dark:text-red-300 text-sm mb-3'>{error}</p>
       {canRetry && onRetry && (
-        <button
+        <Button
           onClick={onRetry}
+          variant='ghost'
           className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
           data-track-category='FileViewer'
           data-track-name='RetryLoadCode'
+          trackId='retry_load_code'
         >
           Try Again
-        </button>
+        </Button>
       )}
     </div>
   </div>
@@ -106,7 +109,9 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
     ? fileName.toLowerCase().endsWith('.md') || fileName.toLowerCase().endsWith('.markdown')
     : false;
 
-  const [markdownMode, setMarkdownMode] = useState<'raw' | 'rendered'>('raw');
+  const [markdownMode, setMarkdownMode] = useState<'raw' | 'rendered'>(
+    isMarkdown ? 'rendered' : 'raw',
+  );
 
   const fileSizeMB = useMemo(() => {
     return source ? source.size / (1024 * 1024) : 0;

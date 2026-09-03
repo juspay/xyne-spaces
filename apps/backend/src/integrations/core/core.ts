@@ -60,10 +60,7 @@ export class ExternalSourceCore {
   }
 
   private async resolveChannelMessageSenderId(source: ExternalSource): Promise<string> {
-    if (
-      this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType) &&
-      source.workspaceId
-    ) {
+    if (this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType)) {
       let botUser = await unifiedBotUserService.getBotByBotId(XYNE_MAIL_BOT_ID, source.workspaceId);
       if (!botUser) {
         await unifiedBotUserService.syncAllBotUsers(source.workspaceId);
@@ -103,7 +100,7 @@ export class ExternalSourceCore {
     const payloads = Array.isArray(enrichedPayload) ? enrichedPayload : [enrichedPayload];
 
     const allResults: IngestionResult[] = [];
-    let failedItemCount = 0;
+    const failedExternalIds: string[] = [];
     for (const payload of payloads) {
       if (payload && typeof payload === 'object' && (payload as any).__skipIngestion) {
         const reason = (payload as any).__skipReason || 'unspecified';
@@ -129,19 +126,24 @@ export class ExternalSourceCore {
           const results = await this.sync(adapter, sourceName, normalizedData, source);
           allResults.push(...results);
         } catch (error) {
-          failedItemCount += 1;
+          failedExternalIds.push(normalizedData.externalId);
           logger.error(`Failed to sync interaction from ${sourceName}`, {
             externalId: normalizedData.externalId,
             eventType: normalizedData.metadata.eventType,
+            errorMessage: error instanceof Error ? error.message : String(error),
             error,
           });
         }
       }
     }
 
-    if (failedItemCount > 0) {
+    if (failedExternalIds.length > 0) {
+      logger.error(
+        `[INGEST_INCOMPLETE] ${failedExternalIds.length} message(s) not ingested from ${sourceName}`,
+        { sourceName, externalIds: failedExternalIds },
+      );
       throw new Error(
-        `Failed to sync ${failedItemCount} interaction${failedItemCount === 1 ? '' : 's'} from ${sourceName}`,
+        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}`,
       );
     }
 
@@ -170,7 +172,7 @@ export class ExternalSourceCore {
       throw new SourceNotFoundError(sourceName);
     }
 
-    if (source.workspaceId && !source.channelId) {
+    if (!source.channelId) {
       const resolvedChannelIds = await this.resolveDlChannels(source, normalizedData);
       if (resolvedChannelIds.length === 0) {
         return [{ success: true, conversationId: '', entityId: '', action: 'skipped' }];
@@ -329,17 +331,19 @@ export class ExternalSourceCore {
     }
 
     // 4. Find or create conversation
-    const { conversation, message, email, isNew, blocked } = await this.findOrCreateConversation(
-      source,
-      normalizedData,
-      downloadedAttachments,
-      isDeskChannel
-    );
+    const { conversation, message, email, isNew, blocked, blockedReason } =
+      await this.findOrCreateConversation(
+        source,
+        normalizedData,
+        downloadedAttachments,
+        isDeskChannel
+      );
 
     if (blocked) {
-      logger.warn(`Ingestion blocked by Superposition for source ${sourceName}`, {
+      logger.warn(`Ingestion skipped (${blockedReason ?? 'unknown'}) for source ${sourceName}`, {
         externalThreadId: normalizedData.externalThreadId,
         externalId: normalizedData.externalId,
+        blockedReason,
       });
       return {
         success: true,
@@ -380,7 +384,11 @@ export class ExternalSourceCore {
       });
     }
 
-    logger.info(`Successfully ingested data from ${sourceName}`);
+    logger.info(`Successfully ingested data from ${sourceName}`, {
+      externalId: normalizedData.externalId,
+      channelId: source.channelId,
+      isNew,
+    });
 
     return {
       success: true,
@@ -395,7 +403,7 @@ export class ExternalSourceCore {
     source: ExternalSource,
     normalizedData: NormalizedData,
   ): Promise<string[]> {
-    const workspaceId = source.workspaceId!;
+    const workspaceId = source.workspaceId;
     if (source.sourceType === 'ozonetel') {
       const channelId =
         typeof normalizedData.metadata.ozonetelChannelId === 'string'
@@ -462,6 +470,8 @@ export class ExternalSourceCore {
         sourceName: source.name,
         workspaceId,
         addrs,
+        externalId: normalizedData.externalId,
+        externalThreadId: normalizedData.externalThreadId,
       });
       return [];
     }
@@ -508,11 +518,17 @@ export class ExternalSourceCore {
 
     // Keep merge scoped to the configured external source. All providers share
     // this logic, but one source must not merge into another source's tickets.
-    const existingExtMsg = await this.externalMessageRepo.findByThreadId(
-      source.id,
-      normalizedData.externalThreadId,
-      isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
-    );
+
+    const isChannelEmail = this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType);
+    // Channel emails always create a new conversation — no thread merging even
+    // for replies.
+    const existingExtMsg = isChannelEmail
+      ? null
+      : await this.externalMessageRepo.findByThreadId(
+          source.id,
+          normalizedData.externalThreadId,
+          isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE
+        );
 
     if (existingExtMsg && !isDeskChannel) {
       const messageRepo = await this.messageRepo.findById(existingExtMsg.messageId);
@@ -523,6 +539,7 @@ export class ExternalSourceCore {
       if (!conversation) {
         throw new Error(`Conversation ${conversationid} not found`);
       }
+
 
       // Create reply message
 
@@ -810,14 +827,18 @@ export class ExternalSourceCore {
         rfcMessageId: normalizedData.rfcMessageId,
         ticketMetadata: normalizedData.metadata,
         uploadedFiles: uploadedFiles,
-        sourceName: normalizedData.emailData.skipBlockingCheck
-          ? undefined
-          : source.name,
         receivedAt: normalizedData.metadata.timestamp,
         ...this.getEmailIntegrationFields(normalizedData),
       });
-      if ((createResult as any)?.blocked || (createResult as any)?.isDuplicate) {
-        return { conversation: undefined, message: undefined, email: undefined, isNew: false, blocked: true };
+      if ((createResult as any)?.isDuplicate) {
+        return {
+          conversation: undefined,
+          message: undefined,
+          email: undefined,
+          isNew: false,
+          blocked: true,
+          blockedReason: 'duplicate',
+        };
       }
       const { conversation, email } = createResult as any;
       return { conversation, email, isNew: true };

@@ -7,11 +7,7 @@ const AISectionLayout = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
   return (
-    <AIShell
-      onCreateChat={onCreateChat}
-      onSelectSession={onSelectSession}
-      mainClassName='ai-page-bg'
-    >
+    <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <div className='relative min-h-0 flex-1 overflow-auto no-scrollbar'>
         <Outlet />
       </div>

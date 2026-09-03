@@ -37,10 +37,15 @@ export * from './utils/csv';
 export * from './release/releaseReport';
 export * from './utils/notificationKeywords';
 export * from './utils/hostControls';
+export * from './utils/slashCommandArtifact';
 export {
   parseTicketMd,
   serializeTicketMd,
+  parseSubTicketsMd,
+  serializeSubTicketsMd,
+  SUB_TICKETS_MD_LIMIT,
   TicketCardSummary,
+  SubTicketsMdData,
 } from './utils/activityMetadataParser';
 export * from './types/research';
 export * from './tickets';
@@ -51,3 +56,4 @@ export * from './templates/callInvitationIcs';
 export * from './templates/callSummary';
 export * from './types/flowUI';
 export * from './validation/flowSchema';
+export * from './sdlc';

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 /**
  * Title Generator Service
  * Provides methods to generate titles from descriptions using AI
@@ -43,7 +44,11 @@ export async function generateTitle(
       ticketType: response.data.ticketType,
     };
   } catch (error) {
-    console.error('Failed to generate title:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to generate title:'),
+      error: error,
+    });
     throw error;
   }
 }

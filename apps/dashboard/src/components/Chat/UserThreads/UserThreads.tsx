@@ -18,11 +18,48 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
 import { useNavigate, useParams, Outlet } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { conversationService, ThreadListEntry } from '../../../services/Chat/conversationService';
+import {
+  conversationService,
+  ThreadListEntry,
+  ThreadListSort,
+} from '../../../services/Chat/conversationService';
 import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsCount';
 import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
+import { Button } from '../../ui/Button/Button';
 
 const PAGE_SIZE = 10;
+const THREAD_LIST_SORT_STORAGE_PREFIX = 'xyne:user-threads-sort';
+
+interface ThreadListSortSelection {
+  userId: string;
+  sortMode: ThreadListSort;
+}
+
+const threadListSortStorageKey = (userId: string): string =>
+  `${THREAD_LIST_SORT_STORAGE_PREFIX}:${userId}`;
+
+const readStoredThreadListSort = (userId: string | undefined): ThreadListSort => {
+  if (!userId || typeof window === 'undefined') return 'sections';
+
+  try {
+    const storedSortMode = window.localStorage.getItem(threadListSortStorageKey(userId));
+    return storedSortMode === 'sections' || storedSortMode === 'recent'
+      ? storedSortMode
+      : 'sections';
+  } catch {
+    return 'sections';
+  }
+};
+
+const persistThreadListSort = (userId: string, sortMode: ThreadListSort): void => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(threadListSortStorageKey(userId), sortMode);
+  } catch {
+    // localStorage unavailable/full — keep the selection for this session.
+  }
+};
 
 // Optimize ThreadRow with memo to prevent unnecessary re-renders of existing rows
 // during scrolling or when new data loads at the bottom.
@@ -125,6 +162,11 @@ const UserThreads = (): ReactElement => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const userId = user?.id;
+  const persistedSortMode = useMemo(() => readStoredThreadListSort(userId), [userId]);
+  const [sortSelection, setSortSelection] = useState<ThreadListSortSelection | null>(null);
+  const sortMode =
+    sortSelection && sortSelection.userId === userId ? sortSelection.sortMode : persistedSortMode;
   const hasConversations = allConversations.length > 0;
   const seenConversationIdsRef = useRef(new Set<string>());
   const nextCursorRef = useRef<string | null>(null);
@@ -132,6 +174,16 @@ const UserThreads = (): ReactElement => {
   const isLoadingRef = useRef(false);
   const generationRef = useRef(0);
   const requestAbortRef = useRef<AbortController | null>(null);
+
+  const handleSortModeChange = useCallback(
+    (nextSortMode: ThreadListSort): void => {
+      if (!userId) return;
+
+      setSortSelection({ userId, sortMode: nextSortMode });
+      persistThreadListSort(userId, nextSortMode);
+    },
+    [userId],
+  );
 
   const loadNextUniquePage = useCallback(
     async (startCursor: string | null, generation: number, initialLoad: boolean): Promise<void> => {
@@ -164,6 +216,7 @@ const UserThreads = (): ReactElement => {
             pageCursor,
             PAGE_SIZE,
             abortController.signal,
+            sortMode,
           );
           if (generationRef.current !== generation || abortController.signal.aborted) return;
 
@@ -199,7 +252,7 @@ const UserThreads = (): ReactElement => {
         }
       }
     },
-    [user?.id],
+    [user?.id, sortMode],
   );
 
   useEffect(() => {
@@ -243,7 +296,8 @@ const UserThreads = (): ReactElement => {
       thread =>
         thread.sectionAtLoad === 'read' && unreadThreadConversationIds.has(thread.conversationId),
     );
-    const shouldShowDivider = hasUnreadAtLoadThread && !hasReadAtLoadThreadTurnedUnread;
+    const shouldShowDivider =
+      sortMode === 'sections' && hasUnreadAtLoadThread && !hasReadAtLoadThreadTurnedUnread;
 
     for (const thread of allConversations) {
       if (thread.sectionAtLoad === 'read' && shouldShowDivider && !addedReadDivider) {
@@ -254,7 +308,7 @@ const UserThreads = (): ReactElement => {
     }
 
     return items;
-  }, [allConversations, unreadThreadConversationIds]);
+  }, [allConversations, unreadThreadConversationIds, sortMode]);
 
   // Memoize the itemContent callback
   const itemContent = useCallback(
@@ -279,14 +333,16 @@ const UserThreads = (): ReactElement => {
         <div className='flex min-h-10 justify-center py-4'>
           {isLoadingMore && <Loader2 className='animate-spin text-muted-foreground' />}
           {loadError && hasConversations && (
-            <button
+            <Button
+              variant='link'
               className='text-sm text-primary hover:underline'
               onClick={retryLoad}
+              trackId='retry_thread_list_page'
               data-track-category='USER_THREADS'
               data-track-name='RETRY_THREAD_LIST_PAGE'
             >
               Try loading more again
-            </button>
+            </Button>
           )}
         </div>
       ),
@@ -295,12 +351,48 @@ const UserThreads = (): ReactElement => {
   );
 
   return (
-    <div className='flex h-full w-full bg-background'>
+    <div className='flex h-full w-full bg-background pt-14 [@media(min-width:500px)]:pt-0'>
       <div
-        className={`pt-8 h-full flex flex-col bg-background ${
+        className={`flex flex-col bg-background ${
           showThreadPanel ? (isMobile ? 'hidden' : 'w-1/2 border-r border-border') : 'w-full'
         }`}
       >
+        <div className='relative z-30 shrink-0 px-6 py-4 border-b border-border/50 bg-background flex items-center justify-between'>
+          <div className='flex items-center gap-2 text-foreground'>
+            <MessageCircle className='w-5 h-5 text-primary' />
+            <h1 className='text-lg font-semibold tracking-tight'>Threads</h1>
+          </div>
+          <div className='inline-flex items-center rounded-md border border-border p-0.5 text-sm'>
+            <button
+              type='button'
+              onClick={(): void => handleSortModeChange('sections')}
+              className={`rounded px-2.5 py-1 transition-colors ${
+                sortMode === 'sections'
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              aria-pressed={sortMode === 'sections'}
+              data-track-category='USER_THREADS'
+              data-track-name='SORT_UNREAD_FIRST'
+            >
+              Unread first
+            </button>
+            <button
+              type='button'
+              onClick={(): void => handleSortModeChange('recent')}
+              className={`rounded px-2.5 py-1 transition-colors ${
+                sortMode === 'recent'
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              aria-pressed={sortMode === 'recent'}
+              data-track-category='USER_THREADS'
+              data-track-name='SORT_MOST_RECENT'
+            >
+              Most recent
+            </button>
+          </div>
+        </div>
         <div className='flex-1'>
           {isInitialLoading && !hasConversations ? (
             <div className='flex h-full items-center justify-center'>
@@ -309,14 +401,16 @@ const UserThreads = (): ReactElement => {
           ) : loadError && !hasConversations ? (
             <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
               <p className='text-muted-foreground'>{loadError}</p>
-              <button
+              <Button
+                variant='link'
                 className='text-sm text-primary hover:underline'
                 onClick={retryLoad}
+                trackId='retry_thread_list'
                 data-track-category='USER_THREADS'
                 data-track-name='RETRY_THREAD_LIST'
               >
                 Try again
-              </button>
+              </Button>
             </div>
           ) : !hasConversations ? (
             <div className='flex flex-col items-center justify-center h-full p-8 text-center'>

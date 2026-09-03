@@ -1673,6 +1673,8 @@ const JiraMigrationScreen = (): ReactElement => {
                     <Button
                       className='w-full lg:w-auto'
                       onClick={() => void handleMoveChannelProject()}
+                      data-track-category='jira_migration'
+                      data-track-name='MOVE_CHANNEL_PROJECT'
                       disabled={isChannelMoveLoading}
                     >
                       {isChannelMoveLoading ? 'Moving…' : 'Move Channel'}
@@ -1824,6 +1826,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   <Button
                     variant={purgeDryRun ? 'outline' : 'default'}
                     onClick={() => void handlePurgeProjectMigration()}
+                    data-track-category='jira_migration'
+                    data-track-name='PURGE_PROJECT_MIGRATION'
                     disabled={isPurgeLoading}
                   >
                     {isPurgeLoading
@@ -2106,6 +2110,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   <Button
                     variant={moveChannelDryRun ? 'outline' : 'default'}
                     onClick={() => void handleMoveJiraProjectChannel()}
+                    data-track-category='jira_migration'
+                    data-track-name='MOVE_JIRA_PROJECT_CHANNEL'
                     disabled={isMoveChannelLoading}
                   >
                     {isMoveChannelLoading
@@ -2359,6 +2365,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   <Button
                     variant={moveDryRun ? 'outline' : 'default'}
                     onClick={() => void handleMoveJiraProjectBoard()}
+                    data-track-category='jira_migration'
+                    data-track-name='MOVE_JIRA_PROJECT_BOARD'
                     disabled={isMoveBoardLoading}
                   >
                     {isMoveBoardLoading ? 'Running…' : moveDryRun ? 'Run Dry Run' : 'Move Tickets'}
@@ -2488,6 +2496,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         variant='outline'
                         className='mt-3 w-full'
                         onClick={() => void handleFetchBoards()}
+                        data-track-category='jira_migration'
+                        data-track-name='FETCH_BOARDS'
                         disabled={isFetchingBoards || !jiraProjectKey.trim()}
                       >
                         {isFetchingBoards ? 'Fetching boards…' : 'Fetch Boards'}
@@ -2760,6 +2770,8 @@ const JiraMigrationScreen = (): ReactElement => {
                               )}
                               <Button
                                 onClick={() => void handlePerBoardImport()}
+                                data-track-category='jira_migration'
+                                data-track-name='START_PER_BOARD_IMPORT'
                                 disabled={
                                   isPerBoardImportLoading ||
                                   normalizedIssueKeys.length > 0 ||
@@ -3063,6 +3075,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           setPageIndex(0);
                           void handlePreview();
                         }}
+                        data-track-category='jira_migration'
+                        data-track-name='RESET_PAGINATION'
                         disabled={isPreviewLoading || isImportLoading || !canPreview}
                       >
                         {isPreviewLoading
@@ -3074,6 +3088,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       <Button
                         variant='outline'
                         onClick={() => setIsHistoryModalOpen(true)}
+                        data-track-category='jira_migration'
+                        data-track-name='OPEN_MIGRATION_HISTORY'
                         disabled={migrationHistory.length === 0}
                       >
                         View Migrated Projects
@@ -3169,6 +3185,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       <Button
                         variant='outline'
                         onClick={() => void handlePreview()}
+                        data-track-category='jira_migration'
+                        data-track-name='PREVIEW_MIGRATION'
                         disabled={isPreviewLoading || isImportLoading}
                       >
                         Refresh Preview
@@ -3284,6 +3302,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           [...preview.jiraStatusSequence].sort((a, b) => a.localeCompare(b)),
                         )
                       }
+                      data-track-category='jira_migration'
+                      data-track-name='APPLY_STATUS_SEQUENCE'
                       disabled={preview.jiraStatusSequence.length === 0}
                     >
                       Sort A→Z
@@ -3444,11 +3464,18 @@ const JiraMigrationScreen = (): ReactElement => {
                 </div>
 
                 <div className='mt-6 flex flex-wrap items-center gap-3 border-t border-border/60 pt-5'>
-                  <Button variant='outline' onClick={() => setMigrationPhase('setup')}>
+                  <Button
+                    variant='outline'
+                    onClick={() => setMigrationPhase('setup')}
+                    data-track-category='jira_migration'
+                    data-track-name='GO_TO_SETUP_PHASE'
+                  >
                     ← Back to Configure
                   </Button>
                   <Button
                     onClick={() => setMigrationPhase('migrate')}
+                    data-track-category='jira_migration'
+                    data-track-name='GO_TO_MIGRATE_PHASE'
                     disabled={!hasCompleteStatusV2Mappings}
                   >
                     Proceed to Migration →
@@ -3523,6 +3550,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   </Button>
                   <Button
                     onClick={() => void handleImport()}
+                    data-track-category='jira_migration'
+                    data-track-name='START_IMPORT'
                     disabled={isImportLoading || !hasCompleteStatusV2Mappings}
                   >
                     {isImportLoading ? 'Migrating...' : 'Migrate Tickets'}
@@ -3574,6 +3603,8 @@ const JiraMigrationScreen = (): ReactElement => {
                                 return next;
                               });
                             }}
+                            data-track-category='jira_migration'
+                            data-track-name='UPDATE_USER_EMAIL_MAPPINGS'
                           >
                             Clear
                           </Button>
@@ -3611,6 +3642,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       <Button
                         variant='outline'
                         onClick={() => setResolvedUsersPage(p => Math.max(0, p - 1))}
+                        data-track-category='jira_migration'
+                        data-track-name='RESOLVED_USERS_PREV_PAGE'
                         disabled={resolvedUsersPage === 0}
                       >
                         Prev
@@ -3629,6 +3662,8 @@ const JiraMigrationScreen = (): ReactElement => {
                             ),
                           )
                         }
+                        data-track-category='jira_migration'
+                        data-track-name='RESOLVED_USERS_NEXT_PAGE'
                         disabled={
                           resolvedUsersPage >=
                           Math.max(
@@ -3809,15 +3844,30 @@ const JiraMigrationScreen = (): ReactElement => {
                   {migrationProgress.status === 'running' && (
                     <div className='mt-2 flex flex-wrap justify-end gap-2'>
                       {migrationProgress.controlStatus === 'paused' ? (
-                        <Button variant='outline' onClick={() => void handleResumeMigration()}>
+                        <Button
+                          variant='outline'
+                          onClick={() => void handleResumeMigration()}
+                          data-track-category='jira_migration'
+                          data-track-name='RESUME_MIGRATION'
+                        >
                           Resume
                         </Button>
                       ) : (
-                        <Button variant='outline' onClick={() => void handlePauseMigration()}>
+                        <Button
+                          variant='outline'
+                          onClick={() => void handlePauseMigration()}
+                          data-track-category='jira_migration'
+                          data-track-name='PAUSE_MIGRATION'
+                        >
                           Pause
                         </Button>
                       )}
-                      <Button variant='outline' onClick={() => void handleStopMigration()}>
+                      <Button
+                        variant='outline'
+                        onClick={() => void handleStopMigration()}
+                        data-track-category='jira_migration'
+                        data-track-name='STOP_MIGRATION'
+                      >
                         Stop
                       </Button>
                     </div>
@@ -4087,6 +4137,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       variant='outline'
                       size='sm'
                       onClick={() => setIssueResultPage(page => Math.max(0, page - 1))}
+                      data-track-category='jira_migration'
+                      data-track-name='ISSUE_RESULTS_PREV_PAGE'
                       disabled={issueResultPage === 0}
                     >
                       Previous
@@ -4097,6 +4149,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       onClick={() =>
                         setIssueResultPage(page => Math.min(issueResultPageCount - 1, page + 1))
                       }
+                      data-track-category='jira_migration'
+                      data-track-name='ISSUE_RESULTS_NEXT_PAGE'
                       disabled={issueResultPage >= issueResultPageCount - 1}
                     >
                       Next
@@ -4320,6 +4374,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       variant='outline'
                       size='sm'
                       onClick={() => void handlePreviousPage()}
+                      data-track-category='jira_migration'
+                      data-track-name='PREVIEW_PREV_PAGE'
                       disabled={isPreviewLoading || pageIndex === 0}
                     >
                       Previous Page
@@ -4328,6 +4384,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       variant='outline'
                       size='sm'
                       onClick={() => void handleNextPage()}
+                      data-track-category='jira_migration'
+                      data-track-name='PREVIEW_NEXT_PAGE'
                       disabled={isPreviewLoading || !preview.pagination.hasNextPage}
                     >
                       Next Page
@@ -4475,6 +4533,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           variant='outline'
                           size='sm'
                           onClick={() => setCustomFieldPage(page => Math.max(0, page - 1))}
+                          data-track-category='jira_migration'
+                          data-track-name='CUSTOM_FIELDS_PREV_PAGE'
                           disabled={customFieldPage === 0}
                         >
                           Previous
@@ -4487,6 +4547,8 @@ const JiraMigrationScreen = (): ReactElement => {
                               Math.min(previewActionCounts.fieldsPageCount - 1, page + 1),
                             )
                           }
+                          data-track-category='jira_migration'
+                          data-track-name='CUSTOM_FIELDS_NEXT_PAGE'
                           disabled={customFieldPage >= previewActionCounts.fieldsPageCount - 1}
                         >
                           Next
@@ -4598,6 +4660,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           variant='outline'
                           size='sm'
                           onClick={() => setIssueSamplePage(page => Math.max(0, page - 1))}
+                          data-track-category='jira_migration'
+                          data-track-name='ISSUE_SAMPLES_PREV_PAGE'
                           disabled={issueSamplePage === 0}
                         >
                           Previous
@@ -4610,6 +4674,8 @@ const JiraMigrationScreen = (): ReactElement => {
                               Math.min(previewActionCounts.issuePageCount - 1, page + 1),
                             )
                           }
+                          data-track-category='jira_migration'
+                          data-track-name='ISSUE_SAMPLES_NEXT_PAGE'
                           disabled={issueSamplePage >= previewActionCounts.issuePageCount - 1}
                         >
                           Next

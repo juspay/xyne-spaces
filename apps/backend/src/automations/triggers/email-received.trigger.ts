@@ -15,7 +15,7 @@ import type { EmailEventPayload } from '../types/automation-events';
 
 export const EMAIL_RECEIVED_EVENT = 'EMAIL_RECEIVED';
 
-const EmailReceivedConfigSchema = z.object({
+export const EmailReceivedConfigFieldsSchema = z.object({
   channelIds: z
     .array(z.string())
     .optional()
@@ -78,15 +78,29 @@ const EmailReceivedConfigSchema = z.object({
     .describe(
       'When on, only the first email of a thread fires this trigger. Useful for "new ticket" rules.',
     ),
+  hasAttachments: z
+    .boolean()
+    .optional()
+    .describe('When enabled, match only emails that have attachments.'),
   onlyReplies: z
     .boolean()
     .optional()
     .describe(
       'When on, only reply emails (not the first email in a thread) fire this trigger.',
     ),
-}).refine(
-  data => !(data.onlyNewThreads === true && data.onlyReplies === true),
-  { message: 'onlyNewThreads and onlyReplies cannot both be true — they are mutually exclusive' },
+});
+
+export function withEmailReceivedConfigValidation<T extends z.AnyZodObject>(
+  schema: T,
+): z.ZodEffects<T> {
+  return schema.refine(
+    data => !(data.onlyNewThreads === true && data.onlyReplies === true),
+    { message: 'onlyNewThreads and onlyReplies cannot both be true — they are mutually exclusive' },
+  );
+}
+
+export const EmailReceivedConfigSchema = withEmailReceivedConfigValidation(
+  EmailReceivedConfigFieldsSchema,
 );
 
 export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
@@ -105,6 +119,7 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
     externalThreadId: z.string(),
     externalMessageId: z.string(),
     createdAt: z.coerce.date(),
+    hasAttachments: z.boolean(),
   }),
   requester: z.object({
     email: z.string(),
@@ -124,6 +139,32 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
 
 type EmailReceivedConfig = z.infer<typeof EmailReceivedConfigSchema>;
 type EmailReceivedPayload = z.infer<typeof EmailReceivedOutputSchema>;
+
+export function hasEmailReceivedFilterConstraints(
+  filters: Partial<EmailReceivedConfig> | undefined,
+): boolean {
+  if (!filters) return false;
+
+  const hasNonEmptyArray = (value: unknown): boolean =>
+    Array.isArray(value) &&
+    value.some(item => (typeof item === 'string' ? item.trim().length > 0 : true));
+
+  return (
+    hasNonEmptyArray(filters.fromEmails) ||
+    hasNonEmptyArray(filters.fromDomains) ||
+    hasNonEmptyArray(filters.toEmails) ||
+    hasNonEmptyArray(filters.subjectContains) ||
+    hasNonEmptyArray(filters.bodyContains) ||
+    filters.hasAttachments === true ||
+    filters.onlyNewThreads === true ||
+    filters.onlyReplies === true ||
+    hasNonEmptyArray(filters.excludedFromEmails) ||
+    hasNonEmptyArray(filters.excludedFromDomains) ||
+    hasNonEmptyArray(filters.excludedToEmails) ||
+    hasNonEmptyArray(filters.excludedSubjectContains) ||
+    hasNonEmptyArray(filters.excludedBodyContains)
+  );
+}
 
 export class EmailReceivedTrigger extends BaseTrigger<typeof EmailReceivedConfigSchema> {
   readonly type = EMAIL_RECEIVED_EVENT;
@@ -169,6 +210,10 @@ function matchEmailReceived(cfg: EmailReceivedConfig, payload: EmailReceivedPayl
 
   const channelIds = asStringArray(cfg.channelIds);
   if (channelIds.length > 0 && !channelIds.includes(e.channelId)) return false;
+
+  if (cfg.hasAttachments === true && !e.hasAttachments) {
+    return false;
+  }
 
   const fromEmails = asStringArray(cfg.fromEmails);
   const fromDomains = asStringArray(cfg.fromDomains);
@@ -256,7 +301,10 @@ export async function emitEmailReceived(emailId: string): Promise<void> {
       return;
     }
 
-    await eventRouter.emit({ type: EMAIL_RECEIVED_EVENT, payload: { emailId } }, workspaceId);
+    await eventRouter.emit(
+      { type: EMAIL_RECEIVED_EVENT, payload: { emailId, channelId: email.channelId } },
+      workspaceId,
+    );
   } catch (err) {
     logger.error('[automations] emitEmailReceived failed', {
       emailId,

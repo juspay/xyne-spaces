@@ -2,8 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAllChannels } from './useChannels';
 import { useUsers, searchUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
+import { useAffinityCallback } from './useAffinityCallback';
+import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
   isDMChannel,
+  isGroupDMChannel,
+  isOneToOneDMChannel,
   parseDMParticipantIds,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import { Channel, ChannelScopeType, User } from '@xyne/shared';
@@ -11,8 +15,12 @@ import { Channel, ChannelScopeType, User } from '@xyne/shared';
 interface UseDmsSearchReturn {
   dmSearchQuery: string;
   setDmSearchQuery: (query: string) => void;
-  /** Existing DM channels matching the search query */
+  /** Existing DM channels matching the search query (1:1 then group, in render order) */
   dmChannelResults: Channel[];
+  /** Matching 1:1 DM channels, ranked by affinity (self-DM pinned first) */
+  oneToOneDmResults: Channel[];
+  /** Matching group DM channels, ranked by affinity */
+  groupDmResults: Channel[];
   /** Workspace users with no existing 1:1 DM matching the search query */
   userResults: User[];
   /** Combined count for keyboard navigation */
@@ -37,49 +45,95 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   const allChannels = useAllChannels();
   const allUsers = useUsers();
   const { userID: currentUserId } = useAuthContextValues();
+  // Re-render once affinity weights finish loading so the DM ranking memo re-runs (weights are read
+  // imperatively inside filterChannelsBySearchableNames, so a post-mount fetch is otherwise invisible).
+  const affinityVersion = useAffinityCallback();
 
   // Build a Map for O(1) user lookup (same as cmd+k approach in ChannelCommandMenu)
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
-  /** Existing DM channels (1:1 and group) matching the query */
-  const dmChannelResults = useMemo(() => {
-    if (!dmSearchQuery.trim()) return [];
+  /**
+   * Existing DM channels matching the query, partitioned into 1:1 and group and each ranked by
+   * affinity weight (flat recency as the tie-break). The two types render as separate sections,
+   * so no cross-type ordering is needed here.
+   */
+  const { oneToOneDmResults, groupDmResults } = useMemo(() => {
+    if (!dmSearchQuery.trim()) return { oneToOneDmResults: [], groupDmResults: [] };
 
-    // Support comma-separated keywords (same as cmd+k via useSearchMetrics)
-    const keywords = dmSearchQuery
-      .toLowerCase()
-      .split(',')
-      .map(k => k.trim())
-      .filter(Boolean);
+    // Referenced so this memo re-runs when affinity weights land (read imperatively below).
+    void affinityVersion;
 
+    const query = dmSearchQuery.trim().toLowerCase();
     const currentUserName = usersById.get(currentUserId)?.name?.toLowerCase() ?? '';
-    const shouldMatchSelfDm = keywords.some(k => k === 'self' || currentUserName.includes(k));
-    const dmChannels = allChannels.filter(channel => isDMChannel(channel.scopeType));
+    const shouldMatchSelfDm = query
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .some(t => t === 'self' || currentUserName.includes(t));
 
     const isSelfDm = (dm: Channel): boolean => {
       const ids = parseDMParticipantIds(dm);
       return ids.length > 0 && ids.every(id => id === currentUserId);
     };
 
-    return dmChannels
-      .filter(dm => {
-        if (shouldMatchSelfDm && isSelfDm(dm)) return true;
-
-        const participantNames = parseDMParticipantIds(dm)
+    // Match DMs with the SAME fuzzy, per-token, cross-participant matcher cmd+k uses
+    // (filterChannelsBySearchableNames → one Fuse over participant docs, AND across query tokens).
+    // Each participant contributes BOTH its displayName and raw name, so a full-name query matches
+    // even when the displayName is a short nickname — the same names getDMNames(...).search builds.
+    const dmItems = allChannels
+      .filter(channel => isDMChannel(channel.scopeType))
+      .map(channel => ({
+        channel,
+        searchableNames: parseDMParticipantIds(channel)
           .filter(id => id !== currentUserId)
-          .map(id => usersById.get(id)?.name?.toLowerCase())
-          .filter((name): name is string => !!name);
+          .flatMap(id => {
+            const u = usersById.get(id);
+            return u ? [u.displayName, u.name].filter((n): n is string => !!n) : [];
+          }),
+      }));
+    // Keep filterChannelsBySearchableNames' own ordering (fuseScore − affinity), the SAME blended
+    // relevance cmd+k uses, so a strong prefix match ("Rajesh") outranks a weak fuzzy match to a
+    // higher-affinity contact. Re-ranking the matched set by pure affinity buried clean matches.
+    const nameMatched = filterChannelsBySearchableNames(dmItems, dmSearchQuery);
+    const nameMatchedIds = new Set(nameMatched.map(item => item.channel.id));
 
-        return keywords.some(keyword => participantNames.some(name => name.includes(keyword)));
+    // Email-only matches (participant email substring, no name match): cmd+k finds emails via People,
+    // which the DM screen can't fall back to for existing contacts, so keep them here — appended
+    // after the relevance-ranked name matches, ordered by recency.
+    const byRecency = (a: Channel, b: Channel): number => b.lastActivityAt - a.lastActivityAt;
+    const emailMatched = allChannels
+      .filter(channel => {
+        if (!isDMChannel(channel.scopeType) || nameMatchedIds.has(channel.id)) return false;
+        const emailHaystack = parseDMParticipantIds(channel)
+          .filter(id => id !== currentUserId)
+          .map(id => usersById.get(id)?.email ?? '')
+          .join(' ')
+          .toLowerCase();
+        return emailHaystack.includes(query);
       })
-      .sort((a, b) => {
-        if (shouldMatchSelfDm) {
-          if (isSelfDm(a) && !isSelfDm(b)) return -1;
-          if (!isSelfDm(a) && isSelfDm(b)) return 1;
-        }
-        return b.lastActivityAt - a.lastActivityAt;
-      });
-  }, [allChannels, dmSearchQuery, usersById, currentUserId]);
+      .sort(byRecency);
+
+    const orderedMatches: Channel[] = [...nameMatched.map(item => item.channel), ...emailMatched];
+
+    // The self-DM is name-excluded (its only participant is you), so it never appears in the matched
+    // set above; surface it explicitly when the query looks like "self"/your own name, pinned to the
+    // top of the Direct Messages section.
+    const selfDms = shouldMatchSelfDm
+      ? allChannels.filter(ch => isOneToOneDMChannel(ch.scopeType) && isSelfDm(ch))
+      : [];
+
+    const oneToOneMatches = orderedMatches.filter(dm => isOneToOneDMChannel(dm.scopeType));
+
+    return {
+      oneToOneDmResults: shouldMatchSelfDm ? [...selfDms, ...oneToOneMatches] : oneToOneMatches,
+      groupDmResults: orderedMatches.filter(dm => isGroupDMChannel(dm.scopeType)),
+    };
+  }, [allChannels, dmSearchQuery, usersById, currentUserId, affinityVersion]);
+
+  /** Combined channel list in render order (1:1 then group) — drives keyboard nav + Enter dispatch. */
+  const dmChannelResults = useMemo(
+    () => [...oneToOneDmResults, ...groupDmResults],
+    [oneToOneDmResults, groupDmResults],
+  );
 
   // Autofocus search input when navigating to DM page
   useEffect(() => {
@@ -173,6 +227,8 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     dmSearchQuery,
     setDmSearchQuery,
     dmChannelResults,
+    oneToOneDmResults,
+    groupDmResults,
     userResults,
     totalResultCount,
     showDmSearchDropdown,

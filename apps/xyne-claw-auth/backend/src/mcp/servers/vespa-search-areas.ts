@@ -172,6 +172,43 @@ export interface SearchArea {
   embeddingFields?: string[];
 }
 
+/**
+ * Entities resolved by the nightly entity-extraction worker (xyne-spaces
+ * backend: writeEntitiesToVespa in services/entityExtraction/channelSource.ts).
+ * It writes the SAME three columns onto both `ticket` and `chat_message` docs,
+ * so both areas share these defs.
+ *
+ * Only ONE of the three columns is exposed — `entityNames` (index + attribute +
+ * bm25, token match on the canonical registry name). The other two are withheld
+ * on purpose:
+ *   - `entityIds` IS matchable (attribute, fast-search) but there is no way for
+ *     the agent to learn an entity id: the registry lives in the xyne-spaces
+ *     Postgres and claw has no tool that returns ids, so an id filter could only
+ *     ever be hallucinated. Expose it once something hands the agent real ids.
+ *   - `entitySurfaceForms` is `indexing: summary` ONLY in both .sd files — not
+ *     matchable at all, so filtering on it would silently match nothing.
+ *
+ * entityNames is array<string> → containsAny (matches if ANY element hits).
+ * containsAny is the ONLY operator exposed. `nin` is deliberately withheld until
+ * the entity backfill lands: extraction only ever ran forward from its rollout,
+ * so most docs have EMPTY entity arrays, and `!(entityNames contains "X")` would
+ * match every un-extracted doc — presenting "not yet processed" as "does not
+ * mention X". That reads as a confident negative and is wrong at scale. Add nin
+ * back once the backfill is complete.
+ *
+ * It is multi-valued, so it must NOT be added to allowedGroupByFields (the
+ * module-load guard below rejects grouping an array — one doc lands in one group
+ * per element).
+ */
+const entityFields = (subject: string): FieldDef[] => [
+  strField(
+    "entityName",
+    `Canonical name of an entity mentioned in the ${subject} (e.g. a product, customer or service), token-matched. Positive match only: a doc without this entity may simply not have been through extraction yet, so absence is NOT evidence the ${subject} is unrelated.`,
+    ["containsAny"],
+    "entityNames",
+  ),
+];
+
 const chatFields = (tsField: string): FieldDef[] => [
   strField("conversationId", "Conversation/thread id.", ["in"], "threadId"),
   strField("channelId", "Channel the message belongs to.", ["contains", "in"]),
@@ -180,6 +217,7 @@ const chatFields = (tsField: string): FieldDef[] => [
   strField("messageType", "Message type (USER/BOT/SYSTEM/FORWARDED).", ["in", "nin"]),
   boolField("isDM", "Set true for messages in a direct-message (1:1) channel.", "isIm"),
   boolField("isGroupDM", "Set true for messages in a group-DM channel.", "isMpim"),
+  ...entityFields("message's thread"),
   dateField("createdDate", "Message creation date (dd/mm/yy, IST).", tsField),
 ];
 
@@ -226,6 +264,13 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     timestampField: "createdAt",
     fields: [
       strField("channelId", "The channel's own id.", ["in"], "docId"),
+      // Name → id resolution. Mapped to `channelName_fuzzy`, NOT the bare
+      // `channelName`: the latter is `attribute | summary` with no index, so a
+      // `contains` on it is a whole-value exact match and "#xyne-spaces" would
+      // only ever match a channel called exactly that. `channelName_fuzzy` is
+      // `input channelName | index` with 3-gram matching + bm25 — built for
+      // exactly this lookup, and it survives partial names and typos.
+      strField("channelName", "Channel name — partial, case-insensitive (3-gram fuzzy index).", ["contains", "in"], "channelName_fuzzy"),
       strField("scopeType", "Channel scope: DEFAULT (regular channel), DM, GROUP_DM, TICKET, DOCUMENT.", ["in", "nin"]),
       strField("visibility", "Channel visibility: PUBLIC or PRIVATE.", ["in"]),
       strField("projectId", "Project the channel belongs to.", ["in", "contains"]),
@@ -266,6 +311,7 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
       strField("xyneId", "Human ticket id, e.g. XYNE-13292 (what people cite).", ["in", "contains"]),
       strField("ticketId", "Internal ticket doc id — prefer xyneId for the human-facing id.", ["in"], "docId"),
       strField("conversationId", "Ticket conversation/thread id.", ["in"], "convId"),
+      ...entityFields("ticket"),
       dateField("createdDate", "Ticket creation date (dd/mm/yy, IST).", "createdAtTimestamp"),
     ],
     // createdAt = day-string ("12/05/2026") → per-day grouping (not the ms timestamp).
@@ -364,6 +410,10 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     timestampField: "createdAt",
     fields: [
       strField("email", "User email.", ["contains"]),
+      // `name_fuzzy` is `input name | index | attribute` with 3-gram + bm25 —
+      // partial names and misspellings resolve, which a plain attribute match
+      // would not.
+      strField("name", "User name — partial (3-gram fuzzy index).", ["contains", "in"], "name_fuzzy"),
       strField("status", "User status (e.g. ACTIVE).", ["in"]),
       dateField("createdDate", "User creation date (dd/mm/yy, IST).", "createdAt"),
     ],
@@ -391,6 +441,12 @@ export const SEARCH_AREAS: Record<string, SearchArea> = {
     aclSchemaKey: null,
     timestampField: "createdAt",
     fields: [
+      // `project.name` is `index | attribute | summary` with bm25, so `contains`
+      // is a real tokenised match. `projectId` mirrors the channel area's
+      // docId mapping so a project resolved by name can be re-queried by id
+      // (and a channel row's `projectId` can be followed back to its project).
+      strField("projectId", "The project's own id.", ["in"], "docId"),
+      strField("name", "Project name.", ["contains", "in"]),
       strField("createdBy", "Creator user id.", ["contains"]),
       dateField("createdDate", "Project creation date (dd/mm/yy, IST).", "createdAt"),
     ],
@@ -630,6 +686,17 @@ export interface StructuredQueryParams {
   hitsPerGroup?: number;
   sort?: { by: string; dir?: "asc" | "desc" };
   hits?: number;
+  /**
+   * Optional projection. Replaces `select *` with just these columns, so the
+   * summary fetch skips message bodies entirely. Measured on chat_message:
+   * 60 hits went 461 KB -> 19.9 KB (23x) with no change in which rows match.
+   *
+   * For CALLERS THAT ONLY NEED IDS (prefetch's channel probe). Never a way to
+   * reach a column the area does not already expose: every entry is validated
+   * against the area's own field list plus the render-critical columns below,
+   * so nothing user-supplied is interpolated into the YQL.
+   */
+  fields?: string[];
   rankProfile?: string;
 }
 
@@ -687,8 +754,11 @@ function buildAreaClauses(
     const emb = area.embeddingFields ?? [];
     // Hybrid works with grouping too — buildYqlFromParams pins default_native
     // below whenever a query is present, so queryDirect sends input.query(e).
-    // Only an explicit `unranked` (or a schema with no embedding) drops the NN.
-    const scored = emb.length > 0 && params.rankProfile !== "unranked";
+    // An explicit `unranked`, a schema with no embedding, or a SORT drops the
+    // NN: sorted queries run unranked (`order by` replaces ranking, and file's
+    // default_native has a global-phase rerank Vespa refuses to sort under),
+    // so `e` is never supplied and the vector clause would break.
+    const scored = emb.length > 0 && params.rankProfile !== "unranked" && !params.sort?.by;
     if (scored) {
       const targetHits = Math.max(params.hits ?? 20, 100);
       const nn = emb.map(f => `({targetHits:${targetHits}} nearestNeighbor(${f}, e))`).join(" or ");
@@ -807,7 +877,33 @@ export function buildYqlFromParams(
     throw new Error(`groupBy and sort cannot be combined — Vespa grouping ignores order by. Use one or the other.`);
   }
 
-  let yql = `select * from sources ${source} where ${clauses.join(" and ")}`;
+  // Projection (optional). `transformHit` classifies rows off docType/sddocname
+  // and titles a message from messageChannelName/channelName + username — drop
+  // those and every row renders as an untyped, nameless blob, so they are always
+  // allowed through even when the caller does not ask for them.
+  const RENDER_CRITICAL = ["docType", "sddocname", "channelId", "channelName", "messageChannelName", "username", "userId"];
+  let projection = "*";
+  if (params.fields && params.fields.length > 0) {
+    const allowed = new Set<string>([
+      ...RENDER_CRITICAL,
+      ...area.fields.map(f => f.vespaField ?? f.name),
+      ...area.fields.map(f => f.name),
+    ]);
+    const picked: string[] = [];
+    for (const f of params.fields) {
+      const name = String(f).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new Error(`fields entry "${name}" is not a valid column name.`);
+      }
+      if (!allowed.has(name)) {
+        throw new Error(`fields entry "${name}" is not a column of area "${params.searchArea}". Allowed: ${[...allowed].sort().join(", ")}.`);
+      }
+      if (!picked.includes(name)) picked.push(name);
+    }
+    for (const rc of RENDER_CRITICAL) if (!picked.includes(rc)) picked.push(rc);
+    projection = picked.join(", ");
+  }
+  let yql = `select ${projection} from sources ${source} where ${clauses.join(" and ")}`;
 
   // 7a. Sort — order by an allowed (date/number attribute) field, asc/desc.
   if (hasSort) {
@@ -854,7 +950,11 @@ export function buildYqlFromParams(
     // default_native so queryDirect sends input.query(e)=embed(hf-embedder, @query) that the
     // nearestNeighbor clause needs. (Its auto-pick would fall to `unranked` for
     // a grouping query and drop `e`, breaking the vector clause.)
-    rankProfile = "default_native";
+    // EXCEPT under sort: `order by` replaces ranking entirely, and schemas
+    // whose default_native carries a global-phase rerank (file) 400 with
+    // "Sorting is not supported with global phase" — so sorted queries run
+    // unranked (buildAreaClauses drops their NN clause for the same reason).
+    rankProfile = hasSort ? "unranked" : "default_native";
   }
 
   return { yql, query, ...(rankProfile ? { rankProfile } : {}) };

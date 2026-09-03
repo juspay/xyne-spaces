@@ -4,7 +4,13 @@ import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Badge } from '../../ui/Badge';
 import { X, Hash, Lock, Users } from 'lucide-react';
-import { useActiveUserSearch, useUser, useUsers } from '../../../hooks/useUsers';
+import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
+import {
+  rankChannelsByAffinity,
+  filterChannelsBySearchableNames,
+} from '../../../utils/rankingUtils';
+import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   useChannelSearch,
@@ -34,8 +40,10 @@ import { InputBox } from '../../ui/InputBox';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { ForwardMessageFormProps, ForwardTarget, SelectionMode } from './ForwardMessageModal.types';
 import { toast } from 'sonner';
+import { subscribeSendLifecycle } from '@xyne/shared/messages';
 import {
   getDMParticipantIdsToFetch,
+  getDMNames,
   parseDMParticipantIds,
 } from '../ChatDirectory/ChatDirectory.utils';
 import { Combobox } from '../../ui/Combobox/Combobox';
@@ -114,7 +122,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         const timestamp = Date.now();
 
         try {
-          zero.mutate(
+          // Fire without awaiting (like sendMessage) and observe the outcome below.
+          const mutation = zero.mutate(
             mutators.conversations.forwardMessage({
               targetChannelId: firstTarget.id,
               originalMessageId: message.messageId,
@@ -147,8 +156,26 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
           // Navigate to the channel
           void navigate(`/chat/dir/${firstTarget.id}`);
+
+          // Surface a real mutator rejection; transient zero errors are ignored
+          // since Zero still persists those on reconnect.
+          subscribeSendLifecycle(mutation, () => {
+            logger.error(Event.MESSAGE_FORWARD_FAILED, {
+              originalMessageId: message.messageId,
+              targetType: 'channel',
+              targetChannelId: firstTarget.id,
+            });
+            toast.error('Failed to forward message', {
+              description: `Please try again.`,
+              duration: 3000,
+            });
+          });
         } catch (error) {
-          console.error('Failed to forward message via mutator:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to forward message via mutator:'),
+            error: error,
+          });
           logger.error(Event.MESSAGE_FORWARD_FAILED, {
             originalMessageId: message.messageId,
             targetType: 'channel',
@@ -209,7 +236,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         // Navigate to the DM channel
         void navigate(`/chat/dir/${response.id}`);
       } catch (error) {
-        console.error('Failed to create DM with forwarded message:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to create DM with forwarded message:'),
+          error: error,
+        });
         logger.error(Event.MESSAGE_FORWARD_FAILED, {
           originalMessageId: message.messageId,
           targetType: 'users',
@@ -294,6 +325,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     c => allVisibleChannels.find(vc => vc.id === c.id) || ({ ...c } as VisibleChannel),
   ); // Merge visible channel data with all channels
   const allUsers = useUsers();
+  const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
   // Determine current selection mode based on selected targets
   const selectionMode: SelectionMode = useMemo(() => {
@@ -422,21 +454,22 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   const [inputValue, setInputValue] = useState<string>('');
   const trimmedInputValue = inputValue.trim();
-  const usersSuggestions = useActiveUserSearch(trimmedInputValue, 20);
+  // Active people ranked by matchesAllTokens + MFU affinity + DM recency (same trio as cmd+K).
+  const rankedUsers = useRankedActivePeople(trimmedInputValue, 20);
   const channelsSuggestions = useChannelSearch(trimmedInputValue, 5);
+  const affinityVersion = useAffinityCallback();
   const dropdownListItems = useMemo(() => {
+    // Re-read affinity once weights load (channel weights read imperatively by the rankers below).
+    void affinityVersion;
     // Show default suggestions on initial modal open with empty input
     if (!inputValue.trim()) {
       if (isInitialOpen) {
         const defaults: DropdownListItemType[] = [];
 
-        // Recent 1:1 DMs sorted by lastActivityAt (up to 5)
-        const recentDMs = [...allChannels]
-          .filter(channel => channel.scopeType === ChannelScopeType.DM)
-          .sort(
-            (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
-          )
-          .slice(0, 5);
+        // Recent 1:1 DMs ranked by MFU affinity, recency tie-break (up to 5)
+        const recentDMs = rankChannelsByAffinity(
+          allChannels.filter(channel => channel.scopeType === ChannelScopeType.DM),
+        ).slice(0, 5);
 
         recentDMs.forEach(channel => {
           // Self-DM ("notes to self") — only the current user is a participant.
@@ -469,13 +502,10 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           }
         });
 
-        // Recent GROUP_DMs sorted by lastActivityAt (up to 5)
-        const recentGroupDMs = [...allChannels]
-          .filter(channel => channel.scopeType === ChannelScopeType.GROUP_DM)
-          .sort(
-            (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
-          )
-          .slice(0, 5);
+        // Recent GROUP_DMs ranked by MFU affinity, recency tie-break (up to 5)
+        const recentGroupDMs = rankChannelsByAffinity(
+          allChannels.filter(channel => channel.scopeType === ChannelScopeType.GROUP_DM),
+        ).slice(0, 5);
 
         recentGroupDMs.forEach(channel => {
           const label = getGroupDMLabel(channel);
@@ -489,13 +519,10 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           }
         });
 
-        // Recent DEFAULT channels sorted by lastActivityAt (up to 5)
-        const recentChannels = [...allChannels]
-          .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-          .sort(
-            (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
-          )
-          .slice(0, 5);
+        // Recent DEFAULT channels ranked by MFU affinity, recency tie-break (up to 5)
+        const recentChannels = rankChannelsByAffinity(
+          allChannels.filter(channel => channel.scopeType === ChannelScopeType.DEFAULT),
+        ).slice(0, 5);
 
         recentChannels.forEach(channel => {
           defaults.push({
@@ -521,7 +548,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         ? new Set(selectedTargets.find(t => t.type === 'group_dm')?.memberIds ?? [])
         : new Set<string>();
 
-    const suggestedUsers: DropdownListItemType[] = usersSuggestions
+    const suggestedUsers: DropdownListItemType[] = rankedUsers
       .filter(
         currUser =>
           // Self is a valid target only as a solo "notes to self" pick. Hide it once
@@ -530,6 +557,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           !selectedUserIds.has(currUser.id) &&
           !groupDmMemberIds.has(currUser.id),
       )
+      // Bound the visible list: rankUsersWithMfu can recover weighted matches past the 20 cap.
+      .slice(0, 20)
       .map(currUser => ({
         leftSlot: <Avatar userId={currUser.id} size='sm' />,
         label: getForwardUserLabel(currUser),
@@ -537,32 +566,33 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         value: currUser.id,
       }));
 
-    const suggestedChannels: DropdownListItemType[] = channelsSuggestions
-      .filter(currChannel => currChannel.scopeType === ChannelScopeType.DEFAULT)
-      .map(currChannel => ({
-        leftSlot:
-          currChannel.visibility === ChannelVisibility.PUBLIC ? (
-            <Hash className='w-3.5 h-3.5 text-muted-foreground' />
-          ) : (
-            <Lock className='w-3.5 h-3.5 text-muted-foreground' />
-          ),
-        label: currChannel.name,
-        value: currChannel.id,
-      }));
+    const suggestedChannels: DropdownListItemType[] = rankChannelsByAffinity(
+      channelsSuggestions.filter(currChannel => currChannel.scopeType === ChannelScopeType.DEFAULT),
+    ).map(currChannel => ({
+      leftSlot:
+        currChannel.visibility === ChannelVisibility.PUBLIC ? (
+          <Hash className='w-3.5 h-3.5 text-muted-foreground' />
+        ) : (
+          <Lock className='w-3.5 h-3.5 text-muted-foreground' />
+        ),
+      label: currChannel.name,
+      value: currChannel.id,
+    }));
 
-    const suggestedGroupDMs: DropdownListItemType[] = [...allChannels]
-      .filter(channel => channel.scopeType === ChannelScopeType.GROUP_DM)
-      .sort((a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0))
-      .filter(channel => {
-        const participantIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
-        const participants = allUsers.filter(u => participantIds.includes(u.id));
-        const query = trimmedInputValue.toLowerCase();
-        return participants.some(u =>
-          [u.displayName, u.name, u.email].some(value => value?.toLowerCase().includes(query)),
-        );
-      })
+    // Full-name participant matching + MFU affinity via the shared cmd+K group-DM matcher
+    // (getDMNames(...).search feeds both displayName and raw name per participant).
+    const groupDmChannels = allChannels.filter(
+      channel => channel.scopeType === ChannelScopeType.GROUP_DM,
+    );
+    const suggestedGroupDMs: DropdownListItemType[] = filterChannelsBySearchableNames(
+      groupDmChannels.map(channel => ({
+        channel,
+        searchNames: getDMNames(channel, currentUser?.id ?? '', usersById).search,
+      })),
+      trimmedInputValue,
+    )
       .slice(0, 5)
-      .map(channel => ({
+      .map(({ channel }) => ({
         leftSlot: getGroupDMLeftSlot(channel),
         label: getGroupDMLabel(channel),
         value: channel.id,
@@ -583,13 +613,15 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     trimmedInputValue,
     selectedUserIds,
     isInitialOpen,
-    usersSuggestions,
+    rankedUsers,
     channelsSuggestions,
     selectionMode,
     selectedTargets,
     allChannels,
     allUsers,
+    usersById,
     currentUser,
+    affinityVersion,
   ]);
 
   const onInputValueChangeHandler = (queryString: string) => {
@@ -877,6 +909,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             data-track-category='FORWARD_MESSAGE_MODAL'
             data-track-name='FORWARD_MESSAGE'
             data-track-metadata={JSON.stringify({ targetCount: selectedTargets })}
+            trackId='forward_message'
           >
             {form.state.isSubmitting ? 'Forwarding...' : 'Forward'}
           </Button>

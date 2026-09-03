@@ -33,6 +33,9 @@ export interface FlowRunGraph {
   locked: Set<string>;
 }
 
+/** React Flow node id for a group's cover — consumers must not re-derive the prefix. */
+export const flowGroupCoverId = (groupId: string): string => `flow-group:${groupId}`;
+
 interface UseFlowRunGraphArgs {
   isFlowBoard: boolean;
   selectedFlowRunModel: FlowPlanModel | null;
@@ -109,7 +112,7 @@ export function useFlowRunGraph({
         )
         .map(group => group.id),
     );
-    const coverId = (groupId: string): string => `flow-group:${groupId}`;
+    const coverId = flowGroupCoverId;
     const displayId = (planId: string): string =>
       activeGroupIds.has(planId) ? coverId(planId) : planId;
     const runtimeParentIds = (parentIds: string[]): string[] =>

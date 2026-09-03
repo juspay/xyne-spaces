@@ -8,6 +8,7 @@ export const LogLevel = {
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
 export const Event = {
+  INFO: "info",
   API_CALL_SUCCESSFUL: 'api_call_successful',
   API_CALL_FAILED: 'api_call_failed',
   WEBSOCKET_CONNECTED: 'websocket_connection_successful',
@@ -154,6 +155,10 @@ export const Event = {
   SLASH_COMMAND_IMPRESSION: "slash_command_impression",
   SLASH_COMMAND_CLICK: "slash_command_click",
   SLASH_COMMAND_SESSION_END: "slash_command_session_end",
+  SLASH_COMMAND_ARTIFACT_STATE_RESOLVED: "slash_command_artifact_state_resolved",
+  SLASH_COMMAND_ARTIFACT_ACTION: "slash_command_artifact_action",
+  SLASH_COMMAND_ARTIFACT_SIDE_EFFECTS_RECONCILED: "slash_command_artifact_side_effects_reconciled",
+  SLASH_COMMAND_ARTIFACT_INVARIANT_FAILED: "slash_command_artifact_invariant_failed",
   FRONTEND_ERROR: "frontend_error",
   DESK_CLAW_AGENTS_FETCH_FAILED: "desk_claw_agents_fetch_failed",
 

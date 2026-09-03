@@ -8,7 +8,11 @@ import { useMarkMoment } from '../../../hooks/useMarkMoment';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { isElectronApp } from '../../../utils/electronApp';
-import { logRecordingError, NO_TRANSCRIPT_RECORDING_TITLE } from '../../../utils/recordingUtils';
+import {
+  calculateRecordingElapsedMs,
+  logRecordingError,
+  NO_TRANSCRIPT_RECORDING_TITLE,
+} from '../../../utils/recordingUtils';
 import NoteTakerOverlay from './NoteTakerOverlay';
 
 export function NoteTakerOverlayHost(): ReactElement {
@@ -33,17 +37,22 @@ export function NoteTakerOverlayHost(): ReactElement {
   // hide the overlay when live recording detail screen entered.
   const isViewingThisRecording =
     Boolean(externalId) && pathname.replace(/\/+$/, '').endsWith(`/recordings/${externalId}`);
+  const isOnRecordingsSection = /^\/[^/]+\/recordings(\/|$)/.test(pathname);
 
   const handleStop = useCallback((): void => {
     const stoppedRecordingId = externalId;
     const capturedNothing = transcripts.length === 0;
     const alreadyTitled = Boolean(title?.trim());
+    const durationMs = calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs);
+    const endedAtMs = Date.now();
 
     sendRecordingEvent({ type: 'stopRecording' });
 
     // The recording just transitioned to ENDED — land the user on its detail
     if (stoppedRecordingId && !isViewingThisRecording) {
-      void navigate(`/recordings/${stoppedRecordingId}`);
+      void navigate(`/recordings/${stoppedRecordingId}`, {
+        state: { justStopped: true, durationMs, endedAtMs, hasTranscript: !capturedNothing },
+      });
     }
 
     if (!stoppedRecordingId || alreadyTitled || !capturedNothing) {
@@ -55,7 +64,16 @@ export function NoteTakerOverlayHost(): ReactElement {
       .updateRecordingTitle(stoppedRecordingId, NO_TRANSCRIPT_RECORDING_TITLE)
       .catch(err => logRecordingError('NoteTakerOverlayHost.titleUntranscribed', err))
       .finally(refreshOatsRecordings);
-  }, [externalId, title, transcripts, isViewingThisRecording, navigate]);
+  }, [
+    externalId,
+    title,
+    transcripts,
+    isViewingThisRecording,
+    navigate,
+    startTime,
+    pauseStartedAt,
+    accumulatedPausedMs,
+  ]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -65,6 +83,11 @@ export function NoteTakerOverlayHost(): ReactElement {
 
   // ─── Native pill hand-off (Electron only) ─────────────────────────────────
   const isElectron = isElectronApp();
+
+  useEffect(() => {
+    if (!isElectron || !isActive) return;
+    sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: !isOnRecordingsSection });
+  }, [isElectron, isActive, isOnRecordingsSection]);
 
   useEffect(() => {
     if (!isElectron) return;
@@ -84,10 +107,17 @@ export function NoteTakerOverlayHost(): ReactElement {
     sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: true });
   }, []);
 
+  const handleExpand = useCallback((): void => {
+    sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false });
+  }, []);
+
+  const shouldRenderOverlay =
+    isActive && startTime !== null && !isViewingThisRecording && (!isMinimized || !isElectron);
+
   return (
     <>
       <AnimatePresence initial={false}>
-        {isActive && startTime !== null && !isViewingThisRecording && !isMinimized && (
+        {shouldRenderOverlay && (
           <NoteTakerOverlay
             key='floating-recording-transcript'
             status={status}
@@ -105,7 +135,12 @@ export function NoteTakerOverlayHost(): ReactElement {
             onPause={() => sendRecordingEvent({ type: 'pauseRecording' })}
             onResume={() => sendRecordingEvent({ type: 'resumeRecording' })}
             onMarkMoment={markMoment}
-            onMinimize={isElectron ? handleMinimize : undefined}
+            isMinimized={isMinimized}
+            onMinimize={handleMinimize}
+            onExpand={handleExpand}
+            onTitleUpdated={(nextTitle: string) =>
+              sendRecordingEvent({ type: 'setTitle', title: nextTitle })
+            }
           />
         )}
       </AnimatePresence>

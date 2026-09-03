@@ -1,4 +1,5 @@
 import type { D2, RenderOptions } from '@terrastruct/d2';
+import { logger, Event as LogEvent } from '../../../utils/logger';
 
 let d2Promise: Promise<D2> | null = null;
 
@@ -137,7 +138,10 @@ export async function renderD2Diagram({
     onSuccess(svg);
     onError('');
   } catch (err) {
-    console.error('D2 rendering error:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      message: 'D2 rendering error',
+      error: err,
+    });
     onError(err instanceof Error ? err.message : 'Failed to render D2 diagram');
   } finally {
     onLoading(false);

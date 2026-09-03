@@ -12,6 +12,7 @@ import {
   Link,
   Copy,
   Headphones,
+  Mic,
   Pin,
   CornerUpLeft,
   SquareAsterisk,
@@ -28,6 +29,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { parseReactionsMd } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
@@ -86,6 +88,9 @@ export interface HoverActionsToolbarProps {
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
   isCallDisabled?: boolean;
+  /** Starts a headless ("take notes") recording anchored to this thread. */
+  onStartRecording?: () => void;
+  isRecordingDisabled?: boolean;
   isChannelArchived?: boolean;
   /** MESSAGE shortcuts for this channel — shown in the More Actions dropdown */
   messageShortcuts?: AppShortcutWithApp[];
@@ -140,6 +145,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onMarkAsUnread,
   onInitiateCall,
   isCallDisabled = false,
+  onStartRecording,
+  isRecordingDisabled = false,
   isChannelArchived = false,
   messageShortcuts,
   onRunShortcut,
@@ -316,6 +323,25 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         </Tooltip>
       )}
 
+      {/* Start Recording (Take Notes) */}
+      {onStartRecording && messageId === initialMessageId && !isChannelArchived && (
+        <Tooltip content={isRecordingDisabled ? 'Recording in progress' : 'Take notes'} side='top'>
+          <Button
+            variant='ghost'
+            className='size-7 text-muted-foreground'
+            onClick={onStartRecording}
+            disabled={isRecordingDisabled}
+            title={isRecordingDisabled ? 'Recording in progress' : 'Take notes'}
+            data-testid='hover-action-start-recording'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='START_RECORDING_FROM_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
+          >
+            <Mic className='w-4 h-4' />
+          </Button>
+        </Tooltip>
+      )}
+
       {/* Ask AI */}
       {onAskAI && (
         <Tooltip content='Ask AI' side='top'>
@@ -381,6 +407,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <EditMessageIcon className='w-4 h-4' />
                       </span>
                       Edit
+                      <ShortcutHint shortcut='message.edit' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -446,6 +473,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <Bookmark className='w-4 h-4' />
                       </span>
                       {isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
+                      <ShortcutHint shortcut='message.bookmark' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -518,6 +546,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         {isPinned ? <UnpinIcon className='w-4 h-4' /> : <Pin className='w-4 h-4' />}
                       </span>
                       {isPinned ? 'Unpin message' : 'Pin message'}
+                      <ShortcutHint shortcut='message.pin' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -537,6 +566,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <Link className='w-4 h-4' />
                       </span>
                       Copy link
+                      <ShortcutHint shortcut='message.copyLink' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -594,6 +624,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                             <DropdownMenuItem
                               key={shortcut.commandName}
                               onClick={() => onRunShortcut?.(shortcut)}
+                              data-track-category='HOVER_ACTIONS_TOOLBAR'
+                              data-track-name='RUN_SHORTCUT'
                             >
                               <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                 <Zap className='w-3.5 h-3.5' />
@@ -609,7 +641,11 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                           {messageShortcuts.length > 3 && (
                             <>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={onShowAllShortcuts}>
+                              <DropdownMenuItem
+                                onClick={onShowAllShortcuts}
+                                data-track-category='HOVER_ACTIONS_TOOLBAR'
+                                data-track-name='SHOW_ALL_SHORTCUTS'
+                              >
                                 <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                   <Zap className='w-4 h-4' />
                                 </span>
@@ -636,6 +672,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <Trash2 className='w-4 h-4' />
                       </span>
                       Delete
+                      <ShortcutHint shortcut='message.delete' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
                 </>

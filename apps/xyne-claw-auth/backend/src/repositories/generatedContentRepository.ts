@@ -29,6 +29,15 @@ export const generatedContentRepository = {
       take: limit,
     }),
 
+  /** Day buckets + status only (no content) — powers the brief date picker. */
+  findDateBuckets: (userId: string, kind: string, limit = 365) =>
+    prisma.generatedContent.findMany({
+      where: { userId, kind },
+      orderBy: [{ dateBucket: "desc" }],
+      take: limit,
+      select: { dateBucket: true, status: true },
+    }),
+
   /** Mark generation as started (idempotent per day) so a fetch can show "generating". */
   markGenerating: (params: {
     userId: string;

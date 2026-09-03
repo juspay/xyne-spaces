@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { Headphones, ChevronDown } from '@xyne/icons';
 import { Popover } from '../../ui/Popover/Popover';
 import { Drawer } from '../../ui/Drawer/Drawer';
+import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallTrigger } from '../CallTrigger/CallTrigger';
@@ -30,6 +32,10 @@ export interface CallData {
   participantPreviewUserIds?: string | null;
   participants?: readonly CallParticipant[];
   callOrigin?: CallOrigin;
+  // Every call's metadata carries the conversationId of the message it posted
+  // into (the thread's own conversation for a thread call, a fresh one for a
+  // channel call) — see callRepository.createCallWithParticipantsAndMessage.
+  metadata?: { conversationId?: string } | null;
 }
 
 interface CallTriggerModalProps {
@@ -42,6 +48,7 @@ interface CallTriggerModalProps {
   className?: string;
   disabled?: boolean;
   isMember: boolean;
+  sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link started calls to
 }
 
 export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
@@ -54,6 +61,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
   className,
   disabled = false,
   isMember,
+  sdlcLink,
 }) => {
   const { isMobile } = usePlatform();
   const usesCustomTriggerStyle = Boolean(className?.trim());
@@ -62,6 +70,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
     channelId,
     targetUserIds,
     callDisplayName,
+    sdlcLink,
   });
 
   // Use the new hook for initiating calls
@@ -115,6 +124,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
       channelId,
       ...(targetUserIds && { targetUserIds }),
       ...(callDisplayName && { callDisplayName }),
+      ...(sdlcLink && { sdlcLink }),
       onComplete: handleClose,
     });
   };
@@ -158,6 +168,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         channelName={channelName}
         participantCount={participantCount}
         isMember={isMember}
+        sdlcLink={sdlcLink}
         {...(className ? { className } : {})}
         {...(callDisplayName && { callDisplayName })}
       />
@@ -212,10 +223,12 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           >
             Other Options
           </div>
-          <button
-            className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-muted transition-colors'
+          <Button
+            variant='ghost'
+            className='flex items-center gap-3 w-full h-auto justify-start px-6 py-4 rounded-lg hover:bg-muted transition-colors'
             onClick={() => handleCallAction(handleInitiateCall)}
-            data-track-category='CALL'
+            data-track-category='CALLS'
+            trackId='start_call_now'
             data-track-name='StartCallNow'
             data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >
@@ -223,7 +236,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
               <Headphones className='w-5 h-5 text-foreground' />
             </div>
             <span className='text-sm font-semibold text-foreground'>Start call now</span>
-          </button>
+          </Button>
         </div>
       )}
     </div>

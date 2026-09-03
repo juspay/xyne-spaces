@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { EmailType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { logger } from '@/utils/logger';
 import { buildTicketContext } from './ticket-context';
 import type { EmailEventPayload } from '../types/automation-events';
 import type { TicketLike } from './ticket-context';
@@ -73,6 +74,7 @@ interface EmailRow {
   externalThreadId: string;
   externalMessageId: string;
   createdAt: Date;
+  hasAttachments?: boolean;
 }
 
 async function loadTicketContextForEmail(
@@ -129,6 +131,7 @@ function emailRowToOutput(email: EmailRow): EmailRow {
     externalThreadId: email.externalThreadId,
     externalMessageId: email.externalMessageId,
     createdAt: email.createdAt,
+    hasAttachments: email.hasAttachments,
   };
 }
 
@@ -147,6 +150,15 @@ export async function hydrateEmailReceivedPayload(
   }
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
+  const hasAttachments = await repositories.messageAttachments
+    .hasEmailAttachment(email.id)
+    .catch(error => {
+      logger.warn(
+        `[automations] failed to hydrate attachment state for email=${email.id}`,
+        error,
+      );
+      return false;
+    });
   const emailUrl = buildEmailUrl({
     ticketUrl: ticketContext?.ticket.url,
     conversationId: ticketContext?.ticket.conversationId ?? email.conversationId,
@@ -156,7 +168,7 @@ export async function hydrateEmailReceivedPayload(
 
   return {
     ...payload,
-    email: { ...emailRowToOutput(email as EmailRow), url: emailUrl },
+    email: { ...emailRowToOutput({ ...email, hasAttachments } as EmailRow), url: emailUrl },
     ...(ticketContext ?? {}),
     requester: {
       email: extractEmailAddress(email.from),

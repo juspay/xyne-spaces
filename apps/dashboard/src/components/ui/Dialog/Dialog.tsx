@@ -35,6 +35,8 @@ export interface DialogProps {
     typeof DialogPrimitive.Content
   >['onInteractOutside'];
   testId?: string;
+  /** Keep the Radix modal on small screens instead of switching to the default drawer. */
+  mobileVariant?: 'drawer' | 'dialog';
 }
 
 /**
@@ -69,6 +71,7 @@ export const Dialog = ({
   onPointerDownOutside,
   onInteractOutside,
   testId,
+  mobileVariant = 'drawer',
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
   useOverlayEffect(open ?? false);
@@ -90,7 +93,7 @@ export const Dialog = ({
   }, []);
 
   // Use Drawer for mobile screens
-  if (isMobile) {
+  if (isMobile && mobileVariant === 'drawer') {
     return (
       <Drawer
         {...(trigger !== undefined && { trigger })}

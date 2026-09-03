@@ -38,6 +38,7 @@ export function SearchableMultiSelect({
   isOpen,
   onOpenChange,
   searchPlaceholder = 'Search...',
+  searchMaxLength,
   searchAriaLabel,
   listAriaLabel,
   emptyMessage = 'No results found',
@@ -77,6 +78,7 @@ export function SearchableMultiSelect({
         ? selectedValues.filter(selected => selected !== value)
         : [...selectedValues, value],
     );
+    setSearchValue('');
   };
 
   const handleOpenChange = (open: boolean): void => {
@@ -156,6 +158,7 @@ export function SearchableMultiSelect({
           onChange={event => setSearchValue(event.target.value)}
           onKeyDown={handleSearchKeyDown}
           placeholder={searchPlaceholder}
+          maxLength={searchMaxLength}
           className='h-auto min-w-0 flex-1 rounded-none border-0 p-0 text-sm shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0'
           aria-label={searchAriaLabel}
           aria-expanded

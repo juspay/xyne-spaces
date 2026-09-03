@@ -41,6 +41,10 @@ import {
   releaseAutomationTemplate,
   storeAutomationTemplates,
 } from '../services/automation-template.service';
+import {
+  deskLabelRulesService,
+  DeskLabelRulesPayloadSchema,
+} from '../services/desk-label-rules.service';
 
 const router = Router();
 
@@ -263,6 +267,141 @@ router.post('/validate', (req: Request, res: Response) => {
   res.json({ success: true, data: result, timestamp: new Date().toISOString() });
 });
 
+// POST /desk-label-rules — create 1–2 personal ACTIVE auto-label automations (no approval)
+router.post('/desk-label-rules', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const parsed = DeskLabelRulesPayloadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.flatten() });
+      return;
+    }
+
+    const result = await deskLabelRulesService.create(parsed.data, auth);
+    res.status(result.created ? 201 : 200).json({
+      success: true,
+      data: result,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'invalid') {
+      res.status(400).json({
+        success: false,
+        error: (err as Error).message,
+        data: (err as { validation?: unknown }).validation,
+      });
+      return;
+    }
+    logger.error('[automations] desk-label-rules failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to create desk label rules' });
+  }
+});
+
+// GET /desk-label-rules — owner + desk scoped list (never syncs via Zero automationsList)
+router.get('/desk-label-rules', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const channelId =
+      typeof req.query.channelId === 'string' && req.query.channelId.length > 0
+        ? req.query.channelId
+        : undefined;
+    if (!channelId) {
+      res.status(400).json({ success: false, error: 'channelId is required' });
+      return;
+    }
+    const limit = parseListLimit(req.query.limit);
+    const cursor = decodeAutomationListCursor(req.query.cursor);
+    const page = await deskLabelRulesService.listOwned(auth, channelId, { limit, cursor });
+    res.json({
+      success: true,
+      data: {
+        automations: page.automations,
+        counts: page.counts,
+        pagination: {
+          limit: page.pagination.limit,
+          nextCursor: page.pagination.nextCursor
+            ? encodeAutomationListCursor(page.pagination.nextCursor)
+            : null,
+          hasMore: page.pagination.hasMore,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    logger.error('[automations] desk-label-rules list failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to list desk label rules' });
+  }
+});
+
+const DeskLabelRuleStatusSchema = z.object({
+  status: z.enum([AutomationStatus.ACTIVE, AutomationStatus.DISABLED]),
+});
+
+// PATCH /desk-label-rules/:id — owner disable/activate without AUTOMATIONS admin
+router.patch('/desk-label-rules/:id', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const parsed = DeskLabelRuleStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.flatten() });
+      return;
+    }
+    const automation = await deskLabelRulesService.setStatus(
+      req.params.id,
+      parsed.data.status,
+      auth,
+    );
+    res.json({
+      success: true,
+      data: { automation },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    logger.error('[automations] desk-label-rules patch failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to update desk label rule' });
+  }
+});
+
 // POST / — create a new automation as DRAFT (no activation)
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -384,6 +523,39 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
   } catch (err) {
     logger.error('[automations] get failed:', err);
     res.status(500).json({ success: false, error: 'Failed to get automation' });
+  }
+});
+
+// GET /:id/versions — full lineage (all versions) this automation belongs to, newest first
+router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    // Scope by workspaceId so a user cannot read another tenant's lineage.
+    const workflow = await db.workflow.findFirst({
+      where: {
+        id: req.params.id,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+      },
+    });
+    if (!workflow) {
+      res.status(404).json({ success: false, error: 'Automation not found' });
+      return;
+    }
+
+    const seriesId = workflow.automationSeriesId ?? workflow.id;
+    const versions = (await approvalService.listLineageVersions(seriesId)).filter(
+      v => v.workspaceId === auth.workspaceId,
+    );
+    res.json({ success: true, data: versions, timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('[automations] list versions failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to list automation versions' });
   }
 });
 
@@ -511,7 +683,7 @@ router.post('/:id/submit', async (req: Request<{ id: string }>, res: Response) =
   }
 });
 
-// DELETE /:id — raise an archive request to admins via DM; does not archive directly
+// DELETE /:id — personal desk rules archive immediately; others raise an admin archive request
 router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -523,24 +695,39 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
     const existing = await db.workflow.findFirst({
       where: {
         id: req.params.id,
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
         workspaceId: auth.workspaceId,
         status: { not: AutomationStatus.ARCHIVED },
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
       },
     });
-    if (!existing) {
-      res.status(404).json({ success: false, error: 'Automation not found' });
+    if (existing) {
+      void notifyAdminsOfArchiveRequest(workflowToAutomation(existing), auth.userId).catch(err =>
+        logger.error('[automations] notifyAdminsOfArchiveRequest failed', err),
+      );
+      res.json({
+        success: true,
+        data: { message: 'Archive request submitted to admins.' },
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
-    void notifyAdminsOfArchiveRequest(workflowToAutomation(existing), auth.userId).catch(err =>
-      logger.error('[automations] notifyAdminsOfArchiveRequest failed', err),
-    );
-    res.json({
-      success: true,
-      data: { message: 'Archive request submitted to admins.' },
-      timestamp: new Date().toISOString(),
-    });
+    try {
+      const archived = await deskLabelRulesService.archivePersonal(req.params.id, auth);
+      res.json({
+        success: true,
+        data: { automation: archived, message: 'Personal desk rule archived.' },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === 'not-found' || code === 'forbidden') {
+        // Do not disclose another user's personal rule through this shared endpoint.
+        res.status(404).json({ success: false, error: 'Automation not found' });
+        return;
+      }
+      throw err;
+    }
   } catch (err) {
     logger.error('[automations] delete failed:', err);
     res.status(500).json({ success: false, error: 'Failed to submit archive request' });

@@ -18,6 +18,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
+import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
@@ -35,6 +36,9 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import threadTypeVocabularyRoutes from '@/routes/threadTypeVocabulary';
+import conversationLabelRoutes from '@/routes/conversationLabels';
+import radarExecutionRoutes from '@/routes/radarExecution';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -61,7 +65,6 @@ import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicUserRoutes from '@/routes/publicUserRoutes';
 import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
@@ -69,6 +72,7 @@ import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarOAuthRoutes from '@/routes/calendarOAuth';
+import driveOAuthRoutes from '@/routes/driveOAuth';
 import calendarWatchRoutes from '@/routes/calendarWatch';
 import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
@@ -91,7 +95,9 @@ import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
+import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -106,7 +112,7 @@ import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
-import ysweetRoutes from '@/routes/ysweet';
+import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
@@ -120,6 +126,8 @@ import deskTagsConfigRoutes from '@/routes/deskTagsConfig';
 import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
 import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
 import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
+import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
+import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
@@ -130,7 +138,10 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
+import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
+import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -169,6 +180,7 @@ import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
+import { sdlcQueue } from '@/queues/sdlcQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -183,6 +195,11 @@ import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
+import officeConversionRoutes from '@/routes/officeConversion';
+import sdlcRoutes from '@/routes/sdlc';
+import sdlcClawRoutes from '@/routes/sdlcClaw';
+import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
+import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 
 
 export class App {
@@ -198,6 +215,23 @@ export class App {
   }
 
   private initializeMiddlewares(): void {
+
+    const apiPathPrefix = config.apiPathPrefix;
+    if (apiPathPrefix) {
+      this.app.use((req: Request, _res: Response, next: express.NextFunction): void => {
+        const url = req.url;
+        const isPrefixed =
+          url === apiPathPrefix ||
+          url.startsWith(`${apiPathPrefix}/`) ||
+          url.startsWith(`${apiPathPrefix}?`);
+        if (isPrefixed) {
+          req.url = `/api${url.slice(apiPathPrefix.length)}`;
+          req.originalUrl = req.url;
+        }
+        next();
+      });
+    }
+
     // Security middleware
     this.app.use(helmet());
 
@@ -334,7 +368,9 @@ export class App {
     this.app.use('/api/channels/:channelId/tags-config', authMiddleware.authenticate, deskTagsConfigRoutes);
     this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
     this.app.use('/api/channels/:channelId/metrics', authMiddleware.authenticate, deskMetricsRoutes);
+    this.app.use('/api/desk-metrics/claw', authenticateUserOrApp, deskMetricsClawRoutes);
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
+    this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
@@ -384,6 +420,12 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
+    // this one-off repair links summary canvases across every workspace. The
+    // '-backfill' path suffix also puts it behind backfillMountGuard above.
+    this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
+    // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -402,7 +444,6 @@ export class App {
     this.app.use('/api/v2/auth', authV2Routes);
     this.app.use('/api/community', communityRoutes);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public/users', publicUserRoutes);
     this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
@@ -444,6 +485,8 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
+    this.app.use('/api/radar', authMiddleware.authenticate, radarExecutionRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
@@ -459,6 +502,7 @@ export class App {
     this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/oauth', calendarOAuthRoutes); // Calendar-only OAuth (init is authenticated; callbacks use bound state)
+    this.app.use('/api/drive/oauth', driveOAuthRoutes); // KB Drive import OAuth (init is authenticated; callback uses bound state)
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
@@ -468,8 +512,9 @@ export class App {
 
     // Internal S2S endpoints (trusted service-to-service calls)
     const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
-      const s2sKey = process.env['INTERNAL_S2S_KEY'];
-      if (!s2sKey || req.headers['x-s2s-key'] !== s2sKey) {
+      const supplied = req.headers['x-s2s-key'];
+      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
+      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
         res.status(401).json({ error: 'Invalid or missing S2S key' });
         return;
       }
@@ -542,6 +587,23 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
+    this.app.post(
+      '/api/internal/sdlc/claw-callback/:executionId/:step',
+      validateS2SKey,
+      handleSdlcClawCallback,
+    );
+    this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
+    this.app.use(
+      '/api/internal/sdlc/artifact-versions',
+      validateS2SKey,
+      sdlcArtifactVersionsInternalRoutes
+    );
+    this.app.post(
+      '/api/internal/desk-report/callback/:channelId/:attachmentId',
+      validateS2SKey,
+      handleDeskReportCallback,
+    );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
@@ -550,6 +612,9 @@ export class App {
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
 
+    // No user session here — the caller is the y-sweet server itself, gated
+    // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
+    this.app.use('/api/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
@@ -571,9 +636,12 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
+    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
     // Board routes (auth and ACL required)
     this.app.use('/api/boards', authMiddleware.authenticate, boardRoutes);
+    this.app.use('/api/sub-tickets', authMiddleware.authenticate, subTicketRoutes);
 
     // Knowledge routes (auth required)
     this.app.use('/api/knowledge', authMiddleware.authenticate, knowledgeRoutes);
@@ -581,8 +649,7 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes (auth required)
-    this.app.use('/api/ysweet', authMiddleware.authenticate, ysweetRoutes);
+    this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
 
@@ -631,6 +698,10 @@ export class App {
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
 
+    // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
+    // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.
+    this.app.use('/api/office-conversion', authMiddleware.authenticate, officeConversionRoutes);
+
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);
 
@@ -644,6 +715,7 @@ export class App {
     // New chat schema routes
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/thread-type-vocabulary', authMiddleware.authenticate, threadTypeVocabularyRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
@@ -843,6 +915,9 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
+    logger.info('Initializing SDLC queue (producer)...');
+    await sdlcQueue.initialize();
+
     logger.info('Initializing automations module (registries + queue producers)...');
     await initializeAutomations();
 
@@ -883,11 +958,14 @@ export class App {
       );
     }
 
-    // Initialize calendar sync queues
-    logger.info('Initializing Microsoft Calendar sync queue...');
+    // Initialize calendar sync queues as PRODUCERS only. The calendar webhook
+    // routes live here and must stay here (they are the publicly reachable
+    // endpoints Google/Microsoft push to), but the sync work they enqueue is
+    // drained by the worker process — see ENABLE_CALENDAR_SYNC_WORKER.
+    logger.info('Initializing Microsoft Calendar sync queue (producer)...');
     await microsoftCalendarSyncQueue.initialize();
 
-    logger.info('Initializing Google Calendar sync queue...');
+    logger.info('Initializing Google Calendar sync queue (producer)...');
     await googleCalendarSyncQueue.initialize();
 
     // Initialize unified watch renewal queue (replaces Gmail + Calendar renewal queues)
@@ -905,6 +983,18 @@ export class App {
     } catch (error) {
       logger.error('Failed to initialize Superposition client:', error);
       logger.warn('Continuing startup without Superposition client...');
+    }
+
+    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate (requireYSweetServerToken
+    // fails closed with 401 if it's empty). A missing token here is silent at
+    // request time — every canvas connect and every 10s revalidation poll
+    // just 401s — so surface it loudly at boot instead. Warn, don't crash:
+    // an empty value is expected in local dev where nothing calls this route.
+    if (!config.ysweet.serverToken) {
+      logger.warn(
+        'Y_SWEET_SERVER_TOKEN is not set.' +
+          'if y-sweet auth validation is enabled in this environment, canvas collaboration will be down.'
+      );
     }
 
     try {
@@ -968,6 +1058,12 @@ export class App {
     logger.info('Initializing delayed message queue (producer)...');
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
+
+    const { radarExecutionQueue, isRadarExecutionEnabled } = await import('@/queues/radarExecutionQueue');
+    if (isRadarExecutionEnabled()) {
+      logger.info('Initializing radar execution queue (producer)...');
+      await radarExecutionQueue.initialize();
+    }
 
     logger.info('Initializing message classification queue (producer)...');
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
@@ -1036,6 +1132,13 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close SDLC producer queue
+      await sdlcQueue.close();
+
+      // Close radar execution producer queue (initialized above when enabled)
+      const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
+      await radarQueue.close();
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();

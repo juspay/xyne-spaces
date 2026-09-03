@@ -7,6 +7,7 @@ export type TicketListColumnKey =
   | 'status'
   | 'assignee'
   | 'createdAt'
+  | 'age'
   | 'latestEmail';
 
 export interface TicketListColumnDefinition {
@@ -88,6 +89,14 @@ export const TICKET_LIST_COLUMNS: readonly TicketListColumnDefinition[] = [
     defaultWidth: 128,
     minWidth: 112,
     maxWidth: 360,
+    align: 'center',
+  },
+  {
+    key: 'age',
+    label: 'Age',
+    defaultWidth: 64,
+    minWidth: 52,
+    maxWidth: 200,
     align: 'center',
   },
   {

@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.184.0",
+  "version": "1.269.3",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -11,6 +11,7 @@
     "doctor": "node scripts/xyne-doctor.mjs",
     "doctor:demo": "node scripts/xyne-doctor.mjs --demo",
     "doctor:test": "node --test scripts/xyne-doctor.test.mjs",
+    "doctor:llm": "node scripts/ping-llm.mjs",
     "services": "node scripts/xyne-doctor.mjs services",
     "services:raw": "node scripts/select-services.mjs",
     "services:sh": "chmod +x scripts/start-services.sh && ./scripts/start-services.sh",
@@ -30,6 +31,7 @@
     "services:vespa": "chmod +x vespa-core/scripts/deploy-dev.sh && ./vespa-core/scripts/deploy-dev.sh",
     "sandbox": "chmod +x scripts/sandbox.sh && ./scripts/sandbox.sh",
     "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
+    "sdlc:cleanup": "bash scripts/cleanup-sdlc-local.sh",
     "reset": "chmod +x scripts/reset-local.sh && ./scripts/reset-local.sh",
     "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
     "test": "./tools/xyne-automation/scripts/run-test.sh",
@@ -73,7 +75,7 @@
         {
           "preset": "conventionalcommits",
           "parserOpts": {
-            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(XYNE-\\d+):?\\s*(.+)$",
+            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(?:(XYNE-\\d+):?\\s*)?(.+)$",
             "headerCorrespondence": [
               "type",
               "ticket",
@@ -136,6 +138,10 @@
             {
               "type": "chore",
               "release": false
+            },
+            {
+              "type": null,
+              "release": "patch"
             }
           ]
         }
@@ -145,7 +151,7 @@
         {
           "preset": "conventionalcommits",
           "parserOpts": {
-            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(XYNE-\\d+):?\\s*(.+)$",
+            "headerPattern": "^(?:(?:Pull [Rr]equest #\\d+:\\s*)+)?(\\w+)(?:\\([^)]*\\))?:\\s*(?:(XYNE-\\d+):?\\s*)?(.+)$",
             "headerCorrespondence": [
               "type",
               "ticket",
@@ -162,7 +168,14 @@
         "@semantic-release/npm",
         {
           "npmPublish": false,
-          "pkgRoot": "dashboard"
+          "pkgRoot": "apps/dashboard"
+        }
+      ],
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": false,
+          "pkgRoot": "apps/backend"
         }
       ],
       [
@@ -177,7 +190,8 @@
         {
           "assets": [
             "package.json",
-            "dashboard/package.json",
+            "apps/dashboard/package.json",
+            "apps/backend/package.json",
             "CHANGELOG.md"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]",
@@ -190,6 +204,18 @@
   },
   "packageManager": "pnpm@10.15.0",
   "pnpm": {
+    "packageExtensions": {
+      "@semantic-release/commit-analyzer": {
+        "dependencies": {
+          "conventional-changelog-conventionalcommits": "7.0.2"
+        }
+      },
+      "@semantic-release/release-notes-generator": {
+        "dependencies": {
+          "conventional-changelog-conventionalcommits": "7.0.2"
+        }
+      }
+    },
     "overrides": {
       "@excalidraw/excalidraw": "0.18.1",
       "@excalidraw/excalidraw>react": "^19.2.1",
@@ -197,7 +223,7 @@
       "@excalidraw/mermaid-to-excalidraw": "1.1.3",
       "@grpc/grpc-js": "1.14.4",
       "@hapi/wreck": "18.1.2",
-      "@hono/node-server": "1.19.14",
+      "@hono/node-server": "1.19.15",
       "@isaacs/brace-expansion": "5.0.1",
       "@livekit/components-core": "0.12.12",
       "@livekit/protocol": "1.48.0",
@@ -206,77 +232,97 @@
       "@opentelemetry/core": "2.8.0",
       "@opentelemetry/core@2": "2.8.0",
       "@opentelemetry/exporter-prometheus": "0.220.0",
+      "@opentelemetry/propagator-jaeger": "2.9.0",
       "@opentelemetry/sdk-node": "0.217.0",
       "@tanstack/form-core": "1.27.7",
       "@tanstack/react-store": "0.8.0",
       "@terrastruct/d2": "0.1.33",
+      "@types/express": "4.17.25",
       "@xmldom/xmldom": "0.8.13",
       "adm-zip": "0.6.0",
       "ajv@6": "6.14.0",
       "ajv@8": "8.18.0",
       "axios": "1.18.1",
       "basic-ftp": "5.3.1",
-      "body-parser": "2.2.1",
-      "brace-expansion@1": "1.1.16",
-      "brace-expansion@2": "2.1.2",
+      "body-parser": "2.3.0",
+      "brace-expansion@1": "1.1.18",
+      "brace-expansion@2": "2.1.4",
+      "brace-expansion@5": "5.0.9",
+      "deepmerge-ts": "8.0.0",
       "defu": "6.1.7",
-      "dompurify@3": "3.4.11",
+      "diff@8": "8.0.3",
+      "dompurify@3": "3.4.13",
       "effect": "3.22.0",
       "engine.io@6": "6.6.9",
       "express-rate-limit": "8.5.2",
-      "fast-uri@3": "3.1.4",
+      "fast-uri@2": "2.4.4",
+      "fast-uri@3": "3.1.5",
+      "fast-uri@4": "4.1.2",
       "fast-xml-builder": "1.3.0",
       "fast-xml-parser@4": "4.5.7",
       "fast-xml-parser@5": "5.10.1",
+      "fastify@4": "5.8.3",
       "fastify@5": "5.10.0",
+      "find-my-way": "9.7.0",
       "flatted": "3.4.2",
       "form-data@2": "2.5.6",
       "form-data@4": "4.0.6",
       "handlebars@4": "4.7.9",
       "happy-dom": "20.8.9",
-      "hono": "4.12.30",
+      "hono": "4.12.34",
       "immutable": "4.3.9",
-      "js-yaml@3": "3.15.0",
-      "js-yaml@4": "4.3.0",
+      "js-yaml@3": "3.15.1",
+      "js-yaml@4": "4.3.1",
       "jsondiffpatch": "0.7.2",
       "jws": "4.0.1",
       "langsmith": "0.8.3",
       "lodash": "4.18.1",
       "lodash-es": "4.18.1",
-      "mermaid@10": "10.9.6",
+      "mathjs": "15.2.0",
+      "mermaid@10": "10.9.8",
+      "mermaid@11": "11.16.1",
       "minimatch@10": "10.2.5",
       "minimatch@3": "3.1.5",
       "minimatch@5": "5.1.9",
       "minimatch@9": "9.0.9",
-      "monaco-editor>dompurify": "3.4.11",
+      "monaco-editor>dompurify": "3.4.13",
       "multer": "2.2.0",
-      "nanoid@3": "3.3.8",
-      "next": "16.2.10",
+      "nanoid@3": "3.3.18",
+      "nanoid@4": "5.1.16",
+      "nanoid@5": "5.1.16",
+      "next": "16.2.11",
       "node-forge": "1.4.0",
-      "nodemailer": "8.0.11",
+      "nodemailer": "9.0.1",
       "path-to-regexp@0": "0.1.13",
       "path-to-regexp@8": "8.4.2",
       "picomatch@2": "2.3.2",
       "picomatch@4": "4.0.5",
-      "postcss": "8.5.10",
+      "postcss": "8.5.23",
       "protobufjs@7": "7.6.5",
       "protobufjs@8": "8.7.1",
       "qs": "6.15.2",
-      "react-router": "7.18.1",
+      "react-router": "7.18.2",
+      "sharp": "0.35.0",
       "shell-quote": "1.10.0",
       "simple-git": "3.36.0",
       "socket.io-parser": "4.2.7",
       "styled-components>postcss": "8.5.10",
       "systeminformation": "5.31.17",
       "tar@6": "7.5.20",
-      "tar@7": "7.5.20",
+      "tar@7": "7.5.21",
       "tmp": "0.2.7",
+      "tough-cookie@2": "4.1.3",
       "underscore": "1.13.8",
       "undici@5": "5.29.0",
-      "undici@6": "6.27.0",
-      "undici@7": "7.28.0",
-      "undici@8": "8.7.0",
+      "undici@6": "6.28.0",
+      "undici@7": "7.29.0",
+      "undici@8": "8.9.0",
+      "uuid@10": "11.1.1",
       "uuid@11": "11.1.1",
+      "uuid@3": "11.1.1",
+      "uuid@8": "11.1.1",
+      "uuid@9": "11.1.1",
+      "request>uuid": "^3.3.2",
       "ws@6": "6.2.6",
       "ws@7": "7.5.13",
       "ws@8": "8.21.1",

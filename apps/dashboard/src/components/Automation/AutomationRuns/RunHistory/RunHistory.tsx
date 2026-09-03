@@ -1,6 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, Hourglass, Loader2, MinusCircle, XCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  CheckTickCircle,
+  ClockDefault,
+  Hourglass,
+  MinusCircle,
+  MultipleCrossCancelCircle,
+  Spinner,
+} from '@xyne/icons';
 import { cn } from '../../../../utils/classNames';
 import {
   Select,
@@ -11,6 +19,7 @@ import {
 } from '../../../ui/Select/Select';
 import { Skeleton } from '../../../ui/Skeleton';
 import { Button } from '../../../ui/Button/Button';
+import { DateRangeFilter, type DateRangeValue } from '../../../ui/DateRangeFilter/DateRangeFilter';
 import { fetchAutomationRuns } from '../../../../api/automationsApi';
 import type { AutomationRunStatus, AutomationRunSummary } from '../../Automation.types';
 import type { RunHistoryProps } from './RunHistory.types';
@@ -20,6 +29,7 @@ const SKELETON_ROWS = 6;
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
+  { value: 'PENDING', label: 'Pending' },
   { value: 'SCHEDULED', label: 'Scheduled' },
   { value: 'RUNNING', label: 'Running' },
   { value: 'EXTERNAL_WAIT', label: 'Waiting on agent' },
@@ -31,6 +41,7 @@ const STATUS_OPTIONS = [
 type StatusFilterValue = (typeof STATUS_OPTIONS)[number]['value'];
 
 const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
+  PENDING: 'bg-muted text-muted-foreground border-border',
   SCHEDULED:
     'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/40',
   RUNNING:
@@ -44,40 +55,30 @@ const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
   SKIPPED: 'bg-muted text-muted-foreground border-border',
 };
 
-const DATE_PRESETS = [
-  { value: 'all', label: 'All time' },
-  { value: '24h', label: 'Last 24 hours' },
-  { value: '7d', label: 'Last 7 days' },
-  { value: '30d', label: 'Last 30 days' },
-] as const;
-type DatePreset = (typeof DATE_PRESETS)[number]['value'];
-
-function datePresetToRange(preset: DatePreset): { from: number | null; to: number | null } {
-  if (preset === 'all') return { from: null, to: null };
-  const now = Date.now();
-  const HOURS = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 } as const;
-  return { from: now - HOURS[preset] * 60 * 60 * 1000, to: null };
-}
-
 export function RunHistory({
   automationId,
   onOpenRun,
   onBack,
 }: RunHistoryProps): React.ReactElement {
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
-  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [dateRange, setDateRange] = useState<DateRangeValue | null>(null);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, refetch } =
     useInfiniteQuery({
-      queryKey: ['automation-runs', automationId, statusFilter, datePreset],
+      queryKey: [
+        'automation-runs',
+        automationId,
+        statusFilter,
+        dateRange?.startDate.getTime() ?? null,
+        dateRange?.endDate.getTime() ?? null,
+      ],
       queryFn: ({ pageParam }) => {
-        const { from, to } = datePresetToRange(datePreset);
         return fetchAutomationRuns(automationId, {
           limit: PAGE_SIZE,
           cursor: pageParam ?? null,
           status: statusFilter === 'all' ? null : statusFilter,
-          from,
-          to,
+          from: dateRange?.startDate.getTime() ?? null,
+          to: dateRange?.endDate.getTime() ?? null,
         });
       },
       initialPageParam: null as string | null,
@@ -89,7 +90,7 @@ export function RunHistory({
     return data?.pages.flatMap(p => p.runs) ?? [];
   }, [data]);
 
-  const hasActiveFilters = statusFilter !== 'all' || datePreset !== 'all';
+  const hasActiveFilters = statusFilter !== 'all' || dateRange !== null;
   const rowsEmpty = !isLoading && filtered.length === 0;
 
   return (
@@ -111,7 +112,7 @@ export function RunHistory({
             type='button'
             onClick={() => {
               setStatusFilter('all');
-              setDatePreset('all');
+              setDateRange(null);
             }}
             data-track-category='automation-runs'
             data-track-name='run-history-clear-filters'
@@ -137,28 +138,17 @@ export function RunHistory({
             </SelectContent>
           </Select>
         </div>
-        <div className='w-[160px]'>
-          <Select value={datePreset} onValueChange={v => setDatePreset(v as DatePreset)}>
-            <SelectTrigger className='h-8 text-xs'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DATE_PRESETS.map(p => (
-                <SelectItem key={p.value} value={p.value}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <DateRangeFilter dateRange={dateRange} onChange={setDateRange} className='h-8' />
       </div>
 
       <div role='list' aria-label='Automation runs' className='flex-1 overflow-y-auto'>
         {isError ? (
           <div className='py-16 text-center text-sm text-red-600'>
             Failed to load runs.
-            <button
+            <Button
+              variant='ghost'
               type='button'
+              trackId='automation_run_history_retry'
               data-track-category='automation-runs'
               data-track-name='run-history-retry'
               onClick={() => {
@@ -167,7 +157,7 @@ export function RunHistory({
               className='ml-2 underline hover:no-underline'
             >
               Retry
-            </button>
+            </Button>
           </div>
         ) : isLoading ? (
           <div className='flex flex-col'>
@@ -201,6 +191,8 @@ export function RunHistory({
                   onClick={() => {
                     void fetchNextPage();
                   }}
+                  data-track-category='automation-runs'
+                  data-track-name='LOAD_MORE_RUNS'
                 >
                   {isFetchingNextPage ? 'Loading…' : 'Load more'}
                 </Button>
@@ -236,15 +228,17 @@ function RunRow({
     >
       <div className='flex size-9 items-center justify-center'>
         {run.status === 'COMPLETED' ? (
-          <CheckCircle2 className='size-4 text-green-600' />
+          <CheckTickCircle className='size-4 text-green-600' />
         ) : run.status === 'FAILED' ? (
-          <XCircle className='size-4 text-red-600' />
+          <MultipleCrossCancelCircle className='size-4 text-red-600' />
         ) : run.status === 'EXTERNAL_WAIT' ? (
           <Hourglass className='size-4 text-purple-600' />
         ) : run.status === 'SKIPPED' ? (
           <MinusCircle className='size-4 text-muted-foreground' />
+        ) : run.status === 'PENDING' ? (
+          <ClockDefault className='size-4 text-muted-foreground' />
         ) : (
-          <Loader2 className='size-4 animate-spin text-blue-600' />
+          <Spinner className='size-4 animate-spin text-blue-600' />
         )}
       </div>
       <div className='flex flex-1 flex-col gap-0.5'>

@@ -27,6 +27,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getFreshCredentials } from "./credentials-refresh.js";
@@ -163,7 +164,7 @@ export async function loadEffectiveCredentials(
         isUserOwned: true,
       };
     } catch (err) {
-      const detail = err instanceof TokenRefreshError ? err.message : err instanceof Error ? err.message : String(err);
+      const detail = err instanceof TokenRefreshError ? err.message : errMsg(err);
       log.error(`[creds-loader] ${serverType} userId=${userId} → token refresh failed: ${detail}`);
       return null;
     }
@@ -178,6 +179,67 @@ export async function loadEffectiveCredentials(
     const live = await liveSpacesCredentials(userId);
     if (live) return live;
     log.info(`[creds-loader] xyne-dashboard userId=${userId} → no live Spaces session`);
+    return null;
+  }
+
+  // xyne-spaces-app-tools: resolved HERE, before the agent-pin cascade. The
+  // adapter declares credentialFields: [] — there is no per-user or per-agent
+  // secret to store — but an AgentMcpConnection row is still seeded for the
+  // agent so /mcp/tools lists the server in the picker, and that row carries
+  // EMPTY creds by design. Resolving it through the cascade would spawn the
+  // child with no url and no token, and every Spaces call (including
+  // apps-send-message) fails with "Spaces base URL is not configured".
+  // Same short-circuit, same reason, as xyne-dashboard above.
+  //
+  // The MCP server runs with the AGENT'S spacesAppToken
+  // (each agent has its own bot identity, set when the agent was created).
+  // We resolve using the agent in scope so cross-agent calls don't leak the
+  // wrong bot's token. If no agentSlug is in context (admin / health-check
+  // paths) we have no agent identity to act as — return null and let the
+  // caller decide what to do.
+  if (serverType === "xyne-spaces-app-tools") {
+    if (!agentSlug) {
+      log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} → no agentSlug in context; cannot resolve app_token`);
+      return null;
+    }
+    const credOrgId = agentOrgId
+      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+      ?? undefined;
+    if (!credOrgId) {
+      log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no org context; cannot resolve app_token`);
+      return null;
+    }
+    const agent = await prisma.agent.findUnique({
+      where: { orgId_slug: { orgId: credOrgId, slug: agentSlug } },
+    });
+    if (agent?.spacesAppToken) {
+      const parts = agent.spacesAppToken.split(":");
+      if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+        try {
+          const appToken = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
+          const workspaceId = await resolveSpacesAppToolsWorkspaceId(userId, credOrgId, agentSlug);
+          log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved app_token from agent row workspaceId=${workspaceId ?? "(none)"}`);
+          return {
+            source: "agent",
+            connectionId: `app-tools:${agent.id}`,
+            credentials: {
+              url: CONFIG.spacesInternalUrl,
+              app_token: appToken,
+              // Identity the app-mode registry tools act as. Without it
+              // XYNE_USER_ID reaches the child empty and every tool that needs
+              // to know who it is — spaces-whoami first among them — fails with
+              // "Could not determine current user."
+              ...(agent.spacesAppUserId ? { userId: agent.spacesAppUserId } : {}),
+              ...(workspaceId ? { workspaceId } : {}),
+            },
+            isUserOwned: false,
+          };
+        } catch {
+          log.error(`[creds-loader] xyne-spaces-app-tools: failed to decrypt agent=${agentSlug} spacesAppToken`);
+        }
+      }
+    }
+    log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no spacesAppToken on agent; cannot resolve`);
     return null;
   }
 
@@ -254,13 +316,18 @@ export async function loadEffectiveCredentials(
     if (live) return live;
   }
 
-  // xyne-spaces-app-tools: empty credentialFields by design — there is no
-  // per-user secret. The MCP server runs with the AGENT'S spacesAppToken
-  // (each agent has its own bot identity, set when the agent was created).
-  // We resolve using the agent in scope so cross-agent calls don't leak the
-  // wrong bot's token. If no agentSlug is in context (admin / health-check
-  // paths) we have no agent identity to act as — return null and let the
-  // caller decide what to do.
+  // heisenberg: shared/global stdio proxy with no per-user secret. The base
+  // URL comes from deployment config (HEISENBERG_BASE_URL or a code default).
+  if (serverType === "heisenberg") {
+    log.info(`[creds-loader] heisenberg userId=${userId} → global env/default URL`);
+    return {
+      source: "global",
+      connectionId: "env:heisenberg",
+      credentials: { baseUrl: CONFIG.heisenbergBaseUrl },
+      isUserOwned: false,
+    };
+  }
+
   // research-agent-mcp: shared/global stdio proxy configured entirely by
   // environment. There is no user OAuth/login flow and no per-user secret; the
   // spawned MCP child receives RESEARCH_AGENT_MCP_API_KEY from CONFIG.
@@ -279,47 +346,6 @@ export async function loadEffectiveCredentials(
       },
       isUserOwned: false,
     };
-  }
-
-  if (serverType === "xyne-spaces-app-tools") {
-    if (!agentSlug) {
-      log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} → no agentSlug in context; cannot resolve app_token`);
-      return null;
-    }
-    const credOrgId = agentOrgId
-      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
-      ?? undefined;
-    if (!credOrgId) {
-      log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no org context; cannot resolve app_token`);
-      return null;
-    }
-    const agent = await prisma.agent.findUnique({
-      where: { orgId_slug: { orgId: credOrgId, slug: agentSlug } },
-    });
-    if (agent?.spacesAppToken) {
-      const parts = agent.spacesAppToken.split(":");
-      if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
-        try {
-          const appToken = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
-          const workspaceId = await resolveSpacesAppToolsWorkspaceId(userId, credOrgId, agentSlug);
-          log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved app_token from agent row workspaceId=${workspaceId ?? "(none)"}`);
-          return {
-            source: "agent",
-            connectionId: `app-tools:${agent.id}`,
-            credentials: {
-              url: CONFIG.spacesInternalUrl,
-              app_token: appToken,
-              ...(workspaceId ? { workspaceId } : {}),
-            },
-            isUserOwned: false,
-          };
-        } catch {
-          log.error(`[creds-loader] xyne-spaces-app-tools: failed to decrypt agent=${agentSlug} spacesAppToken`);
-        }
-      }
-    }
-    log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no spacesAppToken on agent; cannot resolve`);
-    return null;
   }
 
   const userConn = await prisma.userMcpConnection.findFirst({

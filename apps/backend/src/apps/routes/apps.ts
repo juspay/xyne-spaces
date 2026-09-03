@@ -39,6 +39,8 @@ router.post('/webhooks/sentinel/:workspaceId/:appId/:secret', webhookLimiter, in
 // express.json() ignores — parse the body as text here and JSON.parse it in the
 // controller.
 router.post('/webhooks/sns/:workspaceId/:appId/:secret', express.text({ type: '*/*', limit: '1mb' }), webhookLimiter, incomingWebhookController.handleAmazonSnsIncoming);
+router.post('/webhooks/pingdom/:workspaceId/:appId/:secret', express.text({ type: '*/*', limit: '1mb' }), webhookLimiter, incomingWebhookController.handlePingdomIncoming);
+router.post('/webhooks/gcp/:workspaceId/:appId/:secret', express.text({ type: '*/*', limit: '1mb' }), webhookLimiter, incomingWebhookController.handleGcpIncoming);
 router.post('/webhooks/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleIncoming);
 const commandController = new CommandController();
 

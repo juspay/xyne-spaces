@@ -384,6 +384,7 @@ async function handleDeepLink(url: string): Promise<void> {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
+      mainWindow.focus();
       mainWindow.webContents.send('navigate-to', pathStr);
     }
   }

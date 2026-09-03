@@ -8,11 +8,14 @@ export {
 } from "./HttpClientContext.js";
 export type { HttpClient } from "./HttpClientContext.js";
 
-export { useAffinityService } from "./useAffinityService.js";
+export {
+  useAffinityService,
+  AffinityServiceProvider,
+} from "./useAffinityService.js";
 export { AffinityService } from "../services/affinityService.js";
 export type { AffinityWeights } from "../services/affinityService.js";
 
-export { useCacConfig } from "./useCacConfig.js";
+export { useCacConfig, useOptionalCacConfig } from "./useCacConfig.js";
 
 export { useChannelRecentSenders } from "./useChannelRecentSenders.js";
 export { useDmAffinityRank } from "./useDmAffinityRank.js";
@@ -113,17 +116,22 @@ export {
   useFallbackExecutor,
 } from "./useFallbackQuery.js";
 export type { FallbackQueryExecutor } from "./useFallbackQuery.js";
-export { useEncryptionConfig } from './useEncryptionConfig.js';
-export type { EncryptionConfig, EncryptionContextData } from './useEncryptionConfig.js';
+export { useEncryptionConfig } from "./useEncryptionConfig.js";
+export type {
+  EncryptionConfig,
+  EncryptionContextData,
+} from "./useEncryptionConfig.js";
 export {
   useEncryptionBootstrap,
   useEncryptionBootstrapInit,
   EncryptionBootstrapProvider,
   resetGlobalEncryptionBootstrap,
-} from './useEncryptionBootstrap.js';
-export type { EncryptionBootstrapState, EncryptionBootstrapContextValue } from './useEncryptionBootstrap.js';
-export { setCryptoLogger } from '../crypto/crypto-logger.js';
-
+} from "./useEncryptionBootstrap.js";
+export type {
+  EncryptionBootstrapState,
+  EncryptionBootstrapContextValue,
+} from "./useEncryptionBootstrap.js";
+export { setCryptoLogger } from "../crypto/crypto-logger.js";
 
 export { useFallbackHydratedQuery } from "./useFallbackHydratedQuery.js";
 

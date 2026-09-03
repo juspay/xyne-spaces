@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 /**
  * Global Stream Manager for XyneAI
  * Manages streaming lifecycle outside of React components
@@ -5,6 +6,7 @@
  * Uses Web Worker for streaming to run on a separate thread
  */
 import { apiInstance, BASE_URL } from '../clients/apiClient';
+import { consumeConversationLiveStream } from './liveConversationStream';
 import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
 import { parsePartialSummarizerJSON } from '../../utils/partialJsonParser';
 import {
@@ -77,6 +79,11 @@ export interface StreamRequest {
   channelIds: string[];
   collectionIds?: string[];
   fileIds?: string[];
+  /** Folder scopes from the composer picker. Sent to claw-auth as a single
+   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
+   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
+   *  at Vespa-query time. */
+  folderIds?: string[];
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
   callIds?: string[] | undefined;
@@ -92,6 +99,8 @@ export interface StreamRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** Per-run thinking level (composer dropdown). Absent = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -113,10 +122,23 @@ export interface StreamRequest {
    *  agent's own default. Only meaningful on v2 (v1 resolves its model from
    *  env and ignores the field). */
   model?: string | undefined;
+  /** Which provider the model pin rides ("litellm" = the agent's own
+   *  credential, "spaces" = the platform allowed list). Only meaningful
+   *  alongside `model`. */
+  modelProvider?: 'litellm' | 'spaces';
   showInSidebar?: boolean | undefined;
 }
 
 type StreamSubscriber = (state: StreamState) => void;
+
+const deserializeWorkerError = (
+  value: Extract<WorkerOutgoingMessage, { type: 'WORKER_LOG_ERROR' }>['payload']['error'],
+): Error => {
+  const error = new Error(value.message);
+  error.name = value.name;
+  if (value.stack) error.stack = value.stack;
+  return error;
+};
 
 // Helper function to clear status message from a message object
 const clearStatusMessage = <T extends { statusMessage?: string | string[] }>(
@@ -275,10 +297,11 @@ class XyneAIStreamManager {
       const record = await xyneAIStreamStorage.getActiveStreamForThread(threadId);
       if (!record) continue;
 
-      console.info(
-        '[XyneAIStreamManager] App foregrounded — restarting interrupted stream',
-        state.streamId,
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[XyneAIStreamManager] App foregrounded — restarting interrupted stream'),
+        context: [state.streamId],
+      });
 
       // Reset the streaming bot message so it shows a reconnecting indicator
       state.messages = state.messages.map(msg =>
@@ -348,7 +371,11 @@ class XyneAIStreamManager {
         // not from stream storage
       }
     } catch (error) {
-      console.error('[XyneAIStreamManager] Failed to initialize from storage:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Failed to initialize from storage:'),
+        error: error,
+      });
     }
   }
 
@@ -374,8 +401,20 @@ class XyneAIStreamManager {
         this.handleWorkerStreamError(payload.streamId, payload.error);
         break;
 
+      case 'WORKER_LOG_ERROR':
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: payload.message,
+          error: deserializeWorkerError(payload.error),
+        });
+        break;
+
       default:
-        console.error('[XyneAIStreamManager] Unknown worker message type:', type);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAIStreamManager] Unknown worker message type:'),
+          error: type,
+        });
     }
   }
 
@@ -383,7 +422,11 @@ class XyneAIStreamManager {
    * Handle worker errors
    */
   private handleWorkerError(error: ErrorEvent): void {
-    console.error('[XyneAIStreamManager] Worker error:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[XyneAIStreamManager] Worker error:'),
+      error: error,
+    });
   }
 
   /**
@@ -505,7 +548,11 @@ class XyneAIStreamManager {
     }
 
     if (!threadId || !streamState) {
-      console.error('[XyneAIStreamManager] Stream not found for chunk:', streamId);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Stream not found for chunk:'),
+        error: streamId,
+      });
       return;
     }
 
@@ -524,7 +571,10 @@ class XyneAIStreamManager {
     const botMessageId = streamingBotMessage?.id;
 
     if (!botMessageId) {
-      console.error('[XyneAIStreamManager] No streaming bot message found for stream');
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] No streaming bot message found for stream'),
+      });
       return;
     }
 
@@ -588,7 +638,11 @@ class XyneAIStreamManager {
     }
 
     if (!threadId) {
-      console.error('[XyneAIStreamManager] Stream not found for completion:', streamId);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Stream not found for completion:'),
+        error: streamId,
+      });
       return;
     }
 
@@ -633,7 +687,11 @@ class XyneAIStreamManager {
     }
 
     if (!threadId || !botMessageId) {
-      console.error('[XyneAIStreamManager] Stream not found for error:', streamId);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamManager] Stream not found for error:'),
+        error: streamId,
+      });
       return;
     }
 
@@ -672,7 +730,11 @@ class XyneAIStreamManager {
       try {
         subscriber(state);
       } catch (error) {
-        console.error('[XyneAIStreamManager] Subscriber error:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAIStreamManager] Subscriber error:'),
+          error: error,
+        });
       }
     }
   }
@@ -989,6 +1051,8 @@ class XyneAIStreamManager {
           ...(request.collectionIds &&
             request.collectionIds.length > 0 && { collectionIds: request.collectionIds }),
           ...(request.fileIds && request.fileIds.length > 0 && { fileIds: request.fileIds }),
+          ...(request.folderIds &&
+            request.folderIds.length > 0 && { folderIds: request.folderIds }),
           ...(request.canvasIds &&
             request.canvasIds.length > 0 && { canvasIds: request.canvasIds }),
           ...(request.ticketIds &&
@@ -1002,6 +1066,7 @@ class XyneAIStreamManager {
           deepResearchEnabled: request.deepResearchEnabled ?? false,
           createCanvasEnabled: request.createCanvasEnabled ?? false,
           instant: request.instant ?? false,
+          ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {
@@ -1038,6 +1103,7 @@ class XyneAIStreamManager {
           ...(request.disableTools && { disableTools: true }),
           ...(request.agentSlug && { agentSlug: request.agentSlug }),
           ...(request.model && { model: request.model }),
+          ...(request.model && request.modelProvider && { modelProvider: request.modelProvider }),
         },
       },
     };
@@ -1435,7 +1501,11 @@ class XyneAIStreamManager {
           parsedInput = JSON.parse(inputStr);
         }
       } catch (e) {
-        console.warn('Failed to parse tool input:', e);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('Failed to parse tool input:'),
+          context: [e],
+        });
       }
 
       try {
@@ -1446,7 +1516,11 @@ class XyneAIStreamManager {
           parsedOutput = JSON.parse(outputStr);
         }
       } catch (e) {
-        console.warn('Failed to parse tool output:', e);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('Failed to parse tool output:'),
+          context: [e],
+        });
       }
 
       // For create_ppt, data is in 'content' field, not 'output'
@@ -1454,7 +1528,11 @@ class XyneAIStreamManager {
         try {
           parsedOutput = JSON.parse(contentStr);
         } catch (e) {
-          console.warn('Failed to parse create_ppt content:', e);
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_warn',
+            message: String('Failed to parse create_ppt content:'),
+            context: [e],
+          });
         }
       }
 
@@ -1603,6 +1681,7 @@ class XyneAIStreamManager {
           fileName: string;
           mimeType: string;
           data: string;
+          metadata?: MessageAttachment['metadata'];
         }>
       | undefined;
 
@@ -1614,6 +1693,11 @@ class XyneAIStreamManager {
       data: att.data,
       // Parse dimensions if present in data URL or metadata
       ...parseAttachmentDimensions(att.data),
+      // Tool-generated metadata (e.g. the React-artifact manifest). On this live
+      // path the id is a placeholder and the bytes are inline in `data`; after a
+      // reload it is the reverse — a real attachment id and no bytes. Consumers
+      // must handle both.
+      ...(att.metadata ? { metadata: att.metadata } : {}),
     }));
 
     updateMessages(prev =>
@@ -1752,7 +1836,7 @@ class XyneAIStreamManager {
     initialMessages: Message[] = [],
   ): () => void {
     if (!convId.startsWith('chat-')) {
-      return () => {};
+      return () => undefined;
     }
     const existing = this.activeStreams.get(threadId);
     if (existing && existing.status === 'streaming') {
@@ -1763,7 +1847,7 @@ class XyneAIStreamManager {
       const isDeadViewer =
         existing.streamId.startsWith('live-') && !this.liveViewerStreams.has(existing.streamId);
       if (!isDeadViewer) {
-        return () => {};
+        return () => undefined;
       }
     }
 
@@ -2020,67 +2104,13 @@ class XyneAIStreamManager {
     // missed window), and NEVER leaves an infinite spinner: if the stream dies
     // for good without a `done`, we finalize with what we have + reconcile.
     void (async () => {
-      let reconnects = 0;
-      const MAX_RECONNECTS = 3;
-      while (!closed && !abort.signal.aborted) {
-        try {
-          // SSE stream: must use fetch for a readable response body
-          // (`res.body.getReader()`) — axios can't stream in the browser.
-          // eslint-disable-next-line local-rules/no-fetch-use-axios
-          const res = await fetch(
-            `${BASE_URL}/xyne-ai/v2/conversations/${encodeURIComponent(convId)}/live?agentSlug=${encodeURIComponent(agentSlug)}`,
-            {
-              credentials: 'include',
-              headers: { Accept: 'text/event-stream' },
-              signal: abort.signal,
-            },
-          );
-          if (res.ok && res.body) {
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let currentEvent = '';
-            let dataLines: string[] = [];
-            const flush = (): void => {
-              if (currentEvent && dataLines.length > 0) {
-                let parsed: Record<string, unknown> = {};
-                try {
-                  parsed = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
-                } catch {
-                  parsed = {};
-                }
-                reconnects = 0; // events are flowing — reset the retry budget
-                onEvent(currentEvent, parsed);
-              }
-              currentEvent = '';
-              dataLines = [];
-            };
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done || closed) break;
-              buffer += decoder.decode(value, { stream: true });
-              let nl: number;
-              while ((nl = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.slice(0, nl).replace(/\r$/, '');
-                buffer = buffer.slice(nl + 1);
-                if (line === '') {
-                  flush();
-                  continue;
-                }
-                if (line.startsWith(':')) continue; // heartbeat
-                if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
-                else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
-              }
-            }
-          }
-        } catch {
-          /* aborted or network error — fall through to the retry decision */
-        }
-        if (closed || abort.signal.aborted) break;
-        reconnects += 1;
-        if (reconnects > MAX_RECONNECTS) break;
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
+      await consumeConversationLiveStream({
+        conversationId: convId,
+        agentSlug,
+        signal: abort.signal,
+        isClosed: () => closed,
+        onEvent,
+      });
 
       // Ended WITHOUT a `done` (transport died / retries exhausted). Don't leave
       // the bot spinning forever: finalize with the accumulated content and
@@ -2154,7 +2184,11 @@ class XyneAIStreamManager {
         }, delayMs);
       }
     } catch (error) {
-      console.warn('[XyneAIStreamManager] Failed to refresh messages from backend:', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[XyneAIStreamManager] Failed to refresh messages from backend:'),
+        context: [error],
+      });
       // Don't throw - the stream already has the best-effort content from streaming
     }
   }

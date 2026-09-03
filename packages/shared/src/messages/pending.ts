@@ -4,6 +4,7 @@ import { getSyncStorage } from '../platform/syncStorage.js';
 import { queries } from '../zero/queries.js';
 import { mutators } from '../zero/mutators.js';
 import { MessageType } from '../zero/schema.js';
+import type { EntityLinkContextInput } from '../sdlc.js';
 import type { ConversationRef } from './conversationRef.js';
 import { subscribeSendLifecycle } from './mutationLifecycle.js';
 
@@ -43,6 +44,7 @@ export type PendingMessage = {
   alsoSendToChannel?: boolean;
   childConversationId?: string;
   attachments?: PendingAttachment[];
+  entityLinkContext?: EntityLinkContextInput;
   sessionId: string;
   zeroStateAtSend: ZeroStateName;
   mutatorFired: boolean;
@@ -74,9 +76,7 @@ function writeAll(all: Record<string, PendingMessage>): void {
   for (const cb of listeners) {
     try {
       cb();
-    } catch (err) {
-      console.error('pending: listener threw', err);
-    }
+    } catch {}
   }
 }
 
@@ -166,6 +166,14 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
   });
 
   let childConversationId: string | undefined = entry.childConversationId;
+  // Replay is hermetic: a queued or retried send carries its own attachment set
+  // on the pending entry, so pass attachmentIds explicitly here (even when empty).
+  // This forces the server mutator down its explicit branch, which links exactly
+  // these ids and leaves any other draft attachments untouched. Do NOT omit it on
+  // the empty case the way sendMessage does on first fire: an omitted attachmentIds
+  // drops the mutator into the legacy draft-scan fallback, which would promote
+  // whatever is in the channel draft *now* (a concurrent, unrelated compose) onto
+  // this replayed message and delete that draft.
   const attachmentIds = entry.attachments?.map(a => a.attachmentId) ?? [];
   let mutation;
   if (entry.kind === 'channel') {
@@ -178,6 +186,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
         timestamp: fireTimestamp,
         type: entry.type,
         attachmentIds,
+        ...(entry.entityLinkContext !== undefined && { entityLinkContext: entry.entityLinkContext }),
       }),
     );
   } else {

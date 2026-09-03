@@ -51,12 +51,35 @@ export interface IngestedAttachments {
   pdfBuffers: Array<{ fileName: string; buf: Buffer }>;
   /** Keyframes extracted from videos, injected into the opening prompt. */
   videoKeyframes: VideoKeyframe[];
+  /** Raw recordings retained only for /record-skill's sandbox analyzer. */
+  videoBuffers: Array<{ fileName: string; mimeType: string; buf: Buffer }>;
   /** Per-type attachment lists the prompt-builder still references by name. */
   imageAttachments: AttachmentInput[];
   textAttachments: TextAttachmentFile[];
   xlsxAttachments: AttachmentInput[];
   pdfAttachments: AttachmentInput[];
+  docxAttachments: AttachmentInput[];
+  pptxAttachments: AttachmentInput[];
+  htmlAttachments: AttachmentInput[];
+  videoAttachments: AttachmentInput[];
 }
+
+export interface IngestAttachmentOptions {
+  /** Keep videos raw for the sandbox-backed /record-skill analyzer instead of
+   * running ffmpeg in the xyne-claw pod. Ordinary attachment behavior is
+   * unchanged when false/omitted. */
+  deferVideoProcessing?: boolean;
+}
+
+// The image media types every LLM provider (Anthropic/OpenAI/LiteLLM) accepts
+// as an inline image block. Anything else — image/svg+xml, image/bmp,
+// image/tiff, image/heic … — must NOT be sent as an image (see ingestAttachments).
+const SUPPORTED_MODEL_IMAGE_MIME: ReadonlySet<string> = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 
 /** Decode an attachment's base64 payload to bytes (handles data-URI prefixes). */
 function decode(a: AttachmentInput): Buffer {
@@ -83,6 +106,26 @@ const MD_CONVERTERS: ReadonlyArray<{
   { match: isHtmlAttachment, convert: htmlBufferToMarkdown, suffix: "" },
 ];
 
+/**
+ * Convert a single document buffer to markdown iff its type is convertible —
+ * the one reusable "is this convertible + convert it" decision, shared by the
+ * /run attachment pipeline above and skill-file materialization
+ * (session-skills.ts). Returns null for unsupported types. Throws whatever
+ * the underlying converter throws (corrupt file etc.) — callers decide
+ * whether that is fatal (attachments) or skippable (skill files).
+ */
+export async function documentBufferToMarkdown(
+  buf: Buffer,
+  fileName: string,
+  mimeType: string,
+): Promise<string | null> {
+  if (isPdfAttachment(fileName, mimeType)) return pdfBufferToMarkdown(buf, fileName);
+  for (const c of MD_CONVERTERS) {
+    if (c.match(fileName, mimeType)) return c.convert(buf, fileName);
+  }
+  return null;
+}
+
 async function convertAll(
   attachments: AttachmentInput[],
   convert: (buf: Buffer, fileName: string) => Promise<string>,
@@ -104,23 +147,62 @@ async function convertAll(
 export async function ingestAttachments(
   attachments: AttachmentInput[] | undefined,
   log: (message: string) => void,
+  options: IngestAttachmentOptions = {},
 ): Promise<IngestedAttachments> {
   const all = attachments ?? [];
 
-  const imageAttachments = all.filter((a) => a.mimeType.startsWith("image/"));
+  // Only mime types every LLM provider accepts as an image block may be sent as
+  // one. A single unsupported media_type (e.g. image/svg+xml) makes the provider
+  // reject the WHOLE request with a 400 — and because the block is then baked
+  // into the persisted conversation history, EVERY retry and EVERY fallback
+  // provider re-sends it and 400s too, poisoning the thread permanently (prod
+  // 2026-08-24: an attached .svg took xyne-spaces-architect down until the
+  // session archive was purged). So classify strictly and route the rest away
+  // from image content.
+  const baseMime = (m: string): string => m.split(";")[0]!.trim().toLowerCase();
+  const isModelImage = (a: AttachmentInput): boolean =>
+    SUPPORTED_MODEL_IMAGE_MIME.has(baseMime(a.mimeType));
+  const imageAttachments = all.filter(isModelImage);
 
-  const textAttachments: TextAttachmentFile[] = all
-    .filter((a) => isTextAttachment(a.fileName, a.mimeType))
+  // image/* attachments the providers can't render. SVG is XML text, so surface
+  // it as a readable text attachment (the agent reads the markup); any other
+  // unsupported raster type is dropped with a warning rather than 400-ing the
+  // run, since we can't rasterize it here.
+  const unsupportedImages = all.filter(
+    (a) => a.mimeType.startsWith("image/") && !isModelImage(a),
+  );
+  const svgAsText: TextAttachmentFile[] = unsupportedImages
+    .filter((a) => baseMime(a.mimeType) === "image/svg+xml" || /\.svg$/i.test(a.fileName))
     .map((a) => ({
       path: a.fileName,
       content: decodeTextAttachment(a.data),
       fileName: a.fileName,
-      mimeType: a.mimeType,
+      mimeType: "text/plain",
     }));
+  for (const a of unsupportedImages) {
+    if (baseMime(a.mimeType) === "image/svg+xml" || /\.svg$/i.test(a.fileName)) {
+      log(`Attachment ${a.fileName} (${a.mimeType}) not a model-supported image — surfaced as text (SVG markup).`);
+    } else {
+      log(`Attachment ${a.fileName} (${a.mimeType}) is an unsupported image type — dropped (providers accept only jpeg/png/gif/webp).`);
+    }
+  }
 
-  // Simple markdown converters (xlsx/docx/pptx/html). xlsx is pulled out as a
-  // named list because the prompt-builder references it; the others are only
-  // consumed as derived files.
+  const textAttachments: TextAttachmentFile[] = [
+    ...all
+      .filter((a) => isTextAttachment(a.fileName, a.mimeType))
+      .map((a) => ({
+        path: a.fileName,
+        content: decodeTextAttachment(a.data),
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+      })),
+    ...svgAsText,
+  ];
+
+  // Simple markdown converters (xlsx/docx/pptx/html). Every list is returned by
+  // name: the prompt-builder needs them to advertise the derived `.context/`
+  // paths, and a type missing from that block is invisible to the agent even
+  // though its markdown sibling is on disk.
   const xlsxAttachments = all.filter((a) => isXlsxAttachment(a.fileName, a.mimeType));
   const docxAttachments = all.filter((a) => isDocxAttachment(a.fileName, a.mimeType));
   const pptxAttachments = all.filter((a) => isPptxAttachment(a.fileName, a.mimeType));
@@ -146,9 +228,20 @@ export async function ingestAttachments(
   // Video — narrative file + keyframes for the prompt.
   const videoAttachments = all.filter((a) => isVideoAttachment(a.fileName, a.mimeType));
   const videoKeyframes: VideoKeyframe[] = [];
+  const videoBuffers: Array<{ fileName: string; mimeType: string; buf: Buffer }> = [];
   const videoDerived = await Promise.all(
     videoAttachments.map(async (a) => {
-      const { narrative, keyframes } = await videoBufferToContext(decode(a), a.fileName);
+      const buf = decode(a);
+      if (options.deferVideoProcessing) {
+        videoBuffers.push({ fileName: a.fileName, mimeType: a.mimeType, buf });
+        return {
+          path: `${a.fileName}.video.md`,
+          content:
+            `# Recording: ${a.fileName}\n\n` +
+            `This recording is staged for the sandbox-backed \`analyze-skill-recording\` tool.\n`,
+        };
+      }
+      const { narrative, keyframes } = await videoBufferToContext(buf, a.fileName);
       videoKeyframes.push(...keyframes);
       return { path: `${a.fileName}.video.md`, content: narrative };
     }),
@@ -186,9 +279,14 @@ export async function ingestAttachments(
     derivedContextFiles,
     pdfBuffers,
     videoKeyframes,
+    videoBuffers,
     imageAttachments,
     textAttachments,
     xlsxAttachments,
     pdfAttachments,
+    docxAttachments,
+    pptxAttachments,
+    htmlAttachments,
+    videoAttachments,
   };
 }

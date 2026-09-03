@@ -568,12 +568,34 @@ import { PrismaClient } from '@prisma/client';
        logger.warn('Invalid createdAt for attachment:', doc.docId, doc.createdAt);
      }
 
+     // The body the hit actually matched on. Vespa ranks `file` docs over their
+     // `chunks` (for subApp=TRANSCRIPT those chunks ARE the call transcript), so
+     // echoing fileName here made every content match come back with no content
+     // — callers could see THAT a transcript matched but never WHAT was said.
+     const chunkContent = pickBestChunk(hit, doc);
+
+     // TRANSCRIPT docs are keyed by the internal call id, but the call APIs
+     // (…/download-transcript, recording detail) are keyed by externalId, which
+     // only exists inside the doc's metadata JSON. Surface both so a caller can
+     // go from a search hit to the full transcript without a second lookup.
+     let callId: string | undefined;
+     let externalId: string | undefined;
+     if (doc.subApp?.toUpperCase() === 'TRANSCRIPT' && doc.metadata) {
+       try {
+         const parsed = JSON.parse(doc.metadata) as { callId?: string; externalId?: string };
+         callId = parsed.callId;
+         externalId = parsed.externalId;
+       } catch (error) {
+         logger.warn('Failed to parse metadata for transcript:', doc.docId);
+       }
+     }
+
      return {
        id: doc.docId,
        type: 'attachment',
        title: doc.fileName,
        subtitle: doc.description,
-       context: doc.fileName,
+       context: chunkContent || doc.description || doc.fileName,
        relevanceScore: hit.relevance,
        avatar: doc.ownerId,
        metadata: {
@@ -592,10 +614,51 @@ import { PrismaClient } from '@prisma/client';
          callType: doc.callType,
          fileSize: doc.fileSize,
          mimeType: doc.mimeType,
+         ...(callId ? { callId } : {}),
+         ...(externalId ? { externalId } : {}),
        },
      };
    }
    
+/**
+ * Pick the chunk a `file` hit actually matched on.
+ *
+ * Vespa's `chunk_scores` match-feature is the authoritative signal, but it is
+ * only present when the deployed rank profile publishes it. Fall back to the
+ * chunk carrying the most `<hi>` highlights (the same heuristic transformMail
+ * uses), then to the first chunk. Never substring the result — that could cut a
+ * `<hi>` tag in half; the dashboard's SearchSnippetRenderer windows it instead.
+ */
+function pickBestChunk(hit: VespaSearchHit, doc: VespaFileDocument): string {
+  const chunks = doc.chunks;
+  if (!chunks || chunks.length === 0) return '';
+
+  const chunkScores = (hit.fields as any)?.matchfeatures?.chunk_scores;
+  if (chunkScores?.cells && typeof chunkScores.cells === 'object') {
+    let maxScore = -Infinity;
+    let bestIndex = 0;
+    for (const [idx, score] of Object.entries(chunkScores.cells)) {
+      if (typeof score === 'number' && score > maxScore) {
+        maxScore = score;
+        bestIndex = parseInt(idx, 10);
+      }
+    }
+    if (bestIndex >= 0 && bestIndex < chunks.length) return chunks[bestIndex] || '';
+  }
+
+  let best = '';
+  let bestCount = 0;
+  for (const c of chunks) {
+    if (typeof c !== 'string') continue;
+    const count = (c.match(/<hi>/g) || []).length;
+    if (count > bestCount) {
+      bestCount = count;
+      best = c;
+    }
+  }
+  return best || chunks[0] || '';
+}
+
 /**
  * Transform collection document (knowledge base file)
  */

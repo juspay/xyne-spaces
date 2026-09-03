@@ -25,6 +25,7 @@ import {
   CanvasCommentThreadStatus,
   BookmarkEntityType,
   AttachmentEntityType,
+  AttachmentUploadStatus,
   UserPresenceStatus,
   FormFieldType,
   FormContextType,
@@ -55,6 +56,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   GuestEntity,
   WorkspaceRole,
   Status,
@@ -63,8 +65,8 @@ import {
   DraftOrigin,
   Schema,
   CollectionRole,
-  VCSProviderType,
   ReleaseTrackingMode,
+  MessageArtifactStatus,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
@@ -74,13 +76,25 @@ import {
   serializeInitialMessageMd,
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
-import { THREAD_TYPE_NAMES } from '../tags/vocabularies.js';
+import {
+  normalizeThreadTypeName,
+  parseAppliedTags,
+  serializeAppliedTags,
+  type AppliedTag,
+} from '../tags/appliedTags.js';
 import { assertCanvasDestinationAccess } from '../utils/canvasDestinationAccess.js';
 import {
   getCanvasFolderNameConflictMessage,
   rethrowCanvasFolderNameConflict,
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
+import {
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+  createSdlcLinkSchema,
+  entityLinkContextSchema,
+} from '../sdlc.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
   validateFieldBranches,
@@ -98,6 +112,7 @@ import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
+import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
@@ -109,6 +124,84 @@ async function getCanvasThreadCommentCount(
 ): Promise<number> {
   const comments = await tx.run(zql.canvas_comments.where('threadId', threadId));
   return comments.filter(comment => comment.deletedAt == null).length;
+}
+
+const COLLECTION_ROLE_RANK: Record<CollectionRole, number> = {
+  [CollectionRole.VIEWER]: 1,
+  [CollectionRole.EDITOR]: 2,
+  [CollectionRole.OWNER]: 3,
+};
+
+/**
+ * Resolve a user's CollectionRole on a collection from its collection_permissions
+ * rows, considering a direct grant (userId), a grant made to a group they
+ * belong to (userGroupId), or a grant made to a channel they participate in
+ * (channelId — always VIEWER, enforced at grant time, but still needs to be
+ * visible here so a channel-only Viewer can exercise "any role can share").
+ * Mirrors apps/backend's identical helper (and collectionAccess.ts's
+ * resolveCollectionAccess) so the client's optimistic result agrees with the
+ * server's authoritative one. Membership is resolved at check-time, not
+ * fanned out into per-member rows.
+ */
+async function resolveCollectionPermissionRole(
+  tx: Transaction<Schema>,
+  collectionId: string,
+  userId: string,
+): Promise<CollectionRole | null> {
+  const permissions = await tx.run(zql.collection_permissions.where('collectionId', collectionId));
+  const groupIds = new Set(
+    (await tx.run(zql.user_group_mappings.where('userId', userId))).map(m => m.userGroupId),
+  );
+  const channelIds = new Set(
+    (await tx.run(zql.channel_participants.where('userId', userId))).map(cp => cp.channelId),
+  );
+
+  let role: CollectionRole | null = null;
+  for (const p of permissions) {
+    const matches =
+      p.userId === userId ||
+      (p.userGroupId !== null && groupIds.has(p.userGroupId)) ||
+      (p.channelId !== null && channelIds.has(p.channelId));
+    if (!matches) continue;
+    const candidate = p.role as CollectionRole;
+    if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
+  }
+  return role;
+}
+
+export const ATTACHMENT_STILL_UPLOADING = 'Attachment is still uploading';
+
+/**
+ * An attachment row is created the moment a file is picked, and its bytes land later over
+ * a separate upload request. Rows predating `uploadStatus` carry only a url.
+ */
+export function isAttachmentUploaded(attachment: {
+  url: string;
+  uploadStatus?: string | null;
+}): boolean {
+  return (
+    !!attachment.url &&
+    (attachment.uploadStatus == null ||
+      attachment.uploadStatus === AttachmentUploadStatus.COMPLETED)
+  );
+}
+
+/**
+ * Inside this window an unfinished upload is probably still streaming, so the send is
+ * rejected and the caller retries. Beyond it the upload is never coming back (the client
+ * died mid-transfer and its cleanup never reached the server), and the message goes
+ * without the attachment — otherwise one orphan row would block the composer forever.
+ */
+const ATTACHMENT_UPLOAD_WINDOW_MS = 30 * 60 * 1000;
+
+export function isAttachmentUploadInFlight(attachment: {
+  uploadStatus?: string | null;
+  createdAt: number;
+}): boolean {
+  return (
+    attachment.uploadStatus !== AttachmentUploadStatus.FAILED &&
+    Date.now() - attachment.createdAt < ATTACHMENT_UPLOAD_WINDOW_MS
+  );
 }
 
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
@@ -178,7 +271,15 @@ import {
   updateInitialMessageMdField,
   updateInitialMessageMdReaction,
 } from './messageMetadata.js';
-import { updateTicketMdFromZero } from '../utils/ticketMetadata.js';
+import {
+  updateTicketMdFromZero,
+  updateSubTicketsMdFromZero,
+  linkSubTicketConversationToParentFromZero,
+} from '../utils/ticketMetadata.js';
+import {
+  parseSlashCommandArtifactMessage,
+  withSlashCommandArtifactClosed,
+} from '../utils/slashCommandArtifact.js';
 import { stringFromFormValue } from '../tickets/utils.js';
 
 async function getConversationSeenCutoffAt(
@@ -331,29 +432,6 @@ async function hasCanvasVersionEditAccess(
     }
   }
 
-  // Batch query: fetch projectIds for all participant channels 
-  if (channelIds.length > 0) {
-    const channels = await tx.run(
-      zql.channels.where(({ cmp }) => cmp('id', 'IN', channelIds)),
-    );
-    const projectIds = channels
-      .map(ch => ch.projectId)
-      .filter((id): id is string => Boolean(id));
-
-    if (projectIds.length > 0) {
-      const projectGuestAccess = await tx.run(
-        zql.guest_access
-          .where('userId', userId)
-          .where('workspaceId', ctx.workspaceId)
-          .where('accessibleEntityType', GuestEntity.PROJECT)
-          .where(({ cmp }) => cmp('accessibleEntityId', 'IN', projectIds)),
-      );
-      if (projectGuestAccess.length > 0) {
-        return true;
-      }
-    }
-  }
-
   return false;
 }
 
@@ -399,6 +477,16 @@ async function deleteConversationWithParticipants(
     participants.map(participant =>
       tx.mutate.conversation_participants.delete({ id: participant.id })
     )
+  );
+
+  const discussionLinks = await tx.run(
+    zql.sdlc_entity_links
+      .where('targetType', 'CONVERSATION')
+      .where('targetId', conversationId)
+      .where('relationType', 'DISCUSSION'),
+  );
+  await Promise.all(
+    discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
   );
 
   await tx.mutate.conversations.delete({ conversationId });
@@ -1238,7 +1326,11 @@ export const mutators = defineMutators({
       z.object({ channelId: z.string(), updatedAt: z.number() }),
       async ({ tx, ctx, args: { channelId, updatedAt } }) => {
         const participation = await tx.run(
-          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!participation) {
@@ -1290,6 +1382,7 @@ export const mutators = defineMutators({
           id: userStatus.id,
           sectionId,
           sectionPosition: sectionId ? position : null,
+          ...(sectionId ? { isStarred: false } : {}),
           updatedAt: timestamp,
         });
       },
@@ -1646,11 +1739,21 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
         attachmentIds: z.array(z.string()).optional(),
+        entityLinkContext: entityLinkContextSchema.optional(),
       }),
       async ({
         tx,
         ctx,
-        args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds },
+        args: {
+          channelId,
+          content,
+          type,
+          conversationId,
+          messageId,
+          timestamp,
+          attachmentIds,
+          entityLinkContext,
+        },
       }) => {
         if (content === '') {
           throw new Error('Message content or files are required to start a conversation');
@@ -1664,7 +1767,7 @@ export const mutators = defineMutators({
           // Transfer only these specific ids; leave any other draft attachments
           // alone so a concurrent compose isn't corrupted. Never delete the draft row.
           if (attachmentIds.length > 0) {
-            hasAttachments = true;
+            let attachedCount = 0;
             for (const attachmentId of attachmentIds) {
               const attachment = await tx.run(
                 zql.message_attachments.where('id', attachmentId).one(),
@@ -1674,6 +1777,13 @@ export const mutators = defineMutators({
                 attachment.entityType === AttachmentEntityType.CHAT &&
                 attachment.entityId === messageId
               ) {
+                attachedCount++;
+                continue;
+              }
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
                 continue;
               }
               await tx.mutate.message_attachments.update({
@@ -1682,7 +1792,9 @@ export const mutators = defineMutators({
                 entityType: AttachmentEntityType.CHAT,
                 conversationId,
               });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
           }
         } else {
           // Legacy path: scan the current draft and transfer everything.
@@ -1701,17 +1813,23 @@ export const mutators = defineMutators({
                 .where('entityType', AttachmentEntityType.DRAFT),
             );
 
-            if (draftAttachments.length > 0) {
-              hasAttachments = true;
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
+            let attachedCount = 0;
+            for (const attachment of draftAttachments) {
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
+                continue;
               }
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
 
             await tx.mutate.draft_messages.delete({
               id: draft.id,
@@ -1741,6 +1859,21 @@ export const mutators = defineMutators({
             createdAt: now,
           }),
         });
+
+        if (entityLinkContext) {
+          await tx.mutate.sdlc_entity_links.insert({
+            id: entityLinkContext.linkId,
+            workspaceId: ctx.workspaceId,
+            channelId,
+            sourceType: entityLinkContext.sourceType,
+            sourceId: entityLinkContext.sourceId,
+            targetType: 'CONVERSATION',
+            targetId: conversationId,
+            relationType: 'DISCUSSION',
+            createdBy: ctx.userID,
+            createdAt: now,
+          });
+        }
 
         await tx.mutate.messages.insert({
           messageId,
@@ -2050,7 +2183,8 @@ export const mutators = defineMutators({
                   size: attInfo.size || 0,
                   thumbnailUrl: attInfo.thumbnailUrl,
                   mimetype: attInfo.mimetype || '',
-                  createdAt: attInfo.createdAt || now,
+                  createdAt: (attInfo.createdAt || now) + j,
+                  position: j,
                   storageProvider: attInfo.storageProvider || 's3',
                   uploadedByUserId: ctx.userID,
                   createdBy: ctx.userID,
@@ -2236,13 +2370,35 @@ export const mutators = defineMutators({
           throw new Error("Channel doesn't exists");
         }
 
+        // One open artifact per thread. A thread is a single incident's workspace,
+        // so a second /sev2 inside it would fork the responders across two cards
+        // and two calls. The channel is unrestricted — that is where a genuinely
+        // separate incident belongs.
+        const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+        if (outgoingArtifact) {
+          const openArtifact = await tx.run(
+            zql.message_artifacts
+              // channelId first: it is the only selective index on this table.
+              .where('channelId', conversation.channelId)
+              .where('conversationId', conversationId)
+              .where('command', outgoingArtifact.definition.command)
+              .where('status', MessageArtifactStatus.ACTIVE)
+              .one(),
+          );
+          if (openArtifact) {
+            throw new Error(
+              `A ${outgoingArtifact.definition.badge} is already open in this thread`,
+            );
+          }
+        }
+
         let hasAttachments = false;
         if (attachmentIds !== undefined) {
           // Explicit list from a pending-message-aware caller: transfer only
           // those ids, leave any other DRAFT attachments alone, never touch
           // the draft row (the client's clearContent mutator owns draft state).
           if (attachmentIds.length > 0) {
-            hasAttachments = true;
+            let attachedCount = 0;
             for (const attachmentId of attachmentIds) {
               const attachment = await tx.run(
                 zql.message_attachments.where('id', attachmentId).one(),
@@ -2252,6 +2408,13 @@ export const mutators = defineMutators({
                 attachment.entityType === AttachmentEntityType.CHAT &&
                 attachment.entityId === messageId
               ) {
+                attachedCount++;
+                continue;
+              }
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
                 continue;
               }
               await tx.mutate.message_attachments.update({
@@ -2260,7 +2423,9 @@ export const mutators = defineMutators({
                 entityType: AttachmentEntityType.CHAT,
                 conversationId,
               });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
           }
         } else {
           // Legacy path: scan the draft for this conversation and transfer everything.
@@ -2279,17 +2444,23 @@ export const mutators = defineMutators({
                 .where('entityType', AttachmentEntityType.DRAFT),
             );
 
-            if (draftAttachments.length > 0) {
-              hasAttachments = true;
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
+            let attachedCount = 0;
+            for (const attachment of draftAttachments) {
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
+                continue;
               }
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
 
             await tx.mutate.draft_messages.delete({
               id: draft.id,
@@ -2461,6 +2632,57 @@ export const mutators = defineMutators({
             await updateInitialMessageMdField(tx, { messageId }, { content, edited: true });
           }
         }
+      },
+    ),
+    /**
+     * Close a slash-command artifact (e.g. decline a SEV2) without ever running
+     * a call. Only the message's author may do it.
+     *
+     * Two writes, both required: the artifact row moves to a terminal status so
+     * the banner and channel indicator clear for everyone, and the closed marker
+     * is baked into the message's FlowJSON so the card still renders as finished
+     * once the row has left the ACTIVE-only artifact subscription.
+     */
+    closeSlashCommandArtifact: defineMutator(
+      z.object({ messageId: z.string(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { messageId, timestamp } }) => {
+        const message = await resolveMessage(tx, messageId);
+        if (!message) {
+          throw new Error('Message not available');
+        }
+        if (message.senderId !== ctx.userID) {
+          throw new Error('Only the author can close this incident');
+        }
+        if (!parseSlashCommandArtifactMessage(message.content)) {
+          throw new Error('Message is not a slash command artifact');
+        }
+
+        const artifact = await tx.run(
+          zql.message_artifacts.where('messageId', messageId).one(),
+        );
+        if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
+          throw new Error('This incident is already closed');
+        }
+
+        const content = withSlashCommandArtifactClosed(message.content, {
+          closedAt: timestamp,
+          closedBy: ctx.userID,
+        });
+        if (!content) {
+          throw new Error('Message is not a slash command artifact');
+        }
+
+        if (artifact) {
+          await tx.mutate.message_artifacts.update({
+            id: artifact.id,
+            status: MessageArtifactStatus.CANCELLED,
+            updatedAt: timestamp,
+          });
+        }
+        // Deliberately not `edited: true` — closing is a lifecycle transition,
+        // not an edit, and must not raise a "message edited" notification.
+        await tx.mutate.messages.update({ messageId, content });
+        await updateInitialMessageMdField(tx, { messageId }, { content });
       },
     ),
     updateShowInChannel: defineMutator(
@@ -3127,8 +3349,10 @@ export const mutators = defineMutators({
               height,
               uploadedByUserId: ctx.userID,
               createdAt: timestamp + index,
+              position: index,
               createdBy: ctx.userID,
               url: '', // Will be populated after upload completes
+              uploadStatus: AttachmentUploadStatus.PENDING,
               workspaceId: ctx.workspaceId,
               metadata: attachmentMetadata,
               conversationId: conversationId || null,
@@ -3456,12 +3680,9 @@ export const mutators = defineMutators({
     ),
     approveLobbyRequest: defineMutator(
       z.object({ callId: z.string(), participantId: z.string() }),
-      async ({ tx, ctx, args: { callId, participantId } }) => {
+      async ({ tx, args: { callId, participantId } }) => {
         const call = await tx.run(zql.calls.where('id', callId).one());
         if (!call) throw new Error('Call not found');
-        if (call.createdByUserId !== ctx.userID) {
-          throw new Error('Only the call creator can admit participants');
-        }
         await tx.mutate.call_participants.update({
           id: participantId,
           response: InvitationResponse.ACCEPTED,
@@ -3471,12 +3692,9 @@ export const mutators = defineMutators({
     ),
     rejectLobbyRequest: defineMutator(
       z.object({ callId: z.string(), participantId: z.string() }),
-      async ({ tx, ctx, args: { callId, participantId } }) => {
+      async ({ tx, args: { callId, participantId } }) => {
         const call = await tx.run(zql.calls.where('id', callId).one());
         if (!call) throw new Error('Call not found');
-        if (call.createdByUserId !== ctx.userID) {
-          throw new Error('Only the call creator can decline participants');
-        }
         await tx.mutate.call_participants.update({
           id: participantId,
           response: InvitationResponse.DECLINED,
@@ -4078,6 +4296,8 @@ export const mutators = defineMutators({
           kanbanPosition?: string | null;
         }
 
+        const currentTicket = await tx.run(zql.tickets.where('id', id).one());
+        if (!currentTicket) throw new Error('Ticket not found');
         const updateData: TicketUpdateData = {
           updatedBy: ctx.userID,
           updatedAt: updatedAt,
@@ -4257,6 +4477,23 @@ export const mutators = defineMutators({
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });
+
+        if (mappedTicketId !== undefined) {
+          const mappings = (await tx.run(
+            zql.ticket_sub_ticket_mappings.where('subTicketId', subTicketId),
+          )) as Array<{ ticketId: string }>;
+          for (const mapping of mappings) {
+            await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
+          }
+          if (mappedTicketId && mappings[0]) {
+            await linkSubTicketConversationToParentFromZero(
+              tx,
+              zql,
+              mappedTicketId,
+              mappings[0].ticketId,
+            );
+          }
+        }
       },
     ),
   },
@@ -4315,7 +4552,6 @@ export const mutators = defineMutators({
         projectId: z.string(),
         mainBoardId: z.string(),
         mainBoardName: z.string(),
-        vcsProvider: z.nativeEnum(VCSProviderType),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
         applications: z.array(
@@ -4358,6 +4594,7 @@ export const mutators = defineMutators({
         alias: z.string().optional(),
         description: z.string().optional(),
         reassignOnUnavailable: z.boolean().optional(),
+        maxWorkload: z.number().int().positive().nullable().optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4373,6 +4610,7 @@ export const mutators = defineMutators({
           alias,
           description,
           reassignOnUnavailable,
+          maxWorkload,
           userResponsibilityUpdates,
           userRoleUpdates,
           timestamp,
@@ -4384,6 +4622,7 @@ export const mutators = defineMutators({
           ...(alias !== undefined && { alias }),
           ...(description !== undefined && { description }),
           ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+          ...(maxWorkload !== undefined && { maxWorkload }),
           updatedAt: timestamp,
         });
 
@@ -4541,6 +4780,7 @@ export const mutators = defineMutators({
               ? { roleId, ...(responsibility ? { responsibility } : {}) }
               : { responsibility: UserResponsibility.MEMBER }),
             onCallSetNumbers: [],
+            isNotified: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -4548,7 +4788,12 @@ export const mutators = defineMutators({
       },
     ),
     removeUsers: defineMutator(
-      z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
+      z.object({
+        userGroupId: z.string(),
+        userIds: z.array(z.string()),
+        // Server-only: the server queues the ticket handoff after the delete commits.
+        reassignTickets: z.boolean().optional(),
+      }),
       async ({ tx, args: { userGroupId, userIds } }) => {
         // Remove users from group
         // Find all mappings to be removed using individual queries
@@ -5596,6 +5841,7 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           visibility: visibility || CanvasVisibility.PRIVATE,
           isTemplate: false,
+          isArchived: false,
           isCollaborative: false,
           docType: DocType.Canvas,
           lastEditedBy: ctx.userID,
@@ -5666,8 +5912,10 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
+        const sdlcArtifact = await tx.run(zql.sdlc_artifacts.where('artifactId', id).one());
+        const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
 
-        if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
+        if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
           throw new Error('You do not have permission to edit this canvas');
         }
         const {
@@ -5733,8 +5981,58 @@ export const mutators = defineMutators({
         throw new Error('Only the creator can delete the canvas');
       }
 
+      const discussionLinks = await tx.run(
+        zql.sdlc_entity_links
+          .where('sourceType', 'CANVAS')
+          .where('sourceId', id)
+          .where('relationType', 'DISCUSSION'),
+      );
+      await Promise.all(
+        discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
+      );
+
       await tx.mutate.canvases.delete({ id });
     }),
+    archiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can archive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: true,
+        });
+      },
+    ),
+    unarchiveCanvas: defineMutator(
+      z.object({
+        canvasId: z.string(),
+      }),
+      async ({ tx, ctx, args: { canvasId } }) => {
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+        if (!canvas) {
+          throw new Error('Canvas not found');
+        }
+
+        if (canvas.createdBy !== ctx.userID) {
+          throw new Error('Only the creator can unarchive the canvas');
+        }
+
+        await tx.mutate.canvases.update({
+          id: canvasId,
+          isArchived: false,
+        });
+      },
+    ),
     addParticipants: defineMutator(
       z.object({
         canvasId: z.string(),
@@ -6499,29 +6797,28 @@ export const mutators = defineMutators({
           throw new Error('Folder name is required');
         }
 
-        if (!projectId && channelId) {
-          throw new Error('Channel folders must belong to a project');
+        // Channel folders no longer require a project (the channel canvas UI has
+        // no project grouping), but the channel itself must still be valid and
+        // not archived. A projectId is optional; when present it must match.
+        if (channelId) {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error('Channel not found');
+          }
+
+          if (channel.isArchived) {
+            throw new Error('Channel is archived');
+          }
+
+          if (projectId && channel.projectId !== projectId) {
+            throw new Error('Channel does not belong to project');
+          }
         }
 
         if (projectId) {
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
-          }
-
-          if (channelId) {
-            const channel = await tx.run(zql.channels.where('id', channelId).one());
-            if (!channel) {
-              throw new Error('Channel not found');
-            }
-
-            if (channel.isArchived) {
-              throw new Error('Channel is archived');
-            }
-
-            if (channel.projectId !== projectId) {
-              throw new Error('Channel does not belong to project');
-            }
           }
         }
 
@@ -6531,7 +6828,9 @@ export const mutators = defineMutators({
             .where('name', cleanName)
             .where(({ and, cmp }) =>
               channelId
-                ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
+                ? projectId
+                  ? and(cmp('projectId', '=', projectId), cmp('channelId', '=', channelId))
+                  : and(cmp('projectId', 'IS', null), cmp('channelId', '=', channelId))
                 : projectId
                   ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
                   : and(
@@ -6616,10 +6915,12 @@ export const mutators = defineMutators({
               .where('name', cleanName)
               .where(({ and, cmp }) =>
                 folder.channelId
-                  ? and(
-                    cmp('projectId', '=', folder.projectId as string),
-                    cmp('channelId', '=', folder.channelId),
-                  )
+                  ? folder.projectId
+                    ? and(
+                      cmp('projectId', '=', folder.projectId),
+                      cmp('channelId', '=', folder.channelId),
+                    )
+                    : and(cmp('projectId', 'IS', null), cmp('channelId', '=', folder.channelId))
                   : folder.projectId
                     ? and(cmp('projectId', '=', folder.projectId), cmp('channelId', 'IS', null))
                     : and(
@@ -7207,7 +7508,6 @@ export const mutators = defineMutators({
                   targetId: entityId,
                   linkKind: SurfaceLinkKind.RELATES_TO,
                   createdBy: ctx.userID,
-                  projectId: nudge.projectId,
                   createdAt: timestamp,
                 });
               }
@@ -7390,6 +7690,7 @@ export const mutators = defineMutators({
             z.object({
               userId: z.string(),
               onCallSetNumbers: z.array(z.number()),
+              isNotified: z.boolean().optional(),
             }),
           )
           .optional(),
@@ -7417,6 +7718,9 @@ export const mutators = defineMutators({
         stateIds: z.record(z.string(), z.string()).optional(), // Map userId -> stateId
         complexityScoreId: z.string().optional(),
         mappingIds: z.record(z.string(), z.string()).optional(), // Map userId -> mappingId
+        // Server-only: members opted in to a ticket handoff on deactivation. The server
+        // queues it after the states commit; the client optimistic run ignores it.
+        reassignUserIds: z.array(z.string()).optional(),
       }),
       async ({
         tx,
@@ -7485,6 +7789,7 @@ export const mutators = defineMutators({
               await tx.mutate.user_group_mappings.update({
                 id: existingMapping.id,
                 onCallSetNumbers: mapping.onCallSetNumbers,
+                ...(mapping.isNotified !== undefined && { isNotified: mapping.isNotified }),
                 updatedAt: now,
               });
             }
@@ -7688,6 +7993,173 @@ export const mutators = defineMutators({
             baseBranch: newBaseBranch,
           });
         }
+      },
+    ),
+  },
+  sdlc: {
+    createLink: defineMutator(
+      createSdlcLinkSchema.extend({
+        id: z.string(),
+        channelId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        // Links belong to the hub. createSdlcLinkSchema already excludes the
+        // membership relation, so this cannot forge a CHANNEL -> REPOSITORY edge.
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        const sourceExists =
+          args.sourceType === 'CANVAS'
+            ? Boolean(
+                await tx.run(
+                  zql.canvases.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                ),
+              )
+            : args.sourceType === 'TICKET'
+              ? Boolean(
+                  await tx.run(
+                    zql.tickets.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                  ),
+                )
+              : args.sourceType === 'CHANNEL'
+                ? args.sourceId === args.channelId
+                : false;
+        if (!sourceExists) {
+          throw new Error('Relationship source does not belong to this SDLC hub');
+        }
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          channelId: args.channelId,
+          sourceType: args.sourceType,
+          sourceId: args.sourceId,
+          targetType: args.targetType,
+          targetId: args.targetId,
+          relationType: args.relationType,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
+      },
+    ),
+    deleteLink: defineMutator(
+      z.object({ channelId: z.string(), linkId: z.string() }),
+      async ({ tx, ctx, args: { channelId, linkId } }) => {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        const link = await tx.run(
+          zql.sdlc_entity_links.where('id', linkId).where('channelId', channelId).one(),
+        );
+        if (!link) {
+          throw new Error('SDLC relationship not found');
+        }
+        // Structural edges are not content: repository membership is detached through
+        // the hub API, track membership only with the track. The mutation ACL agrees.
+        if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(link.relationType)) {
+          throw new Error('Structural SDLC edges are not deleted through the link API');
+        }
+        await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+      },
+    ),
+
+    createTrack: defineMutator(
+      z.object({
+        id: z.string(),
+        linkId: z.string(),
+        channelId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        description: z.string().trim().max(2000).optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        // Tracks belong to the hub, never to one repository in it.
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        await tx.mutate.sdlc_tracks.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          name: args.name,
+          description: args.description,
+          status: 'ACTIVE',
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+        // The track carries no scope column; this edge is what places it in the hub.
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.linkId,
+          workspaceId: ctx.workspaceId,
+          channelId: args.channelId,
+          sourceType: 'CHANNEL',
+          sourceId: args.channelId,
+          targetType: 'TRACK',
+          targetId: args.id,
+          relationType: SDLC_TRACK_MEMBERSHIP_RELATION,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
+      },
+    ),
+    updateTrack: defineMutator(
+      z.object({
+        trackId: z.string(),
+        name: z.string().trim().min(1).max(120).optional(),
+        description: z.string().trim().max(2000).nullable().optional(),
+        status: sdlcTrackStatusSchema.optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
+        if (!track) {
+          throw new Error('SDLC track not found');
+        }
+        const membership = await tx.run(
+          zql.sdlc_entity_links
+            .where('targetType', 'TRACK')
+            .where('targetId', args.trackId)
+            .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+            .one(),
+        );
+        if (!membership?.channelId) {
+          throw new Error('SDLC channel not found');
+        }
+        const channelId = membership.channelId;
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        await tx.mutate.sdlc_tracks.update({
+          id: args.trackId,
+          ...(args.name !== undefined ? { name: args.name } : {}),
+          ...(args.description !== undefined ? { description: args.description } : {}),
+          ...(args.status !== undefined ? { status: args.status } : {}),
+          updatedAt: args.timestamp,
+        });
       },
     ),
   },
@@ -8788,7 +9260,6 @@ export const mutators = defineMutators({
           name: trimmed,
           ...(color ? { color } : {}),
           channelId,
-          projectId: channel.projectId,
           workspaceId: channel.workspaceId,
           createdBy: ctx.userID,
           createdAt: timestamp,
@@ -8833,7 +9304,6 @@ export const mutators = defineMutators({
             name: trimmed,
             ...(args.color ? { color: args.color } : {}),
             channelId: args.channelId,
-            projectId: channel.projectId,
             workspaceId: channel.workspaceId,
             createdBy: ctx.userID,
             createdAt: now,
@@ -8879,24 +9349,6 @@ export const mutators = defineMutators({
         }
       },
     ),
-    // Delete a label from the catalog and cascade-remove all its conversation mappings.
-    // Only the owner (createdBy) may delete their label.
-    deleteLabel: defineMutator(
-      z.object({ labelId: z.string() }),
-      async ({ tx, ctx, args: { labelId } }) => {
-        const label = await tx.run(zql.conversation_labels.where('id', labelId).one());
-        if (!label) throw new Error('Label not found');
-        if (label.createdBy !== ctx.userID) throw new Error('You can only delete your own labels');
-
-        const mappings = await tx.run(
-          zql.conversation_label_mappings.where('labelId', labelId),
-        );
-        for (const mapping of mappings) {
-          await tx.mutate.conversation_label_mappings.delete({ id: mapping.id });
-        }
-        await tx.mutate.conversation_labels.delete({ id: labelId });
-      },
-    ),
   },
   // Thread types — what kind of thread this is, as a stringified JSON array on the
   // conversation row. The caller sends the FULL desired set: the column is one value, so a
@@ -8907,32 +9359,73 @@ export const mutators = defineMutators({
     setTypes: defineMutator(
       z.object({
         conversationId: z.string(),
-        // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
-        // add their own. Length-capped so a tag stays a label rather than a paragraph.
+        // Free-form, not z.enum: the workspace vocabulary is a starting point, and people
+        // type their own. Length-capped so a tag stays a label rather than a paragraph.
         types: z.array(z.string().trim().min(1).max(40)),
+        /**
+         * What a newly invented tag means. Stored on the vocabulary candidate as its
+         * description — backend side only, since the vocabulary is not a Zero table — so it
+         * is written once per tag rather than copied onto every thread carrying it.
+         */
+        note: z.string().trim().max(280).optional(),
+        timestamp: z.number(),
       }),
-      async ({ tx, args: { conversationId, types } }) => {
+      // `note` is accepted but deliberately unread here. It describes the TAG, not the
+      // thread, so it is stored on the vocabulary candidate — a non-Zero table this client
+      // copy cannot reach. The backend copy picks it up; see recordVocabularyCandidate.
+      async ({ tx, ctx, args: { conversationId, types, timestamp } }) => {
         const conversation = await tx.run(
           zql.conversations.where('conversationId', conversationId).one(),
         );
         if (!conversation) throw new Error('Conversation not found');
 
-        // Built-in types first in vocabulary order, then custom ones alphabetically, so
-        // chips render in a stable order regardless of the order they were picked.
-        const rank = (name: string): number => {
-          const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
-          return i === -1 ? THREAD_TYPE_NAMES.length : i;
-        };
-        const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
-          (a, b) => rank(a) - rank(b) || a.localeCompare(b),
-        );
+        const existing = parseAppliedTags(conversation.threadType);
+        const byName = new Map(existing.map(tag => [tag.name, tag]));
 
+        // Normalise the names being ADDED, and only those. A name already on this thread is
+        // passed through untouched: the caller resends the full set on every edit, so
+        // normalising indiscriminately would silently rewrite tags applied long ago, on an
+        // edit that had nothing to do with them, leaving the same tag spelled two ways
+        // across the workspace.
+        const desired = [
+          ...new Set(
+            types
+              .map(raw => {
+                const trimmed = raw.trim();
+                return byName.has(trimmed) ? trimmed : normalizeThreadTypeName(trimmed);
+              })
+              .filter(Boolean),
+          ),
+        ];
 
-        // '[]' rather than null when cleared: null means "never classified" and the
-        // classifier would re-derive it on its next pass.
+        // A merge, never a replace. The caller sends the full desired set, but each tag
+        // already there keeps its own provenance — who applied it and when. Rewriting them all
+        // as freshly hand-applied would erase exactly the trail the tooltip exists to show.
+        const next: AppliedTag[] = [];
+        for (const name of desired) {
+          const prior = byName.get(name);
+          if (prior && !prior.removed) {
+            next.push(prior);
+            continue;
+          }
+          // New, or being re-applied after removal: this is the caller's doing either way.
+          next.push({ name, at: timestamp, by: ctx.userID });
+        }
+
+        // Dropped tags are tombstoned, not deleted: removal has to stay auditable, and a
+        // deleted tag would look unclassified to the classifier and come straight back.
+        const kept = new Set(desired);
+        for (const tag of existing) {
+          if (kept.has(tag.name)) continue;
+          next.push(
+            tag.removed ? tag : { ...tag, removed: true, at: timestamp, by: ctx.userID },
+          );
+        }
+
         await tx.mutate.conversations.update({
           conversationId,
-          threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+          // Never null: null means "never classified" and the classifier would re-derive it.
+          threadType: serializeAppliedTags(next),
         });
       },
     ),
@@ -9321,6 +9814,10 @@ export const mutators = defineMutators({
         autoDraftAgentSlug: z.string().optional().nullable(),
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
+        appWebhookDeliveryEnabled: z.boolean().optional(),
+        deskReportEnabled: z.boolean().optional(),
+        deskReportAgentSlug: z.string().optional().nullable(),
+        deskReportRangeDays: z.number().optional(),
       }),
       async ({
         tx,
@@ -9337,6 +9834,10 @@ export const mutators = defineMutators({
           autoDraftAgentSlug,
           metricsEnabled,
           frtStageNames,
+          appWebhookDeliveryEnabled,
+          deskReportEnabled,
+          deskReportAgentSlug,
+          deskReportRangeDays,
         },
       }) => {
         const existing = await tx.run(
@@ -9355,6 +9856,10 @@ export const mutators = defineMutators({
             ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+            ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
+            ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
+            ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
+            ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
           });
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -9380,6 +9885,10 @@ export const mutators = defineMutators({
             priorityClassificationThreshold: 0.5,
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
+            appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
+            deskReportEnabled: deskReportEnabled ?? false,
+            deskReportAgentSlug: deskReportAgentSlug ?? null,
+            deskReportRangeDays: deskReportRangeDays ?? 1,
           });
         }
       },
@@ -10440,6 +10949,45 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.saved_user_configurations.delete({ id: configId });
+      },
+    ),
+  },
+  viewAccess: {
+    grant: defineMutator(
+      z.object({
+        id: z.string(),
+        viewId: z.string(),
+        entityType: z.nativeEnum(ViewAccessEntityType),
+        entityId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, viewId, entityType, entityId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.view_access
+            .where('viewId', viewId)
+            .where('entityType', entityType)
+            .where('entityId', entityId)
+            .one(),
+        );
+        if (existing) return;
+
+        await tx.mutate.view_access.insert({
+          workspaceId: ctx.workspaceId,
+          id,
+          viewId,
+          entityType,
+          entityId,
+          sharedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    revoke: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        await tx.mutate.view_access.delete({ id });
       },
     ),
   },
@@ -11513,33 +12061,32 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
 
-        const isOwner = collection.ownerId === ctx.userID;
+        // OWNER is a real, multi-holder role — the creator (ownerId) is a
+        // separate, permanent label, not the sole authority. Either grants
+        // full owner privilege here.
+        const isCreator = collection.ownerId === ctx.userID;
+        const permissionRole = isCreator
+          ? null
+          : await resolveCollectionPermissionRole(tx, id, ctx.userID);
+        const canActAsOwner = isCreator || permissionRole === CollectionRole.OWNER;
 
         // Visibility is owner-only: changing isPrivate flips who can see the
         // collection at all, so EDITOR permissions are not enough.
-        if (isPrivate !== undefined && !isOwner) {
-          throw new Error('Collection update failed: only the owner can change visibility');
+        if (isPrivate !== undefined && !canActAsOwner) {
+          throw new Error('Collection update failed: only an owner can change visibility');
         }
 
         // Rename is owner-only too: collection names are surfaced wherever the
         // collection is referenced (sidebar, breadcrumbs, share UI), so we
-        // treat the title the same as visibility — a property only the owner
-        // is allowed to change.
-        if (name !== undefined && !isOwner) {
-          throw new Error('Collection update failed: only the owner can rename the collection');
+        // treat the title the same as visibility — a property only owners
+        // are allowed to change.
+        if (name !== undefined && !canActAsOwner) {
+          throw new Error('Collection update failed: only an owner can rename the collection');
         }
 
         // Verify OWNER or EDITOR permission for name/description edits
-        if (!isOwner && collection.isPrivate) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', id)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
-            throw new Error('Collection update failed: requires EDITOR or OWNER permission');
-          }
+        if (!canActAsOwner && (!permissionRole || permissionRole === CollectionRole.VIEWER)) {
+          throw new Error('Collection update failed: requires EDITOR or OWNER permission');
         }
 
         await tx.mutate.collections.update({
@@ -11563,7 +12110,10 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
-          throw new Error('Collection deletion failed: only the owner can delete a collection');
+          const permissionRole = await resolveCollectionPermissionRole(tx, id, ctx.userID);
+          if (permissionRole !== CollectionRole.OWNER) {
+            throw new Error('Collection deletion failed: only an owner can delete a collection');
+          }
         }
 
         await tx.mutate.collections.update({
@@ -11598,14 +12148,9 @@ export const mutators = defineMutators({
         // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
         const rootCollectionId = parentCollection.rootCollectionId ?? parentId;
         const isOwner = parentCollection.ownerId === ctx.userID;
-        if (!isOwner && parentCollection.isPrivate) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', rootCollectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
+        if (!isOwner) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, rootCollectionId, ctx.userID);
+          if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
             throw new Error('Folder creation failed: requires EDITOR or OWNER permission');
           }
         }
@@ -11640,14 +12185,9 @@ export const mutators = defineMutators({
 
         // Verify EDITOR+ permission
         const isOwner = collection.ownerId === ctx.userID;
-        if (!isOwner && collection.isPrivate) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', collectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
+        if (!isOwner) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
             throw new Error('Item deletion failed: requires EDITOR or OWNER permission');
           }
         }
@@ -11677,14 +12217,9 @@ export const mutators = defineMutators({
 
         // Verify EDITOR+ permission
         const isOwner = collection.ownerId === ctx.userID;
-        if (!isOwner && collection.isPrivate) {
-          const permission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', collectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!permission || permission.role === CollectionRole.VIEWER) {
+        if (!isOwner) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
             throw new Error('Item rename failed: requires EDITOR or OWNER permission');
           }
         }
@@ -11705,30 +12240,34 @@ export const mutators = defineMutators({
         collectionId: z.string(),
         userId: z.string().optional(),
         userGroupId: z.string().optional(),
+        channelId: z.string().optional(),
         role: z.nativeEnum(CollectionRole),
-        canShare: z.boolean(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, collectionId, userId, userGroupId, role, canShare, timestamp } }) => {
+      async ({ tx, ctx, args: { id, collectionId, userId, userGroupId, channelId, role, timestamp } }) => {
         const collection = await tx.run(zql.collections.where('id', collectionId).one());
         if (!collection) {
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
-          const granterPermission = await tx.run(
-            zql.collection_permissions
-              .where('collectionId', collectionId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!granterPermission || !granterPermission.canShare) {
-            throw new Error('Permission grant failed: only owners or users with canShare can grant permissions');
+          // Anyone with an explicit role (Viewer/Editor/Owner) can share —
+          // there's no separate delegated "canShare" permission.
+          const granterRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (!granterRole) {
+            throw new Error('Permission grant failed: you do not have access to this collection');
           }
         }
 
         // Prevent sharing with the collection owner
         if (userId && userId === collection.ownerId) {
           throw new Error('Cannot share collection with its owner');
+        }
+
+        // A channel grant is always read-only — a channel can have many
+        // members, so defaulting all of them to write access is a bigger
+        // blast radius than a person or a curated group.
+        if (channelId && role !== CollectionRole.VIEWER) {
+          throw new Error('Permission grant failed: channel grants are read-only (Viewer)');
         }
 
         const existing = userId
@@ -11738,13 +12277,31 @@ export const mutators = defineMutators({
                 .where('userId', userId)
                 .one(),
             )
-          : null;
+          : userGroupId
+            ? await tx.run(
+                zql.collection_permissions
+                  .where('collectionId', collectionId)
+                  .where('userGroupId', userGroupId)
+                  .one(),
+              )
+            : channelId
+              ? await tx.run(
+                  zql.collection_permissions
+                    .where('collectionId', collectionId)
+                    .where('channelId', channelId)
+                    .one(),
+                )
+              : null;
 
         if (existing) {
           await tx.mutate.collection_permissions.update({
             id: existing.id,
             role,
-            canShare,
+            // Dead field — nothing reads canShare anymore (sharing is
+            // purely role-based, see the escalation check above). Kept at
+            // the Prisma column default since it's still NOT NULL; not
+            // threaded through as a caller-supplied argument.
+            canShare: false,
             updatedAt: timestamp,
           });
         } else {
@@ -11754,8 +12311,9 @@ export const mutators = defineMutators({
             collectionId,
             userId,
             userGroupId,
+            channelId,
             role,
-            canShare,
+            canShare: false,
             grantedBy: ctx.userID,
             createdAt: timestamp,
             updatedAt: timestamp,
@@ -11775,7 +12333,10 @@ export const mutators = defineMutators({
           throw new Error('Collection not found');
         }
         if (collection.ownerId !== ctx.userID) {
-          throw new Error('Permission revoke failed: only the owner can revoke permissions');
+          const granterRole = await resolveCollectionPermissionRole(tx, collectionId, ctx.userID);
+          if (granterRole !== CollectionRole.OWNER) {
+            throw new Error('Permission revoke failed: only an owner can revoke permissions');
+          }
         }
 
         await tx.mutate.collection_permissions.delete({ id });

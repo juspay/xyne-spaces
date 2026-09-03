@@ -285,6 +285,7 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
   const [showBackfill, setShowBackfill] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showSessionUpload, setShowSessionUpload] = useState(false);
+  const [sessionUploadSource, setSessionUploadSource] = useState<"claude" | "opencode" | "codex">("claude");
   const [status, setStatus] = useState<MemoryStatusFlags | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
@@ -421,13 +422,29 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
               </button>
             )}
             {canDelete && (
-              <button
-                onClick={() => setShowSessionUpload(true)}
-                title="Upload Claude session exports (.jsonl / .json, or a .zip of them) — parsed and retained as agent memory"
-                className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
-              >
-                <Inbox size={12} /> Upload sessions
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => { setSessionUploadSource("claude"); setShowSessionUpload(true); }}
+                  title="Upload Claude session exports (.jsonl / .json, .gz, or a .zip of them) — parsed and retained as agent memory"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+                >
+                  <Inbox size={12} /> Claude
+                </button>
+                <button
+                  onClick={() => { setSessionUploadSource("opencode"); setShowSessionUpload(true); }}
+                  title="Upload OpenCode session bundles (.json, .gz, or a .zip of them) — parsed and retained as agent memory"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+                >
+                  <Inbox size={12} /> OpenCode
+                </button>
+                <button
+                  onClick={() => { setSessionUploadSource("codex"); setShowSessionUpload(true); }}
+                  title="Upload Codex rollout logs (.jsonl / .json, .gz, or a .zip of them) — parsed and retained as agent memory"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary hover:border-xyne-border"
+                >
+                  <Inbox size={12} /> Codex
+                </button>
+              </div>
             )}
             <button
               onClick={loadStats}
@@ -605,6 +622,7 @@ export function MemoryTab({ agentSlug, canDelete = false, userTag }: Props) {
       {showSessionUpload && (
         <UploadSessionModal
           agentSlug={agentSlug}
+          source={sessionUploadSource}
           onClose={() => setShowSessionUpload(false)}
           onDone={() => {
             setShowSessionUpload(false);
@@ -1032,7 +1050,7 @@ function AllMemories({
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [typeFilter, setTypeFilter] = useState<"all" | "world" | "experience" | "observation">("all");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "session-ingest" | "claude-upload" | "other">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "session-ingest" | "claude-upload" | "opencode-upload" | "codex-upload" | "other">("all");
   const [groupBy, setGroupBy] = useState<"none" | "type" | "session" | "subsystem">("none");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -1061,7 +1079,8 @@ function AllMemories({
 
     if (sourceFilter !== "all") {
       const source = memory.tags?.find((tag) => tag.startsWith("source:"))?.slice("source:".length);
-      if (sourceFilter === "other" ? source === "session-ingest" || source === "claude-upload" : source !== sourceFilter) {
+      const knownSources = new Set(["session-ingest", "claude-upload", "opencode-upload", "codex-upload"]);
+      if (sourceFilter === "other" ? knownSources.has(source ?? "") : source !== sourceFilter) {
         return false;
       }
     }
@@ -2592,14 +2611,141 @@ function RecallTester({ agentSlug, userTag }: { agentSlug: string; userTag?: str
  */
 function UploadSessionModal({
   agentSlug,
+  source,
   onClose,
   onDone,
 }: {
   agentSlug: string;
+  source: "claude" | "opencode" | "codex";
   onClose: () => void;
   onDone: () => void;
 }) {
+  const sourceLabel = source === "opencode" ? "OpenCode" : source === "codex" ? "Codex" : "Claude";
+  const acceptedExts = source === "opencode" ? /\.(json|zip)$/i : /\.(jsonl|json|zip)$/i;
+  // Zip MEMBERS must be session files, never nested archives: a zip-inside-zip
+  // would be decoded as garbled binary-as-UTF-8 and uploaded as a "session".
+  const acceptedMemberExts = source === "opencode" ? /\.(json)$/i : /\.(jsonl|json)$/i;
+  const acceptAttr = source === "opencode" ? ".json,.zip,.gz,.tar.gz" : ".jsonl,.json,.zip,.gz,.tar.gz";
+
+  // Finder appends ` (1)` AFTER the original extension when a download already
+  // exists, producing names such as `rollout.jsonl (1).gz`. Strip only that
+  // duplicate suffix before checking the inner extension; otherwise a perfectly
+  // valid gzip is reported as an unsupported session.
+  function normalizeSessionFilename(name: string): string {
+    return name.replace(/\s+\(\d+\)$/u, "");
+  }
+
+  /** Gzipped session files (.jsonl.gz / .json.gz — how Codex rollouts and
+   *  Claude Code session archives usually arrive) are decompressed client-side
+   *  with the browser-native DecompressionStream, then treated exactly like
+   *  their inner file. Only single-file gzip: the INNER name (minus .gz) must
+   *  still match the accepted session extensions, so .tar.gz / nested archives
+   *  stay rejected instead of uploading as binary garbage. */
+  async function gunzipToString(buf: ArrayBuffer): Promise<string> {
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(stream).text();
+  }
+  async function gunzipToArrayBuffer(buf: ArrayBuffer): Promise<ArrayBuffer> {
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(stream).arrayBuffer();
+  }
   const MAX_SESSION_BYTES = 20_000_000; // backend hard cap
+  const MAX_ARCHIVE_BYTES = 250_000_000; // client-side decompression safety cap
+
+  /**
+   * The Codex export helper produces a single `{ session_count, sessions }`
+   * JSON document. Each member contains native rollout records, so split it
+   * into the JSONL sessions the backend parser already understands instead of
+   * rejecting a valid all-sessions export as one oversized upload.
+   */
+  function splitCodexRecords(name: string, records: unknown[]): Array<{ name: string; content: string }> {
+    const rollouts: unknown[][] = [];
+    let current: unknown[] = [];
+    for (const record of records) {
+      const isMeta = typeof record === "object" && record !== null && (record as { type?: unknown }).type === "session_meta";
+      if (isMeta && current.length > 0) { rollouts.push(current); current = []; }
+      current.push(record);
+    }
+    if (current.length > 0) rollouts.push(current);
+    return rollouts.map((rollout, index) => ({
+      name: rollouts.length === 1 ? name : `${name.replace(/\.(?:jsonl|json)$/iu, "")}-${index + 1}.jsonl`,
+      content: rollout.map((record) => JSON.stringify(record)).join("\n"),
+    }));
+  }
+
+  function splitCodexJsonl(name: string, content: string): Array<{ name: string; content: string }> | null {
+    const lines = content.split(/\r?\n/u).filter((line) => line.trim());
+    const records: unknown[] = [];
+    for (const line of lines) {
+      try { records.push(JSON.parse(line)); } catch { return null; }
+    }
+    return records.some((record) => typeof record === "object" && record !== null && (record as { type?: unknown }).type === "session_meta")
+      ? splitCodexRecords(name, records)
+      : null;
+  }
+
+  function expandCodexBundle(name: string, content: string): Array<{ name: string; content: string }> | null {
+    if (source !== "codex") return null;
+    try {
+      const parsed = JSON.parse(content) as { sessions?: unknown } | unknown[];
+      if (Array.isArray(parsed)) return splitCodexRecords(name, parsed);
+      if (typeof parsed !== "object" || parsed === null) return null;
+      if (!Array.isArray(parsed.sessions)) return null;
+      const expanded: Array<{ name: string; content: string }> = [];
+      for (let i = 0; i < parsed.sessions.length; i++) {
+        const session = parsed.sessions[i] as { session_file?: unknown; relative_path?: unknown; records?: unknown };
+        if (!Array.isArray(session?.records)) continue;
+        const sessionName = typeof session.relative_path === "string"
+          ? session.relative_path.split(/[\\/]/).pop()
+          : typeof session.session_file === "string"
+            ? session.session_file.split(/[\\/]/).pop()
+            : undefined;
+        expanded.push({
+          name: normalizeSessionFilename(sessionName || `${name}-session-${i + 1}.jsonl`),
+          content: session.records.map((record) => JSON.stringify(record)).join("\n"),
+        });
+      }
+      return expanded;
+    } catch {
+      return splitCodexJsonl(name, content);
+    }
+  }
+
+  /** Extract regular files from a POSIX tar archive after gzip decompression.
+   * We intentionally support only ordinary file entries; links/devices/PAX
+   * metadata are ignored and never interpreted as session content. */
+  function untar(buf: ArrayBuffer): Array<{ name: string; bytes: Uint8Array }> {
+    const bytes = new Uint8Array(buf);
+    const decoder = new TextDecoder();
+    const readField = (start: number, length: number) => decoder.decode(bytes.subarray(start, start + length)).replace(/\0.*$/u, "").trim();
+    const entries: Array<{ name: string; bytes: Uint8Array }> = [];
+    for (let offset = 0; offset + 512 <= bytes.length;) {
+      const name = readField(offset, 100);
+      if (!name) break;
+      const prefix = readField(offset + 345, 155);
+      const sizeText = readField(offset + 124, 12);
+      const size = Number.parseInt(sizeText || "0", 8);
+      const type = bytes[offset + 156] ?? 0;
+      if (!Number.isFinite(size) || size < 0 || offset + 512 + size > bytes.length) throw new Error("Invalid tar archive");
+      if (type === 0 || type === 48) entries.push({ name: prefix ? `${prefix}/${name}` : name, bytes: bytes.slice(offset + 512, offset + 512 + size) });
+      offset += 512 + Math.ceil(size / 512) * 512;
+    }
+    return entries;
+  }
+
+  function addUsableSessions(
+    name: string,
+    content: string,
+    picked: Array<{ name: string; content: string }>,
+    skip: string[],
+  ): void {
+    const candidates = expandCodexBundle(name, content) ?? [{ name, content }];
+    for (const candidate of candidates) {
+      if (candidate.content.length > MAX_SESSION_BYTES) { skip.push(`${candidate.name} (over 20MB)`); continue; }
+      if (!candidate.content.trim()) { skip.push(`${candidate.name} (empty)`); continue; }
+      picked.push(candidate);
+    }
+  }
   const [sessions, setSessions] = useState<Array<{ name: string; content: string }>>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
@@ -2618,24 +2764,55 @@ function UploadSessionModal({
     const skip: string[] = [];
     try {
       for (const file of files) {
-        if (/\.zip$/i.test(file.name)) {
+        if (/\.tar\.gz$/i.test(file.name)) {
+          let tar: ArrayBuffer;
+          try { tar = await gunzipToArrayBuffer(await file.arrayBuffer()); }
+          catch { skip.push(`${file.name} (not valid tar.gz)`); continue; }
+          if (tar.byteLength > MAX_ARCHIVE_BYTES) { skip.push(`${file.name} (archive over 250MB)`); continue; }
+          let entries: Array<{ name: string; bytes: Uint8Array }>;
+          try { entries = untar(tar); }
+          catch { skip.push(`${file.name} (invalid tar archive)`); continue; }
+          for (const entry of entries) {
+            const base = entry.name.split("/").pop() ?? entry.name;
+            const name = normalizeSessionFilename(base);
+            if (!acceptedMemberExts.test(name)) continue;
+            const content = new TextDecoder().decode(entry.bytes);
+            addUsableSessions(name, content, picked, skip);
+          }
+        } else if (/\.zip$/i.test(file.name)) {
           const { default: JSZip } = await import("jszip");
           const zip = await JSZip.loadAsync(await file.arrayBuffer());
           for (const entry of Object.values(zip.files)) {
             if (entry.dir) continue;
             const base = entry.name.split("/").pop() ?? entry.name;
             if (entry.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
-            if (!/\.(jsonl|json)$/i.test(base)) continue;
-            const content = await entry.async("string");
-            if (content.length > MAX_SESSION_BYTES) { skip.push(`${base} (over 20MB)`); continue; }
-            if (!content.trim()) { skip.push(`${base} (empty)`); continue; }
-            picked.push({ name: base, content });
+            // Gzipped member (rollout-*.jsonl.gz): decompress, keep inner name.
+            const gzInner = /\.gz$/i.test(base) ? normalizeSessionFilename(base.replace(/\.gz$/i, "")) : null;
+            const normalizedBase = normalizeSessionFilename(base);
+            if (gzInner !== null && !acceptedMemberExts.test(gzInner)) continue;
+            if (gzInner === null && !acceptedMemberExts.test(normalizedBase)) continue;
+            let content: string;
+            try {
+              content = gzInner !== null
+                ? await gunzipToString(await entry.async("arraybuffer"))
+                : await entry.async("string");
+            } catch { skip.push(`${base} (not valid gzip)`); continue; }
+            const name = gzInner ?? normalizedBase;
+            addUsableSessions(name, content, picked, skip);
           }
-        } else if (/\.(jsonl|json)$/i.test(file.name)) {
-          if (file.size > MAX_SESSION_BYTES) { skip.push(`${file.name} (over 20MB)`); continue; }
-          picked.push({ name: file.name, content: await file.text() });
+        } else if (/\.gz$/i.test(file.name)) {
+          const inner = normalizeSessionFilename(file.name.replace(/\.gz$/i, ""));
+          if (!acceptedMemberExts.test(inner)) { skip.push(`${file.name} (unsupported type)`); continue; }
+          let content: string;
+          try { content = await gunzipToString(await file.arrayBuffer()); }
+          catch { skip.push(`${file.name} (not valid gzip)`); continue; }
+          // Size-check each expanded session — a Codex all-sessions export is
+          // one large JSON envelope but is uploaded as bounded JSONL members.
+          addUsableSessions(inner, content, picked, skip);
         } else {
-          skip.push(`${file.name} (unsupported type)`);
+          const name = normalizeSessionFilename(file.name);
+          if (!acceptedExts.test(name)) { skip.push(`${file.name} (unsupported type)`); continue; }
+          addUsableSessions(name, await file.text(), picked, skip);
         }
       }
       if (picked.length === 0) {
@@ -2665,7 +2842,7 @@ function UploadSessionModal({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ filename: s.name, content: s.content }),
+          body: JSON.stringify({ filename: s.name, content: s.content, source }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 202 && data.success) ok++;
@@ -2687,7 +2864,7 @@ function UploadSessionModal({
       >
         <div className="mb-3 flex items-center gap-2">
           <Inbox size={16} className="text-xyne-fg-secondary" />
-          <h3 className="text-[14px] font-semibold text-xyne-fg-primary">Upload Claude sessions</h3>
+          <h3 className="text-[14px] font-semibold text-xyne-fg-primary">Upload {sourceLabel} sessions</h3>
           <button
             onClick={onClose}
             disabled={uploading}
@@ -2704,7 +2881,7 @@ function UploadSessionModal({
               <Check size={14} /> Uploaded <b>{doneCount}</b> session{doneCount === 1 ? "" : "s"} — parsing and extracting memories in the background.
             </p>
             <p className="text-xyne-fg-tertiary">
-              New facts appear in this agent's bank within a few minutes (source: claude-upload).
+              New facts appear in this agent's bank within a few minutes (source: {source}-upload).
             </p>
             {failures.length > 0 && (
               <div className="rounded-lg border border-xyne-error-fg/30 bg-xyne-error-bg/40 p-2 text-[12px] text-xyne-error-fg">
@@ -2722,13 +2899,15 @@ function UploadSessionModal({
         ) : (
           <div className="space-y-3">
             <p className="text-[12px] text-xyne-fg-tertiary">
-              Pick Claude Code session files (<span className="font-mono">.jsonl</span>), claude.ai exports (<span className="font-mono">.json</span>),
-              or a <span className="font-mono">.zip</span> containing them. Each session is parsed, cleaned of harness noise, and retained as
-              this agent's memory — uploading is the approval.
+              {source === "opencode"
+                ? <>Pick OpenCode session bundles (<span className="font-mono">.json</span>, gzipped <span className="font-mono">.json.gz</span>) or a <span className="font-mono">.zip</span> containing them. Each bundle is parsed and retained as this agent's memory — uploading is the approval.</>
+                : source === "codex"
+                  ? <>Pick Codex rollout logs (<span className="font-mono">.jsonl</span> / <span className="font-mono">.json</span>, gzipped <span className="font-mono">.jsonl.gz</span>) or a <span className="font-mono">.zip</span> containing them. Each rollout is parsed and retained as this agent's memory — uploading is the approval.</>
+                  : <>Pick Claude Code session files (<span className="font-mono">.jsonl</span>, gzipped <span className="font-mono">.jsonl.gz</span>), claude.ai exports (<span className="font-mono">.json</span>), or a <span className="font-mono">.zip</span> containing them. Each session is parsed, cleaned of harness noise, and retained as this agent's memory — uploading is the approval.</>}
             </p>
             <input
               type="file"
-              accept=".jsonl,.json,.zip"
+              accept={acceptAttr}
               multiple
               disabled={reading || uploading}
               onChange={(e) => void onPickFiles(e)}

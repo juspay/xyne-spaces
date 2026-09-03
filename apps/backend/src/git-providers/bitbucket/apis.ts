@@ -125,7 +125,8 @@ export class BitbucketManager {
     ticketTitle?: string,
     ticketDescription?: string,
     xyneId?: string,
-    ticketId?: string
+    ticketId?: string,
+    draft: boolean = false,
   ): Promise<string | undefined> {
     if (!sourceBranchName || !destinationBranchName || !projectName || !repoName) {
       return undefined;
@@ -141,6 +142,9 @@ export class BitbucketManager {
         prTitle = `feat: ${xyneId}`;
       } else if (ticketTitle) {
         prTitle = `feat: ${ticketTitle}`;
+      }
+      if (draft) {
+        prTitle = `[Draft] ${prTitle}`;
       }
 
       const payload = {

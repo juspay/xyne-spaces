@@ -11,6 +11,7 @@
  */
 
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { createLogger, createTraceId } from "../logger.js";
 import {
@@ -56,7 +57,7 @@ async function fetchApprovedFactsBySubsystem(userId: string): Promise<Map<string
   } catch (err) {
     logger.warn("[soul-synth] fetch approved facts failed", {
       userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
   return bySub;
@@ -71,7 +72,25 @@ interface SynthReq {
   preserveEdits?: boolean;
 }
 
-async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | null; error?: string }> {
+interface SynthCallTrace {
+  model: string;
+  durationMs: number;
+  systemPrompt: string;
+  userPrompt: string;
+  rawOutput: string;
+  promptChars: number;
+  factsAvailable: number;
+  factsUsed: number;
+  factsDropped: number;
+  factsClipped: number;
+  factInputChars: number;
+  factInputBudgetChars: number;
+  contextLimited: boolean;
+  finishReason?: string;
+  usage?: { promptTokens?: number; completionTokens?: number };
+}
+
+async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | null; error?: string; trace?: SynthCallTrace }> {
   if (!CONFIG.xyneClawS2sKey) return { content: null, error: "no-s2s-key" };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/synthesize-file`;
   try {
@@ -82,10 +101,14 @@ async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | nul
       signal: AbortSignal.timeout(SYNTH_TIMEOUT_MS),
     });
     if (!res.ok) return { content: null, error: `http-${res.status}` };
-    const data = (await res.json()) as { content?: string | null; error?: string };
-    return { content: data.content ?? null, ...(data.error ? { error: data.error } : {}) };
+    const data = (await res.json()) as { content?: string | null; error?: string; trace?: SynthCallTrace };
+    return {
+      content: data.content ?? null,
+      ...(data.error ? { error: data.error } : {}),
+      ...(data.trace ? { trace: data.trace } : {}),
+    };
   } catch (err) {
-    return { content: null, error: err instanceof Error ? err.message : String(err) };
+    return { content: null, error: errMsg(err) };
   }
 }
 
@@ -118,7 +141,7 @@ export async function synthesizeSoulFilesForUser(
     }
     const current = await getFile(TWIN_AGENT_SLUG, userId, spec.name);
     const userEdited = current?.updatedBy === "user";
-    const { content, error } = await synthesizeViaClaw({
+    const { content, error, trace } = await synthesizeViaClaw({
       fileName: spec.name,
       description: spec.description,
       facts,
@@ -130,7 +153,8 @@ export async function synthesizeSoulFilesForUser(
       skipped.push(spec.name);
       fileResults.push({
         name: spec.name,
-        factsUsed: facts.length,
+        ...(trace ?? {}),
+        factsUsed: trace?.factsUsed ?? facts.length,
         action: error ? "error" : "skipped",
         ...(error ? { error } : {}),
       });
@@ -150,7 +174,13 @@ export async function synthesizeSoulFilesForUser(
       sortOrder: spec.sortOrder,
     });
     updated.push(spec.name);
-    fileResults.push({ name: spec.name, factsUsed: facts.length, action: "updated", chars: content.length });
+    fileResults.push({
+      name: spec.name,
+      ...(trace ?? {}),
+      factsUsed: trace?.factsUsed ?? facts.length,
+      action: "updated",
+      chars: content.length,
+    });
   }
 
   if (eventId) {

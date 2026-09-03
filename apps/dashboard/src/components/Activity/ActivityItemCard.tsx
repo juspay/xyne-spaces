@@ -7,6 +7,7 @@ import {
 } from './activitySkipMarkAsRead';
 import { Activity, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
+import { resolveSdlcActivityTarget } from './sdlcActivityNavigation';
 
 /** Ref-based context: when current=true, ActivityItemCard appends ?nofocus=1 to navigation. */
 const NofocusRefContext = createContext<React.RefObject<boolean>>({ current: false });
@@ -33,8 +34,9 @@ interface ActivityItemCardProps {
   actorName: string;
   isExpanded?: boolean;
   channelId: string | undefined;
-  badgeIcon: ReactNode;
+  badgeIcon?: ReactNode;
   badgeColorClass?: string;
+  titlePrefix?: ReactNode;
   description: ReactNode;
   targetPath: string;
   supportTargetPath?: string | undefined;
@@ -56,6 +58,7 @@ export const ActivityItemCard = ({
   isExpanded = true,
   badgeIcon,
   badgeColorClass,
+  titlePrefix,
   description,
   targetPath,
   supportTargetPath,
@@ -119,13 +122,19 @@ export const ActivityItemCard = ({
       baseRoute === '/chat/activity' && supportTargetPath
         ? supportTargetPath.replace(/^\/support\//, `${baseRoute}/ticket/`)
         : undefined;
-    const path = isDeskChannel
+    const defaultPath = isDeskChannel
       ? (embeddedTicketPath ?? supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
+    const path = resolveSdlcActivityTarget({
+      activity,
+      channelType: channel?.type,
+      channelId,
+      fallbackPath: defaultPath,
+    });
 
     if (path) {
       const pathWithActivityId =
-        focusThread && !isDeskChannel
+        focusThread && !isDeskChannel && !path.startsWith('/sdlc/')
           ? appendFocusThread(appendSelectedActivity(path))
           : appendSelectedActivity(path);
       const state = {
@@ -255,14 +264,16 @@ export const ActivityItemCard = ({
             data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
           >
             <UserAvatar userId={actorId} size={AvatarSize.REGULAR} showActiveStatus={false} />
-            <div
-              className={cn(
-                'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
-                badgeColorClass,
-              )}
-            >
-              {badgeIcon}
-            </div>
+            {badgeIcon ? (
+              <div
+                className={cn(
+                  'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
+                  badgeColorClass,
+                )}
+              >
+                {badgeIcon}
+              </div>
+            ) : null}
           </button>
         </UserHoverWrapper>
       </div>
@@ -278,6 +289,7 @@ export const ActivityItemCard = ({
               activity.isRead ? 'text-muted-foreground' : 'text-foreground',
             )}
           >
+            {titlePrefix && <span className='mr-1.5 inline-flex align-middle'>{titlePrefix}</span>}
             {isMobile ? (
               <span className='font-semibold'>{actorName}</span>
             ) : (

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 /**
  * Utility functions for generating contextual status messages based on tool inputs
  */
@@ -83,7 +84,10 @@ const parseToolInput = (toolInput: unknown): Record<string, unknown> | null => {
     if (typeof toolInput === 'string') {
       // Validate JSON string length to prevent DoS
       if (toolInput.length > 10000) {
-        console.warn('Tool input string too large, truncating');
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('Tool input string too large, truncating'),
+        });
         return null;
       }
       parsed = JSON.parse(toolInput);
@@ -98,7 +102,11 @@ const parseToolInput = (toolInput: unknown): Record<string, unknown> | null => {
 
     return parsed as Record<string, unknown>;
   } catch (error) {
-    console.error('Failed to parse tool input:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to parse tool input:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -424,8 +432,11 @@ export const generateToolInputStatus = (
         return 'Processing';
     }
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Error generating tool input status:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Error generating tool input status:'),
+      error: error,
+    });
     return 'Processing';
   }
 };

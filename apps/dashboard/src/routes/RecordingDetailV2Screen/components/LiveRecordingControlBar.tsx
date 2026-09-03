@@ -17,7 +17,7 @@
  * `onMarkerSelect`, clicking any of the three opens the transcript at that point.
  */
 
-import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { StopSmall, Spinner, PauseBig, PlayBig, Flag, AlertTriangle } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
@@ -38,6 +38,7 @@ interface LiveRecordingControlBarProps {
   onStopped?: () => void;
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   onMarkerSelect?: (item: MarkedItem) => void;
+  onOpenTranscript?: () => void;
   isAudioPreparing?: boolean;
   /** True once playback is known to be unavailable for this recording. */
   isAudioUnavailable?: boolean;
@@ -52,6 +53,7 @@ export const LiveRecordingControlBar = ({
   onStopped,
   onLoadAudio,
   onMarkerSelect,
+  onOpenTranscript,
   isAudioPreparing = false,
   isAudioUnavailable = false,
 }: LiveRecordingControlBarProps): ReactElement | null => {
@@ -121,6 +123,7 @@ export const LiveRecordingControlBar = ({
         isAudioUnavailable={isAudioUnavailable}
         {...(onLoadAudio ? { onLoadAudio } : {})}
         {...(onMarkerSelect ? { onMarkerSelect } : {})}
+        {...(onOpenTranscript ? { onOpenTranscript } : {})}
       />
     );
   }
@@ -191,7 +194,11 @@ export const LiveRecordingControlBar = ({
         {isPaused ? 'Paused' : 'Live'}
       </span>
 
-      <RecordingVisualizer isPaused={isPaused} />
+      <RecordingVisualizer
+        isAnimated={!isPaused}
+        className='h-7 w-14 justify-center rounded-lg border border-border px-2'
+        {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
+      />
     </div>
   );
 };
@@ -349,6 +356,8 @@ interface RecordedTimelineBarProps {
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   /** Supplied once there is a transcript to open at the marker's timestamp. */
   onMarkerSelect?: (item: MarkedItem) => void;
+  /** Supplied once there is a transcript to open — the waveform pill opens it directly. */
+  onOpenTranscript?: () => void;
   /** True while the stitched audio is still on its way. */
   isAudioPreparing?: boolean;
   /** True once playback is known to be unavailable (e.g. older recordings). */
@@ -359,6 +368,7 @@ const RecordedTimelineBar = ({
   recording,
   onLoadAudio,
   onMarkerSelect,
+  onOpenTranscript,
   isAudioPreparing = false,
   isAudioUnavailable = false,
 }: RecordedTimelineBarProps): ReactElement => {
@@ -537,7 +547,11 @@ const RecordedTimelineBar = ({
           {formatElapsedTime(durationMs)}
         </span>
 
-        <RecordingVisualizer isPaused={!isPlaying} />
+        <RecordingVisualizer
+          isAnimated={false}
+          className='h-7 w-14 justify-center rounded-lg border border-border px-2'
+          {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
+        />
       </div>
 
       {/* Only worth explaining the markers once there are some to explain. */}
@@ -574,24 +588,72 @@ const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactE
 /* Audio visualizer                                                           */
 /* -------------------------------------------------------------------------- */
 
-const RecordingVisualizer = ({ isPaused }: { isPaused: boolean }): ReactElement => (
-  <div className='inline-flex h-7 w-14 items-center justify-center gap-0.5 rounded-lg border border-border px-2'>
-    {Array.from({ length: 4 }, (_, i) => {
-      if (isPaused) {
-        return <div key={i} className='size-1 rounded-full bg-muted-foreground' />;
-      }
+export interface RecordingVisualizerProps {
+  isAnimated: boolean;
+  onClick?: () => void;
+  size?: 'sm' | 'md';
+  colorClassName?: string;
+  className?: string;
+}
 
-      const style: CSSProperties = {
-        animation: `recWaveBar 0.55s ease-in-out ${i * 0.08}s infinite alternate`,
-      };
-      return (
-        <div key={i} className='flex h-4 items-center'>
-          <div
-            className='rec-overlay-waveform-bar w-1 rounded-full bg-primary !opacity-100'
-            style={style}
-          />
-        </div>
-      );
-    })}
-  </div>
-);
+const RECORDING_VISUALIZER_REST_HEIGHT = '40%';
+
+const RECORDING_VISUALIZER_SIZE_CLASSES = {
+  md: { wrapperHeight: 'h-4', barWidth: 'w-1.5' },
+  sm: { wrapperHeight: 'h-3', barWidth: 'w-0.5' },
+} as const;
+
+export const RecordingVisualizer = ({
+  isAnimated,
+  onClick,
+  size = 'md',
+  colorClassName = 'bg-primary',
+  className,
+}: RecordingVisualizerProps): ReactElement => {
+  const shouldReduceMotion = useReducedMotion();
+  const isWaving = isAnimated && !shouldReduceMotion;
+  const { wrapperHeight, barWidth } = RECORDING_VISUALIZER_SIZE_CLASSES[size];
+
+  const bars = Array.from({ length: 4 }, (_, i) => (
+    <div key={i} className={cn('flex items-center', wrapperHeight)}>
+      <motion.div
+        className={cn('rounded-full', barWidth, colorClassName)}
+        initial={{ height: isWaving ? '25%' : RECORDING_VISUALIZER_REST_HEIGHT }}
+        animate={
+          isWaving ? { height: ['25%', '100%'] } : { height: RECORDING_VISUALIZER_REST_HEIGHT }
+        }
+        transition={
+          isWaving
+            ? {
+                duration: 0.55,
+                delay: i * 0.08,
+                repeat: Infinity,
+                repeatType: 'mirror',
+                ease: 'easeInOut',
+              }
+            : { duration: 0.3, ease: 'easeOut' }
+        }
+      />
+    </div>
+  ));
+
+  const wrapperClassName = cn('inline-flex items-center gap-0.5', className);
+
+  if (!onClick) {
+    return <div className={wrapperClassName}>{bars}</div>;
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      className={cn(wrapperClassName, 'transition-colors hover:border-primary/50')}
+      aria-label='Open transcript'
+      title='Open transcript'
+      data-track-category='RecordingDetailV2'
+      data-track-name='waveform_open_transcript'
+    >
+      {bars}
+    </button>
+  );
+};

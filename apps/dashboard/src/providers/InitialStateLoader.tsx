@@ -21,17 +21,20 @@ import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
-import { mixpanelService } from '../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
-import { dropAllDatabases } from '@rocicorp/zero';
+import { dropZeroDatabases } from '../zero/dropZeroDatabases';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
-import { SharedAuthProvider, HttpClientProvider, ChannelServiceProvider } from '@xyne/shared/hooks';
 import { usePendingQueue } from '@xyne/shared/messages';
-import { axiosHttpClient } from '../services/affinityService';
+import {
+  SharedAuthProvider,
+  HttpClientProvider,
+  ChannelServiceProvider,
+  AffinityServiceProvider,
+} from '@xyne/shared/hooks';
+import { axiosHttpClient, affinityService } from '../services/affinityService';
 import { channelService } from '../services/Chat/channelService';
 
 interface InitialStateLoaderProps {
@@ -200,16 +203,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
         });
       });
 
-      // Track app refresh before reload
-      mixpanelService.track(EVENTS.APP_REFRESH, {
-        trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.ZERO_SYNC_AUTH_INVALIDATED,
-        errorMessage: 'ReAuth triggered',
-        url: window.location.href,
-        sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
-      });
-
-      // Clear Zero's local databases
-      void dropAllDatabases();
+      // Clear this lane's Zero local databases
+      void dropZeroDatabases();
 
       // Clear all cookies and auth tokens (handles Electron + Web)
       clearAuthTokens();
@@ -509,15 +504,17 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     return (
       <SharedAuthProvider value={context}>
         <HttpClientProvider client={axiosHttpClient}>
-          <ChannelServiceProvider
-            getVespaParticipants={(id): Promise<string[]> =>
-              channelService.getVespaParticipants(id)
-            }
-          >
-            {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
-            <DeferredLoader />
-            {children}
-          </ChannelServiceProvider>
+          <AffinityServiceProvider value={affinityService}>
+            <ChannelServiceProvider
+              getVespaParticipants={(id): Promise<string[]> =>
+                channelService.getVespaParticipants(id)
+              }
+            >
+              {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
+              <DeferredLoader />
+              {children}
+            </ChannelServiceProvider>
+          </AffinityServiceProvider>
         </HttpClientProvider>
       </SharedAuthProvider>
     );

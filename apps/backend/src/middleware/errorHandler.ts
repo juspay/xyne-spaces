@@ -23,6 +23,7 @@ export const errorHandler = (
   _next: NextFunction
 ): void => {
   let error = err;
+  const originalStack = err.stack;
 
   if (!(error instanceof AppError)) {
     const isJsonParseError =
@@ -39,9 +40,9 @@ export const errorHandler = (
   logger.error({
     message: appError.message,
     statusCode: appError.statusCode,
-    stack: appError.stack,
-    originalError: err instanceof AppError ? undefined : err.message,
-    originalStack: err instanceof AppError ? undefined : err.stack,
+    error: err,
+    stack: originalStack,
+    wrapperStack: err instanceof AppError ? undefined : appError.stack,
     url: redactSensitiveUrl(req.url),
     method: req.method,
     ip: req.ip,

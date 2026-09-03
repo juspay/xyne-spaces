@@ -24,6 +24,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   placeholder,
   searchPlaceholder,
   showSearch = true,
+  matchTriggerWidth = false,
   isLoading = false,
   width = 'auto',
   onSearchChange,
@@ -180,6 +181,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         handleOpenChange(false);
         setSearchValue('');
       }}
+      data-track-category='ENTITY_PICKER'
+      data-track-name='CLEAR_SELECTION'
     >
       <span className='flex h-5 w-5 flex-none items-center justify-center'>
         <div className='w-5 h-5 rounded-full bg-border flex items-center justify-center'>
@@ -208,6 +211,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               : 'cursor-pointer text-foreground hover:bg-accent'
         }`}
         onClick={() => !option.disabled && handleSelect(option.value)}
+        data-track-category='ENTITY_PICKER'
+        data-track-name='SELECT_OPTION'
         onKeyDown={(e): void => {
           if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
             e.preventDefault();
@@ -279,6 +284,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
+            data-track-category='ENTITY_PICKER'
+            data-track-name='CLEAR_SELECTION'
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
@@ -376,6 +383,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
+            data-track-category='ENTITY_PICKER'
+            data-track-name='CLEAR_SELECTION'
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
@@ -409,9 +418,16 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             touchAction: 'pan-y',
             overscrollBehavior: 'contain',
             pointerEvents: 'auto',
+            // Never narrower than the trigger it drops from; a compact trigger
+            // still lets the content size the popover as before.
+            minWidth: 'var(--radix-popover-trigger-width)',
+            ...(matchTriggerWidth && {
+              width: 'var(--radix-popover-trigger-width)',
+              maxWidth: 'var(--radix-popover-trigger-width)',
+            }),
             // Virtuoso rows are absolutely positioned and can't size the popover;
             // lock it to the plain list's max width so widths stay consistent.
-            ...(isVirtualized && { width: '24rem' }),
+            ...(isVirtualized && { width: 'max(24rem, var(--radix-popover-trigger-width))' }),
           }}
           onWheel={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}

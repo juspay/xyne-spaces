@@ -31,7 +31,8 @@ export class EmailClassificationRepository {
     return {
       channelId: pref.channelId,
       ownerUserId: pref.ownerUserId,
-      enabled: pref.classificationEnabled,
+      enabled: pref.classificationEnabled || pref.priorityClassificationEnabled || false,
+      classificationEnabled: pref.classificationEnabled ?? false,
       classificationPrompt: pref.classificationPrompt ?? '',
       categoryField: pref.categoryField ?? 'Query Type',
       subCategoryField: pref.subCategoryField ?? null,
@@ -114,6 +115,27 @@ export class EmailClassificationRepository {
 
   async findMappingById(mappingId: string) {
     return this.db.classificationMapping.findUnique({ where: { id: mappingId } });
+  }
+
+  // ─── AI Categories ────────────────────────────────────────────────────────
+
+  /**
+   * Distinct aiCategory values actually present on this channel's tickets (capped).
+   * The AI emits free-form categories, so mappings alone are not a complete list —
+   * a category with no assignment rule still needs to be filterable.
+   */
+  async findDistinctAiCategoriesByChannelId(channelId: string, limit = 500): Promise<string[]> {
+    const rows = await this.db.ticket.findMany({
+      where: { channelId, aiCategory: { not: null } },
+      select: { aiCategory: true },
+      distinct: ['aiCategory'],
+      orderBy: { aiCategory: 'asc' },
+      take: limit,
+    });
+
+    return rows
+      .map(r => r.aiCategory?.trim())
+      .filter((c): c is string => Boolean(c));
   }
 
   // ─── Priority Classification Config ───────────────────────────────────────

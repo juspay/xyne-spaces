@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useState } from 'react';
 import { NotificationBellOn, NotificationBellOff } from '@xyne/icons';
 import { useQuery } from '../../../hooks/useQuery';
@@ -86,23 +87,35 @@ export const ConversationSubscription = React.forwardRef<
     const handleToggleSubscription = () => {
       const timestamp = Date.now();
 
-      console.log('[ConversationSubscription] Toggle clicked:', {
-        conversationId,
-        currentState: isSubscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED',
-        action: isSubscribed ? 'UNSUBSCRIBE' : 'SUBSCRIBE',
-        participationType,
-        timestamp,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String('[ConversationSubscription] Toggle clicked:'),
+        context: [
+          {
+            conversationId,
+            currentState: isSubscribed ? 'SUBSCRIBED' : 'UNSUBSCRIBED',
+            action: isSubscribed ? 'UNSUBSCRIBE' : 'SUBSCRIBE',
+            participationType,
+            timestamp,
+          },
+        ],
       });
 
       if (isSubscribed) {
-        console.log('[ConversationSubscription] Calling unsubscribeFromConversation mutator');
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[ConversationSubscription] Calling unsubscribeFromConversation mutator'),
+        });
         void zero.mutate(
           mutators.conversations.unsubscribeFromConversation({
             conversationId,
           }),
         );
       } else {
-        console.log('[ConversationSubscription] Calling subscribeToConversation mutator');
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('[ConversationSubscription] Calling subscribeToConversation mutator'),
+        });
         void zero.mutate(
           mutators.conversations.subscribeToConversation({
             conversationId,

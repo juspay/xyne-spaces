@@ -4,6 +4,7 @@ import { cn } from '@/utils/classNames';
 import { useClawAvailableTools } from '@/hooks/useClawAvailableTools';
 import { McpLogo } from '../mcp/McpLogo';
 import { Clamped } from '../../primitives/Clamped';
+import { ScrollFadeBox } from '../../primitives/ProseBox';
 import { SectionHeading, Separator } from '../../primitives/Section';
 import { ChipIconTile, TokenChip } from '../../primitives/TokenChip';
 import { resolveSubagentCapabilities } from './subagentDetail';
@@ -126,7 +127,7 @@ export function SubagentDetailPanel({
             'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             selected
               ? 'border-border bg-card text-foreground hover:bg-muted'
-              : 'border-border bg-primary text-primary-foreground hover:bg-primary/90',
+              : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
           )}
         >
           {selected ? 'Remove' : 'Add'}
@@ -142,15 +143,11 @@ export function SubagentDetailPanel({
       <div className='flex w-full flex-col gap-4'>
         <Section label='Instructions' info='The system prompt this subagent runs with'>
           {systemPrompt ? (
-            <Clamped
-              maxHeight={PROMPT_MAX_HEIGHT}
-              resetKey={entry.name}
-              className='rounded-2xl border border-border bg-card p-4'
-            >
-              <p className='whitespace-pre-wrap text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+            <ScrollFadeBox height={PROMPT_MAX_HEIGHT} resetKeys={[entry.name, systemPrompt]}>
+              <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
                 {systemPrompt}
               </p>
-            </Clamped>
+            </ScrollFadeBox>
           ) : (
             <EmptyHint>No instructions added</EmptyHint>
           )}

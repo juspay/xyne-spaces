@@ -28,6 +28,8 @@ export interface SearchableMultiSelectProps {
 
   searchPlaceholder?: string;
 
+  searchMaxLength?: number;
+
   /** Accessible name for the search box (e.g. 'Search labels'). */
   searchAriaLabel: string;
 

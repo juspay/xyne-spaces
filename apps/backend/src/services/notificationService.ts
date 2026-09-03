@@ -22,7 +22,8 @@ import { serializeInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus } from '@xyne/shared';
+  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
+import { activityService } from '@/services/activity/activityService';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -154,6 +155,25 @@ export interface NotificationData {
    */
   workspaceId?: string;
 }
+
+const buildReleaseStatusPushMessage = (
+  status: TicketStatusV2,
+  releaseXyneId: string,
+  devXyneId: string,
+): string => {
+  switch (status) {
+    case TicketStatusV2.STARTED:
+      return `\u{1F4E6} ${devXyneId} picked up in release ${releaseXyneId} — deployment is in progress.`;
+    case TicketStatusV2.COMPLETED:
+      return `\u{1F680} ${devXyneId} released in ${releaseXyneId} — now live in the app.`;
+    case TicketStatusV2.CANCELLED:
+      return `\u{1F6AB} Release ${releaseXyneId} carrying ${devXyneId} was cancelled.`;
+    case TicketStatusV2.PAUSED:
+      return `\u23F8\uFE0F Release ${releaseXyneId} carrying ${devXyneId} is on hold.`;
+    case TicketStatusV2.TODO:
+      return `\u21A9\uFE0F Release ${releaseXyneId} carrying ${devXyneId} moved to planning.`;
+  }
+};
 
 interface NotificationOptions {
   page?: number;
@@ -1337,6 +1357,8 @@ class NotificationService {
         senderId,
         ...(!isCommentMention ? { senderName } : {}),
         workspaceId,
+        // Every other builder sends it; the client routes on the channel's type.
+        ...(channelId ? { channelId } : {}),
         mentionContext,
         ...(blockId ? { blockId } : {}),
         ...(commentThreadId ? { commentThreadId } : {}),
@@ -2261,6 +2283,167 @@ class NotificationService {
     }
   }
 
+  /**
+   * Notifies the group's subscribed members (user_group_mappings.isNotified)
+   * that no one could be assigned because every eligible candidate is at or
+   * above the group's maxWorkload cap. Not tied to a specific ticket — fires
+   * from the assignment engine itself, not a DB side-effect handler, since a
+   * blocked assignment writes nothing for a handler to react to.
+   */
+  async sendMaxWorkloadReachedNotification(
+    userGroupId: string,
+    groupName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const actionUrl = `/${workspaceId}/user-groups/${userGroupId}/assignment-config`;
+      const title = 'Max workload reached';
+      const message = `${groupName} is at max workload — no one was available for a new ticket.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.MAX_WORKLOAD_REACHED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          // Activities tab entry is written unconditionally, same as
+          // ticket-assignments-handler.ts — it's a persistent record, not a
+          // push, so a user's desktop/mobile notification preferences (below)
+          // shouldn't hide that this happened.
+          await activityService.createActivity({
+            userId,
+            actorId: userId,
+            actorAction: 'max_workload_reached',
+            actionSource: 'user_group',
+            actionSourceId: userGroupId,
+            classification: ActivityClassification.FYI,
+          });
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.MAX_WORKLOAD_REACHED,
+            relatedEntityType: 'user_group',
+            relatedEntityId: userGroupId,
+            actionUrl,
+            workspaceId,
+            metadata: { userGroupId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send max workload reached notification:', error);
+    }
+  }
+
+  /**
+   * Desktop/mobile push for subscribers (user_group_mappings.isNotified) when a
+   * user pauses ticket assignment. The Activities-tab entry is created
+   * separately by userAssignmentStateService (activityService.createActivities),
+   * matching the pre-existing AssignmentPauseActivity renderer's shape — this
+   * method only handles the push side.
+   */
+  async sendAssignmentPauseNotification(
+    pausedUserId: string,
+    pausedUserName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+    unavailableUntil: number,
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const availableAt = new Date(unavailableUntil).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      const title = 'Ticket assignment paused';
+      const message = `${pausedUserName} paused from ticket assignment until ${availableAt}.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.ASSIGNMENT_PAUSED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.ASSIGNMENT_PAUSED,
+            relatedEntityType: 'user',
+            relatedEntityId: pausedUserId,
+            workspaceId,
+            metadata: { pausedUserId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send assignment pause notification:', error);
+    }
+  }
+
+  /**
+   * Desktop/mobile push counterpart to sendAssignmentPauseNotification, fired
+   * when the user resumes. See that method's docstring for the activity-vs-push
+   * split.
+   */
+  async sendAssignmentResumeNotification(
+    resumedUserId: string,
+    resumedUserName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const title = 'Ticket assignment resumed';
+      const message = `${resumedUserName} resumed ticket assignment.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.ASSIGNMENT_RESUMED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.ASSIGNMENT_RESUMED,
+            relatedEntityType: 'user',
+            relatedEntityId: resumedUserId,
+            workspaceId,
+            metadata: { resumedUserId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send assignment resume notification:', error);
+    }
+  }
+
   async sendTicketDueDateChangedNotification(
     ticketId: string,
     recipients: string[],
@@ -2330,11 +2513,20 @@ class NotificationService {
     }
   }
 
-  async sendTicketStatusChangeNotification(
+  /**
+   * Shared pipeline for status-like ticket events - same TICKET_STATUS_CHANGE
+   * preferences and delivery for every flavour. Callers own the finished copy;
+   * the fetch below is only for routing (channel, conversation, actionUrl).
+   */
+  private async sendStatusChangeNotification(
     ticketId: string,
     recipients: string[],
-    newStatus: string,
     actorId: string,
+    content: {
+      title: string;
+      message: string;
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<void> {
     if (recipients.length === 0) return;
 
@@ -2358,9 +2550,7 @@ class NotificationService {
 
       const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
-      const ticketDisplayId = ticket.xyneId || ticket.id;
-      const title = 'Status Changed';
-      const message = `Ticket '${ticketDisplayId}' status changed to ${newStatus}`;
+      const { title, message } = content;
 
       await Promise.allSettled(
         recipients.map(async (userId) => {
@@ -2389,7 +2579,7 @@ class NotificationService {
               actorId,
               channelId: ticket.channelId,
               conversationId: ticket.conversationId,
-              newStatus,
+              ...(content.metadata ?? {}),
             },
           }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
         }),
@@ -2397,6 +2587,45 @@ class NotificationService {
     } catch (error) {
       logger.error('[NotificationService] Failed to send ticket status change notification:', error);
     }
+  }
+
+  /** A ticket moved stage/status. `ticketDisplayId` is the xyneId the caller already holds. */
+  async sendTicketStatusChangeNotification(
+    ticketId: string,
+    recipients: string[],
+    newStatus: string,
+    actorId: string,
+    ticketDisplayId: string,
+  ): Promise<void> {
+    await this.sendStatusChangeNotification(ticketId, recipients, actorId, {
+      title: 'Status Changed',
+      message: `Ticket '${ticketDisplayId}' status changed to ${newStatus}`,
+      metadata: { newStatus },
+    });
+  }
+
+  /**
+   * A release carrying the dev ticket changed status. Push copy names both
+   * sides - the dev ticket the reader owns and the release carrying it -
+   * because a push arrives outside any thread.
+   */
+  async sendTicketReleaseStatusChangeNotification(
+    ticketId: string,
+    ticketXyneId: string,
+    recipients: string[],
+    actorId: string,
+    release: { id: string; xyneId: string },
+    releaseStatus: TicketStatusV2,
+  ): Promise<void> {
+    await this.sendStatusChangeNotification(ticketId, recipients, actorId, {
+      title: `Release update: ${release.xyneId}`,
+      message: buildReleaseStatusPushMessage(releaseStatus, release.xyneId, ticketXyneId),
+      metadata: {
+        isReleaseUpdate: true,
+        releaseStatus,
+        releaseTicketId: release.id,
+      },
+    });
   }
 
   async sendTicketPriorityChangeNotification(

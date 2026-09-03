@@ -63,9 +63,19 @@ class AppDeskService {
     if (!installedApp) {
       throw new Error(`The app backing this desk no longer exists (install ${installedAppId})`);
     }
-    const outboundConfigured = Boolean(
+    const preference = await this.prisma.emailChannelPreference.findUnique({
+      where: { channelId: conversation.channelId },
+      select: { appWebhookDeliveryEnabled: true },
+    });
+    const outboundConfigured = preference?.appWebhookDeliveryEnabled ?? true;
+    const webhookConfigured = Boolean(
       installedApp.webhookUrl?.trim() && installedApp.app?.signingSecret,
     );
+    if (outboundConfigured && !webhookConfigured) {
+      throw new Error(
+        'This desk delivers replies to the app webhook, but the app has no webhook URL configured. Add one, or turn off "Send replies to app webhook" in Desk Settings.',
+      );
+    }
     const signingSecret = installedApp.app?.signingSecret ?? null;
 
     const replier = await this.prisma.user.findUnique({
@@ -113,7 +123,7 @@ class AppDeskService {
       timestamp: new Date().toISOString(),
     };
 
-    logger.info(`${TAG} ${outboundConfigured ? 'delivering' : 'recording (no outbound webhook)'} DESK_REPLY`, {
+    logger.info(`${TAG} ${outboundConfigured ? 'delivering' : 'recording (webhook delivery disabled)'} DESK_REPLY`, {
       conversationId,
       channelId: conversation.channelId,
       threadId,
@@ -121,6 +131,7 @@ class AppDeskService {
       installedAppId,
       webhookUrl: installedApp?.webhookUrl ?? null,
       outboundConfigured,
+      webhookConfigured,
       ticketId: ticket?.id,
       replierUserId: userId,
       replierName,
@@ -229,7 +240,7 @@ class AppDeskService {
     }
 
     logger.info(
-      `${TAG} ${outboundConfigured ? 'Reply delivered to app webhook' : 'Reply recorded on ticket (desk is receive-only)'}`,
+      `${TAG} ${outboundConfigured ? 'Reply delivered to app webhook' : 'Reply recorded on ticket (webhook delivery disabled)'}`,
       { conversationId, threadId, externalId: ackExternalId, emailId: email.id },
     );
 

@@ -1,14 +1,14 @@
 import { detectPlatform, type Platform } from '../hooks/usePlatform';
 import type { ErrorReportNativeLog } from '../types/electron';
-import { logger } from './logger';
+import { logger, Event as LogEvent, limitLibraryStackFrames } from './logger';
 
 type LogLevel = 'error' | 'window.error' | 'unhandledrejection';
 
 const MAX_LOG_ENTRIES = 500;
 const MAX_ERROR_REPORT_LOG_BYTES = 512 * 1024;
 
-// eslint-disable-next-line no-console
-const originalConsoleError = console.error.bind(console);
+const browserConsole = globalThis.console;
+const originalConsoleError = browserConsole.error.bind(browserConsole);
 
 const logEntries: ErrorReportLogEntry[] = [];
 
@@ -18,6 +18,7 @@ export interface ErrorReportLogEntry {
   timestamp: string;
   level: LogLevel;
   message: string;
+  stack?: string;
 }
 
 export interface ErrorReportContext {
@@ -41,8 +42,7 @@ interface InstallErrorReportLogCollectorOptions {
 
 const serializeValue = (value: unknown): string => {
   if (typeof value === 'string') return value;
-  if (value instanceof Error)
-    return `${value.name}: ${value.message}${value.stack ? `\n${value.stack}` : ''}`;
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
   try {
     return JSON.stringify(value) ?? String(value);
   } catch {
@@ -50,12 +50,16 @@ const serializeValue = (value: unknown): string => {
   }
 };
 
-const appendLogEntry = (level: LogLevel, message: string): void => {
-  logEntries.push({
+const appendLogEntry = (level: LogLevel, message: string, error?: unknown): void => {
+  const entry: ErrorReportLogEntry = {
     timestamp: new Date().toISOString(),
     level,
     message,
-  });
+  };
+  if (error instanceof Error && error.stack) {
+    entry.stack = limitLibraryStackFrames(error.stack);
+  }
+  logEntries.push(entry);
 
   if (logEntries.length > MAX_LOG_ENTRIES) {
     logEntries.splice(0, logEntries.length - MAX_LOG_ENTRIES);
@@ -70,8 +74,11 @@ const getNativeLogs = async (): Promise<ErrorReportNativeLog[]> => {
   try {
     return await window.electronAPI.getErrorReportNativeLogs();
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Failed to collect native Electron logs for error report', error);
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('Failed to collect native Electron logs for error report'),
+      context: [error],
+    });
     return [];
   }
 };
@@ -101,10 +108,13 @@ export const installErrorReportLogCollector = (
 
   isInstalled = true;
 
-  // eslint-disable-next-line no-console
-  console.error = (...args: unknown[]): void => {
+  browserConsole.error = (...args: unknown[]): void => {
     originalConsoleError(...args);
-    appendLogEntry('error', args.map(serializeValue).join(' '));
+    appendLogEntry(
+      'error',
+      args.map(serializeValue).join(' '),
+      args.find(arg => arg instanceof Error),
+    );
     options.onConsoleError?.(args);
   };
 
@@ -118,12 +128,13 @@ export const installErrorReportLogCollector = (
       ]
         .filter(Boolean)
         .join(' | '),
+      event.error,
     );
     options.onWindowError?.(event);
   });
 
   window.addEventListener('unhandledrejection', event => {
-    appendLogEntry('unhandledrejection', serializeValue(event.reason));
+    appendLogEntry('unhandledrejection', serializeValue(event.reason), event.reason);
     options.onUnhandledRejection?.(event);
   });
 };
@@ -158,7 +169,10 @@ export const createErrorReportLogFile = async (): Promise<{
 
   const sessionLogLines =
     errorEntries.length > 0
-      ? errorEntries.map(entry => `[${entry.timestamp}] [${entry.level}] ${entry.message}`)
+      ? errorEntries.map(
+          entry =>
+            `[${entry.timestamp}] [${entry.level}] ${entry.message}${entry.stack ? `\n${entry.stack}` : ''}`,
+        )
       : ['No session logs captured.'];
 
   const nativeLogSections = nativeLogs.flatMap(nativeLog => [

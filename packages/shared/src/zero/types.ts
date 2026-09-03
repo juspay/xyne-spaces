@@ -96,7 +96,6 @@ export enum EntityType {
 }
 
 export enum GuestEntity {
-  PROJECT = 'PROJECT',
   CHANNEL = 'CHANNEL',
   CANVAS = 'CANVAS',
 }
@@ -119,6 +118,7 @@ export enum AttachmentEntityType {
   COLLECTION = 'COLLECTION',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
+  DESK_REPORT = 'DESK_REPORT',
 }
 
 // @ts-ignore TS1294
@@ -350,6 +350,8 @@ export enum ActivityType {
   TAGS = 'TAGS',
   ENTITY = 'ENTITY',
   SUBTICKET_CREATED = 'SUBTICKET_CREATED',
+  SUBTICKET_LINKED = 'SUBTICKET_LINKED',
+  SUBTICKET_UNLINKED = 'SUBTICKET_UNLINKED',
   BOARD = 'BOARD',
   PR = 'PR',
   USER_GROUP_ID = 'USER_GROUP_ID',
@@ -384,6 +386,17 @@ export enum ActivityClassificationJobType {
   SPECIAL_MENTION_AUDIENCE = 'SPECIAL_MENTION_AUDIENCE',
 }
 
+// Lifecycle of a structured message whose state drives UI outside the message
+// bubble. Stored as a string in Postgres so adding a future lifecycle state
+// does not require altering a database enum.
+// @ts-ignore TS1294
+export enum MessageArtifactStatus {
+  ACTIVE = 'active',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  FAILED = 'failed',
+}
+
 // @ts-ignore TS1294
 export enum CallType {
   AUDIO = 'AUDIO',
@@ -406,6 +419,12 @@ export enum CallStatus {
   IN_PROGRESS = 'IN_PROGRESS',
   ENDED = 'ENDED',
   CANCELLED = 'CANCELLED',
+}
+
+// @ts-ignore TS1294
+export enum CallVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
 }
 
 // @ts-ignore TS1294
@@ -473,6 +492,8 @@ export enum AppIncomingWebhookType {
   SLACK = 'SLACK',
   SENTINELONE = 'SENTINELONE',
   AMAZON_SNS = 'AMAZON_SNS',
+  PINGDOM = 'PINGDOM',
+  GCP = 'GCP',
 }
 
 // @ts-ignore TS1294
@@ -618,7 +639,12 @@ export enum NotificationType {
   EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
+  RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
+  COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
+  MAX_WORKLOAD_REACHED = "MAX_WORKLOAD_REACHED",
+  ASSIGNMENT_PAUSED = "ASSIGNMENT_PAUSED",
+  ASSIGNMENT_RESUMED = "ASSIGNMENT_RESUMED",
 }
 
 // @ts-ignore TS1294
@@ -717,6 +743,9 @@ export enum ChannelType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  // SDLC repository channel: system-managed, hidden from the chat surfaces
+  // the same way SUPPORT channels are (inline type checks).
+  SDLC = 'SDLC',
 }
 
 // @ts-ignore TS1294
@@ -951,6 +980,12 @@ export enum SavedConfigVisibility {
 export enum SavedConfigEntityName {
   TICKET = 'TICKET',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
+}
+
+// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// @ts-ignore TS1294
+export enum ViewAccessEntityType {
+  USER = 'USER',
 }
 
 // @ts-ignore TS1294

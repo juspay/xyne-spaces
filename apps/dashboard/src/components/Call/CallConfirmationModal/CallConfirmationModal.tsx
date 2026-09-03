@@ -37,10 +37,12 @@ export const CallConfirmationModal: React.FC<CallConfirmationModalProps> = ({
           label: 'Cancel',
           onClick: onClose,
           variant: 'outline',
+          trackName: 'CANCEL_START_CALL',
         },
         {
           label: 'Okay',
           onClick: onConfirm,
+          trackName: 'CONFIRM_START_CALL',
           className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
           testId: 'confirm-call-button',
         },

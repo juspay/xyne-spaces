@@ -20,6 +20,8 @@ import {
 } from '../../services/DynamicDashboard/dataSourcesAdminService';
 import Input from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
+import { Button } from '../ui/Button/Button';
+import { CaCertificateField } from './CaCertificateField';
 import { SOURCE_TYPES, type SourceType } from './dataSources.constants';
 import {
   connectionSignature,
@@ -381,6 +383,8 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
               </span>
               Use SSL (Recommended for production)
             </label>
+
+            {form.ssl && <CaCertificateField value={form.ca} onChange={ca => setField('ca', ca)} />}
           </div>
         </div>
 
@@ -573,10 +577,12 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
         >
           Previous
         </button>
-        <button
+        <Button
+          variant='default'
           type='button'
           onClick={() => void handleSave()}
           disabled={!canSave}
+          trackId='create_data_source'
           data-track-category='DATA_SOURCE'
           data-track-name='Wizard_Save_Ingest'
           className={`inline-flex items-center gap-1.5 h-9 px-5 rounded-lg text-[13px] leading-[18px] font-medium text-white transition-colors ${
@@ -593,7 +599,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
           ) : (
             'Save & Ingest'
           )}
-        </button>
+        </Button>
       </div>
     </div>
   );

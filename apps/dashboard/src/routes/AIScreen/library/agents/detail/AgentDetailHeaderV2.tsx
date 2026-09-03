@@ -39,7 +39,7 @@ const Action = ({
     className={cn(
       'flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50',
       primary
-        ? 'border-border bg-primary text-primary-foreground hover:bg-primary/90'
+        ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
         : 'border-transparent text-foreground hover:bg-muted',
     )}
   >

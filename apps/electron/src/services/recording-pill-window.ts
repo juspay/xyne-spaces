@@ -26,7 +26,8 @@ let currentTheme: RecordingPillTheme = 'light';
 export type RecordingPillTheme = 'light' | 'dark';
 
 export interface RecordingPillState {
-  startTime: number;
+  starting: boolean;
+  startTime: number | null;
   paused: boolean;
   pauseStartedAt: number | null;
   accumulatedPausedMs: number;
@@ -191,18 +192,33 @@ export function showRecordingPill(state: RecordingPillState): void {
   currentState = state;
   pillRequested = true;
 
-  if (pillWindow && !pillWindow.isDestroyed()) {
-    pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
-    pillWindow.webContents.send('recording-pill:show', currentState);
-    if (!pillWindow.isVisible() || wasHiding) {
-      applyIgnoreMouseEvents(true);
-    }
-    if (!pillWindow.isVisible()) {
-      pillWindow.showInactive();
-    }
+  if (!pillWindow || pillWindow.isDestroyed()) {
+    createPillWindow();
     return;
   }
 
+  if (pillWindow.webContents.isLoading()) return;
+
+  pillWindow.webContents.send('recording-pill:theme-changed', currentTheme);
+  pillWindow.webContents.send('recording-pill:show', currentState);
+  if (!pillWindow.isVisible() || wasHiding) {
+    applyIgnoreMouseEvents(true);
+  }
+  if (!pillWindow.isVisible()) {
+    pillWindow.showInactive();
+  }
+}
+
+/**
+ * Builds the pill window ahead of the first recording so a start never pays
+ * window construction + loadFile on the critical path.
+ */
+export function prewarmRecordingPill(): void {
+  if (pillWindow && !pillWindow.isDestroyed()) return;
+  createPillWindow();
+}
+
+function createPillWindow(): void {
   const pos = getInitialPosition();
 
   pillWindow = new BrowserWindow({
@@ -217,7 +233,9 @@ export function showRecordingPill(state: RecordingPillState): void {
     skipTaskbar: true,
     hasShadow: false,
     focusable: true,
+    fullscreenable: false,
     show: false,
+    paintWhenInitiallyHidden: true,
     type: 'panel',
     webPreferences: {
       nodeIntegration: false,
@@ -323,7 +341,7 @@ export function showRecordingPill(state: RecordingPillState): void {
     }
   });
 
-  log.info('[RecordingPill] Showing recording pill');
+  log.info('[RecordingPill] Pill window created');
 }
 
 export function hideRecordingPill(): void {

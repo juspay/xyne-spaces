@@ -214,8 +214,15 @@ export function transformToolOutput(
 export function parseStreamingContent(content: string): StreamingParsedContent {
   let cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, '');
   cleaned = cleaned.replace(/<think>[\s\S]*/gi, '');
-  cleaned = cleaned.replace(/```json\s*/gi, '');
-  cleaned = cleaned.replace(/```\s*/gi, '');
+
+  const isJsonEnvelope =
+    /^\s*(?:```json)?\s*\{/.test(cleaned) ||
+    cleaned.includes('"summary"') ||
+    cleaned.includes('"keypoints"');
+  if (isJsonEnvelope) {
+    cleaned = cleaned.replace(/```json\s*/gi, '');
+    cleaned = cleaned.replace(/```\s*/gi, '');
+  }
   cleaned = cleaned.trim();
 
   let summary = '';

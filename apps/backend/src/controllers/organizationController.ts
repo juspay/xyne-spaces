@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import { OrganizationRepository, CreateOrganizationInput } from '../database/repositories/organizationRepository';
+import { OrganizationRepository } from '../database/repositories/organizationRepository';
 import { UserRepository } from '../database/repositories/users';
 import { DatabaseClient } from '../database/client';
-import { withWorkspaceScope } from '../database/tenant/context';
+import { runAsSystem } from '../database/tenant/context';
 import { logger } from '@/utils/logger';
 import { invitationService } from '@/services/invitationService';
 import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole, Status } from '@xyne/shared';
@@ -178,78 +178,82 @@ export class OrganizationController {
         throw error;
       }
 
-      const { organization, workspace } = await db.$transaction(async (tx) => {
-        const orgData: CreateOrganizationInput = {
-          name: name.trim(),
-          description: description?.trim(),
-          createdBy: userId,
-        };
-        const organization = await tx.organization.create({
-          data: {
-            orgId,
-            name: orgData.name,
-            description: orgData.description,
-            createdBy: orgData.createdBy,
-          },
-        });
+      // The new workspace/org has no relation to the caller's own workspace, so
+      // tenant ACLs would filter out provisioning reads. Run as system and keep
+      // the DB provisioning writes atomic.
+      const { organization, workspace } = await runAsSystem(async () =>
+        db.$transaction(async (tx) => {
+          // 1. Create organization
+          const organization = await tx.organization.create({
+            data: {
+              orgId,
+              name: name.trim(),
+              description: description?.trim(),
+              createdBy: userId,
+              status: Status.ACTIVE,
+            },
+          });
 
-        const workspace = await tx.workspace.create({
-          data: {
-            orgId: organization.orgId,
-            name: workspaceName.trim(),
-            createdBy: userId,
-            status: Status.ACTIVE,
-            workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-          },
-        });
+          // 2. Create workspace for the org
+          const workspace = await tx.workspace.create({
+            data: {
+              orgId: organization.orgId,
+              name: workspaceName.trim(),
+              createdBy: userId,
+              status: Status.ACTIVE,
+              workspaceType: WorkspaceType.ENTERPRISE,
+              joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
+            },
+          });
 
-        await getEncryptionProvider().provisionEntity({
-          entityId: workspace.id,
-          orgId: workspace.orgId,
-          entityType: 'WORKSPACE',
-        });
+          await getEncryptionProvider().provisionEntity({
+            entityId: workspace.id,
+            orgId: workspace.orgId,
+            entityType: 'WORKSPACE',
+          });
 
-        await tx.project.create({
-          data: {
-            name: 'Direct Messages',
-            code: 'DM',
-            description: 'DM project for direct message channels',
-            type: ProjectType.DM,
+          // 3. Create DM project for the workspace (required by the system)
+          await tx.project.create({
+            data: {
+              name: 'Direct Messages',
+              code: 'DM',
+              description: 'DM project for direct message channels',
+              type: ProjectType.DM,
+              workspaceId: workspace.id,
+              createdBy: userId,
+            },
+          });
+
+          // 4. Link workspace to organization
+          await tx.workspaceOrganization.create({
+            data: {
+              orgId: organization.orgId,
+              workspaceId: workspace.id,
+              role: WorkspaceRole.ADMIN,
+            },
+          });
+
+          // 4b. Seed general channel + default project + board/stages
+          await createCommunityWorkspaceDefaults({
+            db: tx,
             workspaceId: workspace.id,
+            workspaceName: workspace.name,
             createdBy: userId,
-          },
-        });
+          });
 
-        await tx.workspaceOrganization.create({
-          data: {
-            orgId: organization.orgId,
-            workspaceId: workspace.id,
-            role: WorkspaceRole.ADMIN,
-          },
-        });
-
-        await createCommunityWorkspaceDefaults({
-          db: tx,
-          workspaceId: workspace.id,
-          workspaceName: workspace.name,
-          createdBy: userId,
-        });
-
-        // Provisioning writes the owner row for the newly created org, not the caller's own.
-        await withWorkspaceScope(() =>
-          tx.orgMember.create({
+          // 5. Add ownerEmail as org OWNER (email-only, no user account yet)
+          await tx.orgMember.create({
             data: {
               orgId: organization.orgId,
               email: ownerEmail.trim().toLowerCase(),
               role: OrgRole.OWNER,
               invitedBy: userId,
             },
-          }),
-        );
+          });
 
-        return { organization, workspace };
-      });
+          return { organization, workspace };
+        }),
+      );
 
       await organizationDomainService.createDomainMappingForOrg({
         orgId: organization.orgId,
@@ -257,14 +261,15 @@ export class OrganizationController {
         verifiedByUserId: userId,
       });
 
-      // 6. Create and send invitation to the workspace
-      const invitation = await invitationService.createInvitation({
-        email: ownerEmail.trim().toLowerCase(),
-        role: WorkspaceRole.OWNER,
-        workspaceId: workspace.id,
-        invitedBy: userId,
-        orgId: organization.orgId,
-      });
+      const invitation = await runAsSystem(() =>
+        invitationService.createInvitation({
+          email: ownerEmail.trim().toLowerCase(),
+          role: WorkspaceRole.OWNER,
+          workspaceId: workspace.id,
+          invitedBy: userId,
+          orgId: organization.orgId,
+        }),
+      );
 
       await invitationService.sendInvitationEmail({
         to: ownerEmail.trim(),

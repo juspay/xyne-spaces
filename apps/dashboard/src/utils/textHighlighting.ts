@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 import { removeStopwords } from 'stopword';
 
 export interface HighlightMatch {
@@ -447,7 +448,11 @@ export const findHighlightMatches = (
       matches: mergedMatches,
     };
   } catch (error) {
-    console.error('Error in client-side highlighting:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Error in client-side highlighting:'),
+      error: error,
+    });
     return {
       success: false,
       message: error instanceof Error ? error.message : 'Unknown error',

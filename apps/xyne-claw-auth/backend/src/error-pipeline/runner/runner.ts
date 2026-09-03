@@ -1,4 +1,5 @@
 import { CONFIG, ERROR_PIPELINE } from "../../config.js";
+import { errMsg } from "../../lib/errors.js";
 import { prisma } from "../../db.js";
 import { createLogger } from "../../logger.js";
 import { getQueue, type ClaimedItem } from "../queue.js";
@@ -93,7 +94,7 @@ class Runner {
         if (this.agentUserId) break;
         log.warn(`[runner] idle — agent "${ERROR_PIPELINE.agentSlug}" has no spacesAppUserId/ownerUserId; set ERROR_PIPELINE_AGENT_USER_ID to a Bitbucket-connected user`);
       } catch (err) {
-        log.warn(`[runner] idle — agent lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[runner] idle — agent lookup failed: ${errMsg(err)}`);
       }
       await sleep(60_000);
     }
@@ -169,7 +170,7 @@ class Runner {
           await this.process(claimed);
         }
       } catch (err) {
-        log.error(`[runner] ${bucket}: ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`[runner] ${bucket}: ${errMsg(err)}`);
       }
       if (!worked && !this.stopped) await sleep(ERROR_PIPELINE.runnerPollMs);
     }
@@ -318,7 +319,7 @@ class Runner {
       }
       sessionId = parsed.sessionId;
     } catch (err) {
-      log.error(`[runner] dispatch failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`[runner] dispatch failed: ${errMsg(err)}`);
       return null;
     }
 
@@ -338,7 +339,7 @@ class Runner {
       try {
         run = await agentRunRepository.findBySessionId(watchSessionId);
       } catch (err) {
-        log.warn(`[runner] poll error (session ${watchSessionId}): ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[runner] poll error (session ${watchSessionId}): ${errMsg(err)}`);
         continue;
       }
       if (!run) continue; // row not visible yet

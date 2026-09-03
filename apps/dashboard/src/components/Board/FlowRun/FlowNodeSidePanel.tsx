@@ -4,15 +4,21 @@ import { toast } from 'sonner';
 import {
   CircleCheck,
   Archive,
-  ExternalLink,
   GitBranch,
-  MessageSquare,
+  Hash,
+  PanelRight,
   PauseCircle,
   Ticket as TicketIcon,
   X,
   XCircle,
 } from 'lucide-react';
-import { ActivityType, FLOW_STAGE_NAMES, TicketStatusV2, type FlowPlanNode } from '@xyne/shared';
+import {
+  ActivityType,
+  FLOW_STAGE_NAMES,
+  TicketStatusV2,
+  type FlowPlanNode,
+  type FormFields,
+} from '@xyne/shared';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import { getStatusOption } from '../BoardStageConfigScreen/BoardStageConfigScreen.types';
@@ -21,19 +27,47 @@ import { StageFormInlinePanel } from '../../Tickets/StageFormInlinePanel/StageFo
 import { isFlowStepBacklogged, normalizeUserId, type FlowRunTicket } from './flowRun.utils';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useActiveUsers } from '../../../hooks/useUsers';
+import { useUsersById } from '../../../hooks/useUsers';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import UserAvatar, { AvatarSize } from '../../UserAvatar/UserAvatar';
+
+/** Activity payloads this panel reads; `field` is a plain string on the wire. */
+interface FlowActivityValue {
+  field?: string;
+  newValue?: string;
+  fieldName?: string;
+  isAutomation?: boolean;
+}
+
+// The status change and the form write are logged by two independent backend
+// handlers, so a normal Submit's timestamps can land in either order — only an
+// edit past this window is a real post-completion edit.
+const FLOW_FORM_EDIT_GRACE_MS = 10_000;
 
 const FlowStepCompletionInfo: React.FC<{
   ticketId: string;
   status?: TicketStatusV2;
   backlogged?: boolean;
   highlighted?: boolean;
-}> = ({ ticketId, status, backlogged = false, highlighted = false }) => {
+  /** Scopes the "Updated by" byline to this form's own fields. */
+  gateFormId?: string;
+}> = ({ ticketId, status, backlogged = false, highlighted = false, gateFormId = '' }) => {
   const [activities] = useCachedQuery(queries.ticketActivities({ ticketId }));
-  const users = useActiveUsers();
+  const [gateFormFields] = useCachedQuery(queries.getFormFieldsByFormId({ formId: gateFormId }), {
+    enabled: !!gateFormId,
+  });
+  // Includes deactivated users — a completion by a since-removed teammate must
+  // still carry their name, not "Someone".
+  const usersById = useUsersById();
+  const resolveActor = useCallback(
+    (updatedBy: string): { id: string; name: string } => {
+      const id = normalizeUserId(updatedBy) ?? updatedBy;
+      const user = usersById.get(id);
+      return { id, name: user ? getUserDisplayName(user) : 'Someone' };
+    },
+    [usersById],
+  );
   // Stage changes share STATUS activity type, so exclude their stageName rows.
   const activity = useMemo(
     () =>
@@ -53,10 +87,31 @@ const FlowStepCompletionInfo: React.FC<{
       }) ?? null,
     [activities, backlogged, status],
   );
+  // A gate-form value edited by a person after the step completed. The flow
+  // already moved on with the original answers; only the byline changes.
+  const lastEditActivity = useMemo(() => {
+    if (backlogged || status !== TicketStatusV2.COMPLETED || !activity || !gateFormId) return null;
+    const gateFieldNames = new Set(
+      ((gateFormFields ?? []) as Array<FormFields & { globalField?: { fieldName?: string } }>)
+        .map(row => row.globalField?.fieldName ?? row.fieldName)
+        .filter((fieldName): fieldName is string => !!fieldName),
+    );
+    if (gateFieldNames.size === 0) return null;
+    // Activities come back newest-first, so the first match is the latest edit.
+    return (
+      (activities ?? []).find(row => {
+        if (row.activityType !== ActivityType.METADATA) return false;
+        if (row.timestamp <= activity.timestamp + FLOW_FORM_EDIT_GRACE_MS) return false;
+        const value = row.value as FlowActivityValue | null;
+        // 'customField' covers ordinary fields, 'stageFormFile' file fields.
+        if (value?.field !== 'customField' && value?.field !== 'stageFormFile') return false;
+        // Automation writes are not a person revising the answer.
+        if (value.isAutomation) return false;
+        return !!value.fieldName && gateFieldNames.has(value.fieldName);
+      }) ?? null
+    );
+  }, [activities, activity, backlogged, status, gateFormId, gateFormFields]);
   if (!activity) return null;
-  const userId = normalizeUserId(activity.updatedBy) ?? activity.updatedBy;
-  const user = users?.find(candidate => candidate.id === userId) ?? null;
-  const name = user ? getUserDisplayName(user) : 'Someone';
   const verb = backlogged
     ? 'Moved to backlog'
     : status === TicketStatusV2.COMPLETED
@@ -72,21 +127,40 @@ const FlowStepCompletionInfo: React.FC<{
     : status === TicketStatusV2.COMPLETED
       ? 'border-emerald-500/15 bg-emerald-500/[0.05]'
       : 'border-red-500/15 bg-red-500/[0.05]';
-  const when = new Date(activity.timestamp).toLocaleDateString(undefined, {
-    dateStyle: 'medium',
-  });
+  const row = lastEditActivity
+    ? {
+        ...resolveActor(lastEditActivity.updatedBy),
+        verb: 'Updated',
+        verbColor: 'text-amber-600',
+        surfaceColor: 'border-amber-500/15 bg-amber-500/[0.05]',
+        when: new Date(lastEditActivity.timestamp).toLocaleString(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
+        title:
+          'This form was edited after the step completed — the flow already moved on with the original answers.',
+      }
+    : {
+        ...resolveActor(activity.updatedBy),
+        verb,
+        verbColor,
+        surfaceColor,
+        when: new Date(activity.timestamp).toLocaleDateString(undefined, { dateStyle: 'medium' }),
+        title: undefined,
+      };
   return (
     <div
       className={`flex items-center gap-2 border-t ${
-        highlighted ? `${surfaceColor} px-3 py-2.5` : 'border-border/60 pt-2.5'
+        highlighted ? `${row.surfaceColor} px-3 py-2.5` : 'border-border/60 pt-2.5'
       }`}
+      {...(row.title && { title: row.title })}
     >
-      <UserAvatar userId={userId} showActiveStatus={false} size={AvatarSize.SM} />
+      <UserAvatar userId={row.id} showActiveStatus={false} size={AvatarSize.SM} />
       <p className='min-w-0 truncate text-[11px] text-muted-foreground'>
-        <span className={`font-semibold ${verbColor}`}>{verb} by</span>{' '}
-        <span className='font-medium text-foreground'>{name}</span>
+        <span className={`font-semibold ${row.verbColor}`}>{row.verb} by</span>{' '}
+        <span className='font-medium text-foreground'>{row.name}</span>
         <span className='mx-1 text-border'>·</span>
-        {when}
+        {row.when}
       </p>
     </div>
   );
@@ -102,12 +176,11 @@ export interface FlowNodeSelection {
 interface FlowNodeSidePanelProps {
   node: FlowNodeSelection;
   backlogSteps?: FlowNodeSelection[];
-  projectId: string;
-  boardId: string;
   /** True when a pause above this step (main ticket or a pass-over) locks it */
   locked: boolean;
   backlogBlockedReason?: string | undefined;
   onClose: () => void;
+  onShowDetails?: (ticket: FlowRunTicket) => void;
   onChangeStatus: (ticketId: string, statusV2: TicketStatusV2) => Promise<void>;
   onBacklog: (ticketId: string) => Promise<void>;
   onSelectBacklog?: (step: FlowNodeSelection) => void;
@@ -140,11 +213,10 @@ const ROOT_ACTIONS: Partial<Record<TicketStatusV2, Array<{ label: string; to: Ti
 export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
   node,
   backlogSteps = [],
-  projectId,
-  boardId,
   locked,
   backlogBlockedReason,
   onClose,
+  onShowDetails,
   onChangeStatus,
   onBacklog,
   onSelectBacklog,
@@ -240,33 +312,37 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
         </div>
         {ticket && (
           <div className='flex items-center gap-0.5'>
-            <Tooltip content='Open ticket' side='bottom' sideOffset={6}>
-              <button
-                type='button'
-                aria-label='Open ticket'
-                onClick={() => void navigate(`/projects/${projectId}/${boardId}/${ticket.id}`)}
-                data-track-category='flow_board'
-                data-track-name='open_node_ticket_header'
-                className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-              >
-                <ExternalLink size={14} />
-              </button>
-            </Tooltip>
-            {ticket.channelId && ticket.conversationId && (
-              <Tooltip content='Open chat' side='bottom' sideOffset={6}>
+            {/* The thread panel only renders its close button for a ticket
+                thread — without a conversation it would open with no way out. */}
+            {onShowDetails && ticket.conversationId && (
+              <Tooltip content='Show details' side='bottom' sideOffset={6}>
                 <button
                   type='button'
-                  aria-label='Open chat'
+                  aria-label='Show details'
+                  onClick={() => onShowDetails(ticket)}
+                  data-track-category='flow_board'
+                  data-track-name='show_node_details'
+                  className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                >
+                  <PanelRight size={14} />
+                </button>
+              </Tooltip>
+            )}
+            {ticket.channelId && ticket.conversationId && (
+              <Tooltip content='Go to channel' side='bottom' sideOffset={6}>
+                <button
+                  type='button'
+                  aria-label='Go to channel'
                   onClick={() =>
                     void navigate(
                       `/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}`,
                     )
                   }
                   data-track-category='flow_board'
-                  data-track-name='open_node_chat_header'
+                  data-track-name='go_to_node_channel'
                   className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                 >
-                  <MessageSquare size={14} />
+                  <Hash size={14} />
                 </button>
               </Tooltip>
             )}
@@ -499,6 +575,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                   highlighted
                   ticketId={ticket.id}
                   status={TicketStatusV2.COMPLETED}
+                  gateFormId={formId}
                 />
               </div>
             )}

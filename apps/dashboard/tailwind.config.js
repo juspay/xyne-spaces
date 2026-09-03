@@ -23,6 +23,7 @@ export default {
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         mono: ['"Geist Mono"', 'monospace'],
+        serif: ['"Libre Baskerville"', 'Georgia', 'serif'],
       },
       maxWidth: {
         'ai-content': '50rem',
@@ -124,6 +125,9 @@ export default {
           failure: 'var(--status-failure)',
           paused: 'var(--status-paused)',
         },
+        'claw-ai': {
+          fg: 'var(--claw-ai-fg)',
+        },
         sidebar: {
           DEFAULT: 'var(--sidebar)',
           foreground: 'var(--sidebar-foreground)',
@@ -156,6 +160,27 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       keyframes: {
+        // Incoming-call modal: the radar ping behind a solo caller's avatar.
+        'call-radar': {
+          '0%': { transform: 'scale(1)', opacity: '0.45' },
+          '100%': { transform: 'scale(1.92)', opacity: '0' },
+        },
+        'live-ping': {
+          '0%': { transform: 'scale(1)', opacity: '0.55' },
+          '70%, 100%': { transform: 'scale(2.6)', opacity: '0' },
+        },
+        'live-pulse': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.45' },
+        },
+        'call-card-in': {
+          from: { opacity: '0', transform: 'scale(0.96) translateY(6px)' },
+          to: { opacity: '1', transform: 'scale(1) translateY(0)' },
+        },
+        'call-overlay-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
         'accordion-down': {
           from: {
             height: '0',
@@ -179,6 +204,18 @@ export default {
         fadeLeft: {
           '0%': { opacity: '0', transform: 'translateX(32px)' },
           '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        railTravel: {
+          '0%': { left: '0%', opacity: '0' },
+          '12%': { opacity: '1' },
+          '88%': { opacity: '1' },
+          '100%': { left: '100%', opacity: '0' },
+        },
+        railTravelVertical: {
+          '0%': { top: '0%', opacity: '0' },
+          '12%': { opacity: '1' },
+          '88%': { opacity: '1' },
+          '100%': { top: '100%', opacity: '0' },
         },
         'slide-in-up': {
           from: {
@@ -250,6 +287,11 @@ export default {
         },
       },
       animation: {
+        'call-radar': 'call-radar 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'live-ping': 'live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'live-pulse': 'live-pulse 2s ease-in-out infinite',
+        'call-card-in': 'call-card-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+        'call-overlay-in': 'call-overlay-in 150ms linear',
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'slide-in-up': 'slide-in-up 0.2s ease-in forwards',

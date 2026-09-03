@@ -6,9 +6,52 @@ import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyn
 import { logger } from '../utils/logger';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 import { DatabaseClient } from '@/database/client';
+import type { UserWithMappings } from '../types/database';
 
 const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
+
+/**
+ * The row fields a user-search caller receives. Kept broad so existing consumers keep
+ * working; `providerUserId` and `metadata` are held back — the first is the external
+ * identity-provider subject, the second is free-form and not part of any caller's contract.
+ */
+function toUserSearchResult(user: UserWithMappings) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    picture: user.picture,
+    displayName: user.displayName,
+    status: user.status,
+    userType: user.userType,
+    authProvider: user.authProvider,
+    workspaceId: user.workspaceId,
+    role: user.role,
+    orgMemberId: user.orgMemberId,
+    leftAt: user.leftAt,
+    statusEmoji: user.statusEmoji,
+    statusContent: user.statusContent,
+    statusExpiryAt: user.statusExpiryAt,
+    lastActiveAt: user.lastActiveAt,
+    notificationsPausedUntil: user.notificationsPausedUntil,
+    assignmentUnavailableUntil: user.assignmentUnavailableUntil,
+    calendarVisibility: user.calendarVisibility,
+    userGroups: user.userGroupMappings.reduce((acc, mapping) => {
+      if (mapping.userGroup) {
+        acc.push({
+          id: mapping.userGroup.id,
+          name: mapping.userGroup.name,
+          alias: mapping.userGroup.alias,
+          description: mapping.userGroup.description,
+        });
+      }
+      return acc;
+    }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
 
 export class UserManagementController {
   private static instance: UserManagementController;
@@ -472,7 +515,7 @@ export class UserManagementController {
       if ('data' in result) {
         // Paginated result
         const response = {
-          data: result.data,
+          data: result.data.map(toUserSearchResult),
           pagination: {
             page: result.pagination.page,
             pageSize: result.pagination.pageSize,
@@ -484,25 +527,7 @@ export class UserManagementController {
       } else {
         // Non-paginated result
         const response = {
-          data: result.map(user => ({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            status: user.status,
-            userGroups: user.userGroupMappings.reduce((acc, mapping) => {
-              if (mapping.userGroup) {
-                acc.push({
-                  id: mapping.userGroup.id,
-                  name: mapping.userGroup.name,
-                  alias: mapping.userGroup.alias,
-                  description: mapping.userGroup.description
-                });
-              }
-              return acc;
-            }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt
-          })),
+          data: result.map(toUserSearchResult),
           pagination: {
             page: 1,
             pageSize: result.length,
@@ -1017,6 +1042,52 @@ export class UserManagementController {
       const type = questionnaireType.trim();
       const questionnairePayload = payload as Prisma.InputJsonValue;
       const prisma = DatabaseClient.getInstance();
+      const normalizedEmail =
+        type === 'onboarding'
+          ? (
+              await prisma.user.findUnique({
+                where: { id: userId },
+                select: { email: true },
+              })
+            )?.email.toLowerCase().trim()
+          : undefined;
+
+      if (type === 'onboarding' && !normalizedEmail) {
+        res.status(400).json({ error: 'User email is required for onboarding questionnaire' });
+        return;
+      }
+
+      if (type === 'onboarding') {
+        const saved = await prisma.questionnaireResponse.upsert({
+          where: {
+            email_questionnaireType: {
+              email: normalizedEmail!,
+              questionnaireType: type,
+            },
+          },
+          update: {
+            workspaceId,
+            userId,
+            payload: questionnairePayload,
+            updatedAt: new Date(),
+          },
+          create: {
+            workspaceId,
+            userId,
+            email: normalizedEmail,
+            questionnaireType: type,
+            payload: questionnairePayload,
+          },
+        });
+
+        res.status(200).json({
+          id: saved.id,
+          questionnaireType: saved.questionnaireType,
+          payload: saved.payload,
+        });
+        return;
+      }
+
       const saved = await prisma.questionnaireResponse.upsert({
         where: {
           workspaceId_questionnaireType_userId: {
@@ -1032,6 +1103,7 @@ export class UserManagementController {
         create: {
           workspaceId,
           userId,
+          email: null,
           questionnaireType: type,
           payload: questionnairePayload,
         },

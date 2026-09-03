@@ -124,6 +124,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           createdBy: fullTicket.createdBy,
           userGroupId: fullTicket.userGroupId,
           ticketType: fullTicket.ticketType,
+          isStageOverdue: Boolean((fullTicket as typeof fullTicket & { isStageOverdue?: boolean | null }).isStageOverdue),
           eta: fullTicket.eta?.getTime() ?? null,
           createdAt: fullTicket.createdAt.getTime(),
           tags: [],
@@ -277,6 +278,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
             notificationRecipients,
             args.stageName as string,
             actorId,
+            ticket.xyneId || ticketId,
           );
           logger.info(`[TicketsSideEffectHandler] Sent status change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
         }

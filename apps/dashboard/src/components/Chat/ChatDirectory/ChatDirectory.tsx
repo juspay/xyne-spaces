@@ -9,6 +9,8 @@ import {
   type ComponentType,
 } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { Radar as RadarIcon } from 'lucide-react';
+import { useRadarEnabled } from '../../../hooks/radarCacConfig';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById } from '../../../shortcuts';
@@ -62,6 +64,7 @@ import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Dialog, { cn } from '../../ui/Dialog';
+import { Button } from '../../ui/Button';
 
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -76,7 +79,13 @@ import {
   DEFAULT_CONTAINER,
   DM_CONTAINER,
 } from './useChannelSectionDnd';
-import { ChannelSection, ChannelType, ChannelScopeType, isDeskChannelType } from '@xyne/shared';
+import {
+  ChannelSection,
+  ChannelType,
+  ChannelScopeType,
+  isDeskChannelType,
+  NotificationLevel,
+} from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Accordion } from 'radix-ui';
@@ -86,6 +95,7 @@ import SectionSettingsMenu, { MENU_ROW } from './SectionSettingsMenu';
 import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
@@ -218,6 +228,10 @@ const ChatDirectory = ({
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
+  // Radar rollout is runtime CAC (radar_config), not a build-time flag:
+  // enabling it must not need a dashboard rebuild, and the pilot runs on an
+  // allowedEmails subset first.
+  const radarEnabled = useRadarEnabled(auth.user?.email);
   const { selfDmChannelId, landingChannelId } = auth;
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
@@ -229,6 +243,7 @@ const ChatDirectory = ({
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
+  const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
   const [sectionToDelete, setSectionToDelete] = useState<ChannelSection | null>(null);
   const [sectionToManage, setSectionToManage] = useState<ChannelSection | null>(null);
@@ -359,7 +374,12 @@ const ChatDirectory = ({
     const allOrdered = [...starred, ...channels, ...directMessages];
     let hasUnread = false;
     for (const c of allOrdered) {
-      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
+      if (
+        isDeskChannelType(c.type) ||
+        c.type === ChannelType.SUPPORT ||
+        c.type === ChannelType.SDLC
+      )
+        continue;
 
       const count = unreadCounts[c.id] ?? 0;
 
@@ -389,11 +409,17 @@ const ChatDirectory = ({
   const unreadChannelIds = useMemo(() => {
     const ids = new Set<string>();
     for (const c of flatSidebarChannels ?? []) {
-      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
+      if (
+        isDeskChannelType(c.type) ||
+        c.type === ChannelType.SUPPORT ||
+        c.type === ChannelType.SDLC
+      )
+        continue;
       const status = allChannelsUserStatus.find(
         s => s.channelId === c.id && s.userId === context.userID,
       );
       const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
+      if (status?.desktopNotificationLevel === NotificationLevel.NONE) continue;
       const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
       let isUnread = hasUnreadCount;
       if (!isDM) {
@@ -656,6 +682,7 @@ const ChatDirectory = ({
                 <ChatPlus className='size-4' />
               </span>
               <span className='flex-1 min-w-0 text-left truncate block'>New Message</span>
+              <ShortcutHint shortcut='global.composeMessage' />
             </button>
             <button
               className={cn(
@@ -675,6 +702,7 @@ const ChatDirectory = ({
                 <Subtask className='size-4' />
               </span>
               <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
+              <ShortcutHint shortcut='global.openThreads' />
               {threadCount > 0 && (
                 <span className='size-5 flex items-center justify-center shrink-0'>
                   <Badge
@@ -802,6 +830,26 @@ const ChatDirectory = ({
                 </span>
               )}
             </button>
+            {radarEnabled && (
+              <button
+                className={cn(
+                  'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                  location.pathname.includes('/chat/dir/radar')
+                    ? 'text-sidebar-accent-foreground font-semibold bg-sidebar-accent'
+                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+                )}
+                onClick={() => {
+                  void navigate('/chat/dir/radar');
+                }}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_RADAR'
+              >
+                <span className='size-4 flex items-center justify-center shrink-0'>
+                  <RadarIcon className='size-4' />
+                </span>
+                <span className='flex-1 min-w-0 text-left truncate block'>Radar</span>
+              </button>
+            )}
           </div>
 
           <div className='py-3 w-full hidden md:block' />
@@ -888,7 +936,10 @@ const ChatDirectory = ({
                     onRename={setSectionToRename}
                     onDelete={setSectionToDelete}
                     onManageChannels={setSectionToManage}
-                    onCreateSection={() => setShowAddSectionForm(true)}
+                    onCreateSection={() => {
+                      setAddSectionSource('channels');
+                      setShowAddSectionForm(true);
+                    }}
                     onMoveChannelToSection={moveChannelToSection}
                     onSetSortOrder={(sectionId, order) => {
                       void zero.mutate(
@@ -1033,7 +1084,10 @@ const ChatDirectory = ({
                             label: 'New section',
                             icon: FolderPlus,
                             trackName: 'CREATE_NEW_SECTION',
-                            onSelect: () => setShowAddSectionForm(true),
+                            onSelect: () => {
+                              setAddSectionSource('channels');
+                              setShowAddSectionForm(true);
+                            },
                           },
                         ]}
                       />
@@ -1123,6 +1177,15 @@ const ChatDirectory = ({
                           trackName: 'CREATE_DIRECT_MESSAGE',
                           onSelect: handleAddDirectMessage,
                         },
+                        {
+                          label: 'New section',
+                          icon: FolderPlus,
+                          trackName: 'CREATE_NEW_SECTION',
+                          onSelect: () => {
+                            setAddSectionSource('dms');
+                            setShowAddSectionForm(true);
+                          },
+                        },
                       ]}
                     />
                   </div>
@@ -1198,6 +1261,7 @@ const ChatDirectory = ({
               channels={sectionableChannels}
               existingNames={(channelSections ?? []).map(s => s.name)}
               lastSectionPosition={lastSectionPosition}
+              prioritizeType={addSectionSource === 'dms' ? 'dm' : 'channel'}
               onClose={() => setShowAddSectionForm(false)}
             />
           )}
@@ -1270,14 +1334,16 @@ const ChatDirectory = ({
               >
                 Cancel
               </button>
-              <button
+              <Button
+                variant='ghost'
                 onClick={handleConfirmDeleteSection}
+                trackId='delete_channel_section'
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='CONFIRM_DELETE_SECTION'
                 className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors'
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         </Dialog>
@@ -1346,6 +1412,8 @@ const ChatDirectory = ({
           <div className='flex items-center justify-between gap-2'>
             <button
               onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT'
               className='h-8 px-4 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30 '
             >
               Chat
@@ -1353,6 +1421,8 @@ const ChatDirectory = ({
             <div className='z-30'>
               <button
                 onClick={() => setIsCommandMenuOpen(true)}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_COMMAND_MENU'
                 className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
               >
                 <SearchDefault size={16} />
@@ -1364,11 +1434,15 @@ const ChatDirectory = ({
         {/* Desktop */}
         {/* <div className=' sticky top-0 z-50 hidden min-[500px]:block pt-4 bg-sidebar-background'>
           <div className='pb-6 flex items-center justify-between'>
-            <button onClick={() => void navigate('/chat')} className='cursor-pointer'>
+            <button onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT' className='cursor-pointer'>
               <h2 className='text-black font-inter text-base font-semibold leading-normal'>Chat</h2>
             </button>
             <button
               onClick={() => setIsCommandMenuOpen(true)}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_COMMAND_MENU'
               className='size-8 items-center justify-center hidden min-[500px]:flex cursor-pointer'
             >
               <SearchDefault size={16} />
@@ -1379,7 +1453,7 @@ const ChatDirectory = ({
             label='Activity'
             {...(activityCount > 0 && { count: activityCount })}
             onClick={() => {
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              posthogService.capture(EVENTS.INITIATE_ACTION, {
                 type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_VIEWED,
               });
               void navigate('/chat/dir/activity');
@@ -1390,7 +1464,7 @@ const ChatDirectory = ({
             label='Thread'
             disabled={true}
             onClick={() => {
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              posthogService.capture(EVENTS.INITIATE_ACTION, {
                 type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_VIEWED,
               });
               void navigate('/chat/threads');
@@ -1402,6 +1476,9 @@ const ChatDirectory = ({
             onClick={() => {
               void navigate('/chat/bookmarks');
             }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_BOOKMARKS'
+            data-track-metadata={JSON.stringify({ overdueRemindersCount })}
           />
           <hr className='border-border mt-4' />
         </div> */}

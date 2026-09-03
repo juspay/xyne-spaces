@@ -28,7 +28,10 @@ export class GmailWatchProvider extends BaseWatchProvider {
       throw new Error(`No Gmail source found for id ${subscription.id}`);
     }
 
-    if (source.sourceType !== ExternalSourcePlatform.GOOGLE) {
+    if (
+      source.sourceType !== ExternalSourcePlatform.GOOGLE &&
+      source.sourceType !== 'google-channel-email'
+    ) {
       throw new Error(`Source ${source.name} is not a Gmail source`);
     }
 
@@ -65,7 +68,7 @@ export class GmailWatchProvider extends BaseWatchProvider {
    */
   async findExpiring(_beforeDate: Date): Promise<SubscriptionRecord[]> {
     const sources = await this.externalSourceRepo.findAll({
-      sourceType: ExternalSourcePlatform.GOOGLE,
+      sourceType: { in: [ExternalSourcePlatform.GOOGLE, 'google-channel-email'] },
       isActive: true,
     });
 

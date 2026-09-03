@@ -231,6 +231,25 @@ export interface SlackConversationsListResponse {
 	};
 }
 
+// ========== users.conversations ==========
+
+export interface SlackUsersConversationsRequest {
+	user?: string;
+	types?: string;
+	limit?: number;
+	cursor?: string;
+	exclude_archived?: boolean;
+	team_id?: string;
+}
+
+export interface SlackUsersConversationsResponse {
+	ok: true;
+	channels: SlackChannelObject[];
+	response_metadata?: {
+		next_cursor: string;
+	};
+}
+
 // ========== conversations.open ==========
 
 export interface SlackConversationsOpenResponse {

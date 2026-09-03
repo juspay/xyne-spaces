@@ -24,32 +24,109 @@ const injectContext = winston.format((info) => {
   return info;
 });
 
-const SAFE_ERROR_FIELDS = ['code', 'status', 'statusCode', 'errno', 'syscall'] as const;
 const ERROR_PAYLOAD_KEYS = new Set(['config', 'request', 'response', 'headers', 'options']);
 const REDACTED = '[REDACTED]';
+const MAX_LIBRARY_STACK_FRAMES = 3;
+const SAFE_ERROR_FIELDS = ['code', 'status', 'statusCode', 'errno', 'syscall'] as const;
 
-export function serializeError(err: Error): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    name: err.name,
-    message: err.message,
-    stack: err.stack,
-  };
-  for (const field of SAFE_ERROR_FIELDS) {
-    const value = (err as unknown as Record<string, unknown>)[field];
-    if (typeof value === 'string' || typeof value === 'number') {
-      out[field] = value;
+const redact = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(
+      /\b(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
+      '$1=[REDACTED]'
+    );
+
+const isLibraryStackFrame = (line: string): boolean =>
+  /(?:[/\\]node_modules[/\\]|\bnode:[^)\s]+|\bat (?:async )?internal[/\\])/.test(line);
+
+export const limitLibraryStackFrames = (stack: string): string => {
+  let libraryFrames = 0;
+
+  return stack
+    .split('\n')
+    .filter((line, index) => {
+      if (index === 0 || !isLibraryStackFrame(line)) return true;
+      libraryFrames += 1;
+      return libraryFrames <= MAX_LIBRARY_STACK_FRAMES;
+    })
+    .join('\n');
+};
+
+const stackFor = (error: Error): string | undefined =>
+  error.stack ? redact(limitLibraryStackFrames(error.stack)) : undefined;
+
+const findError = (value: unknown, depth = 0): Error | undefined => {
+  if (value instanceof Error) return value;
+  if (!value || typeof value !== 'object') return undefined;
+
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (ERROR_PAYLOAD_KEYS.has(key)) continue;
+    if (item instanceof Error) return item;
+    if (depth === 0) {
+      const nestedError = findError(item, depth + 1);
+      if (nestedError) return nestedError;
     }
   }
-  return out;
+  return undefined;
+};
+
+export function serializeError(value: unknown): Record<string, unknown> {
+  if (!(value instanceof Error)) {
+    return {
+      name: 'NonError',
+      message: redact(typeof value === 'string' ? value : String(value)),
+    };
+  }
+
+  const serialized: Record<string, unknown> = {
+    name: value.name,
+    message: redact(value.message),
+    stack: stackFor(value),
+  };
+  for (const field of SAFE_ERROR_FIELDS) {
+    const fieldValue = (value as unknown as Record<string, unknown>)[field];
+    if (typeof fieldValue === 'string' || typeof fieldValue === 'number') {
+      serialized[field] = fieldValue;
+    }
+  }
+  return serialized;
+}
+
+/**
+ * Keep global rejection handlers safe even when a promise is rejected with an
+ * arbitrary object. Passing that object to Winston directly can make its JSON
+ * formatter throw (for example, when the value contains a circular reference).
+ */
+export function describeRejection(reason: unknown): Record<string, unknown> {
+  if (reason instanceof Error) return serializeError(reason);
+
+  let value: string;
+  try {
+    value = typeof reason === 'object' ? Object.prototype.toString.call(reason) : String(reason);
+  } catch {
+    value = '[Unrepresentable value]';
+  }
+
+  return {
+    message: 'Non-error rejection',
+    type: typeof reason,
+    value,
+  };
 }
 
 const normalizeErrors = winston.format((info) => {
+  const infoRecord = info as Record<string, unknown>;
+  if (typeof infoRecord.stack === 'string') {
+    infoRecord.stack = redact(limitLibraryStackFrames(infoRecord.stack));
+  }
+
   for (const key of Object.keys(info)) {
-    const value = (info as Record<string, unknown>)[key];
+    const value = infoRecord[key];
     if (value instanceof Error) {
-      (info as Record<string, unknown>)[key] = serializeError(value);
+      infoRecord[key] = serializeError(value);
     } else if (ERROR_PAYLOAD_KEYS.has(key)) {
-      (info as Record<string, unknown>)[key] = REDACTED;
+      infoRecord[key] = REDACTED;
     }
   }
   return info;
@@ -192,8 +269,38 @@ export const logger = winston.createLogger({
   },
 });
 
+const originalError = logger.error.bind(logger) as (...args: unknown[]) => winston.Logger;
+
+const captureErrorLog = (...args: unknown[]): winston.Logger => {
+  if (!args.some((arg) => findError(arg))) {
+    const message = typeof args[0] === 'string' ? args[0] : String(args[0]);
+    const callSiteError = new Error(message);
+    Error.captureStackTrace?.(callSiteError, captureErrorLog);
+    const lastArgument = args[args.length - 1];
+    const callback = typeof lastArgument === 'function' ? args.pop() : undefined;
+    const stack = stackFor(callSiteError);
+
+    if (args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])) {
+      const info = args[0] as Record<string, unknown>;
+      args[0] = { ...info, stack: info['stack'] ?? stack };
+    } else if (args[1] && typeof args[1] === 'object' && !Array.isArray(args[1])) {
+      // Winston only merges the first splat object into the log info. Put the
+      // captured stack into that object instead of appending a second one.
+      const metadata = args[1] as Record<string, unknown>;
+      args[1] = { ...metadata, stack: metadata['stack'] ?? stack };
+    } else {
+      args.push({ stack });
+    }
+
+    return callback ? originalError(...args, callback) : originalError(...args);
+  }
+  return originalError(...args);
+};
+
+logger.error = captureErrorLog as typeof logger.error;
+
 export const stream = {
   write: (message: string) => {
     logger.info(message.trim());
   },
-}; 
+};

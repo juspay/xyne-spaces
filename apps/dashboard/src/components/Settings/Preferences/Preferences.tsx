@@ -13,14 +13,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Search,
+  AudioLines,
   Monitor,
   Smartphone,
   LayoutGrid,
   Shield,
   Eye,
   EyeOff,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
+import { ResolutionQualityHd, Spinner } from '@xyne/icons';
 import {
   NotificationLevel,
   MAX_NOTIFICATION_KEYWORDS,
@@ -33,6 +36,13 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { Switch } from '../../ui/Switch';
 import { RadioGroup, Radio } from '../../ui/RadioGroup';
 import { Button } from '../../ui/Button/Button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../ui/dropdown-menu';
+import { Tooltip } from '../../ui/Tooltip';
 
 import { usePlatform } from '../../../hooks/usePlatform';
 import type { Theme } from '../../../hooks/useTheme';
@@ -47,6 +57,8 @@ import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
+import { DailyBriefToggle } from '../DailyBriefToggle';
+import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -59,11 +71,13 @@ import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
 } from '../../../hooks/useCallMediaQualitySettings';
+import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
-import { RecordingLayout } from '../../../stores/recordingStore';
+import { disconnectCalendar } from '../../../services/clients/calendarApi';
+import { toast } from 'sonner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
@@ -72,6 +86,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
   { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
+  { id: 'recordings', label: 'Recordings', icon: <AudioLines className='size-4' /> },
   {
     id: 'messaging',
     label: 'Messaging',
@@ -79,7 +94,6 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
-  { id: 'search', label: 'Search', icon: <Search className='size-4' /> },
   {
     id: 'toolbar',
     label: 'Toolbar',
@@ -115,27 +129,70 @@ const QualitySelect: FC<{
   label: string;
   value: CallMediaQuality;
   onChange: (value: CallMediaQuality) => void;
-}> = ({ id, label, value, onChange }) => (
-  <div className='flex items-center justify-between gap-4'>
-    <label htmlFor={id} className='text-sm font-medium text-foreground'>
-      {label}
-    </label>
-    <select
-      id={id}
-      value={value}
-      onChange={event => onChange(event.target.value as CallMediaQuality)}
-      className='h-8 min-w-32 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-      data-track-category='PREFERENCES'
-      data-track-name={id}
-    >
-      {CALL_MEDIA_QUALITY_OPTIONS.map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label} - {option.description}
-        </option>
-      ))}
-    </select>
-  </div>
-);
+  options?: typeof CALL_MEDIA_QUALITY_OPTIONS;
+  disabled?: boolean;
+  action?: ReactNode;
+}> = ({
+  id,
+  label,
+  value,
+  onChange,
+  options = CALL_MEDIA_QUALITY_OPTIONS,
+  disabled = false,
+  action,
+}) => {
+  const selected = options.find(option => option.value === value) ?? options[0];
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <span id={`${id}-label`} className='text-sm font-medium text-foreground'>
+        {label}
+      </span>
+      <div className='flex items-center gap-2'>
+        {action}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild disabled={disabled}>
+            <button
+              id={id}
+              type='button'
+              disabled={disabled}
+              aria-labelledby={`${id}-label ${id}`}
+              className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background'
+              data-track-category='PREFERENCES'
+              data-track-name={id}
+            >
+              <span className='truncate'>
+                {selected?.label}
+                {selected && (
+                  <span className='text-muted-foreground'> - {selected.description}</span>
+                )}
+              </span>
+              <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end' className='min-w-40'>
+            {options.map(option => (
+              <DropdownMenuItem
+                key={option.value}
+                onClick={() => onChange(option.value)}
+                className='flex items-center justify-between gap-3'
+                data-track-category='PREFERENCES'
+                data-track-name={`${id}-${option.value}`}
+              >
+                <span>
+                  {option.label}{' '}
+                  <span className='text-muted-foreground'>- {option.description}</span>
+                </span>
+                {option.value === value && (
+                  <Check className='size-3.5 shrink-0 text-primary' aria-hidden />
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+};
 
 // ─── Appearance ─────────────────────────────────────────────────────────────
 const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
@@ -219,16 +276,18 @@ const NotificationKeywordsCard: FC = () => {
           {keywords.map(keyword => (
             <Badge key={keyword} variant='primary' className='flex items-center gap-1.5 pr-1'>
               <span className='text-xs'>{keyword}</span>
-              <button
+              <Button
                 type='button'
+                variant='ghost'
                 onClick={() => removeKeyword(keyword)}
+                trackId='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
                 data-track-name='RemoveNotificationKeyword'
               >
                 <X className='h-3 w-3' />
-              </button>
+              </Button>
             </Badge>
           ))}
         </div>
@@ -278,9 +337,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                trackId='set_global_desktop_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -291,7 +353,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -304,9 +366,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                trackId='set_global_mobile_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -317,7 +382,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -467,212 +532,182 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 // ─── Calls ──────────────────────────────────────────────────────────────────
 
-// Visual preview for transcript layout - bullet points with lines
-const TranscriptPreview: FC = () => (
-  <div className='w-32 h-20 flex-shrink-0 rounded-lg bg-muted/60 border border-border p-3 flex flex-col justify-center gap-2'>
-    {/* Line with bullet */}
-    <div className='flex items-center gap-2'>
-      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
-      <div className='h-1.5 w-[85%] rounded-full bg-border' />
-    </div>
-    <div className='flex items-center gap-2'>
-      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
-      <div className='h-1.5 w-[70%] rounded-full bg-border' />
-    </div>
-    <div className='flex items-center gap-2'>
-      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
-      <div className='h-1.5 w-[78%] rounded-full bg-border' />
-    </div>
-    <div className='flex items-center gap-2'>
-      <div className='w-1.5 h-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0' />
-      <div className='h-1.5 w-[60%] rounded-full bg-border' />
-    </div>
-  </div>
-);
+const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const {
+    maxHeight: maxCameraHeight,
+    isDetecting,
+    detect: detectCameraQuality,
+  } = useMaxCameraHeight();
+  const videoQualityOptions = filterQualityOptionsByMax(
+    CALL_MEDIA_QUALITY_OPTIONS,
+    maxCameraHeight,
+    state.callVideoQuality,
+  );
 
-// Visual preview for split layout - two panels side by side
-const SplitPreview: FC = () => (
-  <div className='w-32 h-20 flex-shrink-0 rounded-lg bg-muted/60 border border-border p-1.5 flex gap-1.5'>
-    {/* Left panel - transcript lines */}
-    <div className='flex-1 rounded bg-background border border-border/50 p-2 flex flex-col justify-center gap-1.5'>
-      <div className='h-1 w-[90%] rounded-full bg-border' />
-      <div className='h-1 w-3/4 rounded-full bg-border' />
-      <div className='h-1 w-[85%] rounded-full bg-border' />
-      <div className='h-1 w-[65%] rounded-full bg-border' />
-    </div>
-    {/* Right panel - notes with colored header */}
-    <div className='flex-1 rounded bg-background border border-border/50 p-2 flex flex-col gap-1.5'>
-      <div className='h-1.5 w-4/5 rounded-full bg-action-primary' />
-      <div className='h-1 w-[90%] rounded-full bg-border mt-0.5' />
-      <div className='h-1 w-[70%] rounded-full bg-border' />
-      <div className='h-1 w-4/5 rounded-full bg-border' />
-    </div>
-  </div>
-);
+  const handleDisconnectCalendar = async () => {
+    setIsDisconnecting(true);
+    try {
+      await disconnectCalendar('GOOGLE');
+      toast.success('Calendar disconnected. Reconnect to grant updated permissions.');
+    } catch {
+      toast.error('Failed to disconnect calendar. Please try again.');
+    } finally {
+      setIsDisconnecting(false);
+    }
+  };
 
-// Visual preview for notes layout - single notes panel
-const NotesPreview: FC = () => (
-  <div className='w-32 h-20 flex-shrink-0 rounded-lg bg-muted/60 border border-border p-2.5 flex items-center justify-center'>
-    <div className='w-full h-full rounded bg-background border border-border/50 p-2.5 flex flex-col gap-1.5'>
-      {/* Colored header bar */}
-      <div className='h-1.5 w-3/4 rounded-full bg-action-primary' />
-      {/* Content lines */}
-      <div className='h-1 w-[90%] rounded-full bg-border mt-1' />
-      <div className='h-1 w-[70%] rounded-full bg-border' />
-      <div className='h-1 w-4/5 rounded-full bg-border' />
-      <div className='h-1 w-3/5 rounded-full bg-border' />
-    </div>
-  </div>
-);
+  return (
+    <div className='space-y-6'>
+      <SectionHeader title='Calls' subtitle='Configure your default call join settings' />
 
-interface LayoutOption {
-  value: RecordingLayout;
-  title: string;
-  description: string;
-  Preview: FC;
-}
-
-const LAYOUT_OPTIONS: LayoutOption[] = [
-  {
-    value: 'transcript',
-    title: 'Transcript',
-    description: 'Full-width live transcript',
-    Preview: TranscriptPreview,
-  },
-  {
-    value: 'split',
-    title: 'Split',
-    description: 'Transcript alongside your notes',
-    Preview: SplitPreview,
-  },
-  {
-    value: 'notes',
-    title: 'Notes',
-    description: 'Notes document only',
-    Preview: NotesPreview,
-  },
-];
-
-const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => (
-  <div className='space-y-6'>
-    <SectionHeader title='Calls' subtitle='Configure your default call join settings' />
-
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Join with microphone turned off</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>Mute your mic when joining a call</p>
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Join with microphone turned off</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>Mute your mic when joining a call</p>
+        </div>
+        <Switch
+          id='call-join-muted'
+          checked={state.callJoinMuted}
+          onCheckedChange={state.setCallJoinMuted}
+        />
       </div>
-      <Switch
-        id='call-join-muted'
-        checked={state.callJoinMuted}
-        onCheckedChange={state.setCallJoinMuted}
-      />
-    </div>
 
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Join with camera turned off</p>
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Join with camera turned off</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Disable your camera when joining a call
+          </p>
+        </div>
+        <Switch
+          id='call-join-without-video'
+          checked={state.callJoinWithoutVideo}
+          onCheckedChange={state.setCallJoinWithoutVideo}
+        />
+      </div>
+
+      <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Call media quality</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Target capture quality for new camera and screen-share tracks.
+          </p>
+        </div>
+        <QualitySelect
+          id='call-video-quality'
+          label='Video'
+          value={state.callVideoQuality}
+          onChange={state.setCallVideoQuality}
+          options={videoQualityOptions}
+          disabled={maxCameraHeight === null}
+          action={
+            maxCameraHeight === null && (
+              <Tooltip content="Detect your camera's max supported resolution" side='top'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='iconSm'
+                  disabled={isDetecting}
+                  onClick={detectCameraQuality}
+                  aria-label='Detect camera quality'
+                  data-track-category='PREFERENCES'
+                  data-track-name='DetectCameraQuality'
+                >
+                  {isDetecting ? (
+                    <Spinner className='size-3.5 animate-spin' />
+                  ) : (
+                    <ResolutionQualityHd className='size-4' />
+                  )}
+                </Button>
+              </Tooltip>
+            )
+          }
+        />
+        <QualitySelect
+          id='call-screen-share-quality'
+          label='Screen share'
+          value={state.callScreenShareQuality}
+          onChange={state.setCallScreenShareQuality}
+        />
+      </div>
+
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            {state.canSwitchRecordingVersion
+              ? 'Switch between the classic and redesigned recording interface on this device.'
+              : 'Stop the active recording before switching experiences.'}
+          </p>
+        </div>
+        <Switch
+          id='recording-version-v2'
+          aria-label='Use new recording experience'
+          checked={state.recordingVersion === 'v2'}
+          disabled={!state.canSwitchRecordingVersion}
+          onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
+        />
+      </div>
+
+      <MenuBarIconToggle />
+
+      <RecordingPillToggle />
+
+      {/* Calendar connection */}
+      <div className='pt-2'>
+        <p className='text-sm font-semibold text-foreground'>Calendar</p>
         <p className='text-xs text-muted-foreground mt-0.5'>
-          Disable your camera when joining a call
+          Disconnect to revoke access and reconnect with updated permissions.
         </p>
       </div>
-      <Switch
-        id='call-join-without-video'
-        checked={state.callJoinWithoutVideo}
-        onCheckedChange={state.setCallJoinWithoutVideo}
-      />
+      <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Disconnect Calendar</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Stops calendar sync and clears the stored connection.
+          </p>
+        </div>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={isDisconnecting}
+          onClick={() => void handleDisconnectCalendar()}
+          trackId='disconnect_calendar'
+          data-track-category='PREFERENCES'
+          data-track-name='DisconnectCalendar'
+        >
+          {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+        </Button>
+      </div>
     </div>
+  );
+};
+
+const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
+  <div className='space-y-6'>
+    <SectionHeader
+      title='Recordings'
+      subtitle='Configure how your recording summaries are generated'
+    />
 
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>
-        <p className='text-sm font-medium text-foreground'>Call media quality</p>
+        <p className='text-sm font-medium text-foreground'>LLM summary generation model</p>
         <p className='text-xs text-muted-foreground mt-0.5'>
-          Target capture quality for new camera and screen-share tracks.
+          Which model tier generates your recording summaries and titles. Fast is quicker; Thinking
+          is higher quality but slower.
         </p>
       </div>
-      <QualitySelect
-        id='call-video-quality'
-        label='Video'
-        value={state.callVideoQuality}
-        onChange={state.setCallVideoQuality}
-      />
-      <QualitySelect
-        id='call-screen-share-quality'
-        label='Screen share'
-        value={state.callScreenShareQuality}
-        onChange={state.setCallScreenShareQuality}
-      />
-    </div>
-
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          {state.canSwitchRecordingVersion
-            ? 'Switch between the classic and redesigned recording interface on this device.'
-            : 'Stop the active recording before switching experiences.'}
-        </p>
-      </div>
-      <Switch
-        id='recording-version-v2'
-        aria-label='Use new recording experience'
-        checked={state.recordingVersion === 'v2'}
-        disabled={!state.canSwitchRecordingVersion}
-        onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
-      />
-    </div>
-
-    <MenuBarIconToggle />
-
-    <RecordingPillToggle />
-
-    {/* Recording section divider */}
-    <div className='pt-2'>
-      <p id='recording-tab-view-label' className='text-sm font-semibold text-foreground'>
-        Recording tab view
-      </p>
-      <p className='text-xs text-muted-foreground mt-0.5'>
-        Which view opens by default when notes are created during a recording
-      </p>
-    </div>
-
-    {/* Layout options */}
-    <div className='space-y-3' role='radiogroup' aria-labelledby='recording-tab-view-label'>
-      {LAYOUT_OPTIONS.map(option => {
-        const isSelected = state.recordingDefaultLayout === option.value;
-        return (
-          <button
-            key={option.value}
-            type='button'
-            role='radio'
-            aria-checked={isSelected}
-            onClick={() => state.setRecordingDefaultLayout(option.value)}
-            className={cn(
-              'w-full flex items-center gap-4 p-3 rounded-xl border transition-all duration-150',
-              isSelected
-                ? 'border-action-primary bg-action-primary/5'
-                : 'border-border bg-muted/30 hover:bg-muted/50',
-            )}
-            data-track-category='PREFERENCES'
-            data-track-name={`SelectRecordingLayout_${option.value}`}
-          >
-            <option.Preview />
-            <div className='flex-1 text-left min-w-0'>
-              <p className='text-sm font-medium text-foreground'>{option.title}</p>
-              <p className='text-xs text-muted-foreground mt-0.5'>{option.description}</p>
-            </div>
-            {/* Radio indicator */}
-            <div
-              className={cn(
-                'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors duration-150',
-                isSelected ? 'border-action-primary' : 'border-border',
-              )}
-            >
-              {isSelected && <div className='w-2.5 h-2.5 rounded-full bg-action-primary' />}
-            </div>
-          </button>
-        );
-      })}
+      <RadioGroup
+        value={state.summaryModelPreference}
+        onChange={value =>
+          state.setSummaryModelPreference(value === 'thinking' ? 'thinking' : 'fast')
+        }
+      >
+        <Radio value='fast'>Fast (default)</Radio>
+        <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
+      </RadioGroup>
     </div>
   </div>
 );
@@ -763,18 +798,36 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
 const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
     <SectionHeader title='Launch' subtitle='Configure your startup experience' />
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          Start with the Xyne AI landing page instead of chat
-        </p>
+    <div className='p-3 rounded-lg border border-border bg-muted/30'>
+      <div className='flex items-center justify-between gap-4'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Start with the Xyne AI landing page instead of chat
+          </p>
+        </div>
+        <Switch
+          id='ai-landing-default'
+          checked={state.aiLandingDefault}
+          onCheckedChange={state.setAiLandingDefault}
+        />
       </div>
-      <Switch
-        id='ai-landing-default'
-        checked={state.aiLandingDefault}
-        onCheckedChange={state.setAiLandingDefault}
-      />
+      <DailyBriefToggle available={state.aiLandingDefault} />
+      <div className='mt-3 border-t border-border pt-3'>
+        <div className='flex items-center justify-between gap-4'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
+            <p className='mt-0.5 text-xs text-muted-foreground'>
+              Hide the sidebar when a chat is building an app
+            </p>
+          </div>
+          <Switch
+            id='app-mode-collapse-sidebar'
+            checked={state.appModeCollapseSidebar}
+            onCheckedChange={state.setAppModeCollapseSidebar}
+          />
+        </div>
+      </div>
     </div>
     <ClawOverlayToggle />
   </div>
@@ -918,6 +971,7 @@ const PasswordSection: FC = () => {
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
           className='w-full'
+          trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
         >
@@ -935,6 +989,8 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
       <div className='space-y-3'>
+        <IntentSuggestionsToggle />
+
         <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
           <p className='text-sm font-medium text-foreground'>Show send indicators</p>
           <Switch
@@ -1015,32 +1071,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   );
 };
 
-// ─── Search ─────────────────────────────────────────────────────────────────
-const SearchSection: FC<{ state: PreferencesState }> = ({ state }) => (
-  <div className='space-y-4'>
-    <SectionHeader
-      title='Search'
-      subtitle='Choose how search opens when you click the search bar or press ⌘K'
-    />
-    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
-      <RadioGroup
-        value={state.searchMode}
-        onChange={value => state.setSearchMode(value as 'popup' | 'screen')}
-      >
-        <Radio value='popup' subtext='Opens a floating modal — fast navigation and inline results'>
-          Quick search popup
-        </Radio>
-        <Radio
-          value='screen'
-          subtext='Opens the search results page with filters for type, sender, channel, and sort'
-        >
-          Full search screen
-        </Radio>
-      </RadioGroup>
-    </div>
-  </div>
-);
-
 // ─── Toolbar ────────────────────────────────────────────────────────────────
 const ToolbarSection: FC<{ state: PreferencesState }> = () => {
   const items = useVisibleNavigationItems();
@@ -1092,9 +1122,9 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   availability: AvailabilitySection,
   voice: VoiceSection,
   calls: CallsSection,
+  recordings: RecordingsSection,
   messaging: MessagingSection,
   launch: LaunchSection,
-  search: SearchSection,
   toolbar: ToolbarSection,
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,

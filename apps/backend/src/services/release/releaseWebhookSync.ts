@@ -94,11 +94,23 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
       return;
     }
 
+    // A multi-repo release ticket lives only on its PRIMARY board; a merge into a
+    // non-primary repo reaches its release via release_repositories, not boardId.
+    const repoRows = await db.releaseRepository.findMany({
+      where: { mainReleaseBoardId: { in: boardIds } },
+      select: { releaseId: true, branch: true, deployedCommit: true, newCommit: true },
+    });
+    const repoRowByReleaseId = new Map(repoRows.map((r) => [r.releaseId, r]));
+    const releaseIdsForRepo = [...repoRowByReleaseId.keys()];
+
     // Candidate release/hotfix tickets, newest first, scoped to the webhook's workspace.
     const ticketWhere = {
-      boardId: { in: boardIds },
       ticketType: { in: [BaseTicketType.Release, BaseTicketType.Hotfix] },
       isArchived: false,
+      OR: [
+        { boardId: { in: boardIds } },
+        ...(releaseIdsForRepo.length ? [{ id: { in: releaseIdsForRepo } }] : []),
+      ],
     };
     const tickets = await db.ticket.findMany({
       where: { ...ticketWhere, workspaceId },
@@ -132,12 +144,24 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
     // 3. First (most recent) ticket whose stored branch matches the PR base branch.
     const formsRepo = new FormsRepository();
     for (const ticket of tickets) {
-      const formValues = await formsRepo.getFormEntityValuesByEntityId(ticket.id, FormEntityType.TICKET);
-      const branch = String(formValues['branch'] ?? '').trim();
+      // Prefer this repo's release_repositories row (the ticket's scalar form
+      // values describe only the primary repo); fall back for legacy single-repo.
+      const repoRow = repoRowByReleaseId.get(ticket.id);
+      let branch: string;
+      let deployedCommitId: string;
+      let newCommitId: string;
+      if (repoRow) {
+        branch = repoRow.branch.trim();
+        deployedCommitId = repoRow.deployedCommit.trim();
+        newCommitId = repoRow.newCommit.trim();
+      } else {
+        const formValues = await formsRepo.getFormEntityValuesByEntityId(ticket.id, FormEntityType.TICKET);
+        branch = String(formValues['branch'] ?? '').trim();
+        deployedCommitId = String(formValues['deployedCommitId'] ?? '').trim();
+        newCommitId = String(formValues['newCommitId'] ?? '').trim();
+      }
       if (branch !== baseBranch) continue;
 
-      const deployedCommitId = String(formValues['deployedCommitId'] ?? '').trim();
-      const newCommitId = String(formValues['newCommitId'] ?? '').trim();
       if (!deployedCommitId || !newCommitId) {
         // No analyzed range yet (e.g. a just-created release ticket); try the
         // next candidate rather than abandoning the whole sync.
@@ -160,6 +184,8 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
           conversationId: ticket.conversationId,
           userId: bot?.id || ticket.createdBy,
           channelId: ticket.channelId || undefined,
+          // Scalar range — used only when the release has no release_repositories
+          // rows; hotfixOverride below supplies the per-repo delta otherwise.
           deployedCommitId: newCommitId,
           newCommitId: mergeCommitSha!,
           branch,
@@ -167,6 +193,7 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
           userName: bot?.name || 'System',
           workspaceId: ticket.workspaceId,
           hotfixSync: true,
+          hotfixOverride: { boardIds, mergeCommitSha: mergeCommitSha! },
         });
         if (result.success) {
           logger.info(`[${source}] Synced hotfix (${newCommitId.slice(0, 8)}...${mergeCommitSha!.slice(0, 8)}) for ${ticket.xyneId}`);

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 import React, { type ReactElement } from 'react';
 import {
   useState,
@@ -39,8 +40,9 @@ import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
 import { AgentSelector } from './AgentSelector';
 import { ContextPillRow } from './ContextPillRow';
+import { RecordingTranscriptModal } from './RecordingTranscriptModal';
 import { CONTEXT_PICKER_TOGGLE_ATTR } from './ContextPicker';
-import { ModelSelector } from './ModelSelector';
+import { ModelThinkingSelector } from '../../../AIScreen/ModelThinkingSelector';
 import type { ClawAgentModel } from '../../../../services/clawAgentModelsService';
 import type { AgentOption } from './AgentSelector';
 import {
@@ -53,6 +55,7 @@ import { MentionSelector } from '../../../ui/Selectors';
 import { XyneAIPlusMenu } from './XyneAIPlusMenu';
 import type { MentionResult } from '@xyne/shared';
 import { usePlatform } from '../../../../hooks/usePlatform';
+import { posthogService } from '../../../../services/Analytics/posthogService';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
@@ -77,6 +80,7 @@ import type { Channel } from '@xyne/shared';
 import { ChannelVisibility } from '@xyne/shared';
 import type { DisplaySearchResult } from '../../../../types/search';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
+import { Button } from '../../../ui/Button/Button';
 
 // Browser context interface
 export interface BrowserContext {
@@ -163,6 +167,9 @@ export interface XyneAIInputBoxProps {
   models?: ClawAgentModel[];
   /** The agent's configured model, shown against the default row. */
   defaultModel?: string | null;
+  /** Per-message thinking level for the combined model+thinking menu. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  onSelectThinking?: (v: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null) => void;
   /** Currently pinned model, or null for the agent's default. */
   selectedModel?: string | null;
   onSelectModel?: (model: string | null) => void;
@@ -185,6 +192,14 @@ export interface XyneAIInputBoxProps {
   fileScopes?: { id: string; name: string }[];
   /** Replace the selected file set (id = each file's Vespa docId / fileId UUID). */
   onFileScopesChange?: (fileScopes: { id: string; name: string }[]) => void;
+  /** Folders scoped in from the collection picker. Sent to claw-auth as a
+   *  single 'folder' attached_context pointer per id — NOT expanded to a
+   *  recursive file list here (xyneAIControllerV2.ts doesn't do that);
+   *  claw-auth resolves it itself, at Vespa-query time, since Vespa's
+   *  collectionId filter only ever matches a doc's ROOT collection and
+   *  can't filter on a folder id directly. */
+  folderScopes?: { id: string; name: string }[];
+  onFolderScopesChange?: (folderScopes: { id: string; name: string }[]) => void;
   compactToolbar?: boolean;
 }
 
@@ -258,6 +273,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       kbOpenNonce,
       fileScopes = [],
       onFileScopesChange,
+      folderScopes = [],
+      onFolderScopesChange,
       onUserTagsChange,
       isOnboarding = false,
       selectedAgentSlug = null,
@@ -267,6 +284,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       defaultModel = null,
       selectedModel = null,
       onSelectModel,
+      thinkingLevel = null,
+      onSelectThinking,
       collectionsList: collectionsListProp = [],
       agentKbGrants,
       compactToolbar = false,
@@ -351,11 +370,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     useEffect(() => {
       if (kbOpenNonce === undefined) return;
       if (kbOpenNonce === lastSeenOpenNonce.current) return;
-      lastSeenOpenNonce.current = kbOpenNonce;
-      if (!kbCollectionId) return;
-      autoAddedCollectionRemoved.current = false;
+      if (!kbCollectionId) {
+        lastSeenOpenNonce.current = kbOpenNonce;
+        return;
+      }
+      // collectionsList (Zero query) can still be hydrating on a fresh
+      // sidebar mount — don't mark this nonce as handled until the
+      // collection is actually found, so this effect retries on the next
+      // collectionsList update instead of silently dropping the chip.
       const collection = collectionsList.find(c => c.id === kbCollectionId);
       if (!collection) return;
+      lastSeenOpenNonce.current = kbOpenNonce;
+      autoAddedCollectionRemoved.current = false;
       const newCollection = [{ id: collection.id, name: collection.name }];
       setSelectedCollections(newCollection);
       onSelectedCollectionsChange?.(newCollection.map(c => c.id));
@@ -602,6 +628,35 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       [fileScopes, onFileScopesChange, navStack, onSelectedCollectionsChange],
     );
 
+    const handleFolderSingleClick = useCallback(
+      (folder: { id: string; name: string }) => {
+        if (collectionClickTimer.current) return; // a double-click is in progress
+        collectionClickTimer.current = setTimeout(() => {
+          collectionClickTimer.current = null;
+          const isSelected = folderScopes.some(f => f.id === folder.id);
+          onFolderScopesChange?.(
+            isSelected
+              ? folderScopes.filter(f => f.id !== folder.id)
+              : [...folderScopes, { id: folder.id, name: folder.name }],
+          );
+          if (!isSelected) {
+            // Same rationale as handleToggleFile: keep the folder's root
+            // collection in scope so the backend can resolve the folder id.
+            const col = navStack[0];
+            if (col) {
+              setSelectedCollections(prev => {
+                if (prev.some(c => c.id === col.id)) return prev;
+                const updated = [...prev, col];
+                onSelectedCollectionsChange?.(updated.map(c => c.id));
+                return updated;
+              });
+            }
+          }
+        }, 220);
+      },
+      [folderScopes, navStack, onFolderScopesChange, onSelectedCollectionsChange],
+    );
+
     // Thread info state - track if user has removed it
     const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
 
@@ -615,6 +670,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
     // Browser context state
     const [browserContext, setBrowserContext] = useState<BrowserContext | null>(null);
+    // Recording pill → its transcript, read in place over the composer.
+    const [transcriptCallId, setTranscriptCallId] = useState<string | null>(null);
 
     // Update activeThreadInfo when threadInfo prop changes
     useEffect(() => {
@@ -638,7 +695,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
         // Validate context data for security
         if (!context || typeof context !== 'object') {
-          console.warn('[XyneAI] Invalid browser context received');
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_warn',
+            message: String('[XyneAI] Invalid browser context received'),
+          });
           return;
         }
 
@@ -651,7 +711,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         const sanitizedTitle = String(context.title || '').slice(0, 500);
 
         if (!sanitizedText || !sanitizedUrl) {
-          console.warn('[XyneAI] Browser context missing required fields');
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_warn',
+            message: String('[XyneAI] Browser context missing required fields'),
+          });
           return;
         }
 
@@ -669,7 +732,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         try {
           sessionStorage.removeItem('xyne-ai-browser-context');
         } catch (error) {
-          console.error('[XyneAI] Failed to clear browser context from storage:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[XyneAI] Failed to clear browser context from storage:'),
+            error: error,
+          });
         }
 
         // Don't auto-populate - let user type their own question
@@ -692,7 +759,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           );
         }
       } catch (error) {
-        console.error('[XyneAI] Failed to parse browser context from storage:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAI] Failed to parse browser context from storage:'),
+          error: error,
+        });
       }
 
       return () => {
@@ -811,12 +882,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
     };
 
-    // Recordings have a real linkable detail route; fall back to the shared
-    // conversation when the search result didn't carry the recording id.
+    // The transcript is what the pill actually attached, so show it in a modal
+    // rather than routing away from the half-written question. Falls back to the
+    // shared conversation when the search result didn't carry the recording id.
     const handleRecordingContextClick = (recording: SelectedRecording): void => {
       if (recording.externalId) {
-        void navigate(`/recordings/${recording.externalId}`);
-        if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
+        setTranscriptCallId(recording.externalId);
         return;
       }
       handleTranscriptContextClick(recording);
@@ -995,6 +1066,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
             // Otherwise, submit the message
             event.preventDefault();
+            // Keyboard submit is invisible to autocapture; emit it explicitly.
+            posthogService.capture('ai_query_submit', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
             onSubmit();
             return true;
           }
@@ -1265,9 +1341,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
               // Validate that detected MIME type matches file.type
               if (detectedMimeType !== file.type) {
-                console.warn(
-                  `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
-                );
+                logger.warn(LogEvent.FRONTEND_ERROR, {
+                  type: 'migrated_console_warn',
+                  message: String(
+                    `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
+                  ),
+                });
               }
 
               // Validate base64 format
@@ -1395,9 +1474,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
                 // Validate that detected MIME type matches file.type
                 if (detectedMimeType !== file.type) {
-                  console.warn(
-                    `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
-                  );
+                  logger.warn(LogEvent.FRONTEND_ERROR, {
+                    type: 'migrated_console_warn',
+                    message: String(
+                      `[XyneAI] MIME type mismatch for ${file.name}: file.type=${file.type}, detected=${detectedMimeType}`,
+                    ),
+                  });
                 }
 
                 // Validate base64 format
@@ -1672,6 +1754,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           {...(onRemoveChannel && { onRemoveChannel })}
           fileScopes={fileScopes}
           {...(onFileScopesChange && { onFileScopesChange })}
+          folderScopes={folderScopes}
+          {...(onFolderScopesChange && { onFolderScopesChange })}
           collections={selectedCollections}
           onRemoveCollection={handleRemoveCollection}
           attachments={selectedAttachments}
@@ -1689,6 +1773,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           onRecordingClick={handleRecordingContextClick}
           activities={selectedActivities}
           {...(onActivitiesChange && { onActivitiesChange })}
+        />
+
+        <RecordingTranscriptModal
+          callId={transcriptCallId}
+          onClose={() => setTranscriptCallId(null)}
         />
 
         {/* MentionSelector for "@" trigger in editor (user mentions) */}
@@ -1837,16 +1926,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       />
                     </div>
                   )}
-                  {/* Model selector — hides itself when the agent exposes no
-                      switchable models. */}
+                  {/* Combined model + thinking menu — same component as the
+                      /ai composer (Recommended row, search, Thinking flyout). */}
                   {onSelectModel && (
                     <div className='flex items-center shrink-0'>
-                      <ModelSelector
-                        selectedModel={selectedModel}
+                      <ModelThinkingSelector
                         models={models}
                         defaultModel={defaultModel}
-                        onSelect={onSelectModel}
-                        compact={true}
+                        selectedModel={selectedModel}
+                        onSelectModel={onSelectModel}
+                        thinkingLevel={thinkingLevel}
+                        onSelectThinking={onSelectThinking ?? (() => {})}
+                        disabled={false}
                       />
                     </div>
                   )}
@@ -1860,8 +1951,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
-                  <button
+                  <Button
+                    variant='ghost'
                     onClick={isStreaming ? onAbort : onSubmit}
+                    trackId={isStreaming ? 'abort_message' : 'submit_message'}
                     disabled={!isStreaming && !inputValue.trim()}
                     className={`rounded-full transition-colors shrink-0 p-2 ${
                       isStreaming
@@ -1878,7 +1971,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     ) : (
                       <ArrowUp className='w-4 h-4' />
                     )}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -1931,21 +2024,28 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   </div>
                 ) : (
                   <div className='py-1'>
-                    {currentSubfolders.map(folder => (
-                      <button
-                        key={folder.id}
-                        type='button'
-                        onDoubleClick={() => openNode(folder)}
-                        className='w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent'
-                        title='Double-click to open'
-                        data-track-category='XyneAI'
-                        data-track-name='OPEN_KB_FOLDER'
-                      >
-                        <FolderDefault className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
-                        <span className='flex-1 truncate'>{folder.name}</span>
-                        <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
-                      </button>
-                    ))}
+                    {currentSubfolders.map(folder => {
+                      const isSelected = folderScopes.some(f => f.id === folder.id);
+                      return (
+                        <button
+                          key={folder.id}
+                          type='button'
+                          onClick={() => handleFolderSingleClick(folder)}
+                          onDoubleClick={() => openNode(folder)}
+                          className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
+                            isSelected ? 'bg-accent' : ''
+                          }`}
+                          title='Click to select · double-click to open'
+                          data-track-category='XyneAI'
+                          data-track-name='SELECT_KB_FOLDER'
+                        >
+                          <FolderDefault className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
+                          <span className='flex-1 truncate'>{folder.name}</span>
+                          {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
+                          <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
+                        </button>
+                      );
+                    })}
                     {currentFiles.map(file => {
                       const isSelected = fileScopes.some(f => f.id === file.fileId);
                       return (
@@ -1960,9 +2060,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           data-track-name='SELECT_FILE_SCOPE'
                           data-track-metadata={JSON.stringify({ fileId: file.fileId })}
                         >
-                          <FileText className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                          <FileText className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                           <span className='flex-1 truncate'>{file.name}</span>
-                          {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                          {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                         </button>
                       );
                     })}
@@ -1998,9 +2098,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         data-track-name='SELECT_COLLECTION'
                         data-track-metadata={JSON.stringify({ collectionId: collection.id })}
                       >
-                        <Notebook className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                        <Notebook className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                         <span className='flex-1 truncate'>{collection.name}</span>
-                        {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                         <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                       </button>
                     );

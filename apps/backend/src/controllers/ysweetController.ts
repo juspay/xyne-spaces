@@ -1,9 +1,38 @@
 import { Request, Response } from 'express';
-import { DocumentManager } from '@y-sweet/sdk';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
+import { ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
+import { DatabaseClient, readReplicaDb } from '@/database/client';
+import { superpositionClient } from '@/services/superpositionClient';
+
+/**
+ * y-sweet polls this every ~10s per open connection, so it's read-heavy and
+ * latency-tolerant (it's a revalidation, not a first-time access decision) —
+ * route it to the read replica when available so it can't add load to the
+ * primary as connection count scales, same pattern as analyticsRepository.
+ */
+async function getValidateDbInstance() {
+  let useReadReplica = false;
+  try {
+    useReadReplica = await superpositionClient.getBooleanValue(
+      'YSWEET_USE_READ_REPLICA',
+      false,
+      {}
+    );
+  } catch (error) {
+    logger.error('[YSweet] Failed to read YSWEET_USE_READ_REPLICA flag, defaulting to primary DB:', error);
+  }
+  if (!useReadReplica) {
+    return DatabaseClient.getInstance();
+  }
+  if (readReplicaDb) {
+    return readReplicaDb;
+  }
+  logger.info('[YSweet] Read replica not available, using main database for validateAccess');
+  return DatabaseClient.getInstance();
+}
 
 const TOKEN_VALID_SECONDS = 3600;
 
@@ -190,20 +219,17 @@ export class YSweetController {
 
       const authorization = canvasAuthService.getYSweetAuthorizationLevel(canEdit);
 
-      logger.debug('[YSweet] Using ENV URL for DocumentManager', {
+      logger.debug('[YSweet] Using ENV URL for y-sweet', {
         ysweetUrl: config.ysweet.url,
       });
-      const manager = new DocumentManager(config.ysweet.url);
 
-      const clientToken = await manager.getOrCreateDocAndToken(
-        canonicalDocId,
-        {
-          authorization,
-          validForSeconds: TOKEN_VALID_SECONDS,
-        }
-      );
+      const clientToken = await ysweetGetOrCreateDocAndToken(canonicalDocId, {
+        authorization,
+        userId,
+        validForSeconds: TOKEN_VALID_SECONDS,
+      });
 
-      logger.debug('[YSweet] Received client token from DocumentManager', {
+      logger.debug('[YSweet] Received client token from y-sweet', {
         baseUrl: clientToken.baseUrl,
         url: clientToken.url,
         docId: clientToken.docId,
@@ -223,6 +249,59 @@ export class YSweetController {
       res.status(500).json({
         error: 'Failed to get client token'
       });
+    }
+  }
+
+  /**
+   * Called by the y-sweet server (not the browser) to re-validate that a
+   * userId still has access to a docId before serving/mutating content or
+   * upgrading a WebSocket connection. No session cookie is available here.
+   */
+  async validateAccess(req: Request, res: Response): Promise<void> {
+    try {
+      const { docId, userId, authorization } = req.body;
+
+      if (
+        !docId ||
+        typeof docId !== 'string' ||
+        !userId ||
+        typeof userId !== 'string' ||
+        (authorization !== 'full' && authorization !== 'read-only')
+      ) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: "docId, userId are required strings and authorization must be 'full' or 'read-only'",
+        });
+        return;
+      }
+
+      const authResult = await canvasAuthService.checkCanvasAccess(docId, userId, await getValidateDbInstance());
+
+      // The connection was issued at `authorization` level (full = edit,
+      // read-only = view). If the user's edit access was revoked since, a
+      // still-open full-access connection must be denied even though they
+      // may still have view access — checking `hasAccess` alone would let
+      // an editor downgraded to viewer keep writing.
+      const stillAllowed =
+        authorization === 'full' ? authResult.canEdit : authResult.hasAccess;
+
+      if (!authResult.canvas || !stillAllowed) {
+        logger.warn('[YSweet] validateAccess denied', {
+          userId,
+          docId,
+          authorization,
+          canEdit: authResult.canEdit,
+          canView: authResult.canView,
+          hasAccess: authResult.hasAccess,
+        });
+        res.status(403).json({ allowed: false });
+        return;
+      }
+
+      res.status(200).json({ allowed: true });
+    } catch (error) {
+      logger.error('Error in validateAccess:', error);
+      res.status(500).json({ error: 'Failed to validate access' });
     }
   }
 }

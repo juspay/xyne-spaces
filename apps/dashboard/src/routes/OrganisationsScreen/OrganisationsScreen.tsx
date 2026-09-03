@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { ReactElement, useEffect, useRef, useState } from 'react';
 import {
   Building2,
@@ -148,8 +149,16 @@ const OrgMembersSection = ({
   z,
 }: OrgMembersSectionProps): ReactElement => {
   const [members] = useCachedQuery(queries.getOrgMembers({ orgId }), { enabled: true });
-  console.log('[DEBUG] OrgMembersSection query', { orgId });
-  console.log('[DEBUG] OrgMembersSection render', { orgId, members }); // Debug log to trace renders and data
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[DEBUG] OrgMembersSection query'),
+    context: [{ orgId }],
+  });
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[DEBUG] OrgMembersSection render'),
+    context: [{ orgId, members }],
+  }); // Debug log to trace renders and data
 
   const [emailInput, setEmailInput] = useState('');
   const [selectedRole, setSelectedRole] = useState<OrgRole>(OrgRole.MEMBER);

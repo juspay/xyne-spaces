@@ -28,6 +28,7 @@ import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Tooltip from '../../ui/Tooltip';
+import { Button } from '../../ui/Button/Button';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -49,6 +50,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { SupportChannelBadge } from '../SupportChannelBadge';
+import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
 
 interface ChannelItemV2Props {
   channel: VisibleChannel;
@@ -85,6 +87,9 @@ const ChannelItemV2 = memo(
     const isDM = isDMChannel(channel.scopeType);
 
     const hasActiveCall = useChannelHasActiveCall(channel.id);
+    const hasSlashCommandArtifactSideEffect = useChannelHasSlashCommandArtifactSideEffect(
+      channel.id,
+    );
 
     const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
 
@@ -193,6 +198,12 @@ const ChannelItemV2 = memo(
           <span className='flex h-4 w-4 shrink-0 items-center justify-center'>{getIcon()}</span>
           <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
             <span className='visual-regression-hide truncate'>{displayName}</span>
+            {hasSlashCommandArtifactSideEffect && (
+              <span className='relative flex size-2 shrink-0' aria-label='Active incident'>
+                <span className='absolute inline-flex size-full animate-ping rounded-full bg-orange-500 opacity-70' />
+                <span className='relative inline-flex size-2 rounded-full bg-orange-500' />
+              </span>
+            )}
             {isSupportChannel && <SupportChannelBadge />}
             {is1on1DM && (
               <StatusIndicator
@@ -265,6 +276,8 @@ const ChannelItemV2 = memo(
                             e.stopPropagation();
                             onMoveToSection?.(channel.id, section.id);
                           }}
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='MOVE_CHANNEL_TO_SECTION'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -288,6 +301,8 @@ const ChannelItemV2 = memo(
                         e.stopPropagation();
                         onMoveToSection?.(channel.id, null);
                       }}
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='REMOVE_CHANNEL_FROM_SECTION'
                     >
                       <FolderRemove size={14} className='shrink-0' />
                       <span className='flex-1'>Remove from section</span>
@@ -298,10 +313,12 @@ const ChannelItemV2 = memo(
             </DropdownMenu>
           )}
           {shouldShowCloseButton && (
-            <button
+            <Button
+              variant='ghost'
               type='button'
               className='group-hover:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
+              trackId='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
               data-track-metadata={JSON.stringify({
@@ -310,7 +327,7 @@ const ChannelItemV2 = memo(
               })}
             >
               <MultipleCrossCancelDefault size={14} className='shrink-0' />
-            </button>
+            </Button>
           )}
         </div>
       </Link>

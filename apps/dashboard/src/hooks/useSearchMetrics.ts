@@ -1,8 +1,8 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
-import Fuse from 'fuse.js';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
-import { searchService } from '../services/searchService';
+import { searchService, clearVespaSearchCache } from '../services/searchService';
 import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
 import {
   TabType,
@@ -18,10 +18,8 @@ import {
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
 import { useUserSearch } from './useUsers';
-import { searchChannelsWithScores } from './useChannels';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
-import { isDMChannel } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
-import { isUserDeactivated } from '../utils/userDisplayName';
+import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
   parseSearchFilters,
   parseTypeFilter,
@@ -32,53 +30,7 @@ import {
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
-import { useCmdkAllDefaultRankProfile } from './useCmdkSearchConfig';
-
-// Squashes raw affinity into [0, 1] with diminishing returns.
-// At affinity=50 → sat=0.5; at affinity=200 → sat≈0.9.
-const sat = (x: number): number => (2 / Math.PI) * Math.atan(x / 50);
-
-// A single Fuse doc: one participant name tagged with the DM channel it belongs
-// to. We index every DM participant name into ONE Fuse instance instead of
-// building a separate Fuse per DM channel.
-type DmParticipantDoc = { channelId: string; name: string };
-
-const DM_FUSE_OPTIONS = {
-  threshold: 0.35,
-  includeScore: true,
-  ignoreLocation: true,
-  minMatchCharLength: 1,
-  keys: ['name'],
-};
-
-// Single-slot memo for the combined DM Fuse index. The set of DMs (and their
-// participant names) is stable across keystrokes within a typing session, so
-// we build the index once and reuse it for every keystroke — the previous
-// per-DM approach constructed one Fuse per DM on EVERY keystroke and, with an
-// LRU capped at 50, provided zero reuse for users with more than 50 DMs.
-// Fuse computes a per-item (query, string) score independently of the rest of
-// the corpus, so grouping the best match per channel out of one shared index
-// yields the SAME score per DM as a per-DM index did.
-let _dmFuse: { sig: string; fuse: Fuse<DmParticipantDoc> } | null = null;
-
-function getDmFuse(docs: DmParticipantDoc[], sig: string): Fuse<DmParticipantDoc> {
-  if (!_dmFuse || _dmFuse.sig !== sig) {
-    _dmFuse = { sig, fuse: new Fuse(docs, DM_FUSE_OPTIONS) };
-  }
-  return _dmFuse.fuse;
-}
-
-// Affinity weight for DM ranking. Fuse scores are [0, 1]; 0.5 means peak
-// affinity shifts a result by half the score range.
-const AFFINITY_WEIGHT = 0.5;
-
-// Affinity weight for regular channel ranking. searchChannelsWithScores
-// applies −10/−5 prefix boosts, so the score range is ~[−10, 0.3].
-// At W=10, sat(affinity)×10 equals the 5-point tier gap when affinity
-// hits the sat() midpoint (50), so regularly-used channels (affinity≥50)
-// can surface above a lower-affinity prefix match. Fuzzy matches need
-// affinity≫1000 to cross the 10-point prefix gap — effectively never.
-const REGULAR_CHANNEL_AFFINITY_WEIGHT = 10;
+import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -161,175 +113,9 @@ const MAX_BACKEND_OFFSET = 1000;
  */
 export const CMDK_USER_LIMIT = 25;
 
-/**
- * Rank Cmd+K user candidates:
- *   1. active before deactivated — a hard, global demotion: ALL deactivated
- *      users sink below ALL active ones (their own last "bucket"), so reaching
- *      a deactivated user means scrolling past every active match, i.e. past
- *      the "See more" fold of the people section.
- *   2. name-prefix matches (the relevance signal) within each activation group
- *   3. DM-contact users within each tier
- *   4. tie-break by DM recency (smaller index = more recent activity), so
- *      `from:` with no text shows the same people-you-talk-to-most order
- *      that the plain-search empty state shows in the DIRECT MESSAGES
- *      section.
- *
- * `dmContactRecency` maps a user ID to its position in the recency-ordered
- * 1:1 DM list (0 = most recent). Users not in the map fall through to the
- * incoming alphabetical order from `searchUsers`.
- */
-export function rankUsers<T extends { id: string; name: string; status?: string | null }>(
-  users: T[],
-  query: string,
-  dmContactRecency: Map<string, number>,
-): T[] {
-  const q = query.toLowerCase().trim();
-  const isPrefixMatch = (name: string): boolean => !!q && name.toLowerCase().startsWith(q);
-
-  // Stable sort (ES2019+) preserves the incoming `searchUsers` order
-  // (alphabetical for non-DM users) when all keys tie.
-  return [...users].sort((a, b) => {
-    // 1. active before deactivated — a hard, global demotion. Deactivated users
-    //    are the last "bucket": they always rank below every active match
-    //    regardless of relevance, so they land past the "See more" fold and
-    //    take a little more effort to reach.
-    const aDeactivated = isUserDeactivated(a);
-    const bDeactivated = isUserDeactivated(b);
-    if (aDeactivated !== bDeactivated) return aDeactivated ? 1 : -1;
-
-    // 2. name-prefix matches (the relevance signal) within each activation group
-    const aPrefix = isPrefixMatch(a.name);
-    const bPrefix = isPrefixMatch(b.name);
-    if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
-
-    // 3. DM contacts before non-contacts
-    const aDM = dmContactRecency.has(a.id);
-    const bDM = dmContactRecency.has(b.id);
-    if (aDM !== bDM) return aDM ? -1 : 1;
-
-    // 4. more-recent DM first (0 = most recent)
-    const aRecency = dmContactRecency.get(a.id);
-    const bRecency = dmContactRecency.get(b.id);
-    if (aRecency !== undefined && bRecency !== undefined) return aRecency - bRecency;
-    return 0;
-  });
-}
-
-/**
- * Filter channel entries for Cmd+K search.
- *
- * DMs/Group DMs match against `searchableNames` (participant display names)
- * with AND-semantics: every comma/whitespace-separated token must match some
- * participant. Regular channels defer to `searchChannels` for fuzzy +
- * hyphen-strip behaviour shared with the rest of the app.
- *
- * Cmd+K-scoped (the participant-name match path is specific to the command
- * menu's grouped layout). Used by `filteredLocalChannels` below and by the
- * `in:` / `#` typeahead in ChannelCommandMenu.
- *
- * @param options.excludeDMs  Drop DMs/Group DMs entirely — used by the `#`
- *   Slack-style quick switcher which should show only regular channels.
- */
-export function filterChannelsBySearchableNames<
-  T extends { channel: Channel; searchableNames?: string[] },
->(items: T[], query: string, options: { excludeDMs?: boolean } = {}): T[] {
-  const scoped = options.excludeDMs
-    ? items.filter(({ channel }) => !isDMChannel(channel.scopeType))
-    : items;
-
-  const searchLower = query.toLowerCase().trim();
-  if (!searchLower) return scoped;
-
-  const dmItems = scoped.filter(({ channel }) => isDMChannel(channel.scopeType));
-  const regularItems = scoped.filter(({ channel }) => !isDMChannel(channel.scopeType));
-
-  const queryParts = searchLower
-    .split(/[,\s]+/)
-    .map(p => p.trim())
-    .filter(Boolean);
-
-  // Build ONE Fuse index over every DM participant name (tagged with its
-  // channel) and search it once per query token, instead of building a fresh
-  // Fuse per DM and searching each one per token. For P tokens and N DMs this
-  // turns O(N) index constructions + O(N*P) searches per keystroke into a
-  // cached single construction + O(P) searches.
-  const dmDocs: DmParticipantDoc[] = [];
-  for (const item of dmItems) {
-    const names = item.searchableNames;
-    if (!names) continue;
-    for (const name of names) dmDocs.push({ channelId: item.channel.id, name });
-  }
-
-  let matchedDms: T[] = [];
-  if (dmItems.length > 0 && queryParts.length > 0 && dmDocs.length > 0) {
-    // Signature is stable across keystrokes for a fixed DM set, so the index is
-    // constructed once per session and reused. Keyed on channel id + names.
-    const sig = dmDocs.map(d => d.channelId + '\x1f' + d.name).join('\x1e');
-    const fuse = getDmFuse(dmDocs, sig);
-
-    // For each token, record the best (lowest) Fuse score per channel plus the
-    // matched name. Fuse returns results sorted ascending by score, so the FIRST
-    // result seen for a channel is that channel's best match for the token —
-    // identical to `results[0]` from the old per-DM search.
-    const bestPerChannelPerPart = queryParts.map(part => {
-      const perChannel = new Map<string, { score: number; matched: string }>();
-      for (const { item: doc, score } of fuse.search(part)) {
-        if (perChannel.has(doc.channelId)) continue;
-        perChannel.set(doc.channelId, { score: score ?? 1, matched: doc.name.toLowerCase() });
-      }
-      return perChannel;
-    });
-
-    matchedDms = dmItems
-      .flatMap(item => {
-        const channelId = item.channel.id;
-
-        let totalFuseScore = 0;
-        for (let i = 0; i < queryParts.length; i++) {
-          const best = bestPerChannelPerPart[i]!.get(channelId);
-          if (!best) return []; // AND: every token must match some participant
-          totalFuseScore += best.matched.startsWith(queryParts[i]!) ? best.score - 0.5 : best.score;
-        }
-
-        // Fuse scores are [0, 1] (0 = perfect). Prefix boost subtracts 0.5, making
-        // per-part scores potentially negative. Subtraction (not division) is critical:
-        // division would make negative scores less negative with high affinity, inverting
-        // the ranking. Lower finalScore = better rank.
-        const fuseScore = totalFuseScore / queryParts.length;
-        const affinity = affinityService.getChannelWeight(channelId);
-        const finalScore = fuseScore - sat(affinity) * AFFINITY_WEIGHT;
-
-        return [{ item, score: finalScore }];
-      })
-      .sort((a, b) => a.score - b.score) // lower = better
-      .map(({ item }) => item);
-  }
-
-  const regularChannels = regularItems.map(item => item.channel);
-  const regularItemsById = new Map(regularItems.map(item => [item.channel.id, item]));
-
-  // searchChannelsWithScores runs the same Fuse fuzzy match + prefix boosts
-  // as searchChannels but returns { item, score }[] instead of just items,
-  // so we can apply affinity on top before deciding the final order.
-  const matchedRegular = searchChannelsWithScores(regularChannels, query, regularChannels.length)
-    .flatMap(({ item: channel, score }) => {
-      const item = regularItemsById.get(channel.id);
-      if (!item) return [];
-
-      const affinity = affinityService.getChannelWeight(channel.id);
-      const finalScore = score - sat(affinity) * REGULAR_CHANNEL_AFFINITY_WEIGHT;
-
-      return [{ item, score: finalScore }];
-    })
-    .sort((a, b) => a.score - b.score)
-    .map(({ item }) => item);
-
-  return [...matchedDms, ...matchedRegular];
-}
-
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
-  const allDefaultRankProfile = useCmdkAllDefaultRankProfile();
+  const defaultRankProfileFor = useCmdkDefaultRankProfiles();
 
   useEffect(() => {
     void affinityService.prefetch();
@@ -360,6 +146,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
+  // Per-tab CAC default; an explicit user pick (rankProfile) wins.
+  const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
     Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
   >([]);
@@ -416,6 +204,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // ranked list). Defaults true to preserve the sectioned ALL view.
   const [isGrouped, setIsGrouped] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
+  // Whether a search has been scheduled for the current inputs and hasn't settled yet.
+  // Drives the initial loader. Armed in the debounce effect (whose dep array is the
+  // canonical, lint-enforced list of search inputs) and disarmed when the latest
+  // dispatch's performSearch settles — so it is immune to the synchronous-cache-hit
+  // race that stranded the old render-body `isLoading` latch.
+  const [isSearchPending, setIsSearchPending] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [paginationState, setPaginationState] = useState<
@@ -444,7 +238,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   const pendingSearchCountRef = useRef(0);
   const latestResultsRef = useRef<DisplaySearchResult[]>([]);
+  // The query that produced latestResultsRef, so onComplete always receives a
+  // matching pair. Without it a superseded run — which no longer commits its own
+  // results — would hand the callback fresh results labelled with its stale query.
+  const latestQueryRef = useRef('');
   const sessionFiltersRef = useRef<Set<string>>(new Set());
+  // Guards out-of-order responses. Each dispatch claims the next sequence number at the
+  // call site (alongside the abort below); only the latest run may commit its results, and
+  // the same seq gates the loader disarm — so no separate loader counter is needed. A
+  // slow/stale response (e.g. a partial `from` query resolving after the completed `from:`
+  // filter) is discarded instead of overwriting fresh results with an empty payload.
+  const searchSeqRef = useRef(0);
+  // Cancels the previous in-flight vespaSearch when a newer search is dispatched.
+  const searchAbortRef = useRef<AbortController | null>(null);
 
   /**
    * Generate a unique session ID
@@ -775,6 +581,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const onOpen = useCallback(
     (trigger: SearchTrigger) => {
+      // A fresh palette open must never reuse a previous session's cached search — only the
+      // in-flight popup → full-screen → back handoff should. Back-navigation restores the
+      // palette without calling onOpen, so its cached result survives.
+      // debugger;
+      clearVespaSearchCache();
       startSession(trigger);
     },
     [startSession],
@@ -886,6 +697,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
+    // Clear the dedup guard's text so reopening the palette and re-entering the same query
+    // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
+    lastSearchedParamsRef.current.text = '';
+    // Re-arm the loader latch: after a clear/close, re-entering a query must show the
+    // spinner again rather than a stale "No results".
+    setIsSearchPending(false);
   }, [resetImpressionTracking]);
 
   /**
@@ -893,6 +710,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const performSearch = useCallback(
     async (
+      seq: number,
+      abortController: AbortController,
       query: string,
       activeTab: TabType,
       selectedMentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
@@ -904,6 +723,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       }>,
       onComplete?: (results: DisplaySearchResult[], query: string) => void,
     ) => {
+      // Run identity (seq + abortController) is minted by the caller at dispatch time so the
+      // loader disarm can reuse the same seq. A stale response fails isStale() and is dropped.
+      const isStale = () => seq !== searchSeqRef.current;
+
       const {
         searchText,
         board: boardFilter,
@@ -1030,8 +853,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           {
             const limit = BACKEND_RESULTS_LIMIT;
             const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
-            const effectiveRankProfile =
-              activeTab === TabType.ALL ? rankProfile || allDefaultRankProfile : rankProfile;
+            const effectiveRankProfile = rankProfile || allDefaultRankProfile;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -1219,18 +1041,25 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
             if (activeTab === TabType.ALL) {
               const currentSessionId = searchSessionId || '';
-              const vespaResponse = await searchService.vespaSearch({
-                ...searchFilters,
-                //unified rank profile filters
-                ...(effectiveRankProfile === 'unified'
-                  ? {
-                      groupBy: '',
-                      apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
-                    }
-                  : options.groupByDocType && { groupBy: 'docType' }),
-                searchId: currentSessionId,
-                presentationSummary: 'lean',
-              });
+              const vespaResponse = await searchService.vespaSearch(
+                {
+                  ...searchFilters,
+                  //unified rank profile filters
+                  ...(effectiveRankProfile === 'unified'
+                    ? {
+                        groupBy: '',
+                        apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
+                      }
+                    : options.groupByDocType && { groupBy: 'docType' }),
+                  searchId: currentSessionId,
+                  presentationSummary: 'lean',
+                },
+                abortController.signal,
+                { cache: true },
+              );
+
+              // A newer search superseded this one — drop this out-of-order response.
+              if (isStale()) return;
 
               // Honor the backend grouping decision: flat response => flat ALL view.
               setIsGrouped(vespaResponse.grouped);
@@ -1266,11 +1095,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 currentOffset + BACKEND_RESULTS_LIMIT <= MAX_BACKEND_OFFSET;
             } else {
               const currentSessionId = searchSessionId || '';
-              const results = await searchService.vespaSearch({
-                ...searchFilters,
-                searchId: currentSessionId,
-                presentationSummary: 'lean',
-              });
+              const results = await searchService.vespaSearch(
+                {
+                  ...searchFilters,
+                  searchId: currentSessionId,
+                  presentationSummary: 'lean',
+                },
+                abortController.signal,
+                { cache: true },
+              );
+
+              // A newer search superseded this one — drop this out-of-order response.
+              if (isStale()) return;
+
               mergedResults = results.results;
               totalCount = results.totalCount;
               currentOffset = results.results.length;
@@ -1283,6 +1120,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
             setSearchResults(mergedResults);
             latestResultsRef.current = mergedResults;
+            latestQueryRef.current = searchText;
 
             setPaginationState(prev => ({
               ...prev,
@@ -1296,20 +1134,31 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             }));
           }
         } catch (searchError) {
-          setSearchError(searchError instanceof Error ? searchError.message : 'Search failed');
-          setSearchResults([]);
-          // Reset to the default (sectioned) mode so a failed search doesn't render
-          // stale results in the previous grouped/flat mode.
-          setIsGrouped(true);
+          // Ignore failures from a superseded/aborted request (e.g. axios CanceledError
+          // when a newer search aborted this one) — they must not clear fresh results.
+          if (!isStale()) {
+            setSearchError(searchError instanceof Error ? searchError.message : 'Search failed');
+            setSearchResults([]);
+            // Reset to the default (sectioned) mode so a failed search doesn't render
+            // stale results in the previous grouped/flat mode.
+            setIsGrouped(true);
+          }
         } finally {
-          setIsSearching(false);
           pendingSearchCountRef.current -= 1;
+          // Only the latest run may flip the shared loading flag off.
+          if (!isStale()) {
+            setIsSearching(false);
+          }
+          // Fires once every dispatched search has settled — including when a
+          // superseded run is the last to settle — so it must report the results
+          // that were actually committed and the query they came from, not this
+          // run's (possibly stale) searchText.
           if (
             pendingSearchCountRef.current === 0 &&
             latestResultsRef.current.length > 0 &&
             onComplete
           ) {
-            onComplete(latestResultsRef.current, searchText);
+            onComplete(latestResultsRef.current, latestQueryRef.current);
           }
         }
       } else {
@@ -1379,9 +1228,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       normalizedText !== ''
     ) {
+      // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
+      // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
+      setIsSearchPending(pendingSearchCountRef.current > 0);
       return;
     }
 
+    // Arm the loader now (before the 300ms debounce) so we never flash "No results"
+    // in the gap before the request fires. Disarmed when the dispatched search settles.
+    setIsSearchPending(true);
     const timer = setTimeout(() => {
       lastSearchedParamsRef.current = {
         text: normalizedText,
@@ -1393,14 +1248,29 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         includeDebugInfo,
         mentionsKey: currentMentionsKey,
       };
+      // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
+      // dispatch time, not on every keystroke; seq and the abort stay atomic together.
+      const seq = ++searchSeqRef.current;
+      searchAbortRef.current?.abort();
+      const abortController = new AbortController();
+      searchAbortRef.current = abortController;
       void performSearch(
+        seq,
+        abortController,
         text,
         activeTab,
         selectedMentions,
         filteredLocalUsers,
         filteredLocalChannels,
         options.onSearchComplete,
-      );
+      ).finally(() => {
+        // Runs on every exit path of performSearch (returns, errors, aborts). Only the
+        // newest dispatch may clear the flag — a superseded run settling (aborted
+        // mid-flight) must not hide the loader while a fresher search is still running.
+        if (seq === searchSeqRef.current) {
+          setIsSearchPending(false);
+        }
+      });
     }, 300);
 
     return () => clearTimeout(timer);
@@ -1469,8 +1339,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       {
         const currentOffset = currentPagination.offset;
         const pageSize = BACKEND_RESULTS_LIMIT;
-        const effectiveRankProfile =
-          activeTab === TabType.ALL ? rankProfile || allDefaultRankProfile : rankProfile;
+        const effectiveRankProfile = rankProfile || allDefaultRankProfile;
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
@@ -1626,7 +1495,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         }));
       }
     } catch (searchError) {
-      console.error('Failed to load more results:', searchError);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to load more results:'),
+        error: searchError,
+      });
     } finally {
       setIsLoadingMore(false);
     }
@@ -1754,6 +1627,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     searchResults,
     isGrouped,
     isSearching,
+    isSearchPending,
     searchError,
     isLoadingMore,
     paginationState,

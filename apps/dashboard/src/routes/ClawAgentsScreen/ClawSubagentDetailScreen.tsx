@@ -223,6 +223,8 @@ const KnowledgeTab = ({
                     progressLabels: [...current.progressLabels, ''],
                   }))
                 }
+                data-track-category='Claw Agents'
+                data-track-name='ADD_PROGRESS_LABEL'
               >
                 <Plus className='size-3.5' /> Add label
               </Button>
@@ -255,6 +257,8 @@ const KnowledgeTab = ({
                       progressLabels: current.progressLabels.filter((_, i) => i !== index),
                     }))
                   }
+                  data-track-category='Claw Agents'
+                  data-track-name='REMOVE_PROGRESS_LABEL'
                   aria-label='Remove progress label'
                 >
                   <X className='size-4' />
@@ -410,7 +414,13 @@ const ContributorsTab = ({
               }
             }}
           />
-          <Button onClick={() => void addShare()} loading={add.isPending} disabled={!input.trim()}>
+          <Button
+            onClick={() => void addShare()}
+            data-track-category='Claw Agents'
+            data-track-name='ADD_SUBAGENT_SHARE'
+            loading={add.isPending}
+            disabled={!input.trim()}
+          >
             <Plus className='size-4' /> Add
           </Button>
         </div>
@@ -443,6 +453,8 @@ const ContributorsTab = ({
                   loading={remove.isPending && remove.variables === share.userId}
                   disabled={remove.isPending}
                   onClick={() => void removeShare(share)}
+                  data-track-category='Claw Agents'
+                  data-track-name='REMOVE_SUBAGENT_SHARE'
                   aria-label={`Remove ${share.name || share.email}`}
                 >
                   <Trash2 className='size-4 text-destructive' />
@@ -647,6 +659,8 @@ const ClawSubagentDetailScreen = (): ReactElement => {
                   variant='outline'
                   size='sm'
                   onClick={() => setDeleteOpen(true)}
+                  data-track-category='Claw Agents'
+                  data-track-name='OPEN_DELETE_SUBAGENT_CONFIRM'
                   disabled={toggle.isPending}
                 >
                   <Trash2 className='size-4' /> Delete
@@ -665,6 +679,8 @@ const ClawSubagentDetailScreen = (): ReactElement => {
                 <Button
                   size='sm'
                   onClick={() => void save()}
+                  data-track-category='Claw Agents'
+                  data-track-name='SAVE_SUBAGENT'
                   loading={update.isPending}
                   disabled={!dirty || !draft.systemPrompt.trim()}
                 >

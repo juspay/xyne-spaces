@@ -105,6 +105,8 @@ export const RenameHandleDialog = ({
             variant='outline'
             size='sm'
             onClick={() => onOpenChange(false)}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_RENAME_HANDLE'
             disabled={submitting}
           >
             Cancel

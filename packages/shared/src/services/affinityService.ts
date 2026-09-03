@@ -23,10 +23,8 @@ export class AffinityService {
         timeout: FETCH_TIMEOUT_MS,
       });
       this.weights = data;
-    } catch (error) {
+    } catch {
       // Graceful degradation — keep empty weights, Cmd+K falls back to text match
-      // eslint-disable-next-line no-console
-      console.warn('[AFFINITY] Failed to fetch weights:', error);
     } finally {
       // Always update lastFetchedAt so a Vespa outage doesn't cause a retry
       // storm on every keystroke — wait the full TTL before trying again.
@@ -52,6 +50,12 @@ export class AffinityService {
   }
 
   getUserWeight(userId: string): number {
+    // Mirror getChannelWeight: refetch in the background once the cache is stale,
+    // so @-mention (user) affinity refreshes on its own, not just on channel reads.
+    const stale = Date.now() - this.lastFetchedAt > CACHE_TTL_MS;
+    if (stale && !this.inflight) {
+      this.inflight = this.fetch();
+    }
     return this.weights.userWeights[userId] ?? 0;
   }
 }

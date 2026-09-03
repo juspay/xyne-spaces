@@ -80,7 +80,7 @@ export function KnowledgeCapabilityRow({
               className='flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-solid border-border bg-muted py-1 pl-2.5 pr-2 transition-colors hover:bg-muted/70'
             >
               <span className='flex min-w-0 flex-col items-start'>
-                <span className='max-w-[220px] truncate text-sm font-semibold leading-5 text-foreground'>
+                <span className='max-w-[220px] truncate text-sm font-medium leading-5 text-foreground'>
                   {grant.label}
                 </span>
                 {grant.detail && (

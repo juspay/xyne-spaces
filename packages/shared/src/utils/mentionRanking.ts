@@ -8,8 +8,9 @@
 
 import type { MentionRankingCacConfig } from '../config/mentionRankingCacConfig.js';
 import type { MentionResult } from '../types/mention.js';
+import { matchesAllTokens } from './tokenMatch.js';
 
-export type MatchKind = 'prefix' | 'substring' | 'fuzzy' | 'none';
+export type MatchKind = 'prefix' | 'substring' | 'tokens' | 'fuzzy' | 'none';
 
 export type SpecialMentionKind = 'channel' | 'here';
 
@@ -47,6 +48,9 @@ export function matchKind(text: string, query: string): MatchKind {
   const q = query.toLowerCase();
   if (t.startsWith(q)) return 'prefix';
   if (t.includes(q)) return 'substring';
+  // Reordered / partial multi-word match ('prasad siva' → 'Bannala Siva Prasad'). Sits above
+  // fuzzy so these deliberate matches aren't dropped as matchQuality 0 by rankCandidates.
+  if (matchesAllTokens(t, q)) return 'tokens';
   if (fuzzyContains(t, q)) return 'fuzzy';
   return 'none';
 }
@@ -61,10 +65,12 @@ export function matchQuality(
   for (const raw of fields) {
     if (!raw) continue;
     const kind = matchKind(raw, query);
+    // 'tokens' reuses the substring weight — a reordered/partial match is treated as strong as
+    // a contiguous substring match, and always outranks a pure fuzzy (subsequence) match.
     const score =
       kind === 'prefix'
         ? config.matchPrefix
-        : kind === 'substring'
+        : kind === 'substring' || kind === 'tokens'
           ? config.matchSubstring
           : kind === 'fuzzy'
             ? config.matchFuzzy

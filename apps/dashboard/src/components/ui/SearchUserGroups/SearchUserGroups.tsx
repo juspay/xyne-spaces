@@ -147,6 +147,8 @@ export const SearchUserGroups: React.FC<SearchUserGroupsProps> = ({
                 <button
                   type='button'
                   onClick={() => handleTagRemove(g)}
+                  data-track-category='ENTITY_PICKER'
+                  data-track-name='REMOVE_GROUP_CHIP'
                   className='rounded-full p-0.5 transition-colors'
                   aria-label={`Remove ${g.name}`}
                 >

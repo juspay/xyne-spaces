@@ -141,6 +141,8 @@ const SentGroupMessageRow = ({
       actions={null}
       variant='listRow'
       onClick={handleClick}
+      trackCategory='CHAT_SIDEBAR'
+      trackName='OPEN_SENT_MESSAGE'
       attachments={panelAttachments}
     />
   );

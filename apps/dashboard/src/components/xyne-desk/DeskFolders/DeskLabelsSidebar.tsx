@@ -1,13 +1,21 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
-import { Tag, Plus, X, Trash2 } from 'lucide-react';
+import { Loader2, Tag, Plus, X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { Dialog } from '../../ui/Dialog/Dialog';
+import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
+import {
+  deleteConversationLabel,
+  fetchConversationLabelDeleteImpact,
+  type ConversationLabelDeleteImpact,
+} from '../../../api/conversationLabelsApi';
+import { deskLabelRulesQueryKey } from '../AutoLabelWizard/AutoLabelRules';
 
 /**
  * Gmail-style "Labels" section for the desk sidebar. The "Labels" heading is not
@@ -35,21 +43,30 @@ const colorForName = (name: string): string => {
 
 interface DeskLabelsSidebarProps {
   channelId: string;
+  isMember: boolean;
   activeLabelId: string | null;
   onSelectLabel: (labelId: string, labelName: string) => void;
+  onDeletedLabel?: (labelId: string) => void;
 }
 
 export const DeskLabelsSidebar = ({
   channelId,
+  isMember,
   activeLabelId,
   onSelectLabel,
+  onDeletedLabel,
 }: DeskLabelsSidebarProps): ReactElement => {
   const zero = useZero();
-  const [labels] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
-    enabled: !!channelId,
-  });
+  const queryClient = useQueryClient();
+  const [labels] = useCachedQuery(
+    queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
+    { enabled: !!channelId },
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
+  const [deleteImpact, setDeleteImpact] = useState<ConversationLabelDeleteImpact | null>(null);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
   const list = useMemo(() => labels ?? [], [labels]);
 
@@ -82,20 +99,40 @@ export const DeskLabelsSidebar = ({
     }
   };
 
-  const handleDelete = async (
-    labelId: string,
-    name: string,
-    e: React.MouseEvent,
-  ): Promise<void> => {
+  const handleDeleteClick = async (labelId: string, e: React.MouseEvent): Promise<void> => {
     e.stopPropagation();
+    setDeleteLoadingId(labelId);
     try {
-      const result = await zero.mutate(mutators.conversationLabel.deleteLabel({ labelId })).server;
-      if (result.type === 'error') {
-        throw new Error(result.error.message || 'Failed to delete label');
-      }
-      toast.success(`Deleted label "${name}"`);
+      const impact = await fetchConversationLabelDeleteImpact(labelId);
+      setDeleteImpact(impact);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete label');
+    } finally {
+      setDeleteLoadingId(null);
+    }
+  };
+
+  const confirmDelete = async (): Promise<void> => {
+    if (!deleteImpact) return;
+    setDeleteSubmitting(true);
+    try {
+      const result = await deleteConversationLabel(deleteImpact.label.id);
+      toast.success(`Deleted label "${result.label.name}"`);
+      setDeleteImpact(null);
+      onDeletedLabel?.(result.label.id);
+      void queryClient.invalidateQueries({ queryKey: deskLabelRulesQueryKey(channelId) });
+    } catch (err) {
+      const maybeImpact = (
+        err as {
+          response?: { data?: { data?: ConversationLabelDeleteImpact; error?: string } };
+        }
+      )?.response?.data;
+      if (maybeImpact?.data) setDeleteImpact(maybeImpact.data);
+      toast.error(
+        maybeImpact?.error || (err instanceof Error ? err.message : 'Failed to delete label'),
+      );
+    } finally {
+      setDeleteSubmitting(false);
     }
   };
 
@@ -151,14 +188,19 @@ export const DeskLabelsSidebar = ({
                 </button>
                 <button
                   type='button'
-                  onClick={e => void handleDelete(label.id, label.name, e)}
+                  onClick={e => void handleDeleteClick(label.id, e)}
                   className='hidden group-hover:flex items-center justify-center p-1 rounded text-sidebar-foreground hover:text-destructive transition-colors shrink-0'
+                  disabled={deleteLoadingId === label.id || deleteSubmitting}
                   aria-label={`Delete label ${label.name}`}
                   title='Delete label'
                   data-track-category='Support'
                   data-track-name='DeleteLabel'
                 >
-                  <Trash2 size={12} />
+                  {deleteLoadingId === label.id ? (
+                    <Loader2 size={12} className='animate-spin' />
+                  ) : (
+                    <Trash2 size={12} />
+                  )}
                 </button>
               </div>
             );
@@ -221,18 +263,71 @@ export const DeskLabelsSidebar = ({
             >
               Cancel
             </button>
-            <button
+            <Button
               type='button'
+              variant='default'
               onClick={() => void handleCreate()}
               disabled={!newName.trim()}
+              trackId='create_desk_label'
               className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50 disabled:pointer-events-none transition-colors'
               data-track-category='Support'
               data-track-name='ConfirmCreateLabel'
             >
               Create
-            </button>
+            </Button>
           </div>
         </div>
+      </Dialog>
+
+      <Dialog
+        open={!!deleteImpact}
+        onOpenChange={open => {
+          if (!open && !deleteSubmitting) setDeleteImpact(null);
+        }}
+        title='Delete label'
+        description='Review label dependencies before deleting.'
+        className='max-w-[460px] p-0'
+      >
+        {deleteImpact && (
+          <div>
+            <div className='px-5 py-4'>
+              <h2 className='text-base font-semibold text-foreground leading-tight'>
+                Delete “{deleteImpact.label.name}”?
+              </h2>
+              <p className='mt-2 text-sm text-muted-foreground'>
+                This removes the label from {deleteImpact.mappingCount}{' '}
+                {deleteImpact.mappingCount === 1 ? 'email thread' : 'email threads'} and archives{' '}
+                {deleteImpact.linkedDeskRuleCount}{' '}
+                {deleteImpact.linkedDeskRuleCount === 1 ? 'auto-label rule' : 'auto-label rules'}.
+              </p>
+            </div>
+            <div className='flex justify-end gap-2 px-5 py-4 border-t border-border'>
+              <button
+                type='button'
+                onClick={() => setDeleteImpact(null)}
+                disabled={deleteSubmitting}
+                className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
+                data-track-category='Support'
+                data-track-name='CancelDeleteLabel'
+              >
+                Cancel
+              </button>
+              <Button
+                type='button'
+                variant='destructive'
+                onClick={() => void confirmDelete()}
+                disabled={deleteSubmitting}
+                trackId='delete_desk_label'
+                className='inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 disabled:pointer-events-none transition-colors'
+                data-track-category='Support'
+                data-track-name='ConfirmDeleteLabel'
+              >
+                {deleteSubmitting && <Loader2 className='size-4 animate-spin' />}
+                Delete
+              </Button>
+            </div>
+          </div>
+        )}
       </Dialog>
     </div>
   );

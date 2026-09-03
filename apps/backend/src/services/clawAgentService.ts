@@ -9,9 +9,17 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
-import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
+import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { Agent } from 'undici';
+
+// A brief run streams nothing while the model composes; undici's default 300s
+// bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
+// real clock. Mirrors streamDispatcher in claw-auth's consume-claw-stream.ts.
+const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 export interface ChannelClawAgent {
   id: string;
@@ -43,10 +51,21 @@ export interface ClawRunRequest {
   // attached context; separate from `canvasIds` (picker canvases, keyed by cuid).
   canvasId?: string;
   attachedContext?: Array<{
-    // 'collection' + 'file' carry KB picks from the ask-ai v2 picker.
-    // claw-auth's resolveSection emits a prompt block that points the agent
-    // at kb-list-files / kb-read-file with the right id.
-    type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity' | 'collection' | 'file' | string;
+    // 'collection' / 'folder' / 'file' carry KB picks from the ask-ai v2
+    // picker. claw-auth's resolveSection emits a prompt block that points
+    // the agent at kb-list-files / kb-search / kb-read-file with the right
+    // id — a 'folder' id is NOT pre-expanded to its files here, claw-auth
+    // resolves it itself at Vespa-query time.
+    type:
+      | 'channel'
+      | 'ticket'
+      | 'canvas'
+      | 'call'
+      | 'activity'
+      | 'collection'
+      | 'folder'
+      | 'file'
+      | string;
     id: string;
     title: string;
     threadId?: string;
@@ -98,6 +117,10 @@ export interface ClawRunRequest {
    *  which would let a crafted request rewrite the agent's tools config.
    *  claw-auth re-validates and no-ops the pin if it can't serve it. */
   providerOverride?: { provider: string; model?: string };
+  /** Per-message thinking level (composer dropdown). Forwarded to claw-auth's
+   *  /run/stream, which merges it over the agent's modelSettings for this run.
+   *  Absent = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
 }
 
 export interface ClawRunStreamResult {
@@ -221,7 +244,6 @@ export interface ClawFeedbackPayload {
   value: 'LIKE' | 'DISLIKE';
 }
 
-
 // ============================================================================
 // S2S (server-to-server) helpers for backend-initiated claw runs
 // ============================================================================
@@ -234,23 +256,40 @@ export interface S2SClawAgent {
   enabled: boolean;
   isDefault: boolean;
   color: string;
+  spacesAppId?: string | null;
   spacesAppUserId?: string | null;
 }
 
 export interface S2SRunAgentRequest {
+  sessionId?: string;
   agentSlug: string;
   task: string;
   userId: string;
   userName: string;
   userEmail: string;
-  spacesWorkspaceId: string;
-  spacesOrgId: string;
-  spacesOrgMemberId: string;
+  spacesWorkspaceId?: string;
+  spacesOrgId?: string;
+  spacesOrgMemberId?: string;
   callbackUrl: string;
+  callbackSecret?: string;
   conversationId?: string;
   channelId?: string;
   ticketIds?: string[];
   webSearchEnabled?: boolean;
+  context?: string;
+  workspaceId?: string;
+  executionProfile?: 'sdlc';
+  sdlcOperation?: 'baseline' | 'work' | 'wiki';
+  sdlcWikiRole?:
+    | 'BOOTSTRAP_SURVEY'
+    | 'BOOTSTRAP_PAGE'
+    | 'BOOTSTRAP_EDITOR'
+    | 'BOOTSTRAP'
+    | 'GENERATOR'
+    | 'ARCHITECTURE_VALIDATOR'
+    | 'CORRECTOR';
+  sdlcContext?: Record<string, unknown>;
+  allowWriteInReadOnlyJob?: boolean;
 }
 
 export interface S2SRunAgentResponse {
@@ -259,7 +298,18 @@ export interface S2SRunAgentResponse {
   error?: string;
 }
 
+export interface S2SClawRunStatus {
+  sessionId: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  result?: string | null;
+  error?: string | null;
+}
 
+export interface ConversationInsight {
+  reasoning: string | null;
+  content: string | null;
+  toolInvocations: unknown[];
+}
 
 // ============================================================================
 // Internal helpers
@@ -267,6 +317,17 @@ export interface S2SRunAgentResponse {
 
 function getClawBaseUrl(): string {
   return config.xyneClaw.authUrl;
+}
+
+function getS2SWebhookUrl(spacesAppId: string): string {
+  const url = new URL(config.xyneClaw.clawAuthCallbackUrlAutomation);
+  const pathname = url.pathname.replace(/\/+$/, '');
+  const webhookMarker = '/webhook';
+  const webhookIndex = pathname.indexOf(webhookMarker);
+  const webhookRoot =
+    webhookIndex >= 0 ? pathname.slice(0, webhookIndex + webhookMarker.length) : pathname;
+  url.pathname = `${webhookRoot}/app/${encodeURIComponent(spacesAppId)}`;
+  return url.toString();
 }
 
 function getS2SHeaders(): Record<string, string> {
@@ -306,10 +367,7 @@ function extractCookieHeader(req: { headers?: { cookie?: string } }): Record<str
   return cookie ? { Cookie: cookie } : {};
 }
 
-function extractUserIdHeader(
-  userId: string,
-  workspaceId?: string,
-): Record<string, string> {
+function extractUserIdHeader(userId: string, workspaceId?: string): Record<string, string> {
   // `userId` is the raw, workspace-scoped Spaces user id. Keep the legacy
   // x-user-id header for older Claw deployments, and send the explicit source
   // identity for Claw versions that canonicalize it at the auth boundary.
@@ -536,11 +594,10 @@ export async function runClawAgentStream(
   // The dashboard sends parentAssistantMessageId explicitly when it has it,
   // so we trust that field when present; otherwise we split parentMessageId
   // by the flag.
-  const parentUserMessageId =
-    request.isRegenerate ? request.parentMessageId : undefined;
+  const parentUserMessageId = request.isRegenerate ? request.parentMessageId : undefined;
   const parentAssistantMessageId =
-    request.parentAssistantMessageId
-    ?? (!request.isRegenerate ? request.parentMessageId : undefined);
+    request.parentAssistantMessageId ??
+    (!request.isRegenerate ? request.parentMessageId : undefined);
 
   const payload: Record<string, unknown> = {
     userId: request.userId,
@@ -564,6 +621,7 @@ export async function runClawAgentStream(
     ...(request.deepResearchEnabled && { deepResearchEnabled: true }),
     ...(request.instant && { instant: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
+    ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),
@@ -572,7 +630,9 @@ export async function runClawAgentStream(
       ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),
       ...(request.dataSourceId && { SPACES_DATA_SOURCE_ID: request.dataSourceId }),
       ...(request.draftId && { SPACES_DASHBOARD_DRAFT_ID: request.draftId }),
-      ...(request.focusedComponentId && { SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId }),
+      ...(request.focusedComponentId && {
+        SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId,
+      }),
     },
     ...(additionalInstructions && { additionalInstructions }),
     ...(request.generateFollowUpSuggestions === true && { generateFollowUpSuggestions: true }),
@@ -777,7 +837,11 @@ export async function runClawAgentStream(
     }
     throw err;
   } finally {
-    try { reader.releaseLock(); } catch { /* already released */ }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* already released */
+    }
   }
 
   logger.info(`[ClawAgentService] Stream complete, events=${eventCount}`);
@@ -797,7 +861,7 @@ export async function cancelClawAgentRun(
   req: { headers?: { cookie?: string } },
   userId: string,
   sessionId: string,
-  workspaceId?: string,
+  workspaceId?: string
 ): Promise<{ success: boolean; status: string; error?: string }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/run/stream/cancel`;
   try {
@@ -950,39 +1014,120 @@ export async function listAccessibleClawAgents(req: {
 }
 
 /**
- * Models the agent's shared (admin-set) LiteLLM credential can serve, for the
- * Ask AI model picker. Scoped to the AGENT's key — claw-auth lists them off
- * that key's own /v1/models, so the picker can only ever offer models the run
- * will actually accept. The key itself is never exposed.
+ * Models the Ask AI composer's model picker can offer for this agent.
  *
- * An agent with no litellm credential yields `[]` (not an error) so the UI can
- * simply hide the picker — same contract the claw console's ModelSelect uses.
+ * Two sources, in order:
+ * 1. The AGENT's shared (admin-set) LiteLLM credential — claw-auth lists them
+ *    off that key's own /v1/models. Picks from this list pin provider
+ *    "litellm" (they ride the agent credential). The key is never exposed.
+ * 2. When the agent has no such credential (the normal production case — Ask
+ *    AI runs on the keyless platform "spaces" provider), fall back to the
+ *    workspace's allowed model list: the `models` table rows synced daily from
+ *    LiteLLM (modelSyncService), with the org LLM credential's defaultModel as
+ *    the "Recommended" label. Picks from this list pin provider "spaces",
+ *    which claw-auth applies through the agent's modelSettings.model.
+ *
+ * `pinProvider` tells the composer which providerOverride.provider a pick must
+ * be sent with — a "litellm" pin silently no-ops for agents without the
+ * credential, and vice versa a "spaces" pin would bypass an agent's own key.
  */
 export async function listClawAgentModels(
   req: { headers?: { cookie?: string }; userId: string },
-  agentSlug?: string
-): Promise<{ success: boolean; data: ClawAgentModel[]; defaultModel: string | null }> {
+  agentSlug?: string,
+  workspaceId?: string
+): Promise<{
+  success: boolean;
+  data: ClawAgentModel[];
+  defaultModel: string | null;
+  pinProvider: 'litellm' | 'spaces';
+}> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
-  const response = await fetch(url, {
-    headers: {
-      ...extractUserIdHeader(req.userId),
-      ...extractCookieHeader(req),
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    logger.error(`[ClawAgentService] listAgentModels failed: ${response.status} ${errorText}`);
-    throw new Error('Failed to fetch models');
+  try {
+    const response = await fetch(url, {
+      headers: {
+        ...getS2SHeaders(),
+        ...extractUserIdHeader(req.userId),
+        ...extractCookieHeader(req),
+      },
+    });
+    if (response.ok) {
+      const result = (await response.json()) as {
+        success: boolean;
+        data: ClawAgentModel[];
+        defaultModel?: string | null;
+        pinProvider?: 'litellm' | 'spaces';
+      };
+      if (result.success && (result.data ?? []).length > 0) {
+        return {
+          success: true,
+          data: result.data,
+          defaultModel: result.defaultModel ?? null,
+          // claw-auth says which provider a pick must pin: "litellm" when the
+          // list came off the agent's own credential, "spaces" when it fell
+          // back to the platform allowed list. Old claw-auth omits the field
+          // and only ever served the credential list — default "litellm".
+          pinProvider: result.pinProvider ?? 'litellm',
+        };
+      }
+      if (result.success) {
+        // Deliberate empty answer (no credential AND no platform list on the
+        // claw side) — the workspace's synced allowed list may still serve.
+        return listWorkspaceAllowedModels(workspaceId);
+      }
+    } else {
+      const errorText = await response.text();
+      logger.error(`[ClawAgentService] listAgentModels claw-auth leg failed: ${response.status} ${errorText}`);
+    }
+  } catch (err) {
+    logger.error('[ClawAgentService] listAgentModels claw-auth leg error:', err);
   }
+  // Transport failure / 5xx: we cannot know whether the agent has its own
+  // LiteLLM credential, so offering the platform list here would let a pick
+  // bypass that key ("spaces" pins outrank it). Hide the picker instead.
+  return { success: true, data: [], defaultModel: null, pinProvider: 'litellm' };
+}
 
-  const result = (await response.json()) as {
-    success: boolean;
-    data: ClawAgentModel[];
-    defaultModel?: string | null;
-  };
-  return { success: result.success, data: result.data ?? [], defaultModel: result.defaultModel ?? null };
+/**
+ * Platform fallback for the model picker: the workspace's allowed LiteLLM
+ * models from the `models` table (synced daily by modelSyncService) plus the
+ * org LLM credential's defaultModel. Fail-soft — a missing sync or credential
+ * yields an empty list / null default, and the picker simply hides.
+ */
+async function listWorkspaceAllowedModels(workspaceId?: string): Promise<{
+  success: boolean;
+  data: ClawAgentModel[];
+  defaultModel: string | null;
+  pinProvider: 'spaces';
+}> {
+  let data: ClawAgentModel[] = [];
+  let defaultModel: string | null = null;
+  const effectiveWorkspaceId = workspaceId ?? config.defaultWorkspaceId;
+  try {
+    const rows = await db.model.findMany({
+      // The models table is workspace-scoped; without the filter this would
+      // leak another workspace's allowed list.
+      where: { provider: 'litellm-api', workspaceId: effectiveWorkspaceId },
+      select: { name: true },
+      orderBy: { name: 'asc' },
+    });
+    data = rows.map((r) => ({ id: r.name, name: r.name }));
+  } catch (err) {
+    logger.error('[ClawAgentService] listWorkspaceAllowedModels db error:', err);
+  }
+  try {
+    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
+      effectiveWorkspaceId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    );
+    // The sync strips claude/gemini from the table; a default naming a model
+    // that is not in the menu could never be re-selected once un-picked.
+    const candidate = credential?.defaultModel ?? null;
+    defaultModel = candidate && data.some((m) => m.id === candidate) ? candidate : null;
+  } catch (err) {
+    logger.error('[ClawAgentService] listWorkspaceAllowedModels credential error:', err);
+  }
+  return { success: true, data, defaultModel, pinProvider: 'spaces' };
 }
 
 export async function listClawConversations(
@@ -1103,11 +1248,16 @@ export async function streamClawConversationLive(
       if (res.writableEnded) break;
       if (value) {
         res.write(Buffer.from(value));
-        if (typeof (res as unknown as { flush?: () => void }).flush === 'function') (res as unknown as { flush: () => void }).flush();
+        if (typeof (res as unknown as { flush?: () => void }).flush === 'function')
+          (res as unknown as { flush: () => void }).flush();
       }
     }
   } finally {
-    try { reader.releaseLock(); } catch { /* ignore */ }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -1144,6 +1294,7 @@ export async function getClawDebugArtifacts(
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/debug`;
   const response = await fetch(url, {
     headers: {
+      ...getS2SHeaders(),
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
     },
@@ -1287,26 +1438,62 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
 
 /** Run a claw agent via S2S (non-streaming, callback-based). Mirrors legacy clawClient.runAgent(). */
 export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAgentResponse> {
-  const url = config.xyneClaw.webhookUrl;
-  const sessionId = randomUUID();
+  const agent = (await listS2SClawAgents()).find((candidate) => candidate.slug === req.agentSlug);
+  if (!agent?.spacesAppId) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: agent "${req.agentSlug}" has no registered Spaces app`
+    );
+  }
+  const app = await db.apps.findFirst({
+    where: {
+      id: agent.spacesAppId,
+      ...(req.workspaceId ? { workspaceId: req.workspaceId } : {}),
+    },
+    select: { signingSecret: true },
+  });
+  if (!app?.signingSecret) {
+    throw new Error(
+      `[ClawAgentService] runS2SClawAgent: no app signing secret for agent "${req.agentSlug}"`
+    );
+  }
+
+  const url = getS2SWebhookUrl(agent.spacesAppId);
+  const sessionId = req.sessionId ?? randomUUID();
+  const body = JSON.stringify({
+    s2sKey: config.xyneClaw.s2sKey,
+    sessionId,
+    agentSlug: req.agentSlug,
+    task: req.task,
+    userId: req.userId,
+    spacesWorkspaceId: req.spacesWorkspaceId,
+    spacesOrgId: req.spacesOrgId,
+    spacesOrgMemberId: req.spacesOrgMemberId,
+    userName: req.userName,
+    userEmail: req.userEmail,
+    callbackUrl: req.callbackUrl,
+    ...(req.callbackSecret ? { callbackSecret: req.callbackSecret } : {}),
+    ...(req.conversationId ? { conversationId: req.conversationId } : {}),
+    ...(req.channelId ? { channelId: req.channelId } : {}),
+    ...(req.context ? { context: req.context } : {}),
+    ...(req.workspaceId ? { workspaceId: req.workspaceId } : {}),
+    ...(req.executionProfile ? { executionProfile: req.executionProfile } : {}),
+    ...(req.sdlcOperation ? { sdlcOperation: req.sdlcOperation } : {}),
+    ...(req.sdlcWikiRole ? { sdlcWikiRole: req.sdlcWikiRole } : {}),
+    ...(req.sdlcContext ? { sdlcContext: req.sdlcContext } : {}),
+    ...(req.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
+  });
+  const signature = signWebhookPayload(body, decrypt(app.signingSecret));
   let res: globalThis.Response;
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
-      body: JSON.stringify({
-        s2sKey: config.xyneClaw.s2sKey,
-        sessionId,
-        agentSlug: req.agentSlug,
-        task: req.task,
-        userId: req.userId,
-        spacesWorkspaceId: req.spacesWorkspaceId,
-        spacesOrgId: req.spacesOrgId,
-        spacesOrgMemberId: req.spacesOrgMemberId,
-        callbackUrl: req.callbackUrl,
-        ...(req.conversationId ? { conversationId: req.conversationId } : {}),
-        ...(req.channelId ? { channelId: req.channelId } : {}),
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Xyne-Signature': signature,
+        'X-Source': 'XyneSpaces',
+        ...getS2SHeaders(),
+      },
+      body,
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
@@ -1324,6 +1511,66 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
   return { success: true, sessionId: json.sessionId ?? sessionId };
 }
 
+/** Cancel a callback-driven S2S run as its durable owner. */
+export async function cancelS2SClawRun(
+  sessionId: string,
+  userId: string
+): Promise<{ success: boolean; status: string; error?: string }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getS2SHeaders(),
+        ...extractUserIdHeader(userId),
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      success?: boolean;
+      status?: string;
+      error?: string;
+    };
+    if (!response.ok || !payload.success) {
+      return {
+        success: false,
+        status: payload.status ?? 'unknown',
+        error: payload.error ?? `Cancel failed: HTTP ${response.status}`,
+      };
+    }
+    return { success: true, status: payload.status ?? 'cancelled' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`[ClawAgentService] cancelS2SClawRun ${sessionId} failed: ${message}`);
+    return { success: false, status: 'unknown', error: message };
+  }
+}
+
+export async function getS2SClawRunStatus(
+  sessionId: string,
+  userId: string
+): Promise<S2SClawRunStatus | null> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/runs/${encodeURIComponent(sessionId)}`;
+  const response = await fetch(url, {
+    headers: {
+      ...getS2SHeaders(),
+      'x-user-id': userId,
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const body = await safeReadText(response);
+    throw new Error(`Claw run status failed: HTTP ${response.status} — ${body}`);
+  }
+  const payload = (await response.json()) as {
+    success?: boolean;
+    data?: S2SClawRunStatus;
+  };
+  return payload.success && payload.data ? payload.data : null;
+}
+
 export interface AppMentionAgentRequest {
   agentSlug: string;
   task: string;
@@ -1339,15 +1586,13 @@ export interface AppMentionAgentRequest {
   spacesOrgMemberId?: string;
 }
 
-export async function runClawAgent(
-  req: AppMentionAgentRequest,
-): Promise<{ dispatched: boolean }> {
+export async function runClawAgent(req: AppMentionAgentRequest): Promise<{ dispatched: boolean }> {
   // Current Claw installations use /webhook/app/<spacesAppId>. The old
   // /webhook/<agentSlug> URL was removed from the installation flow, so the
   // webhook cannot be resolved from its URL suffix anymore. Resolve the agent
   // first and use its Spaces app user id to find the corresponding install.
   const agents = await listS2SClawAgents();
-  const agent = agents.find(candidate => candidate.slug === req.agentSlug);
+  const agent = agents.find((candidate) => candidate.slug === req.agentSlug);
 
   let installedApp = agent?.spacesAppUserId
     ? await db.installedApps.findFirst({
@@ -1432,7 +1677,7 @@ async function resolveHeadlessAppEventIdentity(req: AppMentionAgentRequest): Pro
   const orgMemberId = req.spacesOrgMemberId ?? actor?.orgMemberId;
   if (!workspaceId || !orgId || !orgMemberId) {
     throw new Error(
-      `[ClawAgentService] Cannot dispatch a headless Claw event without workspace, org, and org-member identity for user ${req.userId}`,
+      `[ClawAgentService] Cannot dispatch a headless Claw event without workspace, org, and org-member identity for user ${req.userId}`
     );
   }
   return {
@@ -1571,24 +1816,32 @@ export async function getDailyBriefConfig(
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
   if (!response.ok) {
-    throw new Error(`[ClawAgentService] daily-brief config GET ${response.status}: ${await safeReadText(response)}`);
+    throw new Error(
+      `[ClawAgentService] daily-brief config GET ${response.status}: ${await safeReadText(response)}`
+    );
   }
   return response.json();
 }
 
-/** PUT the user's Daily Brief config ({ enabled?, instructions? }). */
+/** PUT the user's Daily Brief config ({ enabled?, instructions?, instructionsEnabled? }). */
 export async function saveDailyBriefConfig(
   req: { headers?: { cookie?: string } },
   userId: string,
-  body: { enabled?: boolean; instructions?: string | null }
+  body: { enabled?: boolean; instructions?: string | null; instructionsEnabled?: boolean }
 ): Promise<unknown> {
   const response = await fetch(`${DAILY_BRIEF_BASE()}/config`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractCookieHeader(req),
+      ...extractUserIdHeader(userId),
+    },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`[ClawAgentService] daily-brief config PUT ${response.status}: ${await safeReadText(response)}`);
+    throw new Error(
+      `[ClawAgentService] daily-brief config PUT ${response.status}: ${await safeReadText(response)}`
+    );
   }
   return response.json();
 }
@@ -1603,7 +1856,9 @@ export async function getDailyBriefSettings(
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
   if (!response.ok) {
-    throw new Error(`[ClawAgentService] daily-brief settings GET ${response.status}: ${await safeReadText(response)}`);
+    throw new Error(
+      `[ClawAgentService] daily-brief settings GET ${response.status}: ${await safeReadText(response)}`
+    );
   }
   return response.json();
 }
@@ -1616,7 +1871,11 @@ export async function saveDailyBriefSettings(
 ): Promise<{ status: number; json: unknown }> {
   const response = await fetch(`${DAILY_BRIEF_BASE()}/settings`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractCookieHeader(req),
+      ...extractUserIdHeader(userId),
+    },
     body: JSON.stringify(body),
   });
   // Surface 403 (not admin) / 400 (bad agent) to the caller rather than throwing.
@@ -1633,7 +1892,9 @@ export async function getLatestDailyBrief(
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
   if (!response.ok) {
-    throw new Error(`[ClawAgentService] daily-brief latest GET ${response.status}: ${await safeReadText(response)}`);
+    throw new Error(
+      `[ClawAgentService] daily-brief latest GET ${response.status}: ${await safeReadText(response)}`
+    );
   }
   return response.json();
 }
@@ -1644,15 +1905,64 @@ export async function getDailyBriefHistory(
   userId: string,
   limit?: number
 ): Promise<unknown> {
-  const qs = typeof limit === 'number' && Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
+  const qs =
+    typeof limit === 'number' && Number.isFinite(limit)
+      ? `?limit=${encodeURIComponent(limit)}`
+      : '';
   const response = await fetch(`${DAILY_BRIEF_BASE()}/history${qs}`, {
     method: 'GET',
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
   if (!response.ok) {
-    throw new Error(`[ClawAgentService] daily-brief history GET ${response.status}: ${await safeReadText(response)}`);
+    throw new Error(
+      `[ClawAgentService] daily-brief history GET ${response.status}: ${await safeReadText(response)}`
+    );
   }
   return response.json();
+}
+
+/** GET the days the user has briefs for (date + status only — powers the date picker). */
+export async function getDailyBriefDates(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  limit?: number
+): Promise<unknown> {
+  const qs = typeof limit === 'number' && Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/dates${qs}`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  if (!response.ok) {
+    throw new Error(`[ClawAgentService] daily-brief dates GET ${response.status}: ${await safeReadText(response)}`);
+  }
+  return response.json();
+}
+
+/** GET the user's stored brief for one YYYY-MM-DD bucket. */
+export async function getDailyBriefByDate(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  date: string
+): Promise<{ status: number; json: unknown }> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/by-date/${encodeURIComponent(date)}`, {
+    method: 'GET',
+    headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+  });
+  return { status: response.status, json: await response.json().catch(() => ({})) };
+}
+
+/** POST the "user switched briefs" beacon (fire-and-forget; never surfaced to the user). */
+export async function postDailyBriefSwitched(
+  req: { headers?: { cookie?: string } },
+  userId: string,
+  source: string
+): Promise<number> {
+  const response = await fetch(`${DAILY_BRIEF_BASE()}/switched`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
+    body: JSON.stringify({ source }),
+  });
+  return response.status;
 }
 
 /**
@@ -1682,13 +1992,17 @@ export async function regenerateDailyBriefStream(
       ...extractUserIdHeader(userId),
     },
     body: '{}',
+    // `dispatcher` is an undici extension not in the DOM RequestInit type.
+    dispatcher: briefStreamDispatcher,
     ...(opts.signal ? { signal: opts.signal } : {}),
-  });
+  } as unknown as RequestInit);
 
   if (!response.ok || !response.body) {
     const detail = response.body ? await safeReadText(response) : 'no response body';
     if (!res.writableEnded) {
-      res.write(`event: error\ndata: ${JSON.stringify({ message: `Regenerate failed (${response.status})`, detail })}\n\n`);
+      res.write(
+        `event: error\ndata: ${JSON.stringify({ message: `Regenerate failed (${response.status})`, detail })}\n\n`
+      );
       res.end();
     }
     return;
@@ -1708,10 +2022,16 @@ export async function regenerateDailyBriefStream(
     }
   } catch (err) {
     if (!res.writableEnded) {
-      res.write(`event: error\ndata: ${JSON.stringify({ message: err instanceof Error ? err.message : 'stream error' })}\n\n`);
+      res.write(
+        `event: error\ndata: ${JSON.stringify({ message: err instanceof Error ? err.message : 'stream error' })}\n\n`
+      );
     }
   } finally {
-    try { reader.releaseLock(); } catch { /* ignore */ }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
     if (!res.writableEnded) res.end();
   }
 }

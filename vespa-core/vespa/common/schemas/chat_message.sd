@@ -15,6 +15,18 @@ schema chat_message {
       index: enable-bm25
     }
 
+    field links type array<string> {
+      indexing: index | summary
+      match: text
+      stemming: none
+      index: enable-bm25
+    }
+
+    field hasLinks type bool {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
     # Per-chunk body used for chunk-level embeddings, mirroring mail.sd.
     # `text` (above) is retained as the single display/summary/lexical field;
     # `chunks` holds the same body split into <=2000-char segments so long
@@ -267,6 +279,7 @@ field text_fuzzy type string {
     summary mentions {}
     summary channelMentions {}
     summary attachmentIds {}
+    summary links {}
     summary channelName {}
     summary isPrivate {}
     summary channelId {}
@@ -292,6 +305,8 @@ field text_fuzzy type string {
     summary messageType {}
     summary threadSenders {}
     summary attachmentIds {}
+    summary links {}
+    summary hasLinks {}
     # imported from channelRef
     summary channelId {}
     summary channelName {}

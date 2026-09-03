@@ -31,6 +31,12 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
 
+/**
+ * Vespa document-summary class used when the caller does not ask for a specific one.
+ * `lean` returns only the fields the search UI needs, keeping payloads small.
+ */
+const DEFAULT_PRESENTATION_SUMMARY = 'lean';
+
 function escapeQueryForUserInput(query: string): string {
   if (!query) return query;
 
@@ -92,6 +98,7 @@ interface SearchOptions {
   mail?: MailFilters;
   call?: CallFilters;
   prefixBoostWeight?: number;
+  /** Vespa document-summary class to request. Defaults to `lean` when not set. */
   presentationSummary?: string;
   captureDebug?: (info: VespaSearchDebugInfo) => void;
   // Display name(s) of scoped mention chips, highlighted as exact phrases in results (not in YQL).
@@ -220,7 +227,7 @@ export class SearchService {
       'ranking.profile': 'default_native',
       'input.query(alpha)': 0.35,
       timeout: '15s',
-      'presentation.summary': 'lean',
+      'presentation.summary': DEFAULT_PRESENTATION_SUMMARY,
       ...(useSemantic ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
     };
 
@@ -292,7 +299,7 @@ export class SearchService {
         mail = {},
         call = {},
         prefixBoostWeight = 0.2,
-        presentationSummary,
+        presentationSummary = DEFAULT_PRESENTATION_SUMMARY,
         mentionHighlights = [],
         workspaceId,
         captureDebug,
@@ -379,12 +386,18 @@ export class SearchService {
       // Fetch personalization weights if using personalized rank profile
       let channelWeights = {};
       let userWeights = {};
+      // For mail's involvement rank terms (from/to hold email addresses)
+      let personalizationUserEmail: string | undefined;
 
       if (rankProfile === RankProfile.personalizedRank) {
         try {
           const userDoc = await this.vespa.getDocument({docId:userId,schema:userSchema,namespace:config.namespace});
           channelWeights = userDoc?.fields?.channelWeights || {};
           userWeights = userDoc?.fields?.userWeights || {};
+          personalizationUserEmail = userDoc?.fields?.email || undefined;
+          if (!personalizationUserEmail) {
+            this.logger.warn(`No email on Vespa user doc ${userId}; mail involvement rank terms skipped`);
+          }
           this.logger.info(`Fetched personalization weights for user ${userId}`);
         } catch (error) {
           this.logger.warn(
@@ -415,6 +428,8 @@ export class SearchService {
           wsId,
           sort,
           isExactMatch,
+          rankProfile,
+          personalizationUserEmail,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
@@ -441,7 +456,7 @@ export class SearchService {
           "input.query(time_from)": timeRangeStart,
           "input.query(time_to)": timeRangeEnd,
           "ranking.listFeatures": true,
-          ...(presentationSummary ? { "presentation.summary": presentationSummary } : {}),
+          "presentation.summary": presentationSummary?.trim() || DEFAULT_PRESENTATION_SUMMARY,
           tracelevel: 0,
           // Exact match turns off the default searchrules.sr rewriting (stopword removal + ranking
           // boosts): stripping a word like "is"/"the" mid-query silently breaks phrase adjacency.
@@ -456,22 +471,33 @@ export class SearchService {
 
       // Execute search
       // Fetch feature flags from Superposition
-      const useSemanticAnyway = await superpositionClient.getBooleanValue(
-        'vespa_search_use_semantic_anyway',
-        true,
+      // Rank profiles that skip the vector half of retrieval. `personalized` reads no vector
+      // feature, so nearestNeighbor cannot change its ranking -- it only costs a filtered-HNSW
+      // traversal plus an embed call, and floods recall with zero-lexical docs that the
+      // channel-affinity tier then promotes over real matches. Default [] = nothing skipped.
+      const semanticDisabledRankProfiles = await superpositionClient.getObjectValue(
+        'vespa_search_semantic_disabled_rank_profiles',
+        [],
         {}
+      );
+      const useSemanticAnyway = !(
+        Array.isArray(semanticDisabledRankProfiles) &&
+        semanticDisabledRankProfiles.includes(rankProfile)
       );
       const newFallbackMethod = await superpositionClient.getBooleanValue(
         'vespa_search_new_fallback_method',
         false,
         {}
       );
-      // When enabled, effectiveWorkspaceId is passed to YqlBuilder so the top-level
-      // `workspaceId contains @ws` guard scopes the `user`/`transcript` branches to the
-      // caller's workspace. The flag is controlled remotely via Superposition.
+      // Passes effectiveWorkspaceId to YqlBuilder, so the top-level `workspaceId contains
+      // @ws` guard bounds the `user`/`transcript` branches to the caller's workspace.
+      // Those two branches carry no per-app guard of their own, so this is the only thing
+      // scoping them; it defaults on and the Superposition flag exists to turn it off, not
+      // to turn it on. A document ingested without a workspaceId will not match while this
+      // is enabled, so the schema has to be backfilled before the results are complete.
       const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
         'enableWorkSpaceFiltering',
-        false,
+        true,
         {}
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
@@ -492,17 +518,29 @@ export class SearchService {
        // Filter by nativerank if enabled
        // Skip nativeRank filtering for filter-only searches (no query text)
        // nativeRank is based on text matching - meaningless without a query
+      let textMatchRescuedIds = new Set<string>();
        if (nativeRankThreshold > 0 && searchQuery?.trim()) {
-        response = filterByNativeRank(response, nativeRankThreshold , this.logger);
+        const filtered = filterByNativeRank(response, nativeRankThreshold , this.logger, {
+          query: searchQuery,
+        });
+        response = filtered.response;
+        textMatchRescuedIds = filtered.rescuedIds;
       }
 
       const exactResultCount = response.root?.children?.length || 0;
       const expectedCount = limit - offset;
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
-      
+
+      // Hits kept only by the ticket text-match rescue scored below the nativeRank threshold,
+      // so they are not evidence that the exact pass did well. Counting them would push
+      // exactResultCount over expectedCount and silently skip the 3-gram fuzzy fallback that
+      // recovers typo and prefix queries. Clamped because root.children are group nodes when
+      // grouping is on, while rescued ids are collected from the hits nested inside them.
+      const strongExactResultCount = Math.max(0, exactResultCount - textMatchRescuedIds.size);
+
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
       const isFileSearch = app.some(a => a.toLowerCase() === 'file');
-      const oldFallback = exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
+      const oldFallback = strongExactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
 
       const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
         'vespa_fallback_score_threshold',
@@ -514,8 +552,13 @@ export class SearchService {
         5,
         {}
       );
+      // Same reasoning as strongExactResultCount: a rescued hit can carry a passable
+      // relevance from the vector half of the profile despite a zero nativeRank, so it must
+      // not count toward "we already have enough good results".
       const goodResults = response.root?.children?.filter(
-        child => (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
+        child =>
+          !textMatchRescuedIds.has(String(child.id ?? '')) &&
+          (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
       ) ?? [];
 
       const newFallback =

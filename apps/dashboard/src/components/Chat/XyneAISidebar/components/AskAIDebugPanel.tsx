@@ -31,6 +31,8 @@ import {
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fetchV2DebugArtifacts } from '../../../../services/XyneAI/XyneAISessionsV2Service';
+import { debugArtifactFailureState } from './debugArtifactPollingPolicy';
+import { mergeLiveDebugTimeline } from './unifiedDebugTimeline';
 import type {
   DebugArtifactBundle,
   DebugEventRecord,
@@ -105,6 +107,7 @@ type AskAIDebugPanelProps = {
   inline?: boolean;
   width?: number;
   minWidth?: number;
+  fill?: boolean;
   liveEvents?: DebugEventRecord[];
   running?: boolean;
   artifactsReadyVersion?: number;
@@ -120,6 +123,7 @@ type AskAIDebugPanelProps = {
    *  ("show the tool call in debug panel"). Matched via the `data-tool-call-id`
    *  attribute each event row carries. */
   focusToolCallId?: string | null;
+  fetchArtifacts?: (conversationId: string, agentSlug: string) => Promise<DebugArtifactBundle>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -365,7 +369,16 @@ function JsonViewerModal({
   const modal = (
     <div
       role='presentation'
-      className='fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm'
+      // Portalled to <body>, so when this opens above the twin's reasoning
+      // popover it is a SIBLING of it, not a child — Radix therefore counts
+      // clicks here as "outside" and Escape would close both layers at once.
+      // `data-debug-json-modal` is what that popover's onInteractOutside /
+      // onEscapeKeyDown guards match on to yield to this layer instead.
+      // `pointer-events-auto` is belt-and-braces: harmless now the popover is
+      // non-modal, and it keeps this usable if it is ever hosted under a modal
+      // dialog, which zeroes body pointer-events.
+      data-debug-json-modal=''
+      className='pointer-events-auto fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm'
       onMouseDown={event => {
         // Close only on a true backdrop click — clicks inside the dialog don't
         // bubble a close (avoids a stop-propagation handler on the dialog, which
@@ -921,6 +934,7 @@ function DebugTimelineSection({
   timeMode?: 'delta' | 'abs';
   followUpDiagnostic?: FollowUpDiagnostic | null;
 }) {
+  const [expanded, setExpanded] = useState(defaultOpen);
   const events = useMemo<unknown[]>(() => {
     const raw = data?.['events'];
     return Array.isArray(raw) ? (raw as unknown[]) : [];
@@ -1014,7 +1028,11 @@ function DebugTimelineSection({
     ? 'text-cyan-600 dark:text-cyan-400'
     : 'text-xyne-fg-tertiary';
   return (
-    <details open={defaultOpen} className='group/turn border-b border-xyne-border last:border-b-0'>
+    <details
+      open={expanded}
+      onToggle={event => setExpanded(event.currentTarget.open)}
+      className='group/turn border-b border-xyne-border last:border-b-0'
+    >
       <summary className='cursor-pointer list-none py-2'>
         <div className='flex items-baseline gap-2'>
           <ChevronDown
@@ -1029,158 +1047,160 @@ function DebugTimelineSection({
         </div>
       </summary>
 
-      <div className='pb-3 pt-1 space-y-2'>
-        {Boolean(data?.['task'] || data?.['question'] || data?.['providerError']) && (
-          <p
-            className={`text-[12px] leading-relaxed ${data?.['providerError'] ? 'text-red-600 dark:text-red-400' : 'text-xyne-fg-secondary'}`}
-          >
-            {asString(data?.['providerError']) ||
-              asString(data?.['question']) ||
-              asString(data?.['task'])}
-          </p>
-        )}
+      {expanded && (
+        <div className='ml-1.5 border-l border-xyne-border-subtle pl-4 pb-3 pt-1 space-y-2'>
+          {Boolean(data?.['task'] || data?.['question'] || data?.['providerError']) && (
+            <p
+              className={`text-[12px] leading-relaxed ${data?.['providerError'] ? 'text-red-600 dark:text-red-400' : 'text-xyne-fg-secondary'}`}
+            >
+              {asString(data?.['providerError']) ||
+                asString(data?.['question']) ||
+                asString(data?.['task'])}
+            </p>
+          )}
 
-        {(tokenUsage || latency || streamGraph.length > 0) && (
-          <details className='group/sm'>
-            <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
-              <ChevronDown
-                size={11}
-                className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sm:rotate-0'
-              />
-              <Activity size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
-              <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
-                Stream metrics
-              </span>
-            </summary>
-            <div className='ml-1.5 border-l border-xyne-border-subtle pl-4 pt-1.5 pb-1 space-y-2'>
-              {(tokenUsage || latency) && (
-                <div className='flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-xyne-fg-secondary'>
-                  {tokenUsage && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Tokens:</span>{' '}
-                      {asString(tokenUsage['input'])} in / {asString(tokenUsage['output'])} out
-                    </span>
-                  )}
-                  {latency && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Total:</span>{' '}
-                      {asString(latency['totalMs'])}ms
-                    </span>
-                  )}
-                  {latency && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>LLM:</span>{' '}
-                      {asString(latency['llmTotalMs'])}ms
-                    </span>
-                  )}
-                  {streamCharsPerSec !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Stream:</span>{' '}
-                      {streamCharsPerSec.toFixed(1)} chars/s
-                    </span>
-                  )}
-                  {streamChars !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Chars:</span> {streamChars}
-                    </span>
-                  )}
-                  {streamTextChars !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Text:</span> {streamTextChars}
-                    </span>
-                  )}
-                  {streamThinkingChars !== undefined && (
-                    <span>
-                      <span className='text-xyne-fg-muted'>Thinking:</span> {streamThinkingChars}
-                    </span>
-                  )}
-                </div>
-              )}
-              {streamGraph.length > 0 && <StreamRateGraph samples={streamGraph} />}
-            </div>
-          </details>
-        )}
-
-        {visibleEvents.length > 0 && (
-          <details open className='group/tl'>
-            <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
-              <ChevronDown
-                size={11}
-                className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/tl:rotate-0'
-              />
-              <ListTree size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
-              <span className='text-[12px] font-semibold text-xyne-fg-secondary'>Timeline</span>
-              <div className='ml-auto flex items-baseline gap-2'>
-                <button
-                  type='button'
-                  data-track-category='XyneAI'
-                  data-track-name='DEBUG_TIMELINE_EXPAND_ALL'
-                  onClick={e => {
-                    // Inside <summary> — stop the click from toggling the Timeline itself.
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setAllCards(true);
-                  }}
-                  className='text-[11px] text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary'
-                >
-                  Expand all
-                </button>
-                <span className='text-[11px] text-xyne-fg-muted'>·</span>
-                <button
-                  type='button'
-                  data-track-category='XyneAI'
-                  data-track-name='DEBUG_TIMELINE_COLLAPSE_ALL'
-                  onClick={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setAllCards(false);
-                  }}
-                  className='text-[11px] text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary'
-                >
-                  Collapse all
-                </button>
-                <span className='text-[11px] text-xyne-fg-muted'>
-                  {visibleEvents.length} event{visibleEvents.length === 1 ? '' : 's'}
+          {(tokenUsage || latency || streamGraph.length > 0) && (
+            <details className='group/sm'>
+              <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
+                <ChevronDown
+                  size={11}
+                  className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sm:rotate-0'
+                />
+                <Activity size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
+                <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
+                  Stream metrics
                 </span>
+              </summary>
+              <div className='ml-1.5 border-l border-xyne-border-subtle pl-4 pt-1.5 pb-1 space-y-2'>
+                {(tokenUsage || latency) && (
+                  <div className='flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-xyne-fg-secondary'>
+                    {tokenUsage && (
+                      <span>
+                        <span className='text-xyne-fg-muted'>Tokens:</span>{' '}
+                        {asString(tokenUsage['input'])} in / {asString(tokenUsage['output'])} out
+                      </span>
+                    )}
+                    {latency && (
+                      <span>
+                        <span className='text-xyne-fg-muted'>Total:</span>{' '}
+                        {asString(latency['totalMs'])}ms
+                      </span>
+                    )}
+                    {latency && (
+                      <span>
+                        <span className='text-xyne-fg-muted'>LLM:</span>{' '}
+                        {asString(latency['llmTotalMs'])}ms
+                      </span>
+                    )}
+                    {streamCharsPerSec !== undefined && (
+                      <span>
+                        <span className='text-xyne-fg-muted'>Stream:</span>{' '}
+                        {streamCharsPerSec.toFixed(1)} chars/s
+                      </span>
+                    )}
+                    {streamChars !== undefined && (
+                      <span>
+                        <span className='text-xyne-fg-muted'>Chars:</span> {streamChars}
+                      </span>
+                    )}
+                    {streamTextChars !== undefined && (
+                      <span>
+                        <span className='text-xyne-fg-muted'>Text:</span> {streamTextChars}
+                      </span>
+                    )}
+                    {streamThinkingChars !== undefined && (
+                      <span>
+                        <span className='text-xyne-fg-muted'>Thinking:</span> {streamThinkingChars}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {streamGraph.length > 0 && <StreamRateGraph samples={streamGraph} />}
               </div>
+            </details>
+          )}
+
+          {visibleEvents.length > 0 && (
+            <details open className='group/tl'>
+              <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
+                <ChevronDown
+                  size={11}
+                  className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/tl:rotate-0'
+                />
+                <ListTree size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
+                <span className='text-[12px] font-semibold text-xyne-fg-secondary'>Timeline</span>
+                <div className='ml-auto flex items-baseline gap-2'>
+                  <button
+                    type='button'
+                    data-track-category='XyneAI'
+                    data-track-name='DEBUG_TIMELINE_EXPAND_ALL'
+                    onClick={e => {
+                      // Inside <summary> — stop the click from toggling the Timeline itself.
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setAllCards(true);
+                    }}
+                    className='text-[11px] text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary'
+                  >
+                    Expand all
+                  </button>
+                  <span className='text-[11px] text-xyne-fg-muted'>·</span>
+                  <button
+                    type='button'
+                    data-track-category='XyneAI'
+                    data-track-name='DEBUG_TIMELINE_COLLAPSE_ALL'
+                    onClick={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setAllCards(false);
+                    }}
+                    className='text-[11px] text-xyne-fg-muted transition-colors hover:text-xyne-fg-secondary'
+                  >
+                    Collapse all
+                  </button>
+                  <span className='text-[11px] text-xyne-fg-muted'>
+                    {visibleEvents.length} event{visibleEvents.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+              </summary>
+              <div ref={timelineRef} className='pt-1'>
+                {visibleEvents.map((event, idx) => {
+                  const ekind = isRecord(event) ? asString(event['kind']) : '';
+                  const indented =
+                    (ekind === 'thinking' ||
+                      ekind === 'assistant_turn_end' ||
+                      ekind.startsWith('tool_execution')) &&
+                    idx !== lastAssistantIdx;
+                  const ek = (isRecord(event) ? seqKey(event['seq']) : '') || String(idx);
+                  return (
+                    <DebugEventItem
+                      key={ek}
+                      event={event}
+                      eventKey={ek}
+                      displayIndex={idx + 1}
+                      selected={selectedEventKey === ek}
+                      onSelect={onSelectEvent}
+                      subagentTracesByParentToolCallId={subagentTracesByParentToolCallId}
+                      originMs={originMs}
+                      timeMode={timeMode}
+                      indented={indented}
+                    />
+                  );
+                })}
+              </div>
+            </details>
+          )}
+
+          <details className='group/raw'>
+            <summary className='cursor-pointer list-none py-1 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
+              Show raw run data
             </summary>
-            <div ref={timelineRef} className='pt-1'>
-              {visibleEvents.map((event, idx) => {
-                const ekind = isRecord(event) ? asString(event['kind']) : '';
-                const indented =
-                  (ekind === 'thinking' ||
-                    ekind === 'assistant_turn_end' ||
-                    ekind.startsWith('tool_execution')) &&
-                  idx !== lastAssistantIdx;
-                const ek = (isRecord(event) ? seqKey(event['seq']) : '') || String(idx);
-                return (
-                  <DebugEventItem
-                    key={ek}
-                    event={event}
-                    eventKey={ek}
-                    displayIndex={idx + 1}
-                    selected={selectedEventKey === ek}
-                    onSelect={onSelectEvent}
-                    subagentTracesByParentToolCallId={subagentTracesByParentToolCallId}
-                    originMs={originMs}
-                    timeMode={timeMode}
-                    indented={indented}
-                  />
-                );
-              })}
+            <div className='ml-1.5 border-l border-xyne-border-subtle pl-4 pt-1'>
+              <JsonViewer value={{ ...data, events: visibleEvents }} title='Run artifact' />
             </div>
           </details>
-        )}
-
-        <details className='group/raw'>
-          <summary className='cursor-pointer list-none py-1 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
-            Show raw run data
-          </summary>
-          <div className='ml-1.5 border-l border-xyne-border-subtle pl-4 pt-1'>
-            <JsonViewer value={{ ...data, events: visibleEvents }} title='Run artifact' />
-          </div>
-        </details>
-      </div>
+        </div>
+      )}
     </details>
   );
 }
@@ -1265,6 +1285,7 @@ function DebugEventItem({
   /** Sub-steps of a turn (thinking / assistant / tool) indent under the spine. */
   indented?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   if (!isRecord(event)) {
     return <JsonViewer value={event} title='Event' />;
   }
@@ -1325,7 +1346,9 @@ function DebugEventItem({
   return (
     <details
       data-tool-call-id={asString(data['toolCallId']) || asString(event['toolCallId']) || undefined}
-      className={`group/event border-l-2 ${visual.rail} ${selected ? 'bg-xyne-surface-subtle/60' : 'hover:bg-black/[0.015] dark:hover:bg-white/[0.025]'}`}
+      open={expanded}
+      onToggle={event => setExpanded(event.currentTarget.open)}
+      className={`group/event border-l-2 ${visual.rail} ${indented ? 'ml-4' : ''} ${selected ? 'bg-xyne-surface-subtle/60' : 'hover:bg-black/[0.015] dark:hover:bg-white/[0.025]'}`}
     >
       <summary
         className='cursor-pointer list-none py-[5px] pl-2 pr-1'
@@ -1384,341 +1407,280 @@ function DebugEventItem({
           </p>
         )}
       </summary>
-      <div
-        className={`pl-2 pr-2 pb-3 pt-1 space-y-1.5 ${selected ? 'bg-xyne-surface-subtle/60' : ''}`}
-      >
-        {(kind === 'follow_up_suggestions' ||
-          (kind === 'follow_up_generation_end' && typeof data['outcome'] === 'string')) && (
-          <FollowUpDiagnosticsSection diagnostic={data as unknown as FollowUpDiagnostic} />
-        )}
-        {kind === 'session_prompt' && (
-          <div className='space-y-1.5'>
-            {typeof data['systemPrompt'] === 'string' && data['systemPrompt'] && (
-              <details className='group/sp rounded-md bg-xyne-surface'>
-                <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
-                  <ChevronDown
-                    size={11}
-                    className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sp:rotate-0'
-                  />
-                  <FileText size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
-                  <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
-                    System prompt
-                  </span>
-                  <span className='ml-auto text-[11px] text-xyne-fg-muted'>
-                    {data['systemPrompt'].length} chars
-                  </span>
+      {expanded && (
+        <div
+          className={`pl-[16px] pr-2 pb-3 pt-1 space-y-1.5 ${selected ? 'bg-xyne-surface-subtle/60' : ''}`}
+        >
+          {(kind === 'follow_up_suggestions' ||
+            (kind === 'follow_up_generation_end' && typeof data['outcome'] === 'string')) && (
+            <FollowUpDiagnosticsSection diagnostic={data as unknown as FollowUpDiagnostic} />
+          )}
+          {kind === 'session_prompt' && (
+            <div className='space-y-1.5'>
+              {typeof data['systemPrompt'] === 'string' && data['systemPrompt'] && (
+                <details className='group/sp rounded-md bg-xyne-surface'>
+                  <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
+                    <ChevronDown
+                      size={11}
+                      className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sp:rotate-0'
+                    />
+                    <FileText size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
+                    <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
+                      System prompt
+                    </span>
+                    <span className='ml-auto text-[11px] text-xyne-fg-muted'>
+                      {data['systemPrompt'].length} chars
+                    </span>
+                  </summary>
+                  <div className='px-2 pb-2 pt-1'>
+                    <pre className='max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary'>
+                      {data['systemPrompt']}
+                    </pre>
+                  </div>
+                </details>
+              )}
+              {Array.isArray(data['messages']) && data['messages'].length > 0 && (
+                <details className='group/im rounded-md bg-xyne-surface'>
+                  <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
+                    <ChevronDown
+                      size={11}
+                      className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/im:rotate-0'
+                    />
+                    <MessagesSquare
+                      size={11}
+                      className='shrink-0 self-center text-xyne-fg-tertiary'
+                    />
+                    <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
+                      Input messages
+                    </span>
+                    <span className='ml-auto text-[11px] text-xyne-fg-muted'>
+                      {data['messages'].length} message{data['messages'].length === 1 ? '' : 's'}
+                    </span>
+                  </summary>
+                  <div className='px-2 pb-2 pt-1'>
+                    {(data['messages'] as unknown[]).map((msg, idx) => (
+                      <MessageSnapshot key={`${seq}-msg-${idx}`} message={msg} />
+                    ))}
+                  </div>
+                </details>
+              )}
+              {typeof data['prompt'] === 'string' && data['prompt'] && (
+                <details className='group/up rounded-md bg-xyne-surface'>
+                  <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
+                    <ChevronDown
+                      size={11}
+                      className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/up:rotate-0'
+                    />
+                    <User size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
+                    <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
+                      User prompt
+                    </span>
+                    <span className='ml-auto text-[11px] text-xyne-fg-muted'>
+                      {data['prompt'].length} chars
+                    </span>
+                  </summary>
+                  <div className='px-2 pb-2 pt-1'>
+                    <pre className='max-h-64 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary'>
+                      {data['prompt']}
+                    </pre>
+                  </div>
+                </details>
+              )}
+              <details className='rounded-md bg-xyne-surface'>
+                <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
+                  Show raw event data
                 </summary>
                 <div className='px-2 pb-2 pt-1'>
-                  <pre className='max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary'>
-                    {data['systemPrompt']}
-                  </pre>
+                  <JsonViewer value={data} title='LLM event' />
                 </div>
               </details>
-            )}
-            {Array.isArray(data['messages']) && data['messages'].length > 0 && (
-              <details className='group/im rounded-md bg-xyne-surface'>
-                <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
-                  <ChevronDown
-                    size={11}
-                    className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/im:rotate-0'
-                  />
-                  <MessagesSquare
-                    size={11}
-                    className='shrink-0 self-center text-xyne-fg-tertiary'
-                  />
-                  <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
-                    Input messages
-                  </span>
-                  <span className='ml-auto text-[11px] text-xyne-fg-muted'>
-                    {data['messages'].length} message{data['messages'].length === 1 ? '' : 's'}
-                  </span>
-                </summary>
-                <div className='px-2 pb-2 pt-1'>
-                  {(data['messages'] as unknown[]).map((msg, idx) => (
-                    <MessageSnapshot key={`${seq}-msg-${idx}`} message={msg} />
-                  ))}
+            </div>
+          )}
+
+          {kind === 'tool_execution_start' && (
+            <div className='space-y-1.5'>
+              {'args' in data && (
+                <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
+                  <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Arguments</p>
+                  <JsonViewer value={data['args']} title='Arguments' defaultExpandedDepth={999} />
                 </div>
-              </details>
-            )}
-            {typeof data['prompt'] === 'string' && data['prompt'] && (
-              <details className='group/up rounded-md bg-xyne-surface'>
-                <summary className='flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5'>
-                  <ChevronDown
-                    size={11}
-                    className='shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/up:rotate-0'
-                  />
-                  <User size={11} className='shrink-0 self-center text-xyne-fg-tertiary' />
-                  <span className='text-[12px] font-semibold text-xyne-fg-secondary'>
-                    User prompt
-                  </span>
-                  <span className='ml-auto text-[11px] text-xyne-fg-muted'>
-                    {data['prompt'].length} chars
-                  </span>
-                </summary>
-                <div className='px-2 pb-2 pt-1'>
-                  <pre className='max-h-64 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary'>
-                    {data['prompt']}
-                  </pre>
+              )}
+              <SubagentTraceInline traces={subagentTraces} />
+            </div>
+          )}
+
+          {kind === 'tool_execution_end' && (
+            <div className='space-y-1.5'>
+              {'args' in data && (
+                <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
+                  <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Arguments</p>
+                  <JsonViewer value={data['args']} title='Arguments' defaultExpandedDepth={999} />
                 </div>
-              </details>
-            )}
+              )}
+              {/* Vespa query — emitted by kb-search and spaces-search. Lives
+                  on data.debug.payloads (one entry per Vespa hit: "exact" +
+                  optional "fuzzy-fallback"). Renders the YQL string verbatim so
+                  it can be copy-pasted into a Vespa shell for replay. */}
+              {isRecord(data['debug']) && Array.isArray(data['debug']['payloads']) && (
+                <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
+                  <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Vespa query</p>
+                  {(data['debug'] as { payloads: Array<Record<string, unknown>> }).payloads.map(
+                    (p, i) => (
+                      <div key={i} className='space-y-1'>
+                        {typeof p['stage'] === 'string' && (
+                          <p className='text-[11px] text-xyne-fg-muted'>stage: {p['stage']}</p>
+                        )}
+                        {typeof p['yql'] === 'string' && (
+                          <pre className='max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-xyne-surface-sunken p-2 text-[11px] leading-relaxed text-xyne-fg-secondary'>
+                            {p['yql']}
+                          </pre>
+                        )}
+                        {isRecord(p['vespaParams']) && (
+                          <details className='rounded-md bg-xyne-surface-sunken'>
+                            <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
+                              Bound params + ranking inputs
+                            </summary>
+                            <div className='px-2 pb-2 pt-1'>
+                              <JsonViewer value={p['vespaParams']} title='vespaParams' />
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
+              {'result' in data && (
+                <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
+                  <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Result</p>
+                  <ToolResultView value={data['result']} />
+                </div>
+              )}
+              <SubagentTraceInline traces={subagentTraces} />
+            </div>
+          )}
+
+          {kind === 'thinking' && typeof data['text'] === 'string' && (
+            // Match the collapsed preview exactly (italic sans, secondary, aligned
+            // under the title) so expanding just reveals the FULL text in place,
+            // not a heavier card with a different font.
+            <p className='whitespace-pre-wrap pl-[58px] pr-6 text-[12px] italic leading-relaxed text-xyne-fg-secondary'>
+              {data['text']}
+            </p>
+          )}
+
+          {kind === 'assistant_turn_end' && (
+            <div className='space-y-1.5'>
+              {typeof data['assistantText'] === 'string' && (
+                // Same casual-expand treatment as thinking (non-italic, matches the
+                // assistant preview). Usage stats stay below as a metadata row.
+                <p className='whitespace-pre-wrap pl-[58px] pr-6 text-[12px] leading-relaxed text-xyne-fg-secondary'>
+                  {data['assistantText']}
+                </p>
+              )}
+              {(isRecord(data['usage']) ||
+                typeof data['streamChars'] === 'number' ||
+                typeof data['streamCharsPerSec'] === 'number') && (
+                <div className='flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary'>
+                  {isRecord(data['usage']) && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Usage:</span>{' '}
+                      {asString(data['usage']['input_tokens']) ||
+                        asString(data['usage']['input']) ||
+                        '0'}{' '}
+                      in /{' '}
+                      {asString(data['usage']['output_tokens']) ||
+                        asString(data['usage']['output']) ||
+                        '0'}{' '}
+                      out
+                    </span>
+                  )}
+                  {typeof data['streamChars'] === 'number' && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Chars:</span> {data['streamChars']}
+                    </span>
+                  )}
+                  {typeof data['streamCharsPerSec'] === 'number' && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Rate:</span>{' '}
+                      {asString(data['streamCharsPerSec'])} chars/s
+                    </span>
+                  )}
+                  {typeof data['streamTextChars'] === 'number' && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Text:</span> {data['streamTextChars']}
+                    </span>
+                  )}
+                  {typeof data['streamThinkingChars'] === 'number' && (
+                    <span>
+                      <span className='text-xyne-fg-muted'>Thinking:</span>{' '}
+                      {data['streamThinkingChars']}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {kind === 'session_error' && typeof data['error'] === 'string' && (
+            <pre className='whitespace-pre-wrap rounded-md bg-xyne-surface p-2 text-[12px] leading-relaxed text-red-700 dark:text-red-300'>
+              {data['error']}
+            </pre>
+          )}
+
+          {kind === 'session_end' && (
+            <div className='flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary'>
+              {typeof data['textLength'] === 'number' && (
+                <span>
+                  <span className='text-xyne-fg-muted'>Length:</span> {data['textLength']}
+                </span>
+              )}
+              {typeof data['durationMs'] === 'number' && (
+                <span>
+                  <span className='text-xyne-fg-muted'>Duration:</span> {data['durationMs']}ms
+                </span>
+              )}
+              {typeof data['streamChars'] === 'number' && (
+                <span>
+                  <span className='text-xyne-fg-muted'>Chars:</span> {data['streamChars']}
+                </span>
+              )}
+              {typeof data['streamCharsPerSec'] === 'number' && (
+                <span>
+                  <span className='text-xyne-fg-muted'>Rate:</span>{' '}
+                  {asString(data['streamCharsPerSec'])} chars/s
+                </span>
+              )}
+              {isRecord(data['tokenUsage']) && (
+                <span>
+                  <span className='text-xyne-fg-muted'>Tokens:</span>{' '}
+                  {asString(data['tokenUsage']['input'])} in /{' '}
+                  {asString(data['tokenUsage']['output'])} out
+                </span>
+              )}
+            </div>
+          )}
+
+          {![
+            'session_prompt',
+            'tool_execution_start',
+            'tool_execution_end',
+            'assistant_turn_end',
+            'session_error',
+            'session_end',
+          ].includes(kind) && (
             <details className='rounded-md bg-xyne-surface'>
               <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
                 Show raw event data
               </summary>
               <div className='px-2 pb-2 pt-1'>
-                <JsonViewer value={data} title='LLM event' />
+                <JsonViewer value={data} title='Event data' />
               </div>
             </details>
-          </div>
-        )}
-
-        {kind === 'tool_execution_start' && (
-          <div className='space-y-1.5'>
-            {'args' in data && (
-              <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
-                <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Arguments</p>
-                <JsonViewer value={data['args']} title='Arguments' defaultExpandedDepth={999} />
-              </div>
-            )}
-            <SubagentTraceInline traces={subagentTraces} />
-          </div>
-        )}
-
-        {kind === 'tool_execution_end' && (
-          <div className='space-y-1.5'>
-            {'args' in data && (
-              <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
-                <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Arguments</p>
-                <JsonViewer value={data['args']} title='Arguments' defaultExpandedDepth={999} />
-              </div>
-            )}
-            {/* Vespa query — emitted by kb-search and spaces-search. Lives
-                  on data.debug.payloads (one entry per Vespa hit: "exact" +
-                  optional "fuzzy-fallback"). Renders the YQL string verbatim so
-                  it can be copy-pasted into a Vespa shell for replay. */}
-            {isRecord(data['debug']) && Array.isArray(data['debug']['payloads']) && (
-              <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
-                <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Vespa query</p>
-                {(data['debug'] as { payloads: Array<Record<string, unknown>> }).payloads.map(
-                  (p, i) => (
-                    <div key={i} className='space-y-1'>
-                      {typeof p['stage'] === 'string' && (
-                        <p className='text-[11px] text-xyne-fg-muted'>stage: {p['stage']}</p>
-                      )}
-                      {typeof p['yql'] === 'string' && (
-                        <pre className='max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-xyne-surface-sunken p-2 text-[11px] leading-relaxed text-xyne-fg-secondary'>
-                          {p['yql']}
-                        </pre>
-                      )}
-                      {isRecord(p['vespaParams']) && (
-                        <details className='rounded-md bg-xyne-surface-sunken'>
-                          <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
-                            Bound params + ranking inputs
-                          </summary>
-                          <div className='px-2 pb-2 pt-1'>
-                            <JsonViewer value={p['vespaParams']} title='vespaParams' />
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  ),
-                )}
-              </div>
-            )}
-            {'result' in data && (
-              <div className='space-y-1 rounded-md bg-xyne-surface px-2 py-1.5'>
-                <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Result</p>
-                <ToolResultView value={data['result']} />
-              </div>
-            )}
-            <SubagentTraceInline traces={subagentTraces} />
-          </div>
-        )}
-
-        {kind === 'thinking' && typeof data['text'] === 'string' && (
-          // Match the collapsed preview exactly (italic sans, secondary, aligned
-          // under the title) so expanding just reveals the FULL text in place,
-          // not a heavier card with a different font.
-          <p className='whitespace-pre-wrap pl-[58px] pr-6 text-[12px] italic leading-relaxed text-xyne-fg-secondary'>
-            {data['text']}
-          </p>
-        )}
-
-        {kind === 'assistant_turn_end' && (
-          <div className='space-y-1.5'>
-            {typeof data['assistantText'] === 'string' && (
-              // Same casual-expand treatment as thinking (non-italic, matches the
-              // assistant preview). Usage stats stay below as a metadata row.
-              <p className='whitespace-pre-wrap pl-[58px] pr-6 text-[12px] leading-relaxed text-xyne-fg-secondary'>
-                {data['assistantText']}
-              </p>
-            )}
-            {(isRecord(data['usage']) ||
-              typeof data['streamChars'] === 'number' ||
-              typeof data['streamCharsPerSec'] === 'number') && (
-              <div className='flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary'>
-                {isRecord(data['usage']) && (
-                  <span>
-                    <span className='text-xyne-fg-muted'>Usage:</span>{' '}
-                    {asString(data['usage']['input_tokens']) ||
-                      asString(data['usage']['input']) ||
-                      '0'}{' '}
-                    in /{' '}
-                    {asString(data['usage']['output_tokens']) ||
-                      asString(data['usage']['output']) ||
-                      '0'}{' '}
-                    out
-                  </span>
-                )}
-                {typeof data['streamChars'] === 'number' && (
-                  <span>
-                    <span className='text-xyne-fg-muted'>Chars:</span> {data['streamChars']}
-                  </span>
-                )}
-                {typeof data['streamCharsPerSec'] === 'number' && (
-                  <span>
-                    <span className='text-xyne-fg-muted'>Rate:</span>{' '}
-                    {asString(data['streamCharsPerSec'])} chars/s
-                  </span>
-                )}
-                {typeof data['streamTextChars'] === 'number' && (
-                  <span>
-                    <span className='text-xyne-fg-muted'>Text:</span> {data['streamTextChars']}
-                  </span>
-                )}
-                {typeof data['streamThinkingChars'] === 'number' && (
-                  <span>
-                    <span className='text-xyne-fg-muted'>Thinking:</span>{' '}
-                    {data['streamThinkingChars']}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {kind === 'session_error' && typeof data['error'] === 'string' && (
-          <pre className='whitespace-pre-wrap rounded-md bg-xyne-surface p-2 text-[12px] leading-relaxed text-red-700 dark:text-red-300'>
-            {data['error']}
-          </pre>
-        )}
-
-        {kind === 'session_end' && (
-          <div className='flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary'>
-            {typeof data['textLength'] === 'number' && (
-              <span>
-                <span className='text-xyne-fg-muted'>Length:</span> {data['textLength']}
-              </span>
-            )}
-            {typeof data['durationMs'] === 'number' && (
-              <span>
-                <span className='text-xyne-fg-muted'>Duration:</span> {data['durationMs']}ms
-              </span>
-            )}
-            {typeof data['streamChars'] === 'number' && (
-              <span>
-                <span className='text-xyne-fg-muted'>Chars:</span> {data['streamChars']}
-              </span>
-            )}
-            {typeof data['streamCharsPerSec'] === 'number' && (
-              <span>
-                <span className='text-xyne-fg-muted'>Rate:</span>{' '}
-                {asString(data['streamCharsPerSec'])} chars/s
-              </span>
-            )}
-            {isRecord(data['tokenUsage']) && (
-              <span>
-                <span className='text-xyne-fg-muted'>Tokens:</span>{' '}
-                {asString(data['tokenUsage']['input'])} in /{' '}
-                {asString(data['tokenUsage']['output'])} out
-              </span>
-            )}
-          </div>
-        )}
-
-        {![
-          'session_prompt',
-          'tool_execution_start',
-          'tool_execution_end',
-          'assistant_turn_end',
-          'session_error',
-          'session_end',
-        ].includes(kind) && (
-          <details className='rounded-md bg-xyne-surface'>
-            <summary className='cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary'>
-              Show raw event data
-            </summary>
-            <div className='px-2 pb-2 pt-1'>
-              <JsonViewer value={data} title='Event data' />
-            </div>
-          </details>
-        )}
-      </div>
-    </details>
-  );
-}
-
-function LiveDebugTrace({
-  events,
-  selectedEventKey,
-  onSelectEvent,
-}: {
-  events: DebugEventRecord[];
-  selectedEventKey?: string | null;
-  onSelectEvent?: (key: string) => void;
-}) {
-  const rootEvents = compactTimeline(events.filter(event => !event.subagentName));
-  const subagentGroups = new Map<string, DebugEventRecord[]>();
-  for (const event of events) {
-    if (!event.subagentName) continue;
-    const key = `${event.parentToolCallId ?? 'unknown'}`;
-    const group = subagentGroups.get(key) ?? [];
-    group.push(event);
-    subagentGroups.set(key, group);
-  }
-  const subagentTraceGroups = new Map<string, SubagentTraceGroup[]>();
-  for (const [key, group] of subagentGroups.entries()) {
-    const first = group[0];
-    if (!first) continue;
-    const compactedGroup = compactTimeline(group);
-    const trace = {
-      subagentName: first.subagentName || 'Subagent',
-      parentToolCallId: first.parentToolCallId ?? key,
-      question:
-        asString(first.data?.['question']) || asString(first.data?.['task']) || 'Subagent task',
-      task: asString(first.data?.['task']) || asString(first.data?.['question']) || 'Subagent task',
-      events: compactedGroup,
-    };
-    const list = subagentTraceGroups.get(trace.parentToolCallId) ?? [];
-    list.push({
-      subagentName: trace.subagentName,
-      parentToolCallId: trace.parentToolCallId,
-      trace,
-    });
-    subagentTraceGroups.set(trace.parentToolCallId, list);
-  }
-
-  return (
-    <div>
-      {rootEvents.length > 0 && (
-        <div>
-          {rootEvents.map((event, idx) => {
-            const ek = `live-root-${seqKey(event['seq'])}-${idx}`;
-            return (
-              <DebugEventItem
-                key={ek}
-                event={event}
-                eventKey={ek}
-                selected={selectedEventKey === ek}
-                onSelect={onSelectEvent}
-                subagentTracesByParentToolCallId={subagentTraceGroups}
-              />
-            );
-          })}
+          )}
         </div>
       )}
-    </div>
+    </details>
   );
 }
 
@@ -2085,9 +2047,22 @@ function DebugSessionBody({
   const rootEvents = Array.isArray(root?.['events'])
     ? (root['events'] as Record<string, unknown>[])
     : (bundle.debugEvents ?? []);
-  const persistedRuns = (bundle.runs ?? [])
+  const archivedRuns = (bundle.runs ?? [])
     .slice()
     .sort((a, b) => asString(a.data['startedAt']).localeCompare(asString(b.data['startedAt'])));
+  const rootSessionId = asString(root?.['sessionId']);
+  const persistedRuns =
+    root &&
+    rootSessionId &&
+    !archivedRuns.some(run => asString(run.data['sessionId']) === rootSessionId)
+      ? [
+          ...archivedRuns,
+          {
+            fileName: `active-${rootSessionId}.json`,
+            data: { ...root, events: rootEvents },
+          },
+        ]
+      : archivedRuns;
   const historicalMessages = Array.isArray(root?.['messages']) ? root['messages'] : [];
   const historicalPairs = conversationPairs(historicalMessages);
   const legacyPairs = historicalPairs.slice(
@@ -2265,22 +2240,22 @@ export function AskAIDebugPanel({
   onClose,
   width = 460,
   minWidth,
+  fill = false,
   liveEvents = [],
   running = false,
   artifactsReadyVersion = 0,
   selectedTurnIndex = null,
-  selectedTurnLive = false,
+  selectedTurnLive: _selectedTurnLive = false,
   selectedSessionId = null,
   focusToolCallId = null,
+  fetchArtifacts: fetchArtifactsOverride,
 }: AskAIDebugPanelProps) {
   const isDark = useIsMidnightTheme();
   const bodyRef = useRef<HTMLDivElement>(null);
   const [bundle, setBundle] = useState<DebugArtifactBundle | null>(null);
-  const [bundleHasCurrentRun, setBundleHasCurrentRun] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
-  const [showLiveTrace, setShowLiveTrace] = useState(false);
   const expectedRunRef = useRef<{ sessionId?: string; startedAt: number } | null>(null);
   const previousRunningRef = useRef(false);
   const previousArtifactsReadyVersionRef = useRef(artifactsReadyVersion);
@@ -2289,26 +2264,14 @@ export function AskAIDebugPanel({
   const savedStream = useMemo(() => persistedStreamStatus(bundle), [bundle]);
   const streamStatus =
     running && currentLiveStream ? currentLiveStream : (savedStream ?? currentLiveStream);
-
-  useEffect(() => {
-    if (running && liveEvents.length > 0) {
-      setShowLiveTrace(true);
-      return;
-    }
-    // Hold the live overlay until the bundle has actually caught up to the
-    // most recent run — otherwise follow-up turns flash live events for a
-    // moment and then vanish because a stale bundle from a prior turn was
-    // already present.
-    if (!bundle || !bundleHasCurrentRun) return;
-    const timer = window.setTimeout(() => setShowLiveTrace(false), 240);
-    return () => window.clearTimeout(timer);
-  }, [running, liveEvents.length, bundle, bundleHasCurrentRun]);
+  const unifiedBundle = useMemo(
+    () => mergeLiveDebugTimeline(bundle, liveEvents, conversationId ?? ''),
+    [bundle, conversationId, liveEvents],
+  );
 
   useEffect(() => {
     if (running && !previousRunningRef.current) {
       expectedRunRef.current = { startedAt: Date.now() };
-      // A new run started — any existing bundle is now stale until we refetch.
-      setBundleHasCurrentRun(false);
     }
     previousRunningRef.current = running;
   }, [running]);
@@ -2326,7 +2289,6 @@ export function AskAIDebugPanel({
 
   useEffect(() => {
     setBundle(null);
-    setBundleHasCurrentRun(true);
     setError(null);
     followUpRefreshAttemptRef.current = 0;
     previousArtifactsReadyVersionRef.current = artifactsReadyVersion;
@@ -2336,8 +2298,14 @@ export function AskAIDebugPanel({
     if (!open || !agentSlug || !conversationId) return;
     let cancelled = false;
     let inFlight = false;
+    let pollTimer: number | undefined;
     const readinessChanged = artifactsReadyVersion !== previousArtifactsReadyVersionRef.current;
     previousArtifactsReadyVersionRef.current = artifactsReadyVersion;
+    const failureState = debugArtifactFailureState({
+      running,
+      hasBundle: bundle !== null,
+      hasLiveEvents: liveEvents.length > 0,
+    });
 
     const fetchArtifacts = async (
       showError: boolean,
@@ -2346,18 +2314,20 @@ export function AskAIDebugPanel({
       if (inFlight) return false;
       inFlight = true;
       try {
-        const data = await fetchV2DebugArtifacts(conversationId, agentSlug);
+        const data = await (fetchArtifactsOverride ?? fetchV2DebugArtifacts)(
+          conversationId,
+          agentSlug,
+        );
         if (cancelled) return false;
         setBundle(data);
         setError(null);
         if (requireCurrentRun && !bundleContainsRun(data, expectedRunRef.current)) return false;
         if (requireCurrentRun) {
           expectedRunRef.current = null;
-          setBundleHasCurrentRun(true);
         }
         return true;
       } catch (err) {
-        if (!cancelled && showError) {
+        if (!cancelled && showError && failureState.showError) {
           setError(err instanceof Error ? err.message : String(err));
         }
         return false;
@@ -2366,12 +2336,29 @@ export function AskAIDebugPanel({
       }
     };
 
-    setLoading(!bundle && !running);
+    const scheduleNextPoll = (): void => {
+      if (!running || liveEvents.length > 0 || cancelled) return;
+      pollTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        if (document.visibilityState === 'hidden') {
+          scheduleNextPoll();
+          return;
+        }
+        setRefreshVersion(version => version + 1);
+      }, 2_500);
+    };
+
+    setLoading(!bundle && liveEvents.length === 0);
     setError(null);
     if (running && !readinessChanged) {
-      void fetchArtifacts(false);
+      void (async () => {
+        const loaded = await fetchArtifacts(false);
+        if (!cancelled) setLoading(loaded ? false : failureState.keepLoading);
+        scheduleNextPoll();
+      })();
       return () => {
         cancelled = true;
+        if (pollTimer !== undefined) window.clearTimeout(pollTimer);
       };
     }
     void (async () => {
@@ -2383,14 +2370,25 @@ export function AskAIDebugPanel({
         if (loaded) break;
         await new Promise(resolve => setTimeout(resolve, 500));
       }
-      if (!loaded && !cancelled) await fetchArtifacts(true, requireCurrentRun);
-      if (!cancelled) setLoading(false);
+      if (!loaded && !cancelled) loaded = await fetchArtifacts(true, requireCurrentRun);
+      if (!cancelled) setLoading(loaded ? false : failureState.keepLoading);
+      scheduleNextPoll();
     })();
 
     return () => {
       cancelled = true;
+      if (pollTimer !== undefined) window.clearTimeout(pollTimer);
     };
-  }, [open, agentSlug, conversationId, artifactsReadyVersion, refreshVersion]);
+  }, [
+    open,
+    agentSlug,
+    conversationId,
+    artifactsReadyVersion,
+    refreshVersion,
+    fetchArtifactsOverride,
+    liveEvents.length,
+    running,
+  ]);
 
   useEffect(() => {
     if (!open || !hasPendingFollowUpDiagnostic(bundle, selectedSessionId)) {
@@ -2482,13 +2480,11 @@ export function AskAIDebugPanel({
         {!conversationId ? (
           running && liveEvents.length > 0 ? (
             <div className='space-y-4'>
-              <div>
-                <div className='mb-1 flex items-baseline gap-2'>
-                  <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Live run</p>
-                  <p className='text-[11px] text-xyne-fg-muted'>waiting for conversation id</p>
-                </div>
-                <LiveDebugTrace events={liveEvents} />
-              </div>
+              <DebugTimelineSection
+                title='Live run · waiting for conversation id'
+                data={unifiedBundle?.debugSession ?? null}
+                defaultOpen
+              />
               <p className='border-t border-xyne-border-subtle pt-3 text-[12px] text-xyne-fg-muted'>
                 The conversation record will appear here once the backend assigns an id.
               </p>
@@ -2498,52 +2494,24 @@ export function AskAIDebugPanel({
               Open a conversation to inspect its runtime trace.
             </p>
           )
-        ) : loading && !bundle ? (
+        ) : loading && !unifiedBundle ? (
           <div className='space-y-3'>
+            {running && (
+              <p className='text-[12px] text-xyne-fg-muted'>Waiting for debug artifacts…</p>
+            )}
             <div className='h-24 animate-pulse rounded-md bg-xyne-surface-subtle' />
             <div className='h-72 animate-pulse rounded-md bg-xyne-surface-subtle' />
           </div>
-        ) : error && !bundle ? (
+        ) : error && !unifiedBundle ? (
           <p className='py-4 text-[13px] text-red-700 dark:text-red-300'>{error}</p>
         ) : (
-          <div className='space-y-3'>
-            {conversationId &&
-              (showLiveTrace || (running && liveEvents.length > 0)) &&
-              ((running && liveEvents.length > 0) ||
-                (selectedSessionId === null && (selectedTurnIndex === null || selectedTurnLive))) &&
-              (() => {
-                // Never let a stale prior-turn bundle hide an actively-streaming
-                // new run: while the current turn streams live events, force the
-                // handoff off so the live overlay stays visible on every turn
-                // (the prior bundle survives the turn boundary and the
-                // bundleHasCurrentRun reset is deferred/racy). Reverts to the
-                // persisted handoff once the run ends.
-                const liveHandedOff = Boolean(
-                  bundle && bundleHasCurrentRun && !(running && liveEvents.length > 0),
-                );
-                return (
-                  <div
-                    className={`transition-all duration-300 ease-out ${liveHandedOff ? 'pointer-events-none opacity-0 -translate-y-1' : 'opacity-100 translate-y-0'}`}
-                    aria-hidden={liveHandedOff}
-                  >
-                    <div className='mb-1 flex items-baseline gap-2'>
-                      <p className='text-[12px] font-semibold text-xyne-fg-secondary'>Live run</p>
-                      <p className='text-[11px] text-xyne-fg-muted'>
-                        {liveHandedOff
-                          ? 'handoff to persisted trace'
-                          : 'updates while the request is in flight'}
-                      </p>
-                    </div>
-                    <LiveDebugTrace events={liveEvents} />
-                  </div>
-                );
-              })()}
+          <div>
             <div
-              className={`transition-all duration-300 ease-out ${bundle ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none'}`}
+              className={`transition-all duration-300 ease-out ${unifiedBundle ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none'}`}
             >
-              {bundle ? (
+              {unifiedBundle ? (
                 <DebugSessionBody
-                  bundle={bundle}
+                  bundle={unifiedBundle}
                   selectedTurnIndex={selectedTurnIndex}
                   selectedSessionId={selectedSessionId}
                 />
@@ -2564,7 +2532,7 @@ export function AskAIDebugPanel({
   return (
     <div
       className={`${isDark ? 'dark ' : ''}flex h-full min-h-0 shrink-0 flex-col border-l border-xyne-border-subtle bg-xyne-surface shadow-2xl`}
-      style={{ width, minWidth: minWidth ?? width }}
+      style={{ width: fill ? '100%' : width, minWidth: fill ? 0 : (minWidth ?? width) }}
     >
       {panel}
     </div>

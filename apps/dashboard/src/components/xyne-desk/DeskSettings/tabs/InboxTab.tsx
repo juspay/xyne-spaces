@@ -1,21 +1,17 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Check, Search, Pencil, Trash2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
 import type { EmailSignature } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../ui/Select/Select';
 import Avatar from '../../../ui/Avatar/Avatar';
+import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { Button } from '../../../ui/Button/Button';
+import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
@@ -31,12 +27,11 @@ export const SIGNATURE_AUTO_APPEND_STORAGE_KEY = 'signature-auto-append-enabled'
 const CC_USER_RESULT_LIMIT = 50;
 
 function filterUsersByQuery(
-  users: ReadonlyArray<{ id: string; name: string; email: string }>,
+  users: ReadonlyArray<{ id: string; name: string; email: string; displayName?: string | null }>,
   query: string,
 ) {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return users.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  if (!query.trim()) return [];
+  return users.filter(u => matchesUserQuery(u, query));
 }
 
 interface InboxTabProps {
@@ -65,26 +60,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setTwoStepSend,
     autoMergeEmails,
     setAutoMergeEmails,
+    appWebhookDeliveryEnabled,
+    setAppWebhookDeliveryEnabled,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
   const [ccHighlightIndex, setCcHighlightIndex] = useState(0);
-  const [ownerSearch, setOwnerSearch] = useState('');
-  const ownerSearchInputRef = useRef<HTMLInputElement>(null);
-  const filteredOwnerUsers = useMemo(() => {
-    const q = ownerSearch.trim().toLowerCase();
-    const all = allUsers ?? [];
-    const matches = q
-      ? all.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
-      : all;
-    // Always include the currently selected user so the trigger keeps showing
-    // its name/avatar even when the search filters it out of the list.
-    if (ownerId && !matches.some(u => u.id === ownerId)) {
-      const selected = all.find(u => u.id === ownerId);
-      if (selected) return [selected, ...matches];
-    }
-    return matches;
-  }, [allUsers, ownerSearch, ownerId]);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
   const [signatureAutoAppendEnabled, setSignatureAutoAppendEnabled] = useState(
@@ -125,62 +106,18 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               : 'This user will be used to create tickets in this channel'}
           </div>
         </div>
-        <Select
-          value={ownerId}
-          onValueChange={setOwner}
+        <fieldset
           disabled={!canManage}
-          onOpenChange={open => {
-            if (!open) setOwnerSearch('');
-          }}
+          className={`w-full max-w-[300px] border-0 p-0 m-0 min-w-0 ${!canManage ? 'opacity-50' : ''}`}
         >
-          <SelectTrigger className='w-full max-w-[300px] p-[8px] h-[36px] bg-background rounded-[10px] font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50'>
-            <SelectValue placeholder='Select owner' />
-          </SelectTrigger>
-          <SelectContent
-            className='rounded-[10px]'
-            header={
-              <div className='flex items-center gap-2 border-b border-border bg-popover px-2 py-1.5'>
-                <Search size={14} className='text-muted-foreground shrink-0' />
-                <input
-                  ref={ownerSearchInputRef}
-                  type='text'
-                  value={ownerSearch}
-                  onChange={e => {
-                    setOwnerSearch(e.target.value);
-                    requestAnimationFrame(() => ownerSearchInputRef.current?.focus());
-                  }}
-                  onKeyDown={e => e.stopPropagation()}
-                  onPointerDown={e => e.stopPropagation()}
-                  placeholder='Search users…'
-                  autoFocus
-                  className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                  data-track-category='DeskSettings'
-                  data-track-name='SearchInboxOwner'
-                />
-              </div>
-            }
-          >
-            {filteredOwnerUsers.length === 0 ? (
-              <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
-                No users found
-              </div>
-            ) : (
-              filteredOwnerUsers.map(user => (
-                <SelectItem key={user.id} value={user.id} className='rounded-[8px]'>
-                  <div className='flex items-center gap-2'>
-                    <Avatar
-                      userId={user.id}
-                      size='sm'
-                      showActiveStatus={false}
-                      className='!size-5 !text-[10px]'
-                    />
-                    <span>{user.name}</span>
-                  </div>
-                </SelectItem>
-              ))
-            )}
-          </SelectContent>
-        </Select>
+          <UserSelector
+            selectedUserId={ownerId || null}
+            onUserSelect={userId => {
+              if (userId) setOwner(userId);
+            }}
+            channelId={channelId}
+          />
+        </fieldset>
       </div>
 
       {isEmail && (
@@ -350,6 +287,25 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         </div>
       )}
 
+      {isApp && (
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Send replies to app webhook</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Forward every reply to the app webhook, and accept the reply only once the webhook
+              responds with 200. Turn this off if the app does not consume replies.
+            </div>
+          </div>
+          <Switch
+            variant='desk'
+            checked={appWebhookDeliveryEnabled}
+            onCheckedChange={setAppWebhookDeliveryEnabled}
+            disabled={!canManage}
+            aria-label='Toggle sending replies to the app webhook'
+          />
+        </div>
+      )}
+
       {isEmail && (
         <div className='flex items-start justify-between gap-4'>
           <div className='flex flex-col gap-[4px]'>
@@ -512,8 +468,11 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                     </div>
                     <div className='flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0'>
                       {!sig.isDefault && (
-                        <button
+                        <Button
                           type='button'
+                          variant='ghost'
+                          size='sm'
+                          trackId='set_default_signature'
                           onClick={() =>
                             zero.mutate(
                               mutators.emailSignature.setDefault({
@@ -522,12 +481,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                               }),
                             )
                           }
-                          className='text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground'
+                          className='h-auto p-0 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground hover:bg-transparent'
                           data-track-category='DeskSettings'
                           data-track-name='SetDefaultSignature'
                         >
                           Set as default
-                        </button>
+                        </Button>
                       )}
                       <button
                         type='button'
@@ -543,17 +502,20 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       >
                         <Pencil size={16} />
                       </button>
-                      <button
+                      <Button
                         type='button'
+                        variant='ghost'
+                        size='icon'
+                        trackId='delete_signature'
                         onClick={() => zero.mutate(mutators.emailSignature.delete({ id: sig.id }))}
-                        className='text-desk-muted transition-colors hover:text-red-500'
+                        className='size-auto p-0 text-desk-muted transition-colors hover:bg-transparent hover:text-red-500'
                         title='Delete signature'
                         aria-label='Delete signature'
                         data-track-category='DeskSettings'
                         data-track-name='DeleteSignature'
                       >
                         <Trash2 size={16} />
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}

@@ -5,25 +5,6 @@ import type { JsonSchema, ValidationIssue } from '../../Automation.types';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import { resolveSchema } from '../SchemaForm/SchemaForm.utils';
 
-const INCLUDE_KEYS = [
-  'channelIds',
-  'fromEmails',
-  'fromDomains',
-  'toEmails',
-  'subjectContains',
-  'bodyContains',
-  'matchCase',
-  'onlyNewThreads',
-  'onlyReplies',
-];
-const EXCLUDE_KEYS = [
-  'excludedFromEmails',
-  'excludedFromDomains',
-  'excludedToEmails',
-  'excludedSubjectContains',
-  'excludedBodyContains',
-];
-
 interface EmailReceivedFilterFormProps {
   schema: JsonSchema;
   value: Record<string, unknown>;
@@ -39,10 +20,21 @@ export function EmailReceivedFilterForm({
   issues,
   pathPrefix,
 }: EmailReceivedFilterFormProps): React.ReactElement {
-  const includeSchema = useMemo(() => pickSchemaProps(schema, INCLUDE_KEYS), [schema]);
-  const excludeSchema = useMemo(() => pickSchemaProps(schema, EXCLUDE_KEYS), [schema]);
+  const { includeKeys, excludeKeys } = useMemo(() => {
+    const properties = resolveSchema(schema).properties ?? {};
+    const keys = Object.keys(properties);
+    return {
+      includeKeys: keys.filter(key => !key.startsWith('excluded')),
+      excludeKeys: keys.filter(key => key.startsWith('excluded')),
+    };
+  }, [schema]);
+  const includeSchema = useMemo(() => pickSchemaProps(schema, includeKeys), [schema, includeKeys]);
+  const excludeSchema = useMemo(() => pickSchemaProps(schema, excludeKeys), [schema, excludeKeys]);
 
-  const hasAnyExclusion = useMemo(() => EXCLUDE_KEYS.some(k => !isEmpty(value[k])), [value]);
+  const hasAnyExclusion = useMemo(
+    () => excludeKeys.some(k => !isEmpty(value[k])),
+    [excludeKeys, value],
+  );
   const [excludeOpen, setExcludeOpen] = useState(hasAnyExclusion);
 
   // onlyNewThreads and onlyReplies are mutually exclusive — checking one clears the other.

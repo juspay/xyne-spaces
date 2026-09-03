@@ -9,7 +9,7 @@ import { db } from '@/database/client';
 import { conversationService } from '@/services/conversationService';
 import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core/';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
-import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
+import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas, type CommitAnalysisRepoSlice } from '@/utils/commitAnalysisCanvas';
 import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
 import { escapeHtml } from '@/utils/htmlEscape';
 import { isSameCommit } from '@/utils/commitIds';
@@ -23,6 +23,7 @@ function buildAnalysisSummaryHtml(opts: {
   prefaceHtml?: string;
   workspace: string;
   repoSlug: string;
+  repoLabel?: string;
   totalCommits: number;
   commitsWithPR: number;
   commitsWithTicket: number;
@@ -35,13 +36,14 @@ function buildAnalysisSummaryHtml(opts: {
   canvasUrl?: string;
 }): string {
   const {
-    header, prefaceHtml, workspace, repoSlug, totalCommits, commitsWithPR, commitsWithTicket,
+    header, prefaceHtml, workspace, repoSlug, repoLabel, totalCommits, commitsWithPR, commitsWithTicket,
     affectedApplications, servicesLabel, appMatchSummary, hasMigrationChange, hasEnvChange, canvasUrl,
   } = opts;
 
   let html = `<p><strong>${header}</strong></p>`;
   if (prefaceHtml) html += prefaceHtml;
-  html += `<p class="m-0 leading-6"><em class="text-gray-600">${escapeHtml(workspace)}/${escapeHtml(repoSlug)}</em></p>`;
+  const repoLine = repoLabel != null ? escapeHtml(repoLabel) : `${escapeHtml(workspace)}/${escapeHtml(repoSlug)}`;
+  html += `<p class="m-0 leading-6"><em class="text-gray-600">${repoLine}</em></p>`;
   html += `<p class="m-0 leading-6"><em class="text-gray-600">${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets</em></p>`;
 
   if (affectedApplications.length > 0) {
@@ -162,6 +164,22 @@ export interface CommitAnalysisParams {
   // per-app sub-tickets are tagged as hotfixes, and the canvas is upserted into
   // the "🔥 Hotfix PRs" section instead of rebuilding the main analysis.
   hotfixSync?: boolean;
+  // Multi-repo hotfix: restrict analysis to the merged repo's board(s) + post-merge head.
+  hotfixOverride?: { boardIds: string[]; mergeCommitSha: string };
+  // Re-run keeps the deployed pointer frozen (it was set at create).
+  isReRun?: boolean;
+}
+
+interface ReleaseRepoContext {
+  projectId: string;
+  mainReleaseBoardId: string;
+  projectKey: string;
+  repoSlug: string;
+  code: string | null;
+  vcsProvider: 'BITBUCKET_SERVER' | 'GITHUB';
+  deployedCommitId: string;
+  newCommitId: string;
+  branch: string;
 }
 
 // Analysis result type
@@ -205,8 +223,14 @@ export class CommitAnalysisController {
     this.releaseRepository = new ReleaseRepository();
   }
 
-  private async deriveReleaseContext(
-    releaseTicketId: string,
+  private async deriveBoardContext(
+    board: {
+      id: string;
+      vcsProvider: string | null;
+      releaseTrackingMode: string | null;
+    } | null,
+    projectId: string,
+    projectCode: string | null,
   ): Promise<{
     projectId: string;
     mainReleaseBoardId: string;
@@ -215,45 +239,27 @@ export class CommitAnalysisController {
     code: string | null;
     vcsProvider: 'BITBUCKET_SERVER' | 'GITHUB';
   } | null> {
-    const ticket = await db.ticket.findUnique({
-      where: { id: releaseTicketId },
-      select: {
-        projectId: true,
-        boardId: true,
-        project: { select: { code: true } },
-        board: {
-          select: {
-            boardType: true,
-            vcsProvider: true,
-            releaseTrackingMode: true,
-          },
-        },
-      },
-    });
+    if (!board) return null;
+    const boardId = board.id;
 
-    if (!ticket?.boardId || !ticket.board) {
-      return null;
-    }
-
-    if (ticket.board.releaseTrackingMode !== ReleaseTrackingMode.COMMIT_RANGE) {
+    if (board.releaseTrackingMode !== ReleaseTrackingMode.COMMIT_RANGE) {
       logger.warn(
-        `[ReleaseTrigger] skipped: board ${ticket.boardId} releaseTrackingMode=${ticket.board.releaseTrackingMode ?? 'null'}`,
+        `[ReleaseTrigger] skipped: board ${boardId} releaseTrackingMode=${board.releaseTrackingMode ?? 'null'}`,
       );
       return null;
     }
 
-    const provider = ticket.board.vcsProvider;
+    const provider = board.vcsProvider;
     if (provider !== VCSProviderType.BITBUCKET_SERVER && provider !== VCSProviderType.GITHUB) {
       logger.warn(
-        `[ReleaseTrigger] skipped: board ${ticket.boardId} vcsProvider=${provider ?? 'null'} — only BITBUCKET_SERVER and GITHUB are wired`,
+        `[ReleaseTrigger] skipped: board ${boardId} vcsProvider=${provider ?? 'null'} — only BITBUCKET_SERVER and GITHUB are wired`,
       );
       return null;
     }
 
-    const apps =
-      await this.applicationRepository!.findByMainReleaseBoardId(ticket.boardId);
+    const apps = await this.applicationRepository!.findByMainReleaseBoardId(boardId);
     if (apps.length === 0) {
-      logger.warn(`[ReleaseTrigger] skipped: main release board ${ticket.boardId} has zero applications`);
+      logger.warn(`[ReleaseTrigger] skipped: main release board ${boardId} has zero applications`);
       return null;
     }
 
@@ -262,7 +268,7 @@ export class CommitAnalysisController {
     ];
     if (repoUrls.length !== 1 || !repoUrls[0]) {
       logger.error(
-        `[ReleaseTrigger] skipped: main release board ${ticket.boardId} has invalid repository URLs (${repoUrls.join(', ')})`,
+        `[ReleaseTrigger] skipped: main release board ${boardId} has invalid repository URLs (${repoUrls.join(', ')})`,
       );
       return null;
     }
@@ -289,164 +295,253 @@ export class CommitAnalysisController {
       repoSlug = parsed.repoSlug;
     }
 
-    return {
-      projectId: ticket.projectId,
-      mainReleaseBoardId: ticket.boardId,
+    return { projectId, mainReleaseBoardId: boardId, projectKey, repoSlug, code: projectCode, vcsProvider: provider };
+  }
+
+  private async deriveReleaseContexts(
+    releaseTicketId: string,
+    fallback: { deployedCommitId: string; newCommitId: string; branch: string },
+    hotfixOverride?: { boardIds: string[]; mergeCommitSha: string },
+  ): Promise<{ contexts: ReleaseRepoContext[]; skipped: string[] }> {
+    const ticket = await db.ticket.findUnique({
+      where: { id: releaseTicketId },
+      select: { projectId: true, boardId: true, project: { select: { code: true } } },
+    });
+    if (!ticket?.boardId) return { contexts: [], skipped: [] };
+
+    const rows = await db.releaseRepository.findMany({
+      where: { releaseId: releaseTicketId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
+    let entries: Array<{
+      boardId: string;
+      deployedCommitId: string;
+      newCommitId: string;
+      branch: string;
+    }>;
+    if (rows.length === 0) {
+      // Legacy scalar path: fallback carries the range (hotfix delta included).
+      entries = [{ boardId: ticket.boardId, ...fallback }];
+    } else if (hotfixOverride) {
+      // Hotfix: only the merged repo(s), over that repo's frozen head → merge head.
+      const matched = new Set(hotfixOverride.boardIds);
+      entries = rows
+        .filter(r => matched.has(r.mainReleaseBoardId))
+        .map(r => ({
+          boardId: r.mainReleaseBoardId,
+          deployedCommitId: r.newCommit,
+          newCommitId: hotfixOverride.mergeCommitSha,
+          branch: r.branch,
+        }));
+    } else {
+      // Plain re-run: every repo at its frozen range (idempotent).
+      entries = rows.map(r => ({
+        boardId: r.mainReleaseBoardId,
+        deployedCommitId: r.deployedCommit,
+        newCommitId: r.newCommit,
+        branch: r.branch,
+      }));
+    }
+
+    // Make the release ticket's own board primary (= contexts[0]) so the canvas
+    // title/metadata and parent-ticket headline describe it, not the last-added repo.
+    const primaryIdx = entries.findIndex(e => e.boardId === ticket.boardId);
+    if (primaryIdx > 0) {
+      const [primaryEntry] = entries.splice(primaryIdx, 1);
+      entries.unshift(primaryEntry);
+    }
+
+    // Batch the board-metadata reads into a single query.
+    const entryBoardIds = [...new Set(entries.map(e => e.boardId))];
+    const boardMetaById = new Map(
+      (
+        await db.board.findMany({
+          where: { id: { in: entryBoardIds } },
+          select: { id: true, name: true, vcsProvider: true, releaseTrackingMode: true },
+        })
+      ).map(b => [b.id, b]),
+    );
+
+    const contexts: ReleaseRepoContext[] = [];
+    const skipped: string[] = [];
+    for (const entry of entries) {
+      const boardMeta = boardMetaById.get(entry.boardId) ?? null;
+      const board = await this.deriveBoardContext(boardMeta, ticket.projectId, ticket.project.code);
+      if (!board) {
+        skipped.push(boardMeta?.name ?? entry.boardId);
+        continue;
+      }
+      contexts.push({
+        ...board,
+        deployedCommitId: entry.deployedCommitId,
+        newCommitId: entry.newCommitId,
+        branch: entry.branch,
+      });
+    }
+    return { contexts, skipped };
+  }
+
+  private async analyzeReleaseContext(
+    ctx: ReleaseRepoContext,
+    params: CommitAnalysisParams,
+  ): Promise<{
+    results: CommitAnalysisResult[];
+    viewResults: CommitAnalysisResult[];
+    affectedApplications: AffectedApplicationInfo[];
+    migrationLinks: Array<{ filePath: string; diffUrl: string }>;
+    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+    appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }>;
+  }> {
+    const { conversationId, userId, channelId, currentTicketId, userName, isHotFix, hotfixSync } = params;
+    const { deployedCommitId, newCommitId, branch, projectKey, repoSlug, vcsProvider, projectId, mainReleaseBoardId, code: projectCode } = ctx;
+
+    const analysisRequest: AnalyzeCommitsRequest = {
+      deployedCommitId,
+      newCommitId,
+      branch,
       projectKey,
-      repoSlug,
-      code: ticket.project.code,
-      vcsProvider: provider,
+      repositorySlug: repoSlug,
+      workspaceId: params.workspaceId,
+      // Project's local code drives the dev-ticket-id regex (e.g. 'TSP').
+      // Falls through to 'XYNE' in the service if absent.
+      ...(projectCode && { ticketPrefix: projectCode }),
+      // Hotfix syncs fire seconds after a merge; retry the eventually-consistent
+      // PR lookup so the just-merged commit's PR isn't missed on the canvas.
+      retryMissingPr: hotfixSync,
     };
+
+    // Build a provider-specific VCS client + downstream services per repo
+    // so board.vcsProvider picks between BitbucketService and GitHubService.
+    const vcsClient = buildVcsClient(vcsProvider as VCSProviderType);
+    const commitAnalysisService = new CommitAnalysisService(vcsClient);
+    const releaseService = new ReleaseService(commitAnalysisService);
+
+    const results = await commitAnalysisService.analyzeCommits(analysisRequest);
+
+    // getCommitsBetween() appends the boundary (deployedCommitId) commit to the
+    // range. For a hotfix sync that boundary is the FROZEN release head — a
+    // main PR — so drop it from the view.
+    const viewResults = hotfixSync
+      ? results.filter((r) => !isSameCommit(r.commitId, deployedCommitId))
+      : results;
+
+    let affectedApplications: AffectedApplicationInfo[] = [];
+    let migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
+    let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+    let appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
+
+    if (projectId && currentTicketId) {
+      const releaseResult = await releaseService.release(analysisRequest, {
+        workspace: projectKey,
+        repoSlug,
+        projectId,
+        mainReleaseBoardId,
+        channelId: channelId || '',
+        conversationId,
+        userId,
+        userName: userName || userId,
+        currentTicketId,
+        isHotFix: hotfixSync ? true : isHotFix,
+      });
+
+      affectedApplications = releaseResult.affectedApplications;
+      migrationLinks = releaseResult.migrationLinks;
+      envChanges = releaseResult.envChanges;
+      appMatchSummary = releaseResult.appMatchSummary;
+
+      if (newCommitId && affectedApplications.length > 0 && !params.isReRun) {
+        const applicationIds = affectedApplications.map((app) => app.id);
+        await releaseService.updateDeployedCommits(applicationIds, newCommitId);
+      }
+    }
+
+    return { results, viewResults, affectedApplications, migrationLinks, envChanges, appMatchSummary };
   }
 
   async analyzeCommits(params: CommitAnalysisParams): Promise<CommitAnalysisResponse> {
-    const {
-      conversationId,
-      userId,
-      channelId,
-      newCommitId,
-      deployedCommitId,
-      branch,
-      parentTicketId,
-      currentTicketId,
-      userName,
-      isHotFix,
-      hotfixSync,
-    } = params;
+    const { conversationId, userId, channelId, newCommitId, deployedCommitId, branch, currentTicketId, hotfixSync } = params;
 
     let loadingMessageId: string | null = null;
 
     try {
-      const derived = await this.deriveReleaseContext(currentTicketId);
+      const { contexts, skipped } = await this.deriveReleaseContexts(
+        currentTicketId,
+        { deployedCommitId, newCommitId, branch },
+        params.hotfixOverride,
+      );
 
-      if (!derived) {
+      if (contexts.length === 0) {
         logger.warn('[ReleaseTrigger] skipped: no workspace/repoSlug available');
         return { success: false, error: 'Release board is not configured for commit analysis' };
       }
 
-      const {
-        projectId,
-        mainReleaseBoardId,
-        projectKey: derivedProjectKey,
-        repoSlug: derivedRepoSlug,
-        code: projectCode,
-        vcsProvider: derivedVcsProvider,
-      } = derived;
+      const repoLabels = contexts.map((c) => `${c.projectKey}/${c.repoSlug}`);
+      logger.info(`Commit analysis request: ${repoLabels.join(', ')} by user ${userId} (derived from Application.repoUrl)`);
 
-      logger.info(
-        `Commit analysis request: ${derivedProjectKey}/${derivedRepoSlug} (provider=${derivedVcsProvider}) by user ${userId} (derived from Application.repoUrl)`,
-      );
-
-      // Post loading indicator
+      // Post loading indicator (once — the release owns a single analysis card).
       loadingMessageId = await postLoadingMessage(conversationId, userId);
 
-      const analysisRequest: AnalyzeCommitsRequest = {
-        deployedCommitId,
-        newCommitId,
-        branch,
-        projectKey: derivedProjectKey,
-        repositorySlug: derivedRepoSlug,
-        workspaceId: params.workspaceId,
-        // Project's local code drives the dev-ticket-id regex (e.g. 'TSP').
-        // Falls through to 'XYNE' in the service if absent.
-        ...(projectCode && { ticketPrefix: projectCode }),
-      };
+      const results: CommitAnalysisResult[] = [];
+      const viewResults: CommitAnalysisResult[] = [];
+      const affectedApplications: AffectedApplicationInfo[] = [];
+      const migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
+      const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+      const appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
+      const repoSlices: CommitAnalysisRepoSlice[] = [];
 
-      // Build a provider-specific VCS client + downstream services per request
-      // so board.vcsProvider picks between BitbucketService and GitHubService.
-      const vcsClient = buildVcsClient(derivedVcsProvider as VCSProviderType);
-      const commitAnalysisService = new CommitAnalysisService(vcsClient);
-      const releaseService = new ReleaseService(commitAnalysisService);
-
-      const results = await commitAnalysisService.analyzeCommits(analysisRequest);
-
-      // getCommitsBetween() appends the boundary (deployedCommitId) commit to the
-      // range. For a hotfix sync that boundary is the FROZEN release head — a
-      // main PR — so drop it from the view: the "🔥 Hotfix PRs" section and the
-      // hotfix summary must not list the last main PR as a hotfix. Persistence is
-      // unaffected (release() dedups the boundary against the existing release).
-      // prefix compare — deployedCommitId may be an abbreviated SHA
-      const viewResults = hotfixSync
-        ? results.filter((r) => !isSameCommit(r.commitId, deployedCommitId))
-        : results;
-
-      let affectedApplications: AffectedApplicationInfo[] = [];
-      let migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-      let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
-      let appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
-
-      if (projectId && currentTicketId) {
-        const releaseResult = await releaseService.release(
-          analysisRequest,
-          {
-            workspace: derivedProjectKey,
-            repoSlug: derivedRepoSlug,
-            projectId,
-            mainReleaseBoardId,
-            channelId: channelId || '',
-            conversationId,
-            userId,
-            userName: userName || userId,
-            currentTicketId,
-            // A hotfix sync tags the delta's per-app sub-tickets as hotfixes.
-            isHotFix: hotfixSync ? true : isHotFix,
-          }
-        );
-
-        affectedApplications = releaseResult.affectedApplications;
-        migrationLinks = releaseResult.migrationLinks;
-        envChanges = releaseResult.envChanges;
-        appMatchSummary = releaseResult.appMatchSummary;
-
-        // Update deployed commits if we have a new commit ID
-        if (newCommitId && affectedApplications.length > 0) {
-          const applicationIds = affectedApplications.map((app) => app.id);
-          await releaseService.updateDeployedCommits(applicationIds, newCommitId);
-        }
-
-        // Post to parent ticket conversation if this is a sub-ticket
-        if (parentTicketId) {
-          await this.postToParentTicket(
-            parentTicketId,
-            results,
-            derivedProjectKey,
-            derivedRepoSlug,
-            conversationId,
-            channelId,
-            affectedApplications,
-            userId,
-            deployedCommitId,
-            newCommitId,
-            envChanges,
-            migrationLinks
+      const failedRepos: string[] = [];
+      for (const ctx of contexts) {
+        const label = `${ctx.projectKey}/${ctx.repoSlug}`;
+        try {
+          const slice = await this.analyzeReleaseContext(ctx, params);
+          results.push(...slice.results);
+          viewResults.push(...slice.viewResults);
+          affectedApplications.push(...slice.affectedApplications);
+          migrationLinks.push(...slice.migrationLinks);
+          envChanges.push(...slice.envChanges);
+          appMatchSummary.push(...slice.appMatchSummary);
+          repoSlices.push({
+            workspace: ctx.projectKey,
+            repoSlug: ctx.repoSlug,
+            deployedCommitId: ctx.deployedCommitId,
+            newCommitId: ctx.newCommitId,
+            results: slice.viewResults,
+          });
+        } catch (repoError) {
+          failedRepos.push(label);
+          logger.error(
+            `[ReleaseTrigger] repo analysis failed for ${label}: ${repoError instanceof Error ? repoError.message : String(repoError)}`,
           );
         }
       }
 
-      // Create canvas for detailed analysis
-      let canvasUrl: string | undefined;
-      const shouldCreateCanvas = viewResults.length > 0;
+      // Every repo failed: propagate as an error instead of falling through to success:true.
+      if (failedRepos.length === contexts.length) {
+        throw new Error(`Analysis failed for: ${failedRepos.join(', ')}`);
+      }
 
-      if (shouldCreateCanvas) {
-        // One canvas per release: upsert (locate by conversationId + source and
-        // update in place) instead of minting a new canvas each run. A hotfix
-        // sync writes into the "🔥 Hotfix PRs" section and preserves the main
-        // analysis; a main run preserves any existing hotfix section.
+      const primary = contexts[0];
+
+      // One canvas per release: upsert the aggregated slices in place.
+      let canvasUrl: string | undefined;
+      if (viewResults.length > 0) {
         const canvasId = await upsertCommitAnalysisCanvas({
           section: hotfixSync ? 'hotfix' : 'main',
           results: viewResults,
           affectedApplications,
           envChanges,
           migrationLinks,
+          repoSlices,
           createdByUserId: userId,
           metadata: {
-            projectId,
+            projectId: primary.projectId,
             conversationId,
             channelId,
-            workspace: derivedProjectKey,
-            repoSlug: derivedRepoSlug,
-            deployedCommitId,
-            newCommitId,
+            workspace: primary.projectKey,
+            repoSlug: primary.repoSlug,
+            deployedCommitId: primary.deployedCommitId,
+            newCommitId: primary.newCommitId,
             affectedApplicationCount: affectedApplications.length,
             migrationCount: migrationLinks.length,
             envChangeCount: envChanges.length,
@@ -459,15 +554,43 @@ export class CommitAnalysisController {
         }
       }
 
-      // Create a concise summary for the message
+      if (params.parentTicketId && results.length > 0) {
+        await this.postToParentTicket(
+          params.parentTicketId, results, primary.projectKey, primary.repoSlug, conversationId, channelId,
+          affectedApplications, userId, primary.deployedCommitId, primary.newCommitId, envChanges, migrationLinks,
+          repoSlices,
+        );
+      }
+
       const totalCommits = viewResults.length;
       const commitsWithPR = viewResults.filter((r) => r.pullRequest !== null).length;
       const commitsWithTicket = viewResults.filter((r) => r.ticket !== null).length;
 
+      const warningLines = [
+        failedRepos.length > 0
+          ? `<p class="m-0 leading-6"><em class="text-red-600">⚠️ Analysis failed for: ${escapeHtml(failedRepos.join(', '))}</em></p>`
+          : '',
+        skipped.length > 0
+          ? `<p class="m-0 leading-6"><em class="text-red-600">⚠️ Skipped (not configured for commit analysis): ${escapeHtml(skipped.join(', '))}</em></p>`
+          : '',
+      ].filter(Boolean);
+      const failuresPreface = warningLines.length > 0 ? warningLines.join('') : undefined;
+
+      // Downgrade the header when some repos failed (all-failed already threw above).
+      const partialFailure = failedRepos.length > 0;
+
       const summaryContent = buildAnalysisSummaryHtml({
-        header: hotfixSync ? '🔥 Hotfix Analysis Complete' : '📦 Release Analysis Complete',
-        workspace: derivedProjectKey,
-        repoSlug: derivedRepoSlug,
+        header: hotfixSync
+          ? partialFailure
+            ? '🔥 Hotfix Analysis — completed with errors'
+            : '🔥 Hotfix Analysis Complete'
+          : partialFailure
+            ? '📦 Release Analysis — completed with errors'
+            : '📦 Release Analysis Complete',
+        ...(failuresPreface && { prefaceHtml: failuresPreface }),
+        workspace: primary.projectKey,
+        repoSlug: primary.repoSlug,
+        ...(contexts.length > 1 && { repoLabel: repoLabels.join(', ') }),
         totalCommits,
         commitsWithPR,
         commitsWithTicket,
@@ -518,7 +641,8 @@ export class CommitAnalysisController {
     deployedCommitId: string,
     newCommitId: string,
     envChanges?: Array<{ filePath: string; fileName: string; newValue: string }>,
-    migrationLinks?: Array<{ filePath: string; diffUrl: string }>
+    migrationLinks?: Array<{ filePath: string; diffUrl: string }>,
+    repoSlices?: CommitAnalysisRepoSlice[]
   ): Promise<void> {
     try {
       const parentTicket = await this.ticketRepository!.getTicketById(parentTicketId);
@@ -545,7 +669,8 @@ export class CommitAnalysisController {
             affectedApplicationCount: affectedApplications.length,
             migrationCount: migrationLinks?.length || 0,
             envChangeCount: envChanges?.length || 0,
-          }
+          },
+          repoSlices,
         );
 
         if (canvasId) {
@@ -570,6 +695,9 @@ export class CommitAnalysisController {
         prefaceHtml: subTicketPreface,
         workspace,
         repoSlug,
+        ...(repoSlices && repoSlices.length > 1 && {
+          repoLabel: repoSlices.map(s => `${s.workspace}/${s.repoSlug}`).join(', '),
+        }),
         totalCommits,
         commitsWithPR,
         commitsWithTicket,

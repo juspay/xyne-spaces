@@ -540,6 +540,7 @@ export class PRTicketStatusSyncService {
       senderId,
       excludeConversationId: ticket.conversationId ?? undefined,
       metadata: {
+        isTicketActivity: true,
         activityType: 'PR',
         prWebhook: true,
         prUrl: pr.prUrl,

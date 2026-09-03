@@ -7,6 +7,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { Popover } from '../../ui/Popover/Popover';
+import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 
 export type ConversationLabelSlot = 'chips' | 'picker';
@@ -14,6 +15,7 @@ export type ConversationLabelSlot = 'chips' | 'picker';
 interface ConversationLabelsProps {
   conversationId: string;
   channelId: string;
+  isMember: boolean;
   slot: ConversationLabelSlot;
   appliedMappings: ReadonlyArray<{
     id: string;
@@ -50,6 +52,7 @@ const colorForName = (name: string): string => {
 export const ConversationLabels = ({
   conversationId,
   channelId,
+  isMember,
   slot,
   appliedMappings,
 }: ConversationLabelsProps): JSX.Element | null => {
@@ -58,9 +61,10 @@ export const ConversationLabels = ({
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [catalog] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
-    enabled: !!channelId && pickerOpen,
-  });
+  const [catalog] = useCachedQuery(
+    queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
+    { enabled: !!channelId && pickerOpen },
+  );
 
   const appliedNames = useMemo(
     () => new Set(appliedMappings.map(m => m.labelName.toLowerCase())),
@@ -162,10 +166,12 @@ export const ConversationLabels = ({
         const selected = appliedNames.has(label.name.toLowerCase());
         const color = label.color ?? colorForName(label.name);
         return (
-          <button
+          <Button
             key={label.id}
             type='button'
+            variant='ghost'
             onClick={() => toggleByName(label.id, label.name, color)}
+            trackId='toggle_conversation_label'
             className='flex items-center justify-between w-full px-2 py-1.5 text-sm rounded text-left hover:bg-muted text-foreground'
             data-track-category='Support'
             data-track-name='ToggleConversationLabel'
@@ -175,7 +181,7 @@ export const ConversationLabels = ({
               <span className='truncate'>{label.name}</span>
             </span>
             {selected && <Check className='size-4 text-foreground shrink-0' />}
-          </button>
+          </Button>
         );
       })}
       {filtered.length === 0 && !canCreate && (
@@ -183,16 +189,18 @@ export const ConversationLabels = ({
       )}
       {canCreate && (
         <div className='border-t border-border mt-1 pt-1'>
-          <button
+          <Button
             type='button'
+            variant='ghost'
             onClick={createAndApply}
+            trackId='create_conversation_label'
             className='flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded font-medium text-foreground hover:bg-muted'
             data-track-category='Support'
             data-track-name='CreateConversationLabel'
           >
             <Plus className='size-4' />
             Create &ldquo;{search.trim()}&rdquo;
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -211,16 +219,18 @@ export const ConversationLabels = ({
             >
               <span className='size-2 rounded-full shrink-0' style={{ backgroundColor: color }} />
               <span className='truncate max-w-[140px]'>{mapping.labelName}</span>
-              <button
+              <Button
                 type='button'
+                variant='ghost'
                 aria-label={`Remove ${mapping.labelName}`}
                 onClick={() => void removeLabel(mapping.labelId)}
+                trackId='remove_conversation_label'
                 className='hover:bg-muted rounded-full p-0.5'
                 data-track-category='Support'
                 data-track-name='RemoveConversationLabel'
               >
                 <X className='size-2.5' />
-              </button>
+              </Button>
             </span>
           );
         })}

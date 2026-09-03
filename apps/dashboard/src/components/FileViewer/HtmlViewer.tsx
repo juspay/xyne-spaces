@@ -1,5 +1,11 @@
 import React, { useEffect, useState, useCallback, memo } from 'react';
 import { BaseViewerProps } from './utils';
+import { Button } from '../ui/Button/Button';
+
+const declaresEncoding = async (file: Blob): Promise<boolean> => {
+  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+  return /<meta[^>]+charset/i.test(new TextDecoder('latin1').decode(head));
+};
 
 const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -17,11 +23,11 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     setError(null);
 
     try {
-      const text = await source.text();
-      if (!text) throw new Error('File is empty');
+      if (source.size === 0) throw new Error('File is empty');
 
-      const blob = new Blob([text], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
+      const type = (await declaresEncoding(source)) ? 'text/html' : 'text/html;charset=utf-8';
+
+      const url = URL.createObjectURL(source.slice(0, source.size, type));
       setBlobUrl(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load HTML file');
@@ -57,14 +63,16 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
             Unable to display file
           </p>
           <p className='text-red-600 dark:text-red-300 text-sm mb-3'>{error}</p>
-          <button
+          <Button
             onClick={() => void loadFile()}
+            variant='ghost'
             className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
             data-track-category='FileViewer'
             data-track-name='RetryLoadHtml'
+            trackId='retry_load_html'
           >
             Try Again
-          </button>
+          </Button>
         </div>
       </div>
     );

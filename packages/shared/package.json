@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./sdlc": {
+      "types": "./dist/sdlc.d.ts",
+      "import": "./dist/sdlc.js",
+      "default": "./dist/sdlc.js"
+    },
     "./zero": {
       "types": "./dist/zero/index.d.ts",
       "import": "./dist/zero/index.js",
@@ -83,12 +88,13 @@
   ],
   "scripts": {
     "build": "tsc",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
     "watch": "tsc --watch",
     "test": "tsc && node --test \"test/*.test.mjs\"",
     "prepare": "pnpm run build"
   },
   "dependencies": {
-    "@rocicorp/zero": "1.6.1",
+    "@rocicorp/zero": "1.9.0",
     "@standard-schema/spec": "^1.1.0",
     "fast-xml-parser": "^5.10.1",
     "fuse.js": "^7.1.0",
@@ -113,11 +119,16 @@
     }
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
     "@tanstack/react-query": "^5.96.0",
     "@types/node": "^22.15.3",
     "@types/react": "^19.0.0",
     "@types/uuid": "^8.3.4",
     "@xstate/react": "^6.1.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-local-rules": "^3.0.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
     "typescript": "^5.3.3"
   }
 }

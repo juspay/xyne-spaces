@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { Hash, Ticket, FileText, Phone, Search, Loader2 } from "lucide-react";
+import { Hash, Ticket, FileText, Phone, Search, Loader2, GitBranch } from "lucide-react";
 import { searchContext, type ContextItem, type ContextSearchType, type ContextType } from "../lib/api";
 
 interface Props {
@@ -40,6 +40,14 @@ export function ContextPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<ContextItem[]>([]);
+  const tabs = useMemo(
+    () => slug === "sdlc-agent" ? [...TABS, { id: "repository" as const, label: "Repositories" }] : TABS,
+    [slug],
+  );
+
+  useEffect(() => {
+    if (slug !== "sdlc-agent" && tab === "repository") onTabChange("all");
+  }, [slug, tab, onTabChange]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
@@ -94,6 +102,7 @@ export function ContextPicker({
     if (tab === "channel") return "Attach channels";
     if (tab === "ticket") return "Attach tickets";
     if (tab === "canvas") return "Attach canvases";
+    if (tab === "repository") return "Select SDLC repository";
     return "Attach calls";
   }, [tab]);
 
@@ -105,7 +114,7 @@ export function ContextPicker({
 
       <div className="border-b border-zinc-800 px-4 pt-3">
         <div className="mb-3 flex flex-wrap gap-1">
-          {TABS.map((entry) => (
+          {tabs.map((entry) => (
             <button
               key={entry.id}
               onClick={() => onTabChange(entry.id)}
@@ -125,7 +134,9 @@ export function ContextPicker({
           <input
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search channels, tickets, canvases, calls..."
+            placeholder={slug === "sdlc-agent"
+              ? "Search channels, tickets, canvases, calls, repositories..."
+              : "Search channels, tickets, canvases, calls..."}
             className="w-full bg-transparent text-sm text-zinc-200 placeholder-zinc-600 outline-none"
             autoFocus
           />
@@ -190,6 +201,7 @@ function typeIcon(type: ContextType): ReactElement {
   if (type === "channel") return <Hash size={14} className="text-cyan-400" />;
   if (type === "ticket") return <Ticket size={14} className="text-amber-400" />;
   if (type === "canvas") return <FileText size={14} className="text-emerald-400" />;
+  if (type === "repository") return <GitBranch size={14} className="text-blue-400" />;
   return <Phone size={14} className="text-fuchsia-400" />;
 }
 
@@ -197,5 +209,6 @@ function typeBadgeClass(type: ContextType): string {
   if (type === "channel") return "bg-cyan-500/20 text-cyan-300";
   if (type === "ticket") return "bg-amber-500/20 text-amber-300";
   if (type === "canvas") return "bg-emerald-500/20 text-emerald-300";
+  if (type === "repository") return "bg-blue-500/20 text-blue-300";
   return "bg-fuchsia-500/20 text-fuchsia-300";
 }

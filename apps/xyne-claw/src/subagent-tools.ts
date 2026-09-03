@@ -22,7 +22,8 @@ import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
-import { SUBAGENT_DEFINITIONS, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
+import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
 import { compactionExtension } from "./compaction-extension.js";
@@ -55,6 +56,67 @@ const log = createLogger("subagent-tools");
  * Without a parentSessionId we skip caching (cross-run pollution risk).
  */
 const SUBAGENT_CACHE_TTL_MS = 30 * 60 * 1000;
+
+export interface SubagentArtifact {
+  relPath: string;
+  marker: string;
+  fileName: string;
+  mimeType: string;
+  sha256: string;
+}
+
+function encodeArtifactPart(value: string): string {
+  return encodeURIComponent(value).replace(/%20/g, "+");
+}
+
+export function parseSubagentArtifact(toolName: string, resultText: string): SubagentArtifact | null {
+  if (!toolName.endsWith("__spaces-fetch-attachment") && toolName !== "spaces-fetch-attachment") return null;
+
+  const markerMatch = /^Workspace file marker:\s*(\{\{file:([^}]+)\}\})\s*$/m.exec(resultText);
+  const metadataMatch = /^Attachment metadata:\s*(\{.*\})\s*$/m.exec(resultText);
+  if (!markerMatch || !metadataMatch) return null;
+
+  try {
+    const metadata = JSON.parse(metadataMatch[1]!) as Record<string, unknown>;
+    const fileName = typeof metadata["fileName"] === "string" ? metadata["fileName"] : null;
+    const mimeType = typeof metadata["mimeType"] === "string" ? metadata["mimeType"] : null;
+    const sha256 = typeof metadata["sha256"] === "string" ? metadata["sha256"] : null;
+    if (!fileName || !mimeType || !sha256 || !/^[a-f0-9]{64}$/i.test(sha256)) return null;
+    return {
+      marker: markerMatch[1]!,
+      relPath: markerMatch[2]!,
+      fileName,
+      mimeType,
+      sha256,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function renderSubagentArtifacts(artifacts: SubagentArtifact[]): string {
+  if (artifacts.length === 0) return "";
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const artifact of artifacts) {
+    const key = `${artifact.sha256}:${artifact.relPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const artifactId = artifact.sha256.slice(0, 16);
+    const machineMarker = `[SUBAGENT_ARTIFACT:spaces:${artifactId}:${encodeArtifactPart(artifact.fileName)}:${encodeArtifactPart(artifact.mimeType)}]`;
+    lines.push(
+      `- ${machineMarker} path=\`${artifact.relPath}\` marker=\`${artifact.marker}\` fileName=\`${artifact.fileName}\` mimeType=\`${artifact.mimeType}\` sha256=\`${artifact.sha256}\``,
+    );
+  }
+  if (lines.length === 0) return "";
+  return [
+    "",
+    "---",
+    "**Subagent artifacts available to parent**",
+    "These files were fetched by the child tool and written into the parent workspace `.context/` directory. For MCP tools that accept file input, pass the `marker` value so bytes are forwarded out-of-band instead of through model context.",
+    ...lines,
+  ].join("\n");
+}
 
 /**
  * Per-call timeout for stdio MCPs spawned from xyne-claw (deepwiki, context7,
@@ -517,9 +579,34 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             ),
           }
         : {}),
+      // Follow-up handle. Only exposed when this subagent opts in via
+      // def.supportsFollowUp. When the parent passes the `session_id` a PRIOR
+      // call of THIS subagent returned, the follow-up question runs INSIDE that
+      // same child session (full prior context) instead of a fresh one.
+      ...(def.supportsFollowUp
+        ? {
+            session_id: Type.Optional(
+              Type.String({
+                description:
+                  "Optional. To ask THIS subagent a follow-up WITH the full context of a previous call, pass the `session_id` that the previous call of THIS SAME subagent returned. Omit to start a fresh session. Never pass a session_id that a DIFFERENT subagent returned.",
+              }),
+            ),
+          }
+        : {}),
     }),
     async execute(_toolCallId: string, params: unknown) {
       const question = (params as Record<string, string>)[def.paramName] ?? "";
+      // Optional follow-up handle: resume the SAME child session (full prior
+      // context) instead of a fresh one. Only honoured when the def opts in,
+      // and only after the handle passes a strict single-path-segment check so
+      // it can never be used for path traversal.
+      const rawFollowUpId = def.supportsFollowUp
+        ? (params as Record<string, unknown>)["session_id"]
+        : undefined;
+      const followUpId = isValidFollowUpHandle(rawFollowUpId) ? rawFollowUpId : undefined;
+      if (typeof rawFollowUpId === "string" && rawFollowUpId.length > 0 && !followUpId) {
+        log.warn(`[${def.name}] Ignoring malformed session_id handle — starting a fresh session`);
+      }
       const execStartedAt = Date.now();
       log.info(`[${def.name}] Subagent start t=${execStartedAt} call=${_toolCallId.slice(0,8)}: ${question.slice(0, 100)}`);
 
@@ -574,7 +661,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // entirely. Skipped when there is no parentSessionId — without a
       // bounded scope we'd risk cross-run pollution.
       const parentSid = progressCtx?.parentSessionId;
-      if (parentSid) {
+      // Follow-ups are stateful and must NEVER dedupe against a prior fresh call
+      // (or against each other) — bypass the memo cache when a session_id is in
+      // play so each resume actually runs against the evolving child session.
+      if (parentSid && !followUpId) {
         const subMap = subagentResultCache.get(parentSid) ?? new Map<string, CachedEntry>();
         if (!subagentResultCache.has(parentSid)) subagentResultCache.set(parentSid, subMap);
         const key = subagentCacheKey(def.name, question);
@@ -602,6 +692,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // can clear the timer on early failures without leaking the interval.
       let stickyLabel: string | null = null;
       let sessionRef: unknown = null;
+      // Declared before the try so the finally can release it. Guards concurrent
+      // follow-up resumes that share one persisted child session directory.
+      let releaseFollowUpLock: (() => void) | null = null;
       let toolBudget: ToolBudgetTracker | null = null;
       // Hoisted so the finally can clean it up regardless of success/error.
       let childSkillScope: string | null = null;
@@ -610,6 +703,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // verbatim to the returned text (below) so the parent always has the exact
       // [clf-…#n] tokens to cite, independent of how the inner LLM summarized.
       const citedToolOutputs: string[] = [];
+      // Child `spaces-fetch-attachment` calls persist files into the parent workspace.
+      // Capture their deterministic file markers here and append them to the wrapper
+      // result so the parent can pass `{{file:.context/...}}` to a later MCP tool
+      // (for example GitHub `upload-pr-attachment`) without routing base64 through
+      // either LLM.
+      const subagentArtifacts: SubagentArtifact[] = [];
       let turnStartedAt: number | null = null;
       let firstDeltaAt: number | null = null;
       let turnStreamChars = 0;
@@ -778,6 +877,47 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         const parentSessionId = progressCtx?.parentSessionId;
         const childWorkingDir = parentSessionId ? workspacePath(parentSessionId) : process.cwd();
+
+        // ── Follow-up session persistence. When this subagent supports
+        // follow-ups AND we have a conversation to scope under, the child
+        // session is PERSISTED in its own per-handle directory beneath the
+        // parent conversation's session dir. That directory is picked up by the
+        // existing recursive session archiver (session-store walk), so a
+        // resumed follow-up survives across turns/pods for free — no new GCS
+        // pipeline. Without a conversationId (nested/anon runs) or when the def
+        // opts out, fall back to the original in-memory session (no resume).
+        const followUpConversationId = progressCtx?.parentMeta?.conversationId;
+        const followUpEnabled = !!(def.supportsFollowUp && followUpConversationId);
+        let followUpHandle: string | null = null;
+        let followUpResumed = false;
+        let childSessionManager: SessionManager;
+        if (followUpEnabled) {
+          followUpHandle = followUpId ?? crypto.randomUUID();
+          // Root strictly under THIS conversation's session dir + this def's
+          // name. A handle minted by another conversation or subagent simply
+          // won't exist here, so continueRecent starts a fresh session rather
+          // than reading a foreign one — structural cross-tenant isolation.
+          const childSessionRoot = join(
+            sessionDir(followUpConversationId!),
+            "subagents",
+            def.name,
+            followUpHandle,
+          );
+          const { mkdir } = await import("node:fs/promises");
+          await mkdir(childSessionRoot, { recursive: true });
+          // Serialize any concurrent resume of the same handle before we open it.
+          releaseFollowUpLock = await acquireFollowUpLock(childSessionRoot);
+          if (followUpId) {
+            childSessionManager = SessionManager.continueRecent(childWorkingDir, childSessionRoot);
+            followUpResumed = true;
+            log.info(`[${def.name}] Resuming follow-up session handle=${followUpHandle}`);
+          } else {
+            childSessionManager = SessionManager.create(childWorkingDir, childSessionRoot);
+            log.info(`[${def.name}] Created persistent follow-up session handle=${followUpHandle}`);
+          }
+        } else {
+          childSessionManager = SessionManager.inMemory();
+        }
         // Same allowlist-must-include-customTools subtlety as agent.ts —
         // pi v0.75 treats `tools` as a global allowlist that filters
         // customTools too. Listing only the 5 built-ins would silently
@@ -799,7 +939,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           // a subagent's read/grep could walk the whole container.
           tools: ["read", "write", "grep", "find", "ls", ...subagentCustomNames],
           cwd: childWorkingDir,
-          sessionManager: SessionManager.inMemory(),
+          sessionManager: childSessionManager,
           authStorage,
           modelRegistry,
           // cwd-scoped file tools (override pi's unscoped read/write/grep/find/
@@ -920,6 +1060,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
               // allow-list that would silently drop new id formats.
               if (resStr && /\[clf-[^#\s[\]]+#\d+\]/i.test(resStr)) {
                 citedToolOutputs.push(resStr);
+              }
+              const artifact = parseSubagentArtifact(event.toolName, resStr);
+              if (artifact) {
+                subagentArtifacts.push(artifact);
               }
             } catch { /* ignore non-serializable results */ }
 
@@ -1081,83 +1225,13 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const preamble = def.allowRequery ? SUBAGENT_REQUERY_PREAMBLE : SUBAGENT_PREAMBLE;
         let systemPrompt = `${preamble}${def.systemPrompt}`;
 
-        // For sandbox subagent: surface every configured repo (workdir, ports,
-        // setup steps) so the child LLM knows where things live and what's
-        // expected to be set up — no guessing /home/user/ paths or trying to
-        // re-install deps that sandbox-repo-setup already handles.
-        if (def.serverType === "custom:sandbox") {
-          const blocks: string[] = [];
-          for (const [name, cfg] of Object.entries(REPO_CONFIGS)) {
-            const installPkgs = cfg.steps
-              .filter((s: SetupStep): s is { type: "install"; packages: string[]; cmd?: string } => s.type === "install")
-              .flatMap((s) => s.packages);
-            const hasServices = cfg.steps.some((s: SetupStep) => s.type === "services");
-            const devservers = cfg.steps
-              .filter((s: SetupStep): s is { type: "devserver"; name: string; cmd: string; cwd: string } => s.type === "devserver")
-              .map((s) => {
-                const port = cfg.ports?.[s.name];
-                return port ? `${s.name} → http://localhost:${port}` : s.name;
-              });
-            const setupLines: string[] = [];
-            if (installPkgs.length > 0) setupLines.push(`  - npm install in: ${installPkgs.map((p) => `\`${p}/\``).join(", ")}`);
-            if (hasServices) setupLines.push(`  - docker compose services up (\`npm run services\`)`);
-            for (const ds of devservers) setupLines.push(`  - dev server: ${ds}`);
-            blocks.push(
-              `### ${name}\n` +
-                (cfg.repoUrl
-                  ? `- Repo: \`${cfg.repoUrl}\`\n` +
-                    `- Default base branch: \`${cfg.defaultBranch}\`\n`
-                  : `- No repository — browser-only sandbox (headless chromium + CDP + noVNC).\n`) +
-                `- Workdir in VM: \`${cfg.workDir}\`\n` +
-                `- Template: \`${cfg.template}\`\n` +
-                (setupLines.length > 0 ? `- \`sandbox-repo-setup\` auto-runs:\n${setupLines.join("\n")}\n` : "") +
-                (cfg.ports ? `- Ports: ${Object.entries(cfg.ports).map(([k, v]) => `${k}=${v}`).join(", ")}` : ""),
-            );
-          }
-          if (blocks.length > 0) {
-            systemPrompt += `\n\n## Available Repos for sandbox-repo-setup\n${blocks.join("\n\n")}\n\nWhen working on a configured repo, ALWAYS use its listed workdir (e.g. \`/workspace/xyne-spaces\`) — never \`/home/user/\` or \`/tmp\`. Dependencies are installed by \`sandbox-repo-setup\`; \`npm test\` / \`npx tsc\` / \`npm run build\` should just work without re-installing.`;
-            log.info(`[${def.name}] Repo configs injected: ${Object.keys(REPO_CONFIGS).join(", ")}`);
-          }
-        }
-
-        // For sandbox subagent: only mention `upload-pr-screenshot` when it
-        // is actually in the palette (user has a Bitbucket connection).
-        // Without this gate, an agent without Bitbucket connected sees a
-        // prompt block referencing a tool it cannot call.
-        if (def.serverType === "custom:sandbox" && tools.some((t) => /upload-pr-screenshot/.test(t.name))) {
-          systemPrompt += `\n\n## Attaching a screenshot to a Bitbucket PR\nWhen the parent task involves a Bitbucket PR (e.g. "post screenshots on PR #6339"), call \`upload-pr-screenshot\` right after \`sandbox-pw-screenshot\`. Pass \`fileData=<base64 from the [ATTACHMENT:...] block of the screenshot result>\`, plus \`projectKey\`, \`repoSlug\`, \`prId\`, and \`fileName\` (e.g. \`tc1-thread.png\`). Do NOT try to curl the Bitbucket API yourself from \`sandbox-run\` — the sandbox VM has no Bitbucket credentials; \`upload-pr-screenshot\` runs in claw-auth and uses the user's stored token.`;
-        }
-
-        // For sandbox subagent: surface any existing live sandbox session
-        // so the cold-started child LLM doesn't redo sandbox-repo-setup.
-        // Only reuse sessions on a real repo template — agent-workspace
-        // (gvisor/Nix) or the legacy kata docker-dev. Bare-warmpool VMs
-        // have no git creds or services baked in and are useless for repo
-        // work — if one is cached, ignore it so the LLM is forced to call
-        // sandbox-repo-setup.
-        if (def.serverType === "custom:sandbox" && progressCtx?.parentMeta?.conversationId) {
-          const userId = progressCtx.parentMeta.userId;
-          const conversationId = progressCtx.parentMeta.conversationId;
-          const agentSlug = progressCtx.parentMeta.agentSlug ?? "";
-          const storeKey = buildSandboxStoreKey(userId, conversationId, agentSlug);
-          const existing = storeKey ? getSandboxSession(storeKey) : undefined;
-          const isRepoTemplate = !!existing && (
-            existing.id.includes("agent-workspace") || existing.id.includes("docker-dev")
-          );
-          if (existing && isRepoTemplate) {
-            const alive = await probeSession(existing, storeKey).catch(() => false);
-            if (alive) {
-              systemPrompt += `\n\n## Active Session\nSandbox session \`${existing.id}\` is already provisioned for this conversation. Repo is at \`/workspace/xyne-spaces\` (shallow clone of default branch) and Nix-managed services (postgres :5433, redis :6379, livekit :7880, zero :4848, fake-gcs :4443, y-sweet :8080) are already pre-realized in /nix/store from the pod's prebake step.\nUse \`sandbox-run\` with \`sessionId="${existing.id}"\` for ALL commands. DO NOT call \`sandbox-repo-setup\` again unless the session has died.`;
-              log.info(`[${def.name}] Active session injected: ${existing.id}`);
-            }
-          } else if (existing) {
-            log.info(`[${def.name}] Skipping injection: cached session ${existing.id} is not a repo-template`);
-          }
-        }
-
         const childPrompt = `${systemPrompt}\n\n## Question\n${question}`;
+        // On a RESUMED follow-up the child session already holds the system
+        // prompt + all prior turns; re-injecting the preamble/systemPrompt would
+        // bloat context and re-anchor the model. Send ONLY the new question.
+        const promptText = followUpResumed ? `## Follow-up\n${question}` : childPrompt;
         pushDebugEvent("session_prompt", {
-          prompt: childPrompt,
+          prompt: promptText,
           messages: snapshotMessages(),
         });
         turnStartedAt = Date.now();
@@ -1186,7 +1260,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         };
         subagentAbortSignal?.addEventListener("abort", onParentAbort, { once: true });
         try {
-          await session.prompt(childPrompt);
+          await session.prompt(promptText);
 
           const sq = session as unknown as { _agentEventQueue?: Promise<void> };
           if (sq._agentEventQueue) await sq._agentEventQueue;
@@ -1216,6 +1290,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           // unusual but possible. Keep the original fallback wording so callers
           // that special-case "(No findings)" don't regress.
           text = "(No findings)";
+        }
+
+        const artifactAppendix = renderSubagentArtifacts(subagentArtifacts);
+        if (artifactAppendix) {
+          text += artifactAppendix;
+          log.info(`[${def.name}] Appended ${subagentArtifacts.length} subagent artifact marker(s) to parent-visible result`);
         }
 
         // Citation-token safety net: surface any `[clf-…#n]` token from the raw
@@ -1300,7 +1380,15 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             log.warn(`[${def.name}] Failed to write child debug artifact: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
-        return { content: [{ type: "text" as const, text }], details: {} };
+        if (followUpEnabled && followUpHandle) {
+          text += `\n\n---\n_Follow-up:_ to ask THIS \`${def.name}\` subagent another question WITH the full context of this run, call \`${def.name}\` again passing \`session_id: "${followUpHandle}"\`. Omit it to start fresh.`;
+        }
+        return {
+          content: [{ type: "text" as const, text }],
+          details: followUpEnabled && followUpHandle
+            ? { session_id: followUpHandle, resumed: followUpResumed }
+            : {},
+        };
       } catch (err) {
         if (stickyTimer) clearInterval(stickyTimer);
         stopStreamRateTimer();
@@ -1340,6 +1428,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // already disposed it (dispose() is idempotent), but the catch path
         // didn't, leaking the session's listeners/extension context on every
         // failed subagent. Best-effort.
+        try { releaseFollowUpLock?.(); } catch { /* ignore */ }
         try { (sessionRef as { dispose?: () => void } | null)?.dispose?.(); } catch { /* ignore */ }
         if (toolBudget) {
           metric.observe("tool_calls_per_run", toolBudget.calls, {
@@ -1408,17 +1497,22 @@ function resolveCustomSubagentTools(
 
   if (directNames.size > 0) {
     for (const group of groups) {
-      const writeSet = new Set(group.writeTools.map(String));
       for (const t of group.tools) {
         const name = extractToolName(t.name);
-        if (directNames.has(name) && !writeSet.has(name)) out.push(t);
+        // Include write tools too. Their ToolDefinition still queues a signed
+        // pendingAction via the parent run's MCP wrapper; it does not execute
+        // until the human approval card is approved in claw-auth.
+        if (directNames.has(name)) out.push(t);
       }
     }
   }
   if (customSlugs.size > 0 && customTools) {
     for (const t of customTools) {
       const slug = customToolSlug(t);
-      if (customSlugs.has(slug) && !isCustomWriteTool(t)) out.push(t);
+      // Custom write tools follow the same signed pendingAction path as MCP
+      // writes, so custom subagents can now own the full workflow while the
+      // approval gate remains outside the child LLM.
+      if (customSlugs.has(slug)) out.push(t);
     }
   }
   return out;
@@ -1426,8 +1520,10 @@ function resolveCustomSubagentTools(
 
 /**
  * Group MCP tool groups into subagent wrappers based on serverType.
- * Also wraps custom tools that match a subagent definition (e.g. custom:sandbox).
- * Write tools (from adapter's writeTools) stay as direct tools in the parent agent.
+ * Also wraps custom tools whose `source` matches a subagent definition.
+ * Write tools are included in the subagent palette and still use the parent
+ * run's signed pendingAction approval gate; they are also hoisted as direct
+ * tools for backwards compatibility with existing parent-driven approvals.
  * Server types without a matching SubagentDefinition pass through as direct tools.
  */
 export function buildSubagentTools(
@@ -1468,28 +1564,28 @@ export function buildSubagentTools(
   };
 
   for (const group of groups) {
-    const def = SUBAGENT_DEFINITIONS.find((d) => d.serverType === group.serverType);
+    const def = findSubagentDefinitionForServer(group.serverType);
 
     if (def) {
-      // Split write tools out as direct (they need user approval in the parent agent)
       const writeSet = new Set(group.writeTools.map(String));
-      const readTools = group.tools.filter((t) => !writeSet.has(extractToolName(t.name)));
       const writeTools = group.tools.filter((t) => writeSet.has(extractToolName(t.name)));
 
-      if (readTools.length > 0) {
+      if (group.tools.length > 0) {
         const skills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
         const bonus = bonusToolsBySubagent?.[def.name] ?? [];
-        subagentTools.push(makeSubagentTool(def, [...readTools, ...bonus], skillTriggers, skills, providerResolution, progressCtx));
+        subagentTools.push(makeSubagentTool(def, [...group.tools, ...bonus], skillTriggers, skills, providerResolution, progressCtx));
 
-        // Hoist user-picked reads into the parent's direct palette too. The
+        // Hoist user-picked tools into the parent's direct palette too. The
         // subagent wrapper above already contains them — this just exposes a
         // second path so the parent agent can call e.g. `bitbucket__get_pull_request`
         // without going through the `bitbucket` subagent. Picked-as-direct +
         // picked-as-subagent both work; the parent-level filter in run.ts
         // decides which path actually surfaces to the model.
-        const hoisted = readTools.filter((t) => isDirectPick(t.name));
+        const hoisted = group.tools.filter((t) => isDirectPick(t.name));
         if (hoisted.length > 0) directTools.push(...hoisted);
       }
+      // Backwards compatibility: keep write tools visible at parent level for
+      // agents/prompts that already perform parent-driven approval flows.
       directTools.push(...writeTools);
     } else {
       // No subagent definition for this server type — keep all as direct
@@ -1497,10 +1593,12 @@ export function buildSubagentTools(
     }
   }
 
-  // Wrap custom tools that match a subagent definition (e.g. custom:sandbox)
+  // Wrap custom tools whose `source` matches a subagent definition. NOTE:
+  // sandbox tools are NOT wrapped — the sandbox subagent was removed
+  // (2026-06-14) and they mount parent-direct (see routes/run.ts).
   const remainingCustomTools: ToolDefinition[] = [];
   if (customTools) {
-    // Group custom tools by source prefix (e.g. "custom:sandbox" → "sandbox" tools)
+    // Group custom tools by their `source` label.
     const customBySource = new Map<string, ToolDefinition[]>();
     for (const t of customTools) {
       const source = (t as unknown as { source?: string }).source;
@@ -1514,33 +1612,20 @@ export function buildSubagentTools(
     }
 
     for (const [source, tools] of customBySource) {
-      const def = SUBAGENT_DEFINITIONS.find((d) => d.serverType === source);
+      // Response-only cards stay out of the always-active set here exactly as
+      // they do in buildFastModeDirectTools — routes/run.ts catalogues them
+      // instead, and a name that reaches fastAlwaysActiveToolNames is filtered
+      // back OUT of the catalog, which would silently make them eager again.
+      // This is the non-fast-mode half of that invariant.
+      if (isPresentationToolSource(source)) continue;
+      const def = findSubagentDefinitionForServer(source);
       if (def && tools.length > 0) {
         const customSkills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
-        // The sandbox subagent must not see sandbox-destroy — child LLMs were
-        // calling it after errors / "to be tidy" and nuking the cached VM,
-        // forcing the next conversation turn to redo a 10-min sandbox-repo-setup.
-        // Cleanup is handled by Lifecycle.shutdownTime + idle timer; no tool needed.
-        //
-        // We compare against `slug` (the canonical identifier used in tool
-        // calls), NOT `name` (which is a human-readable label like
-        // "Sandbox Destroy Session"). Earlier code filtered by `name` which
-        // never matched — sandbox-destroy was leaking into the palette and
-        // the LLM was happily calling it, causing massive SandboxClaim
-        // churn (visible as random pods getting reaped under active
-        // sessions; xyne-kata DELETE-/sessions/:id → K8s API DELETE).
-        const filteredTools = source === "custom:sandbox"
-          ? tools.filter((t) => customToolSlug(t) !== "sandbox-destroy")
-          : tools;
-        // Custom write tools (e.g. google-sheets-create/append/update) must
-        // remain parent-level approval tools. Do not put them in child LLM
-        // palettes: the child can otherwise queue writes and then speak as if
-        // it completed the whole multi-step write flow after approval.
-        const readTools = filteredTools.filter((t) => !isCustomWriteTool(t));
+        const filteredTools = tools;
         const writeTools = filteredTools.filter(isCustomWriteTool);
         const bonus = bonusToolsBySubagent?.[def.name] ?? [];
-        if (readTools.length > 0 || bonus.length > 0) {
-          subagentTools.push(makeSubagentTool(def, [...readTools, ...bonus], skillTriggers, customSkills, providerResolution, progressCtx));
+        if (filteredTools.length > 0 || bonus.length > 0) {
+          subagentTools.push(makeSubagentTool(def, [...filteredTools, ...bonus], skillTriggers, customSkills, providerResolution, progressCtx));
         }
 
         // Same individual-pick hoist as the built-in MCP branch above: any
@@ -1551,8 +1636,10 @@ export function buildSubagentTools(
         // check that bitbucket/spaces direct picks use — one config knob,
         // one mental model. The tool stays accessible inside the subagent
         // wrapper too.
-        const hoisted = readTools.filter((t) => isDirectPick(t.name));
+        const hoisted = filteredTools.filter((t) => isDirectPick(t.name));
         if (hoisted.length > 0) directTools.push(...hoisted);
+        // Backwards compatibility for existing prompts that expect custom write
+        // tools to be parent-level approval tools.
         remainingCustomTools.push(...writeTools);
       } else {
         remainingCustomTools.push(...tools);

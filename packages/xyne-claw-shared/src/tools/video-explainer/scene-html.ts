@@ -55,6 +55,11 @@ function sceneBody(scene: VideoScene, title: string, code?: string, mermaidLive?
       return `<section><div class="eyebrow">BEFORE → AFTER</div><div class="diff-grid"><div><h2 class="before">Before</h2><pre class="code compact">${codeLines(scene.before)}</pre></div><div><h2 class="after">After</h2><pre class="code compact">${codeLines(scene.after)}</pre></div></div></section>`;
     case "bullets":
       return `<section><div class="eyebrow">WHAT THIS MEANS FOR YOU</div><h2>${escapeHtml(title)}</h2><ul>${scene.items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>`;
+    default:
+      // Animated scenes (manim, d2) are rendered by the composer directly and
+      // never reach this HTML rasterizer; this keeps the switch exhaustive and
+      // degrades to a title card if one is ever routed here by mistake.
+      return `<section class="title-scene"><div class="eyebrow">VIDEO EXPLAINER</div><h1>${escapeHtml(title)}</h1><div class="rule"></div></section>`;
   }
 }
 

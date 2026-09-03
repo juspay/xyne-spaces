@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 /**
  * IndexedDB Service for persisting XState machine context
  * Uses Zero's schema version for cache invalidation
@@ -268,7 +269,10 @@ class IndexedDBService {
           dropRequest.onsuccess = () => res();
           dropRequest.onerror = () => res();
           dropRequest.onblocked = () => {
-            console.warn(`Database deletion blocked for ${dbName}, proceeding anyway`);
+            logger.warn(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String(`Database deletion blocked for ${dbName}, proceeding anyway`),
+            });
             res();
           };
         });
@@ -277,13 +281,18 @@ class IndexedDBService {
       await Promise.all(dropPromises);
 
       if (userDatabases.length > 0) {
-        console.log(
-          `Dropped ${userDatabases.length} IndexedDB databases including user cache and encryption keys`,
-        );
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(`Dropped ${userDatabases.length} user-scoped databases`),
+        });
       }
     } catch (error) {
       // If we can't list databases, just proceed
-      console.warn('Failed to list user databases:', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to list user databases:'),
+        context: [error],
+      });
     }
   }
 }

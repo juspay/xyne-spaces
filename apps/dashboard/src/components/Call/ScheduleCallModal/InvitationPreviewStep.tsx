@@ -246,7 +246,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
                     editor?.commands.focus();
                   }
                 }}
-                data-track-category='calls'
+                data-track-category='CALLS'
                 data-track-name='focus-invitation-message'
                 className='cursor-text overflow-y-auto overflow-x-hidden overscroll-contain min-w-0'
                 style={{ minHeight: 220, maxHeight: 340 }}
@@ -282,7 +282,13 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
 
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <div className='flex justify-between items-center border-t p-3 shrink-0'>
-        <Button variant='ghost' onClick={onBack} disabled={isSubmitting}>
+        <Button
+          variant='ghost'
+          onClick={onBack}
+          data-track-category='CALLS'
+          data-track-name='BACK_FROM_INVITATION_PREVIEW'
+          disabled={isSubmitting}
+        >
           Back
         </Button>
         <div className='flex items-center gap-3'>
@@ -290,7 +296,12 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
             Sending to <strong className='text-foreground'>{recipients.length}</strong> external
             {recipients.length === 1 ? '' : 's'} as a reply.
           </p>
-          <Button onClick={onSend} disabled={isSubmitting}>
+          <Button
+            onClick={onSend}
+            data-track-category='CALLS'
+            data-track-name='SEND_CALL_INVITATION'
+            disabled={isSubmitting}
+          >
             {isSubmitting ? 'Sending…' : 'Send & schedule'}
           </Button>
         </div>
@@ -334,7 +345,7 @@ const LabeledInput: React.FC<{
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      data-track-category='calls'
+      data-track-category='CALLS'
       data-track-name='edit-invitation-field'
       className='h-8 px-2.5 text-[13px] border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-foreground/40'
     />

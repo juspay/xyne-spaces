@@ -288,9 +288,7 @@ function useChannelMessagesImpl(
         setConversationsState(merged);
         setIsInitialLoadComplete(true);
       })
-      .catch(err => {
-        console.error('[useMessages] initial channel load failed', serializeInitialLoadError(err));
-      });
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
@@ -641,4 +639,3 @@ function useThreadMessagesImpl(
     } as ThreadConversation;
   }, [base, pendingForThread]);
 }
-

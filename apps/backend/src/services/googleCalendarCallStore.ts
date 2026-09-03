@@ -40,17 +40,30 @@ export interface GCalAttendee {
 
 export interface GCalEvent {
   id?: string;
+  etag?: string;
   summary?: string;
   description?: string;
   start?: GCalDateTime;
   end?: GCalDateTime;
   location?: string;
   status?: string;
+  eventType?: string;
+  /**
+   * Present on expanded recurring instances. Because all fetches use
+   * singleEvents=true, each occurrence intentionally keeps its own event.id,
+   * Call row, and Xyne room rather than mutating the series master.
+   */
+  recurringEventId?: string;
   htmlLink?: string;
   organizer?: { email?: string; displayName?: string; self?: boolean };
   attendees?: GCalAttendee[];
   hangoutLink?: string;
-  conferenceData?: { entryPoints?: { uri?: string; entryPointType?: string }[] };
+  conferenceData?: {
+    conferenceId?: string;
+    conferenceSolution?: { name?: string; key?: { type?: string } };
+    entryPoints?: { uri?: string; entryPointType?: string; label?: string }[];
+  };
+  extendedProperties?: { private?: Record<string, string> };
 }
 
 export interface GCalListResponse {
@@ -69,6 +82,15 @@ function parseGCalDateTime(dt?: GCalDateTime): Date | undefined {
 }
 
 function resolveRoomLink(event: GCalEvent): string | undefined {
+  // Xyne Call Link Auto-Injection: once an event has been patched, the private
+  // xyneRoomLink property is the canonical URL for the parallel Call record,
+  // used for summary posting/post-call workflows regardless of whether the
+  // Calendar conference entry itself was replaced (internal-only) or left
+  // untouched (external-participant, Xyne link lives in the description only).
+  const xyneRoomLink = event.extendedProperties?.private?.xyneRoomLink;
+  if (event.extendedProperties?.private?.xyneManaged === 'true' && xyneRoomLink) {
+    return xyneRoomLink;
+  }
   if (event.hangoutLink) return event.hangoutLink;
   const videoEntry = event.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video');
   if (videoEntry?.uri) return videoEntry.uri;
@@ -107,6 +129,8 @@ export async function storeGCalEventAsCall(
     (a) => !organizerEmail || a.email !== organizerEmail
   );
 
+  const xyneManaged = event.extendedProperties?.private?.xyneManaged === 'true';
+
   await upsertExternalCalendarCall(
     {
       externalId,
@@ -122,6 +146,8 @@ export async function storeGCalEventAsCall(
       startsAt,
       endsAt,
       timezone: event.start?.timeZone ?? 'UTC',
+      xyneManaged,
+      channelId: xyneManaged ? (event.extendedProperties?.private?.xyneChannelId ?? null) : null,
       metadata: {
         provider: 'google',
         calendarOwnerEmail,

@@ -6,6 +6,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
 import {
@@ -20,6 +21,7 @@ import {
   chatMessageRepository,
   agentChainWorkflowRepository,
   activeGoalRepository,
+  experimentRepository,
   agentRequestRepository,
 } from "../repositories/index.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -34,7 +36,8 @@ import {
 } from "../lib/agent-card.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
-import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
@@ -44,15 +47,20 @@ import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
+import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
+import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession, seedUnderstandingFrontier } from "../lib/experiment.js";
 import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
-import { handleSlashCommandBeforeRun, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
+import { handleSlashCommandBeforeRun, normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
 import {
   QUEUE_ENABLED,
   QUEUE_CAP,
   tryAcquireSlot,
   releaseSlot,
   refreshSlot,
+  attachSlotSession,
+  getSlotOwner,
   enqueueMessage,
   dequeueMessage,
   queueDepth,
@@ -78,15 +86,19 @@ import {
 } from "../queue/run-recovery-worker.js";
 import { appendCitations, buildThreadCitationMeta } from "../lib/citations.js";
 import { htmlToPlainText } from "../lib/html-to-text.js";
+import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
+import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
-import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
   setActivePlanCard,
@@ -96,14 +108,125 @@ import {
   clearPlanExecMeta,
   normalizePlanTitle,
   filterToApprovedTitles,
+  setPlanLastTodos,
+  getPlanLastTodos,
+  clearPlanLastTodos,
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
-import { buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
-import type { TwinDelivery } from "xyne-claw-shared";
+
+import {
+  buildTicketProposalFlow,
+  buildMcpSuggestFlow,
+  buildCodeFlow,
+  buildDiffFlow,
+  buildChartFlow,
+  isUiWidget,
+} from "xyne-claw-shared";
+import {   buildSdlcAgentToolProfile,SDLC_REQUIRED_TOOLS, buildWriteApprovalFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildPlanFlow, buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, MAX_AGENT_LIST_CARDS, hashSkillContent, buildPrFlow, prScreenId, isTwinDelivery, type PrProvider, type PrStatus } from "xyne-claw-shared";
+import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
+import type { TwinDelivery, UiWidget } from "xyne-claw-shared";
+import { isAgentInvocableBy } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
+import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
+import { connectorTypesFromText, connectorTypesUserAskedToConnect } from "../lib/connector-hints.js";
+import { availableServerIds } from "../lib/connector-availability.js";
 
 const clog = createLogger("webhook");
+const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+  xyneSpacesTools.map((tool) => tool.name),
+);
+
+/** A run that died because the model provider was over capacity (429 / quota /
+ *  overloaded / 5xx after fallback), as opposed to a real agent error. */
+function isCapacityFailure(payload: { status?: string; error?: unknown; emptyReason?: string }): boolean {
+  if (payload.emptyReason === "provider_capacity") return true;
+  if (payload.status !== "failed") return false;
+  const e = String(payload.error ?? "").toLowerCase();
+  return /\b429\b|\b50[234]\b|quota|rate.?limit|overloaded|over capacity|service unavailable|too many requests/.test(e);
+}
+
+/**
+ * Schedule an auto-retry when a run failed on PLATFORM provider capacity.
+ *
+ * Interactive → post a card and poll with it; automation → poll silently and
+ * only surface if it gives up. Scoped to the platform provider (litellm/spaces):
+ * a BYO provider that hit capacity is better served by promote-provider
+ * (switch), and re-dispatching BYO needs cred reconstruction we defer. Returns
+ * true if a retry was scheduled (interactive callers use it to suppress the
+ * generic failure notice).
+ */
+async function scheduleCapacityRetryIfNeeded(
+  ctx: SessionContext,
+  payload: { status?: string; error?: unknown; emptyReason?: string; provider?: string; model?: string },
+  interactive: boolean,
+): Promise<boolean> {
+  // Experiments run their own recovery loop (experiment supervisor); don't
+  // double-drive them.
+  if (ctx.isExperiment) return false;
+  if (!isCapacityFailure(payload)) return false;
+  const provider = payload.provider ?? ctx.provider;
+  const isPlatform = !provider || provider === "litellm" || provider === "spaces";
+  if (!isPlatform) return false;
+  // channelId is only needed to POST the card — a channel-less automation
+  // (pure API caller) must still get the silent retry.
+  if (!ctx.agentSlug || !ctx.agentOrgId || !ctx.conversationId || !ctx.senderId) return false;
+  if (interactive && !ctx.channelId) return false;
+
+  const retryToken = crypto.randomUUID();
+  const redispatch = {
+    userId: ctx.senderId,
+    task: ctx.task ?? "",
+    agentSlug: ctx.agentSlug,
+    orgId: ctx.agentOrgId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId ?? "",
+    // Automation retries MUST re-declare their run type: claw's read-only tool
+    // gating (isReadOnlyJob) keys on eventType, and losing it would hand the
+    // retried automation write tools the original never had.
+    ...(ctx.resultForwardUrl ? { eventType: "automation" } : {}),
+    ...(provider ? { provider } : {}),
+    ...(ctx.resultForwardUrl ? { resultForwardUrl: ctx.resultForwardUrl } : {}),
+  };
+
+  let card: { messageId: string; spacesAppId?: string } | undefined;
+  if (interactive) {
+    try {
+      const flow = withSpacesAppId(
+        buildCapacityRetryFlow(provider ?? "the model", {
+          agentSlug: ctx.agentSlug,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+          retryToken,
+          phase: "pending",
+        }),
+        ctx.spacesAppId,
+      );
+      const posted = (await spacesAppFetch("/chat/postMessage", {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        flow,
+        userId: ctx.spacesAppUserId,
+      }, ctx.appToken)) as { messageId?: string; id?: string };
+      const messageId = posted?.messageId ?? posted?.id;
+      if (messageId) card = { messageId, ...(ctx.spacesAppId ? { spacesAppId: ctx.spacesAppId } : {}) };
+    } catch (err) {
+      clog.warn("[capacity-retry] failed to post card (scheduling silently):", err instanceof Error ? err.message : err);
+    }
+  }
+
+  await scheduleProviderRetry({
+    retryToken,
+    provider: provider ?? "litellm",
+    ...(payload.model ? { model: payload.model } : {}),
+    automation: !!ctx.resultForwardUrl,
+    redispatch,
+    ...(card ? { card } : {}),
+  });
+  clog.info(`[capacity-retry] scheduled token=${retryToken} interactive=${interactive} automation=${!!ctx.resultForwardUrl} conv=${ctx.conversationId}`);
+  return true;
+}
 
 // Feature flag: when Spaces has the XYNE-12145 fix deployed
 // (POST /api/apps/chat/agentProgress with the authenticateApp middleware), flip
@@ -400,6 +523,10 @@ import {
   readPrBindingData,
   normalizePrUrl,
   setWidgetBindingStatus,
+  upsertPlanBinding,
+  findProposedPlanBinding,
+  readPlanBindingData,
+  markPlanBindingStatus,
 } from "../lib/agent-widget-binding.js";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -443,6 +570,8 @@ import {
   spacesAppFetch,
   spacesAppFetchGet,
   spacesAppFetchMultipart,
+  SpacesApiError,
+  isFlowSchemaRejection,
   withSpaces5xxRetry,
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
@@ -454,6 +583,211 @@ import {
   zipAttachmentsToBuffer,
   prepareAgentResultForPosting,
 } from "../surfaces/spaces/attachments.js";
+
+/** Owner display name + id for an agent's card chin ("Created by @x"). */
+/** Connectors shown before the card defers to "Browse MCPs". */
+const MCP_SUGGEST_ROSTER_SAMPLE = 5;
+
+/** Agents listed on the roster card before it defers to "Browse agents". */
+const AGENT_SUMMARY_SAMPLE = 5;
+
+/** Cap on connectors the server offers unprompted, so a card never becomes a list. */
+const MCP_SUGGEST_INFERRED_MAX = 3;
+
+/**
+ * Connector cards to post alongside a reply. The model requests these
+ * explicitly (`title`/`listAll`); the server fills the same shape when it
+ * infers a suggestion from the message text (`inferred`).
+ */
+type PendingConnectorSuggestions = {
+  serverTypes: string[];
+  title?: string;
+  listAll?: boolean;
+  inferred?: boolean;
+};
+
+async function agentOwnerCredit(
+  ownerUserId: string | null | undefined,
+): Promise<{ name?: string | null; id?: string | null } | undefined> {
+  if (!ownerUserId) return undefined;
+  const owner = await prisma.user
+    .findUnique({ where: { id: ownerUserId }, select: { id: true, name: true } })
+    .catch(() => null);
+  return owner?.name ? { name: owner.name, id: owner.id } : undefined;
+}
+
+
+function experimentCounts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
+  return {
+    conjecture: findings.filter((f) => f.status === "conjecture").length,
+    proved: findings.filter((f) => f.status === "proved").length,
+    refuted: findings.filter((f) => f.status === "refuted").length,
+  };
+}
+
+const EXPERIMENT_FINDINGS_MAX_BYTES = 200 * 1024;
+
+function capExperimentFindingsMarkdown(markdown: string): string {
+  if (Buffer.byteLength(markdown, "utf8") <= EXPERIMENT_FINDINGS_MAX_BYTES) return markdown;
+  const suffix = "\n\n---\n\n_Report truncated at 200KB for Spaces file delivery._\n";
+  let capped = markdown;
+  while (Buffer.byteLength(capped + suffix, "utf8") > EXPERIMENT_FINDINGS_MAX_BYTES && capped.length > 0) {
+    capped = capped.slice(0, Math.max(0, capped.length - 4096));
+  }
+  return `${capped.trimEnd()}${suffix}`;
+}
+
+function experimentFindingsFilename(agentSlug: string, date = new Date()): string {
+  const safeSlug = agentSlug.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "agent";
+  const stamp = date.toISOString().replace(/\.\d{3}Z$/, "").replace(/:/g, "-");
+  return `experiment-findings-${safeSlug}-${stamp}.md`;
+}
+
+/**
+ * Upload a generated markdown document as a thread attachment.
+ *
+ * FILE ONLY — deliberately no `flow` parameter. `/files/filesUpload`
+ * (filesController.uploadFiles) does not read a flow field, so a card passed
+ * here is silently dropped and no Approve/Decline buttons ever render. Post
+ * approval cards separately via `/chat/postMessage` with `flow: <FlowDefinition>`.
+ */
+async function postGeneratedMarkdownFile(args: {
+  channelId: string;
+  conversationId: string;
+  workspaceId?: string | null;
+  userId: string;
+  appToken: string;
+  filename: string;
+  /** Text body, or raw bytes when `mimeType` says the payload is binary. */
+  markdown: string | Uint8Array;
+  mimeType?: string;
+  /** Additional files to attach to the SAME message (Spaces' filesUpload takes
+   *  repeated `files` parts). Used by /experiment findings, which ships the
+   *  proof zip AND the readable .md side by side — the zip is the archive, the
+   *  markdown is what people actually open in the thread. */
+  extraFiles?: Array<{ filename: string; content: string | Uint8Array; mimeType?: string }>;
+  summary: string;
+}): Promise<void> {
+  const form = new FormData();
+  const mimeType = args.mimeType ?? "text/markdown";
+  const body = typeof args.markdown === "string"
+    ? [args.markdown]
+    : [new Uint8Array(args.markdown)];
+  form.append("files", new Blob(body, { type: mimeType }), args.filename);
+  for (const extra of args.extraFiles ?? []) {
+    const extraBody = typeof extra.content === "string"
+      ? [extra.content]
+      : [new Uint8Array(extra.content)];
+    form.append("files", new Blob(extraBody, { type: extra.mimeType ?? "text/markdown" }), extra.filename);
+  }
+  form.append("channelId", args.channelId);
+  form.append("conversationId", args.conversationId);
+  form.append("userId", args.userId);
+  if (args.workspaceId) form.append("workspaceId", args.workspaceId);
+  form.append("markdownText", args.summary);
+  form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
+  await spacesAppFetchMultipart("/files/filesUpload", form, args.appToken);
+}
+
+function formatExperimentStatus(
+  run: Awaited<ReturnType<typeof experimentRepository.findActiveByConversation>>,
+  findings: Array<{ status: string; title: string; epoch: number; createdAt: Date }>,
+): string {
+  if (!run) return "No active /experiment in this thread.";
+  const elapsedMs = Date.now() - run.createdAt.getTime();
+  const remainingMs = Math.max(0, run.deadlineAt.getTime() - Date.now());
+  const counts = experimentCounts(findings);
+  const recent = [...findings]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 5);
+  const icon = (status: string) => status === "proved" ? "✓" : status === "refuted" ? "✗" : "◉";
+  return [
+    `**/experiment status** — epoch ${run.epoch}`,
+    `Elapsed: ${formatDuration(elapsedMs)} · Remaining: ${formatDuration(remainingMs)}`,
+    ...(run.provider ? [`Model: ${formatExperimentModel(run.provider, run.modelId)}`] : []),
+    `Now: ${run.currentHypothesis?.trim() || "(no current hypothesis recorded)"}`,
+    `Findings: ${counts.conjecture} open · ${counts.proved} proved · ${counts.refuted} refuted`,
+    recent.length
+      ? ["", ...recent.map((f) => `${icon(f.status)} [epoch ${f.epoch}] ${f.title}`)].join("\n")
+      : "\nNo findings recorded yet.",
+  ].join("\n");
+}
+
+function formatExperimentModel(provider: string, modelId?: string | null): string {
+  return modelId?.trim() ? `${provider}/${modelId.trim()}` : `${provider} (default)`;
+}
+
+async function continueExperimentAfterResult(ctx: SessionContext, sessionId: string): Promise<boolean> {
+  const active = await experimentRepository.findActiveByConversation(ctx.conversationId);
+  if (!active) return false;
+  if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
+
+  const now = Date.now();
+  if (active.status === "finishing") {
+    await experimentRepository.update(active.id, { status: "done", lastEpochEndedAt: new Date() });
+    return false;
+  }
+
+  // Rapid-fail brake: an epoch that died within seconds of STARTING (model
+  // outage, misconfig) must NOT chain instantly — that's an unbounded tight
+  // dispatch loop. Measured against the session's own startedAt (not the
+  // experiment row's updatedAt, which ledger writes also bump). Deferring
+  // leaves the run inactive; the supervisor's stale sweep re-dispatches after
+  // its window, turning a hot loop into ~1 retry/10min.
+  const MIN_EPOCH_MS = 30_000;
+  const epochRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+  const epochRanMs = epochRun?.startedAt ? now - epochRun.startedAt.getTime() : Number.POSITIVE_INFINITY;
+  if (epochRanMs < MIN_EPOCH_MS) {
+    clog.warn(`[experiment] epoch for ${active.id} lived only ${Math.round(epochRanMs / 1000)}s — deferring next epoch to supervisor (rapid-fail brake)`);
+    await experimentRepository.update(active.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
+    return true; // treated as handled: keep this thread's queue-drain semantics unchanged
+  }
+
+  // Check the epoch that just ended, in parallel with the next one starting.
+  // Deliberately not awaited: the checker is advisory, and a slow or failing
+  // verification pass must never delay or block the experiment's own progress.
+  // Its verdicts land in the ledger and reach whichever epoch starts after.
+  void dispatchExperimentChecker(active, active.epoch).catch((err) => {
+    clog.warn("[experiment] checker dispatch threw", {
+      experimentId: active.id,
+      epoch: active.epoch,
+      error: errMsg(err),
+    });
+  });
+
+  // repo-history is COMMIT-bound, not time-bound: every commit from the initial
+  // sha to HEAD must be walked, so the deadline is NOT its stop condition — it
+  // keeps chaining epochs until the agent ends the run at HEAD (end-experiment,
+  // which flips the row out of "active" so this function returns early next
+  // time). The only backstop is an epoch-count cap, since a walk that never
+  // advances the cursor would otherwise loop forever — a time deadline would
+  // defeat the whole point. Other kinds keep the deadline as their safety cap.
+  const MAX_REPO_HISTORY_EPOCHS = 1000;
+  const keepGoing =
+    active.kind === "repo-history"
+      ? active.epoch < MAX_REPO_HISTORY_EPOCHS
+      : now < active.deadlineAt.getTime();
+  if (keepGoing) {
+    const next = await experimentRepository.update(active.id, {
+      epoch: { increment: 1 },
+      lastEpochEndedAt: new Date(),
+    });
+    await dispatchExperimentEpoch(next);
+    return true;
+  }
+  if (active.kind === "repo-history") {
+    clog.warn(`[experiment] repo-history ${active.id} hit the ${MAX_REPO_HISTORY_EPOCHS}-epoch backstop without reaching HEAD — finishing; the walk likely stalled (cursor not advancing)`);
+  }
+
+  const finishing = await experimentRepository.update(active.id, {
+    status: "finishing",
+    epoch: { increment: 1 },
+    lastEpochEndedAt: new Date(),
+  });
+  await dispatchExperimentEpoch(finishing);
+  return true;
+}
+
 function recordParam(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -490,12 +824,15 @@ async function pendingActionTargetValidation(
       );
       return { error: null };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/Spaces app API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+      // Branch on the typed HTTP status, not message text. Only a definitive 404
+      // rejects a conversation target; everything else (403 included, preserving
+      // prior behavior) fails open so the Spaces API stays the final judge.
+      const status = err instanceof SpacesApiError ? err.status : undefined;
+      if (status === 404) {
         return { error: `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread` };
       }
       clog.warn(
-        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(errMsg(err)).slice(0, 240)}`,
       );
       return { error: null };
     }
@@ -507,24 +844,21 @@ async function pendingActionTargetValidation(
     const channel = (await spacesAppFetch("/channel/info", { channelId }, appToken)) as { name?: string } | undefined;
     return channel?.name ? { error: null, channelName: channel.name } : { error: null };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (
-      /Spaces app API 404/i.test(msg) ||
-      /CHANNEL_NOT_FOUND/i.test(msg) ||
-      (/channel not found/i.test(msg) && /\b404\b/.test(msg))
-    ) {
+    // Same typed-status branch as the queue-time validator (mcp/validators.ts):
+    // 404 → not found, 403 → not accessible, anything else fails open.
+    const status = err instanceof SpacesApiError ? err.status : undefined;
+    if (status === 404) {
       return { error: `channel ${channelId} not found — use a real Spaces channel id` };
     }
-    if (/Spaces app API 403/i.test(msg) || /forbidden/i.test(msg)) {
+    if (status === 403) {
       return { error: `channel ${channelId} is not accessible — add the app to the channel or choose a channel it can access` };
     }
     clog.warn(
-      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(errMsg(err)).slice(0, 240)}`,
     );
     return { error: null };
   }
 }
-
 
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
@@ -560,6 +894,89 @@ function mergeInvocationsForCitations(...lists: unknown[]): unknown[] {
 }
 
 /**
+ * LEGACY delivery path (pre-XYNE-17815): post the Twin's proposal as an
+ * approve/decline card in a DM with the owner. Kept ONLY as the fallback for
+ * Spaces backends that don't yet serve /api/internal/twin-reply-draft — see
+ * sendTwinReplyDraft. Delete once every environment runs the in-thread draft.
+ * The signature suffix is already applied by the caller, so the original
+ * inline suffix block was removed on restore (it would double-append).
+ */
+async function sendDigitalTwinApprovalDm(
+  ctx: SessionContext,
+  delivery: TwinDelivery,
+  attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+  sessionId: string,
+): Promise<void> {
+  // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
+  // drops it). If it somehow does, never open a DM / post / write a pending row.
+  if (delivery.action === "ignore") {
+    clog.warn(`[webhook/result] sendDigitalTwinApprovalDm called with action=ignore — dropping, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
+  }
+  const token = ctx.appToken;
+
+  // workspaceId required by prod openDm schema. Empty fallback only to satisfy
+  // types — the earlier USER_MENTIONED gate already rejected runs where we
+  // couldn't resolve the workspaceId, so this should always have a real value.
+  const dmResult = (await spacesAppFetch("/channel/openDm", {
+    targetUserId: ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+  }, token)) as { channelId: string };
+
+  const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
+    delivery: delivery,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    targetChannelId: ctx.channelId,
+    targetConversationId: ctx.conversationId,
+    mentionedUserId: ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+    senderId: ctx.senderId,
+    senderName: ctx.senderName,
+    channelName: ctx.channelName,
+    task: ctx.task,
+    ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+    dmChannelId: dmResult.channelId,
+    spacesBaseUrl: CONFIG.spacesAppUrl,
+  }), ctx.spacesAppId);
+
+  if (attachments?.length) {
+    const form = new FormData();
+    for (const att of attachments) {
+      const buffer = Buffer.from(att.data, "base64");
+      const blob = new Blob([buffer], { type: att.mimeType });
+      form.append("files", blob, att.fileName);
+    }
+    form.append("channelId", dmResult.channelId);
+    form.append("userId", ctx.spacesAppUserId);
+    form.append("flow", JSON.stringify(twinFlow));
+
+    await spacesAppFetchMultipart("/files/filesUpload", form, token);
+  } else {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: dmResult.channelId,
+      flow: twinFlow,
+      userId: ctx.spacesAppUserId,
+    }, token);
+  }
+
+  // Record a PENDING feedback row so the daily learning loop can later reconcile
+  // the user's accept / decline / edit / ignore of this proposal. Fire-and-forget.
+  void recordTwinApprovalPending({
+    userId: ctx.mentionedUserId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    channelName: ctx.channelName,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    incomingTask: ctx.task,
+    delivery: delivery,
+  });
+
+  clog.info(`[webhook/result] Digital Twin: sent approve/decline DM to ${ctx.mentionedUserId} (asked by ${ctx.senderId})`);
+  await deleteSession(sessionId);
+}
+
+/**
  * Deliver the Twin's structured proposal as an OWNER-ONLY in-thread reply draft
  * (replaces the old approval DM card). Bakes citation metadata from the Twin's
  * private `reasoning` (its `[clf-…#n]` tokens reference the Spaces tools it
@@ -572,6 +989,8 @@ async function sendTwinReplyDraft(
   delivery: TwinDelivery,
   toolInvocations: unknown,
   sessionId: string,
+  /** Callback attachments — only used by the legacy approval-DM fallback. */
+  attachments?: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
 ): Promise<void> {
   // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
   // drops it). If it somehow does, never create a draft / write a pending row.
@@ -595,7 +1014,7 @@ async function sendTwinReplyDraft(
         effectiveDelivery = { ...delivery, message: `${delivery.message.trimEnd()}\n\n${suffix}` };
       }
     } catch (err) {
-      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${errMsg(err)}`);
     }
   }
 
@@ -608,7 +1027,7 @@ async function sendTwinReplyDraft(
       const merged = mergeInvocationsForCitations(persisted?.toolInvocations, toolInvocations);
       citationMeta = buildThreadCitationMeta(merged, effectiveDelivery.reasoning);
     } catch (err) {
-      clog.warn(`[webhook/result] Twin citation baking failed: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Twin citation baking failed: ${errMsg(err)}`);
     }
   }
 
@@ -646,7 +1065,14 @@ async function sendTwinReplyDraft(
     sessionId,
   };
 
-  // Create the owner-only in-thread draft in Spaces (Redis). Fail-closed silence.
+  // Create the owner-only in-thread draft in Spaces. When the Spaces backend
+  // doesn't serve /api/internal/twin-reply-draft yet (route added in
+  // XYNE-17815; caller shipped 2026-07-23, route reached main 2026-08-05), the
+  // request falls through to the user-auth middleware and comes back 401/404.
+  // That skew silently killed EVERY twin reply for ~2 weeks because this path
+  // was fail-closed with no alternative. Fall back to the pre-XYNE-17815
+  // approval DM card instead: the twin keeps working on old backends, and the
+  // moment the route deploys we're back on the in-thread draft with no change.
   try {
     const resp = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/twin-reply-draft`, {
       method: "POST",
@@ -656,12 +1082,19 @@ async function sendTwinReplyDraft(
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
+      // 401/404 == endpoint not deployed (or not reachable as S2S) → legacy DM.
+      // Any other status is a genuine draft-create failure: stay fail-closed.
+      if (resp.status === 401 || resp.status === 404) {
+        clog.warn(`[webhook/result] Twin reply-draft endpoint unavailable (${resp.status}) — falling back to approval DM, session ${sessionId}`);
+        await sendDigitalTwinApprovalDm(ctx, effectiveDelivery, attachments, sessionId);
+        return;
+      }
       clog.error(`[webhook/result] Twin reply-draft create failed: ${resp.status} ${text.slice(0, 200)} — staying silent, session ${sessionId}`);
       await deleteSession(sessionId);
       return;
     }
   } catch (err) {
-    clog.error(`[webhook/result] Twin reply-draft create error: ${err instanceof Error ? err.message : String(err)} — staying silent, session ${sessionId}`);
+    clog.error(`[webhook/result] Twin reply-draft create error: ${errMsg(err)} — staying silent, session ${sessionId}`);
     await deleteSession(sessionId);
     return;
   }
@@ -725,11 +1158,30 @@ async function postGoalPhase(
 interface ResolvedAgent {
   id: string;
   slug: string;
+  /** Display name — the text a leftover "@Display Name" mention carries. */
+  name: string;
   orgId: string;
   appToken: string;
   spacesAppId: string;
   spacesAppUserId: string;
   isDefault: boolean;
+}
+
+/**
+ * Strip a leftover leading "@<agent mention>" so a slash command lands at byte
+ * zero. Matches only the given names verbatim (display name first, slug as
+ * fallback) — never a generic @-token+words pattern, which cannot distinguish
+ * a multi-word display name from the user's own prose.
+ */
+function stripLeadingAgentMention(text: string, names: Array<string | null | undefined>): string {
+  for (const raw of names) {
+    const name = raw?.trim();
+    if (!name) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`^@${escaped}(?=\\s|$)`, "i");
+    if (re.test(text)) return text.replace(re, "").trimStart();
+  }
+  return text;
 }
 
 async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent | null> {
@@ -739,6 +1191,7 @@ async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent
     return {
       id: agent.id,
       slug: agent.slug,
+      name: agent.name ?? agent.slug,
       orgId: agent.orgId,
       appToken: decryptStoredField(agent.spacesAppToken),
       spacesAppId: agent.spacesAppId,
@@ -758,6 +1211,7 @@ async function getDefaultAgent(): Promise<ResolvedAgent | null> {
   return {
     slug: agent.slug,
     id: agent.id,
+    name: agent.name ?? agent.slug,
     orgId: agent.orgId,
     appToken: decryptStoredField(agent.spacesAppToken),
     spacesAppId: agent.spacesAppId,
@@ -821,6 +1275,14 @@ export async function fetchConversationHistory(
 
 // ── Action formatting ───────────────────────────────────────────────
 
+/** Tickets rendered in full inside the bulk approval card. The rest are
+ *  summarised by count — every ticket in `params` is still created on approve,
+ *  since the executed payload comes from the HMAC-signed action, not the card. */
+const BULK_TICKETS_CARD_LIMIT = 25;
+
+type TicketCardPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -841,6 +1303,73 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     const desc = (params["description"] as string ?? "").slice(0, 300);
     const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
     if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-create-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [
+      `**Create ${tickets.length} Tickets**`,
+      ``,
+      `**Project/Board/Channel:** ${String(params["projectId"] ?? "")} / ${String(params["boardId"] ?? "")} / ${options?.channelName ? `#${options.channelName}` : String(params["channelId"] ?? "")}`,
+      ``,
+    ];
+    // Everything the approver needs lives in THIS card — no companion file
+    // upload. Same shape as spaces-create-ticket above (title + trimmed
+    // description), repeated per ticket. The card body scrolls past 280px
+    // (buildWriteApprovalFlow), so a long batch stays readable in-thread.
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
+      const title = String(ticket["title"] ?? "(untitled)");
+      const priority = String(ticket["priority"] ?? params["defaultPriority"] ?? "");
+      const assignee = String(ticket["assignedTo"] ?? params["defaultAssignedTo"] ?? "");
+      const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
+      const rawDesc = String(ticket["description"] ?? "");
+      const desc = rawDesc.slice(0, 200);
+      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
+      lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
+      if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
+      lines.push(``);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(`_…and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more — all ${tickets.length} are created on approve._`);
+    }
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-update-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [`**Update ${tickets.length} Tickets**`, ``];
+
+    const defaults: string[] = [];
+    if (params["defaultStatus"]) defaults.push(`status \u2192 ${String(params["defaultStatus"])}`);
+    if (params["defaultStage"]) defaults.push(`stage \u2192 ${String(params["defaultStage"])}`);
+    if (params["defaultPriority"]) defaults.push(`priority \u2192 ${String(params["defaultPriority"])}`);
+    if (params["defaultAssigneeId"]) defaults.push(`assignee \u2192 ${String(params["defaultAssigneeId"])}`);
+    if (Array.isArray(params["defaultTags"]) && (params["defaultTags"] as unknown[]).length) {
+      defaults.push(`tags [${(params["defaultTags"] as unknown[]).join(", ")}]`);
+    }
+    if (defaults.length) lines.push(`**Defaults:** ${defaults.join(" \u00b7 ")}`, ``);
+
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
+      const ticketId = String(ticket["ticketId"] ?? "(no id)");
+      const changes: string[] = [];
+      const status = ticket["status"] ?? params["defaultStatus"];
+      const stage = ticket["stage"] ?? params["defaultStage"];
+      const priority = ticket["priority"] ?? params["defaultPriority"];
+      const assignee = ticket["assigneeId"] ?? params["defaultAssigneeId"];
+      if (status) changes.push(`status \u2192 ${String(status)}`);
+      if (stage) changes.push(`stage \u2192 ${String(stage)}`);
+      if (priority) changes.push(`priority \u2192 ${String(priority)}`);
+      if (assignee) changes.push(`assignee \u2192 ${String(assignee)}`);
+      if (ticket["title"]) changes.push(`title`);
+      if (ticket["description"]) changes.push(`description`);
+      if (ticket["eta"]) changes.push(`eta \u2192 ${String(ticket["eta"])}`);
+      if (Array.isArray(ticket["tags"]) || Array.isArray(params["defaultTags"])) changes.push(`tags`);
+      lines.push(`**${index + 1}. ${ticketId}**${changes.length ? ` \u2014 ${changes.join(" \u00b7 ")}` : ""}`);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(``, `_\u2026and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more \u2014 all ${tickets.length} are updated on approve._`);
+    }
     return lines.join("\n");
   }
 
@@ -887,6 +1416,128 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
   return lines.join("\n");
 }
 
+async function postWriteApprovalAction(args: {
+  action: Record<string, unknown>;
+  ctx: SessionContext;
+  token: string;
+  targetValidation: { channelName?: string };
+}): Promise<void> {
+  const { action, ctx, token, targetValidation } = args;
+  const params = action["params"] as Record<string, unknown>;
+  const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
+
+  // The pending-action signature is minted before the Spaces delivery target is
+  // known. Verify it, then bind the trusted session agent to the card signature
+  // so flow-action cannot be replayed with another org's app credentials.
+  const { signAction, verifyActionSignature } = await import("./mcp.js");
+  const pendingActionPayload = {
+    serverType: action["serverType"] as string,
+    tool: action["tool"] as string,
+    params,
+    userId: action["userId"] as string,
+  };
+  if (!verifyActionSignature(pendingActionPayload, action["signature"] as string)) {
+    throw new Error("Invalid pending write-action signature");
+  }
+  const agentSlug = ctx.agentSlug ?? "";
+  const spacesAppId = ctx.spacesAppId ?? "";
+  const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
+
+  const cardAction = {
+    serverType: pendingActionPayload.serverType,
+    tool: pendingActionPayload.tool,
+    params,
+    userId: pendingActionPayload.userId,
+    signature: cardSignature,
+    agentSlug,
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+  };
+
+  const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
+  // The rich `ticket` FlowUI component is only rendered by newer Spaces
+  // backends; older deployments reject it. Track when we used it so a flow-
+  // schema rejection can fall back to the generic approval card below.
+  const usedRichTicketCard = pendingActionPayload.tool === "spaces-create-ticket" && !!ticketTitle;
+  const writeFlow = withSpacesAppId(
+    usedRichTicketCard
+      ? buildTicketProposalFlow({
+          title: ticketTitle,
+          ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
+            ? { priority: params["priority"] as TicketCardPriority }
+            : {}),
+          ...(typeof params["eta"] === "string" && params["eta"] ? { eta: params["eta"] } : {}),
+          ...(typeof params["assignedTo"] === "string" && params["assignedTo"]
+            ? { assigneeId: params["assignedTo"] }
+            : {}),
+        }, cardAction)
+      : buildWriteApprovalFlow(actionDesc, cardAction),
+    spacesAppId,
+  );
+
+  // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
+  // (filesController.uploadFiles) has no flow handling at all — a `flow` field
+  // sent with an upload is silently dropped, so the Approve/Decline card never
+  // appears. Only `/chat/postMessage` renders a card, and its schema calls the
+  // field `flow` (UpdateMessage uses `flowJSON` — different route, different
+  // name).
+  //
+  // spaces-create-bulk-tickets deliberately posts NO file: the batch renders
+  // inline in the approval card itself (formatActionDescription), same as
+  // spaces-create-ticket. One message, one Approve button, nothing to open.
+  if (action["tool"] === "spaces-memory-create" && params?.["content"]) {
+    const memContent = params["content"] as string;
+    const memDocType = (params["docType"] as string) ?? "fact";
+    try {
+      await postGeneratedMarkdownFile({
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+        userId: ctx.spacesAppUserId,
+        appToken: token,
+        filename: `memory-${memDocType}-${Date.now()}.md`,
+        markdown: memContent,
+        summary: "",
+      });
+    } catch (err) {
+      clog.warn("[webhook/result] memory attachment upload failed; posting approval card without attachment", {
+        error: errMsg(err),
+      });
+    }
+  }
+
+  const postCard = (flow: unknown): Promise<unknown> =>
+    spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      // Same empty-conversationId guard as the result post: an API/event-triggered
+      // run has no thread, so posting the approval card with conversationId: ""
+      // 400s in Spaces' channel-validation middleware and the card silently never
+      // appears. Omit when empty → the card posts as a top-level channel message.
+      ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, token);
+
+  try {
+    await postCard(writeFlow);
+  } catch (err) {
+    // The rich `ticket` component isn't rendered by every deployed Spaces
+    // backend; when it isn't, /chat/postMessage rejects the ENTIRE card with a
+    // 400 "Invalid flowJSON" (unknown component discriminator) and the approval
+    // never appears (prod 2026-08-24, arya-doctor spaces-create-ticket). Degrade
+    // to the generic approve/decline card, which uses only universally-supported
+    // component types and carries the identical signed action, so the write can
+    // still be approved. ONLY a flow-schema 400 triggers this — any other error
+    // (auth, channel validation, network) re-throws so the caller's skip/target
+    // logic is unaffected. Once Spaces ships `ticket`, the rich card works again
+    // with no code change.
+    if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
+    clog.warn(
+      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${pendingActionPayload.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+    );
+    await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
+  }
+}
 
 // ── POST /webhook and /webhook/:agentSlug — receive events from Xyne Spaces ──
 
@@ -944,6 +1595,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agent = {
         id: agentRow.id,
         slug: agentRow.slug,
+        name: agentRow.name ?? agentRow.slug,
         orgId: agentRow.orgId ?? null,
         appToken: decryptStoredField(agentRow.spacesAppToken),
         spacesAppId: agentRow.spacesAppId,
@@ -1016,6 +1668,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agent = {
         id: agentRow.id,
         slug: agentRow.slug,
+        name: agentRow.name ?? agentRow.slug,
         orgId: agentRow.orgId ?? null,
         appToken: decryptStoredField(agentRow.spacesAppToken),
         spacesAppId: agentRow.spacesAppId,
@@ -1028,7 +1681,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (mentionedUserIds.length > 0) {
       // First check if the mentioned user is an agent bot
       agent = await resolveAgentByAppUserId(mentionedUserIds[0]!);
-
 
       // If not an agent bot, check if the mentioned user is registered in claw-auth
       // (i.e. they have a Digital Twin set up with MCP connections)
@@ -1079,7 +1731,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         metadata: { contentFormat: "markdown" },
       }, agent.appToken).catch((err) => {
         log.error("Failed to send unregistered-user template", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
       });
     } else {
@@ -1096,6 +1748,22 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   const userText = payload.cleanContent?.trim();
   if (!userText) return;
+  // Commands whose leading slash is an execution contract in xyne-claw. Keep
+  // them out of auto-goal/plan mode: both transforms strip or suspend the
+  // command before the runtime can mount its command-owned tools.
+  // cleanContent usually removes the bot mention, but some Spaces event
+  // producers leave a leading "@Display Name" behind. Strip ONLY this agent's
+  // own mention (exact display name, or slug as fallback). A generic
+  // "@word word..." strip is unanchorable: word-classes can't tell display-name
+  // tokens from the user's prose, so "@Bot how do I use /explainer" would lose
+  // "how do I use" and force command mode on a question.
+  const taskCommandText = stripLeadingAgentMention(userText, [agent.name, agent.slug]);
+  // KEEP IN SYNC with TASK_COMMANDS in apps/xyne-claw/src/task-commands.ts —
+  // a command missing here ships with the mention un-stripped, so claw never
+  // sees it at byte zero and the whole contract silently degrades (bit /design
+  // in prod 2026-08-08). Proper fix: shared registry in xyne-claw-shared.
+  const immediateTaskCommand = /^\/(?:explainer|record-skill|design|dashboard|spec)(?:\s|$)/i.test(taskCommandText);
+  const recordSkillCommand = /^\/record-skill(?:\s|$)/i.test(taskCommandText);
   if (!agent.orgId) {
     log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
     return;
@@ -1119,7 +1787,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     planModeEnabled = ((cfgRow?.config ?? {}) as Record<string, unknown>)["planMode"] === true;
   } catch (err) {
     log.warn("autoGoal config lookup failed — treating as off", {
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
   }
   // ── /goal slash command interception ─────────────────────────────────────
@@ -1137,7 +1805,270 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const rawSlash = parseSlashCommand(userText);
   const slash =
     rawSlash ??
-    (autoGoalEnabled ? parseSlashCommand(`/goal ${userText}`) : null);
+    (autoGoalEnabled && !immediateTaskCommand ? parseSlashCommand(`/goal ${userText}`) : null);
+  const experimentCommand = parseExperimentCommand(userText);
+
+  if (experimentCommand) {
+    const postExperimentReply = (markdownText: string) => spacesAppFetch("/chat/postMessage", {
+      channelId: payload.channelId,
+      conversationId: payload.conversationId,
+      markdownText,
+      userId: agent.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, agent.appToken).catch((err) => {
+      log.warn("Failed to post /experiment reply", { error: errMsg(err) });
+    });
+
+    if (experimentCommand.sub === "unknown") {
+      await postExperimentReply([
+        "/experiment <duration> [provider=…] [model=…] [focus…]",
+        "/understanding [duration cap] [focus…] — coverage-gated: runs until the code-path frontier is exhausted",
+        "/experiment status",
+        "/experiment list",
+        "/experiment findings [id]",
+        "/experiment stop",
+      ].join("\n"));
+      return;
+    }
+
+    if (experimentCommand.sub === "status") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      const findings = run ? await experimentRepository.listFindings(run.id) : [];
+      await postExperimentReply(formatExperimentStatus(run, findings));
+      return;
+    }
+
+    if (experimentCommand.sub === "stop") {
+      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+      if (!run) {
+        await postExperimentReply("No active /experiment to stop.");
+        return;
+      }
+      const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
+      if (!allowed) {
+        await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
+        return;
+      }
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
+      // Cancel in-flight CHECKER sessions too. They never claim
+      // currentSessionId (claiming it would chain the next epoch off their
+      // completion), so before this they survived stop and kept posting into
+      // the thread after the run was already aborted.
+      let cancelledCheckers = 0;
+      for (const checkerSessionId of run.checkerSessionIds ?? []) {
+        try {
+          await cancelRunSession(checkerSessionId, run.userId);
+          cancelledCheckers++;
+        } catch {
+          // Already finished or unknown to claw — nothing to cancel.
+        }
+      }
+      let cancelledEpoch = false;
+      if (run.currentSessionId) {
+        try {
+          await cancelRunSession(run.currentSessionId, run.userId);
+          cancelledEpoch = true;
+        } catch (err) {
+          log.warn("[experiment] failed to cancel running epoch", {
+            experimentId: run.id,
+            sessionId: run.currentSessionId,
+            error: errMsg(err),
+          });
+        }
+      }
+      const stoppedParts = [
+        ...(cancelledEpoch ? ["cancelled the running epoch"] : []),
+        ...(cancelledCheckers > 0 ? [`cancelled ${cancelledCheckers} checker run${cancelledCheckers === 1 ? "" : "s"}`] : []),
+      ];
+      await postExperimentReply(stoppedParts.length > 0
+        ? `Stopped /experiment (${stoppedParts.join(", ")}).`
+        : "Stopped /experiment.");
+      return;
+    }
+
+    if (experimentCommand.sub === "list") {
+      // Thread-scoped, no ownership gate — same visibility as /experiment
+      // status. The run ids printed here are what `/experiment findings <id>`
+      // takes, and THAT path does gate on owner/admin.
+      const runs = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId, 15);
+      if (runs.length === 0) {
+        await postExperimentReply("No /experiment has run in this thread.");
+        return;
+      }
+      const rows = runs.map((run) => {
+        const started = run.createdAt.toISOString().slice(0, 16).replace("T", " ");
+        const model = run.provider ? ` · ${formatExperimentModel(run.provider, run.modelId)}` : "";
+        const live = run.status === "running" || run.status === "finishing" ? " ← active" : "";
+        return `\`${run.id}\` — ${run.status}, ${run._count.findings} findings, epoch ${run.epoch}${model} · ${started}${live}`;
+      });
+      await postExperimentReply([
+        `**/experiment list** — ${runs.length} run${runs.length === 1 ? "" : "s"} in this thread`,
+        "",
+        ...rows,
+        "",
+        "Pull any one with `/experiment findings <id>`.",
+      ].join("\n"));
+      return;
+    }
+
+    if (experimentCommand.sub === "findings") {
+      const run = experimentCommand.id
+        ? await experimentRepository.findById(experimentCommand.id)
+        : await experimentRepository.findBestForFindings(payload.conversationId);
+      if (!run) {
+        await postExperimentReply(experimentCommand.id
+          ? "Experiment not found."
+          : "No /experiment has run in this thread.");
+        return;
+      }
+      if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
+        await postExperimentReply("Not your experiment.");
+        return;
+      }
+      const [findings, reviews] = await Promise.all([
+        experimentRepository.listFindings(run.id),
+        experimentRepository.listReviews(run.id),
+      ]);
+      const recentRuns = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId);
+      const counts = experimentCounts(findings);
+      const summaryLines = [
+        `**/experiment findings** — ${run.agentSlug}`,
+        `Status: ${run.status} · Epoch: ${run.epoch} · Findings: ${counts.proved} proved, ${counts.conjecture} open, ${counts.refuted} refuted`,
+      ];
+      if (!experimentCommand.id && recentRuns[0] && recentRuns[0].id !== run.id) {
+        summaryLines.push(`(showing experiment ${run.id} — the most recent run in this thread had no findings)`);
+      }
+      const otherRuns = recentRuns.filter((candidate) => candidate.id !== run.id).slice(0, 5);
+      if (recentRuns.length > 1 && otherRuns.length > 0) {
+        summaryLines.push(`Other runs in this thread: ${otherRuns.map((candidate) =>
+          `${candidate.id} (${candidate.status}, ${candidate._count.findings} findings, ${candidate.createdAt.toISOString().slice(0, 10)})`
+        ).join(" · ")}`);
+      }
+      const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings, reviews));
+      const filename = experimentFindingsFilename(run.agentSlug);
+
+      // Prefer ONE zip laid out by epoch over a bare .md: the proof artifacts
+      // are otherwise scattered across hours of thread messages, and a proof
+      // you can't locate is a proof you don't have. Falls back to the markdown
+      // when the thread has no attachments or Spaces is unreachable.
+      let bundle: Awaited<ReturnType<typeof buildExperimentProofBundle>> = null;
+      try {
+        // Reads the thread's attachments as the REQUESTER, so the bundle can
+        // never contain a file they couldn't already open in the thread.
+        const bundleAuth = await resolveAuthForUser(payload.userId);
+        if (!bundleAuth) {
+          log.warn("[experiment] no Spaces credentials for requester; findings will be markdown-only", {
+            userId: payload.userId,
+          });
+        } else {
+          bundle = await buildExperimentProofBundle({
+            run,
+            findings,
+            findingsMarkdown: markdown,
+            conversationId: payload.conversationId,
+            auth: bundleAuth,
+          });
+        }
+      } catch (err) {
+        log.warn("[experiment] proof bundle failed; falling back to markdown only", {
+          error: errMsg(err),
+        });
+      }
+      if (bundle) {
+        summaryLines.push(
+          `Proof bundle: ${bundle.includedCount} of ${bundle.entries.length} findings have their artifact attached` +
+          (bundle.missingCount > 0 ? ` · ${bundle.missingCount} missing (see MANIFEST.md)` : "") +
+          ` — organised by epoch inside the zip. The findings write-up is also attached as ${filename}.`,
+        );
+      }
+      const summary = summaryLines.join("\n");
+      try {
+        await postGeneratedMarkdownFile({
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          userId: agent.spacesAppUserId,
+          appToken: agent.appToken,
+          filename: bundle ? bundle.filename : filename,
+          markdown: bundle ? bundle.buffer : markdown,
+          ...(bundle ? { mimeType: "application/zip" } : {}),
+          // Ship the readable findings .md alongside the zip. The zip is the
+          // complete archive (proof artifacts organised by epoch), but nobody
+          // wants to download-and-unzip just to read the write-up — so the
+          // markdown rides the same message, exactly as it did before bundling.
+          ...(bundle ? { extraFiles: [{ filename, content: markdown, mimeType: "text/markdown" }] } : {}),
+          summary,
+        });
+      } catch (err) {
+        log.warn("[experiment] findings file upload failed; posting inline fallback", {
+          error: errMsg(err),
+        });
+        await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${bundle ? bundle.filename : filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
+      }
+      return;
+    }
+
+    if (experimentCommand.invalidProvider !== undefined) {
+      await postExperimentReply([
+        `Invalid /experiment provider: ${experimentCommand.invalidProvider || "(empty)"}`,
+        `Valid providers: ${Array.from(EXPERIMENT_PROVIDERS).join(", ")}`,
+      ].join("\n"));
+      return;
+    }
+
+    const existing = await experimentRepository.findActiveByConversation(payload.conversationId);
+    if (existing) {
+      await postExperimentReply("An active /experiment is already running in this thread. Use `/experiment status` or `/experiment stop`.");
+      return;
+    }
+    const run = await experimentRepository.createRun({
+      conversationId: payload.conversationId,
+      channelId: payload.channelId,
+      agentSlug: agent.slug,
+      userId: payload.userId,
+      orgId: agent.orgId,
+      focus: experimentCommand.focus ?? null,
+      provider: experimentCommand.provider ?? null,
+      modelId: experimentCommand.model ?? null,
+      kind: experimentCommand.kind ?? null,
+      deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
+    });
+    const isUnderstanding = experimentCommand.kind === "understanding";
+    // Seed the frontier from a list the user already gave us (e.g. 57 table
+    // names). Ground truth beats model enumeration: with the paths pre-recorded
+    // the run cannot exit by imagining fewer of them.
+    const seededPaths = isUnderstanding
+      ? await seedUnderstandingFrontier(run.id, experimentCommand.focus).catch(() => 0)
+      : 0;
+    await postExperimentReply([
+      isUnderstanding ? "**/understanding started**" : "**/experiment started**",
+      isUnderstanding
+        ? `Mode: coverage-gated understanding loop (ends when the code-path frontier is exhausted)`
+        : `Mode: time-boxed autonomous exploration`,
+      `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
+      ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
+      seededPaths > 0
+        ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`
+        : `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
+      // Never drop part of the user's scope in silence: the old cap cut a
+      // 57-table list mid-word and the run explored a narrower scope than the
+      // user believed they had asked for.
+      ...(experimentCommand.droppedFocus
+        ? [`⚠️ Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
+        : []),
+      `Use \`/experiment status\` to inspect progress.`,
+    ].join("\n"));
+    try {
+      await dispatchExperimentEpoch(run);
+    } catch (err) {
+      // A silent failure here strands a zombie "active" run that blocks every
+      // future /experiment in this thread. Abort it and tell the user why.
+      const msg = errMsg(err);
+      log.warn("[experiment] initial dispatch failed", { error: msg });
+      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
+      await postExperimentReply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`);
+    }
+    return;
+  }
 
   // ── /queue ── show messages waiting behind the active run, then stop.
   if (slash?.kind === "queueShow") {
@@ -1161,7 +2092,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /queue reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /queue reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1172,13 +2103,32 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       channelId: payload.channelId,
       conversationId: payload.conversationId,
       markdownText: [
+        // KEEP IN SYNC with what actually parses: parseSlashCommand (this
+        // file's control commands), parseExperimentCommand (lib/experiment.ts)
+        // and TASK_COMMANDS (apps/xyne-claw/src/task-commands.ts). Every entry
+        // below is routable today; a command that works but is missing here is
+        // a command nobody discovers — /design, /dashboard, /explainer and
+        // /record-skill shipped unlisted for months.
         "**Slash commands**",
-        "- `/goal <condition>` — work autonomously until the condition is met",
-        "- `/goal status` — show the active goal",
+        "",
+        "*Autonomy*",
+        "- `/goal <condition>` — work autonomously until the condition is met · `/goal status`",
+        "- `/experiment <duration> [provider=… model=…] [focus...]` — explore until the deadline",
+        "- `/understanding [duration cap] [focus...]` — explain every path in scope; ends when the frontier is exhausted, not on the clock",
+        "- `/experiment status` · `/experiment list` · `/experiment findings [id]` · `/experiment stop`",
+        "",
+        "*Producing something*",
+        "- `/design <brief>` — design-studio run: produces a self-contained HTML artifact",
+        "- `/dashboard <brief>` — live-data dashboard snapshot, refreshable on a schedule",
+        "- `/explainer <topic>` — narrated explainer video",
+        "- `/record-skill` — turn a recorded walkthrough into a reusable skill",
+        "- `/spec <ticket>` — interview you, then write the specification onto the ticket",
+        "",
+        "*Controlling this thread*",
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
         "- `/compact [focus]` — summarize & shrink the context, then continue",
-        "- `/queue` — show messages waiting behind the current run · `/queue clear` — drop them",
+        "- `/queue` — show messages waiting behind the current run · `/queue <message>` — run it after the current run without interrupting · `/queue clear` — drop waiting messages",
         "- `/upgrade [task]` — use the premium model for this conversation",
         "- `/fast [task]` / `/fast off` — fast mode: the agent calls tools directly instead of delegating to subagents (quicker for short asks; use normal mode for deep investigations)",
         "- `/help` — show this list",
@@ -1186,7 +2136,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /help reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /help reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1199,7 +2149,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /fast reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /fast reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1217,7 +2167,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       try {
         await setFastModeOverride(payload.conversationId, agent.slug, slash.enabled);
       } catch (err) {
-        log.warn("Failed to set /fast override", { error: err instanceof Error ? err.message : String(err) });
+        log.warn("Failed to set /fast override", { error: errMsg(err) });
         markdownText = "⚠️ couldn't persist fast mode — try again";
       }
     }
@@ -1228,7 +2178,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /fast reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /fast reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1245,7 +2195,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       });
       cleared = (r as unknown as { ok: boolean }).ok;
     } catch (err) {
-      log.warn("Failed to clear claw session", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to clear claw session", { error: errMsg(err) });
     }
     await spacesAppFetch("/chat/postMessage", {
       channelId: payload.channelId,
@@ -1256,7 +2206,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /clear reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /clear reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1278,7 +2228,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /queue clear reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /queue clear reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1319,7 +2269,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /stop reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /stop reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1328,6 +2278,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Not a short-circuit: it dispatches a normal turn with compactBeforeRun set,
   // so the agent compacts the resumed session and replies with a summary.
   const compactBeforeRun = slash?.kind === "compact";
+  const explicitQueueOnly = slash?.kind === "queueAdd";
 
   // Only goal commands reach the goal relooper; stop/clear/compact are handled
   // here (goalClear was short-circuited above into the full /stop path).
@@ -1336,7 +2287,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ? slash
       : null;
   const intercept = await handleSlashCommandBeforeRun({ command: goalCommand, conversationId: payload.conversationId });
-  let pendingGoalStart: { condition: string } | null = null;
+  let pendingGoalStart: { condition: string; providerOverride?: { provider: string; model?: string } } | null = null;
   let task: string;
   if (intercept.kind === "goalStatusReply" || intercept.kind === "goalCleared") {
     await spacesAppFetch("/chat/postMessage", {
@@ -1346,9 +2297,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /goal control reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /goal control reply", { error: errMsg(err) });
     });
     return;
+  } else if (slash?.kind === "queueAdd") {
+    // `/queue <message>` is an explicit opt-out from same-user interrupt-with-reply.
+    // If a run is active the slot gate below will enqueue it without touching the
+    // active run; if nothing is active we just run the message now.
+    task = slash.message;
   } else if (compactBeforeRun) {
     // The run resumes the session, forces a compaction, and answers this task —
     // a short summary for the user while the context shrinks.
@@ -1357,7 +2313,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         ? `The user ran /compact. Summarize the conversation so far concisely, focusing on: ${slash.instructions}. Then we continue.`
         : "The user ran /compact. Give a concise summary of the conversation so far so we can continue with a smaller context.";
   } else if (intercept.kind === "goalStarted") {
-    pendingGoalStart = { condition: intercept.condition };
+    pendingGoalStart = {
+      condition: intercept.condition,
+      ...(intercept.providerOverride ? { providerOverride: intercept.providerOverride } : {}),
+    };
     task = intercept.firstTurnTask;
     // Show "Starting /goal…" on the ephemeral progress spinner (same surface as
     // tool calls), not as a permanent chat message — the goal loop's meta lines
@@ -1367,7 +2326,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       intercept.replyToUser,
     );
   } else {
-    task = userText;
+    task = immediateTaskCommand ? taskCommandText : userText;
   }
 
   // `/upgrade` — explicit user opt-in to the agent's premium provider for
@@ -1413,7 +2372,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         await setFastModeOverride(payload.conversationId, agent.slug, fastEnable);
       } catch (err) {
         // Run the task anyway — resolveFastMode falls back to agent config.
-        log.warn("Failed to set /fast override for /fast <task>", { error: err instanceof Error ? err.message : String(err) });
+        log.warn("Failed to set /fast override for /fast <task>", { error: errMsg(err) });
       }
     }
   }
@@ -1437,9 +2396,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Claim the conversation slot before slow provider/history/attachment setup.
   // Bare `/upgrade` is an ack-only command, so it must not reserve a run slot.
   if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId && task) {
-    const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug);
+    const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug, undefined, targetUserId);
     slotToken = slot;
     if (!slot) {
+      const slotOwner = await getSlotOwner(payload.conversationId, runAgentSlug).catch(() => null);
+      const activeRunToInterrupt =
+        !explicitQueueOnly && slotOwner?.sessionId
+          ? { sessionId: slotOwner.sessionId, ownerUserId: slotOwner.userId }
+          : null;
       const queuedMsg: QueuedMessage = {
         eventId: (payload as { messageId?: string }).messageId ?? traceId,
         conversationId: payload.conversationId,
@@ -1451,16 +2415,45 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         orgId: agent.orgId,
         task,
         eventType,
+        queueReason: activeRunToInterrupt ? "interrupt_followup" : explicitQueueOnly ? "explicit_queue" : "busy",
+        interruptMode: activeRunToInterrupt ? "interrupt_with_reply" : "queue_only",
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
-      const notice = enq.enqueued
-        ? `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`
-        : enq.deduped
-          ? `🕒 Already queued — I’ll get to it as soon as I’m done with the current one.`
-          : enq.full
-            ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
-            : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
+      let interruptRequested = false;
+      if (enq.enqueued && activeRunToInterrupt) {
+        try {
+          const interruptRes = await fetch(
+            `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(activeRunToInterrupt.sessionId)}/interrupt-with-reply`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                "x-user-id": targetUserId,
+              },
+            },
+          );
+          interruptRequested = interruptRes.ok;
+          if (!interruptRes.ok) {
+            const body = await interruptRes.text().catch(() => "");
+            log.warn(`[msg-queue] interrupt-with-reply rejected session=${activeRunToInterrupt.sessionId} owner=${activeRunToInterrupt.ownerUserId ?? "?"} by=${targetUserId} status=${interruptRes.status} body=${body.slice(0, 200)}`);
+          }
+        } catch (err) {
+          log.warn("Failed to request interrupt-with-reply", { error: errMsg(err) });
+        }
+      }
+      const notice = activeRunToInterrupt && interruptRequested
+        ? `⏸️ I’ll wrap up my current reply first, then continue with your new message.`
+        : enq.enqueued
+          ? explicitQueueOnly
+            ? `🕒 Queued after the current run (position ${enq.position}).`
+            : `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`
+          : enq.deduped
+            ? `🕒 Already queued — I’ll get to it as soon as I’m done with the current one.`
+            : enq.full
+              ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
+              : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
       await spacesAppFetch("/chat/postMessage", {
         channelId: payload.channelId,
         conversationId: payload.conversationId,
@@ -1468,9 +2461,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         userId: agent.spacesAppUserId,
         metadata: { contentFormat: "markdown" },
       }, agent.appToken).catch((err) => {
-        log.warn("Failed to post queue notice", { error: err instanceof Error ? err.message : String(err) });
+        log.warn("Failed to post queue notice", { error: errMsg(err) });
       });
-      log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
+      log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} reason=${queuedMsg.queueReason} interruptRequested=${interruptRequested} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
       return;
     }
   }
@@ -1524,9 +2517,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ? await userAgentConfigRepository.findByUserAndAgent(targetUserId, agent.orgId, agent.slug).catch(() => null)
       : null;
     const rawPersonalProvider = userAgentConfig?.provider;
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
+    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider)
+      ? undefined
+      : selectedPersonalProvider;
 
     // Agent-level fallback: shared keys the agent's owner/admin configured.
     // Anurag's framing: "If someone configures codex at xyne doctor level then
@@ -1535,13 +2531,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     //   1. personal provider (user picked in agent settings + has own creds)
     //   2. agent-level provider (agent.config.provider + agentProviderCredentials)
     //   3. "spaces" / LiteLLM platform default
-    const agentLevelProvider = (agentRow?.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
+    // Agent-default fast mode may resolve against its own provider profile
+    // (config.fastModeProfile) — see lib/agent-provider-config.ts.
+    const mentionSpeed = agentDefaultSpeed(agentRow?.config);
+    const mentionSpeedConfig = providerConfigForSpeed(agentRow?.config, mentionSpeed);
+    const agentLevelProvider = mentionSpeedConfig["provider"] as string | undefined;
     // Owners can also pin an ordered preference list under config.providerOrder.
     // We use it (a) to pick which agent-level provider to bind as the parent
     // model, and (b) to thread the full fallback chain into the runtime so
     // claw can walk it on quota exhaustion instead of dropping straight to
     // LiteLLM. Validation: keep only known provider strings.
-    const rawProviderOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const rawProviderOrder = mentionSpeedConfig["providerOrder"];
     const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
       ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
       : [];
@@ -1604,6 +2604,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         providerScope[provider] = "agent";
       }
     }
+    applyFastModeModels(providerConfigs, agentRow?.config, mentionSpeed);
 
     // Refresh the Claude OAuth token before use — it's short-lived. Codex
     // already stores+refreshes a bundle; Claude historically stored a raw token
@@ -1631,7 +2632,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           // it's visible rather than a mystery empty-completion.
           log.warn("Claude OAuth refresh failed — credential likely needs reconnect", {
             scope,
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -1663,7 +2664,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           // it's visible rather than a mystery empty-completion.
           log.warn("Codex OAuth refresh failed — credential likely needs reconnect", {
             scope,
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -1798,6 +2799,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           spacesAppUserId: agent.spacesAppUserId,
           traceId,
           rootAgentSlug: agent.slug,
+          triggerSource: "spaces",
           escalatedProvider,
           // Preserve other prior-session fields where helpful.
           ...(priorSession?.workflowId ? { workflowId: priorSession.workflowId } : {}),
@@ -1810,7 +2812,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           userId: agent.spacesAppUserId,
           metadata: { contentFormat: "markdown" },
         }, agent.appToken).catch((err) => {
-          log.warn("Failed to post /upgrade ack", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("Failed to post /upgrade ack", { error: errMsg(err) });
         });
         log.info(`/upgrade flipped escalation to ${escalatedProvider} for conv ${payload.conversationId}`);
       } else {
@@ -1861,7 +2863,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           if (parsed.workspaceId) userSpacesWorkspaceId = parsed.workspaceId;
         }
       } catch (err) {
-        log.warn(`Failed to load user Spaces token for ${payload.userId}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Failed to load user Spaces token for ${payload.userId}: ${errMsg(err)}`);
       }
     }
     if (userSpacesToken && !userSpacesWorkspaceId) {
@@ -1889,6 +2891,16 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const userCookieHeader = userCookieParts.length > 0 ? userCookieParts.join("; ") : undefined;
 
     const inboundAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    // Large /record-skill videos travel as authenticated references. The
+    // internal /run proxy binds these to its newly minted session; xyne-claw
+    // later streams the bytes through claw-auth into the sandbox in bounded
+    // chunks. Never base64 a screen recording into the 50 MB JSON body.
+    const inboundRecordingRefs: Array<{
+      attachmentId: string;
+      fileName: string;
+      mimeType: string;
+      fileSize: number;
+    }> = [];
     // Mime allow-list for what xyne-claw's /run can consume. Must stay in
     // sync with TEXT_ATTACHMENT_MIME_TYPES / TEXT_ATTACHMENT_EXTENSIONS and
     // the xlsx/pdf detectors in xyne-claw/src/routes/run.ts — claw-auth
@@ -1934,6 +2946,56 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (!isAllowedAttachment(att)) {
           log.warn(
             `Skipping attachment ${att.attachmentId} (${att.fileName}, ${att.mimeType}) — not in claw-auth allow-list. Update isAllowedAttachment in webhook.ts.`,
+          );
+          continue;
+        }
+        const videoExtMatch = /\.(mov|mp4|m4v|webm|avi|mkv|mpg|mpeg|wmv|flv)$/i.exec(att.fileName ?? "");
+        const isVideoRecording = att.mimeType?.toLowerCase().startsWith("video/") || videoExtMatch !== null;
+        if (recordSkillCommand && isVideoRecording) {
+          // A dropped recording must TELL the user — a /record-skill run that
+          // silently loses its video still force-mounts analyze-skill-recording
+          // and pressures the model to draft a skill from nothing.
+          const notifyRecordingDropped = (reason: string) => {
+            log.warn(`Skipping /record-skill recording ${att.attachmentId} (${att.fileName}) — ${reason}`);
+            if (!payload.conversationId) return;
+            void spacesAppFetch("/chat/postMessage", {
+              channelId: payload.channelId,
+              conversationId: payload.conversationId,
+              markdownText: `⚠️ Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
+              userId: agent.spacesAppUserId,
+              metadata: { contentFormat: "markdown" },
+            }, agent.appToken).catch(() => {});
+          };
+          const fileSize = Number(att.fileSize);
+          if (!Number.isFinite(fileSize) || fileSize <= 0) {
+            notifyRecordingDropped("its size was not reported by the upload — please re-upload it");
+            continue;
+          }
+          if (fileSize > 1024 * 1024 * 1024) {
+            notifyRecordingDropped("it exceeds the 1 GB recording limit");
+            continue;
+          }
+          // claw-auth's /run consumer validates each ref strictly; normalize
+          // HERE (the producer) so a client that stored a .mov as
+          // application/octet-stream doesn't get rejected downstream.
+          if (inboundRecordingRefs.length >= 4) {
+            notifyRecordingDropped("at most 4 recordings are analyzed per run");
+            continue;
+          }
+          const normalizedMime = att.mimeType?.toLowerCase().startsWith("video/")
+            ? att.mimeType
+            : `video/${(videoExtMatch?.[1] ?? "mp4").toLowerCase()}`;
+          const safeFileName = (att.fileName ?? `recording-${att.attachmentId}`)
+            .replace(/[/\\]/g, "_")
+            .slice(0, 255);
+          inboundRecordingRefs.push({
+            attachmentId: att.attachmentId,
+            fileName: safeFileName,
+            mimeType: normalizedMime,
+            fileSize,
+          });
+          log.info(
+            `Deferred /record-skill recording ${att.attachmentId} (${safeFileName}, ${fileSize} bytes, ${normalizedMime}) to sandbox stream`,
           );
           continue;
         }
@@ -1991,7 +3053,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             const body = await dlRes.text().catch(() => "");
             failures.push(`${src.label}: HTTP ${dlRes.status} ${body.slice(0, 120)}`);
           } catch (err) {
-            failures.push(`${src.label}: ${err instanceof Error ? err.message : String(err)}`);
+            failures.push(`${src.label}: ${errMsg(err)}`);
           }
         }
         if (!downloaded) {
@@ -2067,7 +3129,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // "parent" (inherit parent's provider) or "spaces" (platform default).
       subagentProviderMode,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
+      // `/goal provider=… model=…` pins every turn of the autonomous loop.
+      // The full dispatch body is persisted below and re-used by the relooper.
+      ...(pendingGoalStart?.providerOverride ? { providerOverride: pendingGoalStart.providerOverride } : {}),
       ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
+      ...(inboundRecordingRefs.length > 0 ? { recordingRefs: inboundRecordingRefs } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled (memory-search tool),
       // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
@@ -2085,7 +3151,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // /webhook path only serves interactive mentions (USER_MENTIONED /
       // APP_MENTIONED / DIRECT_MESSAGE); scheduled/automation runs arrive via the
       // separate S2S handler and must NOT be configured with planMode.
-      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // progressMessageId is the ONLY session field not knowable pre-dispatch — it's
@@ -2112,6 +3178,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       spacesAppUserId: agent.spacesAppUserId,
       traceId,
       rootAgentSlug: agent.slug,
+      triggerSource: "spaces",
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(escalatedProvider ? { escalatedProvider } : {}),
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
@@ -2120,7 +3187,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // Plan mode (see dispatchPayload): 'plan' only when the agent opts in AND
       // this is a non-twin interactive mention. Absent ⇒ 'auto' (today's flow).
       // The plan-approval flow-action flips this to 'auto' for Turn 2.
-      ...(planModeEnabled && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
+      ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
     // ── Per-user twin FIFO gate ───────────────────────────────────────────────
@@ -2186,21 +3253,110 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       body: JSON.stringify(dispatchPayload),
     });
 
-    let runRes: Awaited<ReturnType<typeof fetchRun>>;
-    try {
-      runRes = await fetchRun();
-    } catch (err) {
-      // Dispatch never happened — free the global twin slot, and drain/free the
-      // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
-      // that never started.
-      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-      if (twinConvSlotToken !== null && payload.conversationId) {
-        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
-      }
-      throw err;
-    }
+    // A dispatch that dies on a TRANSIENT upstream failure (envoy 502/503/504
+    // "no healthy upstream" during a claw rollout, a connection refusal against
+    // a terminating pod) is retryable — the run never started, so nothing is
+    // duplicated by trying again. Without this, a routine claw deploy turns
+    // every in-flight mention into a user-visible "I couldn't start this
+    // request: no healthy upstream" (observed prod 2026-08-05) even though a
+    // retry two seconds later would have succeeded. Mirrors the retry the /run
+    // proxy already does (routes/run.ts fetchClawRunWithRetry).
+    //
+    // The ladder must OUTLAST a claw rollout, not just a blip: envoy keeps
+    // returning 503 for the full pod-boot window (image pull + boot +
+    // readiness, 1–3 min observed prod 2026-08-06 — a 2s×2 ladder exhausted in
+    // 4.5s and still posted the "briefly unavailable" notice for every mention
+    // landing mid-deploy). This runs after the webhook was ack'd, so waiting
+    // here blocks no caller; the message is already acked and the queue slot
+    // is held for this conversation.
+    const DISPATCH_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
+    const isTransientUpstream = (status: number, body: string): boolean =>
+      status === 502 || status === 503 || status === 504 ||
+      /no healthy upstream|upstream connect error|connection (refused|reset)|EAI_AGAIN|ECONNREFUSED|fetch failed/i.test(body);
 
-    const body = (await runRes.json()) as { success: boolean; sessionId?: string };
+    const fetchRunWithRetry = async (): Promise<Awaited<ReturnType<typeof fetchRun>>> => {
+      let lastRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
+      const attempts = DISPATCH_RETRY_DELAYS_MS.length + 1;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAYS_MS[attempt - 1]));
+        const res = await fetchRun();
+        if (res.ok) return res;
+        // Peek at the body WITHOUT consuming the caller's copy.
+        const peek = await res.clone().text().catch(() => "");
+        if (!isTransientUpstream(res.status, peek)) return res;
+        lastRes = res;
+        log.warn(
+          `Dispatch attempt ${attempt + 1}/${attempts} hit transient upstream (${res.status}) for agent=${agent.slug}` +
+          (attempt < attempts - 1 ? ` — retrying in ${DISPATCH_RETRY_DELAYS_MS[attempt]! / 1000}s` : " — giving up"),
+        );
+      }
+      return lastRes!;
+    };
+
+    // Local-harness routing: only mention-driven runs are eligible. If the user
+    // has an online authenticated local device for a preferred provider, the run
+    // is dispatched there; otherwise we fall through to the server run below.
+    const localHarnessEligible = eventType === "USER_MENTIONED" || eventType === "APP_MENTIONED";
+    const rawAgentOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const localTarget = localHarnessEligible
+      ? await resolveLocalHarnessTarget({
+          userId: targetUserId,
+          orgId: agent.orgId,
+          providerOrder: Array.isArray(rawAgentOrder)
+            ? rawAgentOrder.filter((p): p is string => typeof p === "string")
+            : [],
+          personalProvider: rawPersonalProvider,
+        }).catch((err: unknown) => {
+          log.warn("Local-harness resolution failed — using server run", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
+
+    let body: { success: boolean; sessionId?: string; error?: string };
+    let runRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
+    if (localTarget) {
+      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
+      try {
+        dispatched = await dispatchLocalHarnessRun({
+          target: localTarget,
+          userId: targetUserId,
+          orgId: agent.orgId,
+          conversationId: payload.conversationId,
+          agentSlug: runAgentSlug,
+          agentName: agentRow?.name ?? agent.slug,
+          systemPrompt: agentRow?.systemPrompt ?? "",
+          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
+          task,
+          context: dispatchContext || null,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          serverFallbackBody: dispatchPayload as unknown as Record<string, unknown>,
+        });
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = { success: true, sessionId: dispatched.sessionId };
+    } else {
+      try {
+        runRes = await fetchRunWithRetry();
+      } catch (err) {
+        // Dispatch never happened — free the global twin slot, and drain/free the
+        // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
+        // that never started.
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
+    }
 
     // Re-key the GLOBAL twin slot to the real sessionId (released by
     // /webhook/result); free it immediately if the dispatch didn't produce a run.
@@ -2243,7 +3399,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             log.info(`Posted progress placeholder, messageId=${progressMessageId}`);
           }
         } catch (err) {
-          log.warn("Failed to publish initial agent progress signal", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("Failed to publish initial agent progress signal", { error: errMsg(err) });
         }
       }
 
@@ -2255,15 +3411,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
       // Run-recovery / goal-replay reuses the SAME dispatchPayload that was
       // dispatched above (built once before the per-user gate) — byte-identical
-      // replay, no mention-note drift.
-      await registerRunRecovery({
-        rootSessionId: body.sessionId,
-        maxRetries: CONFIG.runRecoveryMaxRetries,
-        timeoutMs: CONFIG.runRecoveryTimeoutMs,
-        retryBackoffMs: CONFIG.runRecoveryBackoffMs,
-        dispatchPayload,
-        sessionContext,
-      });
+      // replay, no mention-note drift. Skipped on the local-harness path: the
+      // run lives in the user's Electron app, so a server-side retry can't
+      // recover it.
+      if (!localTarget) {
+        await registerRunRecovery({
+          rootSessionId: body.sessionId,
+          maxRetries: CONFIG.runRecoveryMaxRetries,
+          timeoutMs: CONFIG.runRecoveryTimeoutMs,
+          retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+          dispatchPayload,
+          sessionContext,
+        });
+      }
 
       // /goal turn-0 persistence: same dispatchPayload is replayed by the
       // relooper for each subsequent turn (task is overwritten with the
@@ -2283,7 +3443,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           // brand which doesn't accept Record<string, unknown> directly.
           runPayload: JSON.parse(JSON.stringify(dispatchPayload)),
         }).catch((err) => {
-          log.warn("Failed to persist /goal start — loop will not auto-continue", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("Failed to persist /goal start — loop will not auto-continue", { error: errMsg(err) });
         });
       }
 
@@ -2303,6 +3463,34 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // the slot) so the conversation isn’t wedged until the busy TTL expires.
       // We hold the token here, so release is owner-checked.
       await drainNextQueued(payload.conversationId, runAgentSlug, slotToken).catch(() => {});
+    }
+
+    // A refused dispatch (agent disabled, no provider, resolution failure)
+    // previously left the thread SILENT — the user mentioned the agent and
+    // nothing happened. Surface the refusal for interactive mentions. Twin
+    // mentions stay silent (background persona; a refusal notice would be
+    // noise), and resultForward callers get the failure via their callback.
+    if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
+      const refusal = body.error ?? "the run could not be started";
+      // Three shapes of refusal, three honest messages. A transient upstream
+      // failure that survived the retries above is an infra blip, not a broken
+      // agent — saying "I couldn't start this request: no healthy upstream"
+      // reads as an agent fault and tells the user nothing actionable.
+      const notice = /disabled/i.test(refusal)
+        ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
+        : runRes && isTransientUpstream(runRes.status, refusal)
+          ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
+          : `⚠️ I couldn't start this request: ${refusal}`;
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: payload.channelId,
+        conversationId: payload.conversationId,
+        markdownText: notice,
+        userId: agent.spacesAppUserId,
+        metadata: { contentFormat: "markdown" },
+      }, agent.appToken).catch((err) =>
+        log.warn("Failed to post dispatch-refusal notice", { error: errMsg(err) }),
+      );
+      log.warn(`Dispatch refused for agent=${agent.slug} conv=${payload.conversationId}: ${refusal}`);
     }
     }; // end dispatchRunForTarget
 
@@ -2397,7 +3585,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           await dispatchRunForTarget(twin.userId, twin.workspaceId);
         } catch (err) {
           log.error(`Twin dispatch failed for user ${twin.userId} — other mentioned users unaffected`, {
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -2407,9 +3595,36 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // Conversation mode (APP_MENTIONED / DIRECT_MESSAGE): a single run as the
     // sender — one call, sender is the target, no twin workspaceId. Behavior
     // unchanged from before the per-target refactor.
+    //
+    // Invocation whitelist: this is the "someone called the agent" path, so
+    // gate it on agent.config.privacy before dispatch. Denied callers get the
+    // same shape of notice as a disabled agent (per product decision), never a
+    // silent drop. Twin (USER_MENTIONED) runs above are a persona of the
+    // mentioned user, not an agent call, so they are intentionally not gated.
+    {
+      const invocRow = await agentRepository.findBySlug(agent.slug, agent.orgId ?? undefined).catch(() => null);
+      if (invocRow && !isAgentInvocableBy(invocRow.config as Record<string, unknown> | null, payload.userId)) {
+        log.warn(`Invocation denied (not whitelisted) agent=${agent.slug} userId=${payload.userId} conv=${payload.conversationId}`);
+        if (payload.conversationId) {
+          await spacesAppFetch("/chat/postMessage", {
+            channelId: payload.channelId,
+            conversationId: payload.conversationId,
+            markdownText: `🚫 **${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
+            userId: agent.spacesAppUserId,
+            metadata: { contentFormat: "markdown" },
+          }, agent.appToken).catch((err) =>
+            log.warn("Failed to post invocation-denied notice", { error: errMsg(err) }),
+          );
+        }
+        if (QUEUE_ENABLED && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
+        }
+        return;
+      }
+    }
     await dispatchRunForTarget(payload.userId, undefined);
   } catch (err) {
-    log.error("Error forwarding:", { error: err instanceof Error ? err.message : String(err) });
+    log.error("Error forwarding:", { error: errMsg(err) });
     if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId) {
       await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
     }
@@ -2459,7 +3674,7 @@ async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: s
       // actual cancel on this. (finalizeOrphanedRun repeats it idempotently
       // on the orphan path.)
       await cancelRunRecovery(run.sessionId).catch((err) =>
-        clog.warn(`[stop] cancelRunRecovery failed for ${run.sessionId}: ${err instanceof Error ? err.message : String(err)}`),
+        clog.warn(`[stop] cancelRunRecovery failed for ${run.sessionId}: ${errMsg(err)}`),
       );
       const res = await fetch(
         `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(run.sessionId)}/cancel`,
@@ -2493,13 +3708,13 @@ async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: s
         }
       }
     } catch (err) {
-      clog.warn(`[stop] reconcile failed for run ${run.sessionId} conv ${conversationId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[stop] reconcile failed for run ${run.sessionId} conv ${conversationId}: ${errMsg(err)}`);
     }
   }
 
   for (const agentSlug of cleanedAgentSlugs) {
     await drainNextQueued(conversationId, agentSlug).catch((err) =>
-      clog.warn(`[stop] orphan drain failed for conv ${conversationId}: ${err instanceof Error ? err.message : String(err)}`),
+      clog.warn(`[stop] orphan drain failed for conv ${conversationId}: ${errMsg(err)}`),
     );
   }
   return summary;
@@ -2571,6 +3786,13 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: msg.channelId,
       ...(msg.context ? { context: msg.context } : {}),
+      // Experiment epochs re-dispatched from the queue must keep their context,
+      // else claw injects no experiment-ledger/-review tools on the retry.
+      ...(msg.experiment ? { experiment: msg.experiment } : {}),
+      // /record-skill refs must survive the hop too — /run re-binds them in
+      // Redis under the fresh sessionId; without this the retried run's
+      // analyze-skill-recording finds no registered recordings (404).
+      ...(msg.recordingRefs?.length ? { recordingRefs: msg.recordingRefs } : {}),
       // A lock-contention retry already persisted its user message on the first
       // dispatch — skip re-persisting so the retry doesn't create a duplicate
       // root user row (branch). Proactively-queued mentions leave this unset and
@@ -2608,6 +3830,16 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     ...(msg.resolveMentions ? { resolveMentions: msg.resolveMentions } : {}),
   };
   await setSession(body.sessionId, queuedContext);
+  if (msg.queueReason === "interrupt_followup") {
+    void emitAgentWorkingSignal({
+      conversationId: msg.conversationId,
+      channelId: msg.channelId,
+      agentSlug: msg.agentSlug,
+      spacesAppUserId: agentRow.spacesAppUserId ?? "",
+      appToken,
+      toolLabel: "Picked up your new message — continuing from the summary above…",
+    });
+  }
   clog.info(`[msg-queue] registered queued session context sessionId=${body.sessionId} conv=${msg.conversationId} agent=${msg.agentSlug} workspaceId=${workspaceId ?? "(none)"}`);
 }
 
@@ -2641,7 +3873,7 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     await refreshSlot(conversationId, agentSlug, undefined, userScopeId);
     clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${userScopeId ? ` owner ${userScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
   } catch (err) {
-    clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${err instanceof Error ? err.message : String(err)}`);
+    clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${errMsg(err)}`);
     await releaseSlot(conversationId, agentSlug, token ?? undefined, userScopeId);
   }
 }
@@ -2695,26 +3927,47 @@ async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
 //     and need the final callback to resume the workflow step.
 //   - The target agent must be path-bound. The old bare `/webhook` route took
 //     `agentSlug` from the body, which made the endpoint too broad.
-export async function handleAutomationWebhook(req: Request, res: Response, pathAgentSlug: string, pathAgentOrgId?: string | null): Promise<void> {
+export async function handleAutomationWebhook(
+  req: Request,
+  res: Response,
+  pathAgentSlug: string,
+  pathAgentOrgId?: string | null,
+): Promise<void> {
   const payload = req.body as {
     sessionId?: string;
     agentSlug?: string;
     task?: string;
     userId?: string;
+    userName?: string;
+    userEmail?: string;
     callbackUrl?: string;
+    callbackSecret?: string;
     context?: string;
     conversationId?: string | null;
     channelId?: string | null;
     channelName?: string | null;
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
+    executionProfile?: "sdlc";
+    sdlcOperation?: "baseline" | "work" | "wiki";
+    sdlcWikiRole?:
+      | "BOOTSTRAP_SURVEY"
+      | "BOOTSTRAP_PAGE"
+      | "BOOTSTRAP_EDITOR"
+      | "BOOTSTRAP"
+      | "GENERATOR"
+      | "ARCHITECTURE_VALIDATOR"
+      | "CORRECTOR";
+    sdlcContext?: Record<string, unknown>;
   };
 
-  const { sessionId, userId, callbackUrl, context } = payload;
+  const { sessionId, userId, callbackUrl, callbackSecret, context } = payload;
   let task = payload.task;
   const agentSlug = pathAgentSlug;
   if (payload.agentSlug && payload.agentSlug !== pathAgentSlug) {
-    res.status(400).json({ success: false, error: `body agentSlug does not match path agent "${pathAgentSlug}"` });
+    res
+      .status(400)
+      .json({ success: false, error: `body agentSlug does not match path agent "${pathAgentSlug}"` });
     return;
   }
 
@@ -2729,6 +3982,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
     res.status(400).json({ success: false, error: `missing required fields: ${missing.join(", ")}` });
     return;
   }
+  if (callbackSecret !== undefined && (typeof callbackSecret !== "string" || callbackSecret.length > 256)) {
+    res.status(400).json({
+      success: false,
+      error: "callbackSecret must be a string of at most 256 characters",
+    });
+    return;
+  }
+  const externalResultCallback: ExternalResultCallbackConfig | undefined =
+    callbackUrl && callbackSecret
+      ? { url: callbackUrl, encryptedSecret: encryptSurfaceSecret(callbackSecret) }
+      : undefined;
 
   // Agent existence + enabled check. Without this, spaces fires the run and
   // only finds out it was rejected when the (never-arriving) callback never
@@ -2737,18 +4001,30 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // unresolved).
   const automationOrgId = await orgIdForSpacesUser(userId, "scheduled-job", pathAgentOrgId ?? undefined);
   if (!automationOrgId) {
-    clog.error(`[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`);
+    clog.error(
+      `[webhook/automation-run] orgId is required userId=${userId} agentSlug=${agentSlug} sessionId=${sessionId} callbackUrl=${callbackUrl ?? "none"}`,
+    );
     res.status(400).json({ success: false, error: "orgId is required" });
     return;
   }
   const agent = await agentRepository.findBySlug(agentSlug, automationOrgId);
   if (!agent) {
-    clog.warn(`[webhook/automation-run] agent org-scoped miss slug=${agentSlug} orgId=${automationOrgId ?? "none"} userId=${userId} sessionId=${sessionId}`);
+    clog.warn(
+      `[webhook/automation-run] agent org-scoped miss slug=${agentSlug} orgId=${automationOrgId ?? "none"} userId=${userId} sessionId=${sessionId}`,
+    );
     res.status(404).json({ success: false, error: `agent "${agentSlug}" not found` });
     return;
   }
   if (!agent.enabled) {
     res.status(403).json({ success: false, error: `agent "${agentSlug}" is disabled` });
+    return;
+  }
+  // Invocation whitelist — automations run under `userId` (the run owner); gate
+  // them exactly like a human caller so "all surfaces" holds. Refused like
+  // disabled (403), which the automation callback surfaces to the trigger.
+  if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
+    clog.warn(`[webhook/automation-run] invocation denied (not whitelisted) agent=${agentSlug} userId=${userId} sessionId=${sessionId}`);
+    res.status(403).json({ success: false, error: `agent "${agentSlug}" is restricted — you don't have access to it` });
     return;
   }
 
@@ -2779,13 +4055,17 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       if (acquiredStep !== "OK") {
         const holder = await redis.get(stepKey);
         if (holder && holder !== sessionId) {
-          clog.info(`[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`);
+          clog.info(
+            `[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`,
+          );
           res.status(200).json({ success: true, sessionId: holder, deduplicated: true });
           return;
         }
       }
     } catch (err) {
-      clog.warn(`[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${errMsg(err)}`,
+      );
     }
   }
 
@@ -2797,7 +4077,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       if (acquired !== "OK") {
         const holder = await redis.get(dedupKey);
         if (holder && holder !== sessionId) {
-          clog.warn(`[webhook/automation-run] duplicate automation run rejected conversationId=${payload.conversationId} agentSlug=${agentSlug} incomingSessionId=${sessionId} holderSessionId=${holder}`);
+          clog.warn(
+            `[webhook/automation-run] duplicate automation run rejected conversationId=${payload.conversationId} agentSlug=${agentSlug} incomingSessionId=${sessionId} holderSessionId=${holder}`,
+          );
           res.status(409).json({
             success: false,
             error: "duplicate automation run for this conversation and agent already in progress",
@@ -2807,7 +4089,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         }
       }
     } catch (err) {
-      clog.warn(`[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${errMsg(err)}`,
+      );
     }
   }
 
@@ -2825,10 +4109,7 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // creates the conversation). Without a bot identity we keep the original
   // direct-callback behavior (no interposition, no mention resolution).
   const interpose = Boolean(
-    callbackUrl &&
-    agent.spacesAppUserId &&
-    agent.spacesAppToken &&
-    agent.spacesAppId,
+    callbackUrl && agent.spacesAppUserId && agent.spacesAppToken && agent.spacesAppId,
   );
   let automationSlotToken: string | null = null;
   const releaseAutomationSlot = async (): Promise<void> => {
@@ -2857,11 +4138,18 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
-      clog.info(`[webhook/automation-run] conv ${payload.conversationId} busy — queued automation session=${sessionId} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`);
+      clog.info(
+        `[webhook/automation-run] conv ${payload.conversationId} busy — queued automation session=${sessionId} enqueued=${enq.enqueued} deduped=${enq.deduped} full=${enq.full} pos=${enq.position}`,
+      );
       if (enq.enqueued || enq.deduped) {
         res.status(202).json({ success: true, queued: true, sessionId });
       } else {
-        res.status(enq.full ? 429 : 503).json({ success: false, error: enq.full ? "conversation queue is full" : "failed to queue automation run" });
+        res
+          .status(enq.full ? 429 : 503)
+          .json({
+            success: false,
+            error: enq.full ? "conversation queue is full" : "failed to queue automation run",
+          });
       }
       return;
     }
@@ -2893,18 +4181,22 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       spacesAppId: agent.spacesAppId!,
       spacesAppUserId: agent.spacesAppUserId!,
       rootAgentSlug: agent.slug,
+      // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
+      // MCP swap on this (not on the resolveMentions proxy).
+      isAutomation: true,
+      triggerSource: "automation",
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
-      resultForwardUrl: callbackUrl!,
-      resolveMentions: true,
+      ...(externalResultCallback
+        ? { externalResultCallback }
+        : { resultForwardUrl: callbackUrl!, resolveMentions: true }),
     };
     await setSession(sessionId!, sessionContext);
   }
 
-  // Do NOT create an AgentRun row here. /internal/run mints its OWN
-  // authoritative sessionId (ours is ignored — see the recovery comment below)
-  // and inserts the run row itself, deriving triggerSource="automation" from
+  // Do NOT create an AgentRun row here. /internal/run preserves this trusted
+  // sessionId and inserts the run row itself, deriving triggerSource="automation" from
   // eventType. A pre-insert under OUR sessionId created a SECOND row that no
   // execution or result callback ever referenced — it sat "running" forever
   // (the Control Center double-run report, 2026-07-08, and the ~1,400 zombie
@@ -2917,7 +4209,8 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // requireResultToken-gated, so we mint a per-run token and pass it; claw
   // echoes it as `x-session-token` on the callback. When NOT interposing we
   // pass the automation's callbackUrl straight through, as before.
-  const clawCallbackUrl = interpose ? `${CONFIG.internalUrl}/claw/api/v1/webhook/result` : callbackUrl;
+  const clawCallbackUrl =
+    interpose || externalResultCallback ? `${CONFIG.internalUrl}/claw/api/v1/webhook/result` : callbackUrl;
 
   // Read-only enforcement for automation runs lives in CODE (isReadOnlyJob), so
   // the write EXCEPTION is code-driven too — the CALLER declares it. When the
@@ -2926,11 +4219,126 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // agentConfig; claw already honors that flag on both gates (tool-palette strip
   // + sbx-git routing). Any caller that doesn't send it stays read-only, and no
   // per-agent DB flag is needed.
-  const forwardedAgentConfig: Record<string, unknown> | undefined =
-    agent.config || payload.allowWriteInReadOnlyJob
+  const sdlcProfile =
+    payload.executionProfile === "sdlc" &&
+    agentSlug === "sdlc-agent" &&
+    s2sKeyMatches(req.headers["x-s2s-key"]);
+  const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
+  const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+  const wikiValidator =
+    payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
+    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR";
+  const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
+  const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
+  const sdlcOutputFormat =
+    payload.sdlcOperation === "wiki" && wikiSurvey
       ? {
-          ...((agent.config as Record<string, unknown> | null) ?? {}),
-          ...(payload.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              repositorySummary: { type: "string" },
+              pages: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    path: { type: "string" },
+                    purpose: { type: "string" },
+                    concepts: { type: "array", items: { type: "string" } },
+                    priority: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
+                    archetype: {
+                      type: "string",
+                      enum: ["overview", "subsystem", "flow", "data-model", "interface", "operations", "decision"],
+                    },
+                    sourceAreas: { type: "array", items: { type: "string" } },
+                    relatedPages: { type: "array", items: { type: "string" } },
+                    tableCandidates: { type: "array", items: { type: "string" } },
+                    diagramCandidates: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["path", "purpose", "concepts", "priority", "archetype", "sourceAreas", "relatedPages", "tableCandidates", "diagramCandidates"],
+                },
+              },
+            },
+            required: ["repositorySummary", "pages"],
+          },
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.wikiSurvey],
+        }
+      : payload.sdlcOperation === "wiki" && wikiValidator
+        ? {
+            type: "json",
+            schema: {
+              type: "object",
+              properties: {
+                complete: { type: "boolean" },
+                missingTopics: { type: "array", items: { type: "string" } },
+                issues: { type: "array", items: { type: "string" } },
+                suggestions: { type: "array", items: { type: "string" } },
+              },
+              required: ["complete", "missingTopics", "issues", "suggestions"],
+            },
+          }
+        : payload.sdlcOperation === "wiki"
+          ? {
+              type: "json",
+              schema: {
+                type: "object",
+                properties: { completed: { type: "boolean" } },
+                required: ["completed"],
+              },
+          requireToolsBeforeSubmit: wikiPageWriter
+            ? [...SDLC_REQUIRED_TOOLS.wikiPage]
+            : [...SDLC_REQUIRED_TOOLS.wikiFinalize],
+            }
+    : payload.sdlcOperation === "work"
+      ? {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+              branchName: { type: "string" },
+              commitHash: { type: "string" },
+              pullRequestUrl: { type: "string" },
+            },
+            required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
+          },
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.work],
+        }
+      : {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              created: { type: "boolean" },
+              canvasId: { type: "string" },
+              artifactKind: { type: "string" },
+            },
+            required: ["created", "canvasId", "artifactKind"],
+          },
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.baseline],
+        };
+  const forwardedAgentConfig: Record<string, unknown> | undefined =
+    agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
+      ? {
+          ...baseAgentConfig,
+          ...(payload.allowWriteInReadOnlyJob || sdlcProfile ? { allowWriteInReadOnlyJob: true } : {}),
+          ...(sdlcProfile
+            ? {
+                tools: {
+                  ...baseTools,
+                  direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
+                  custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
+                  subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
+                },
+                toolPermissions: {
+                  ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
+                  ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
+                },
+                outputFormat: sdlcOutputFormat,
+                sdlcContext: payload.sdlcContext,
+              }
+            : {}),
         }
       : undefined;
   const resultToken = interpose
@@ -2949,7 +4357,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // agent-level creds only, honoring the agent's providerAlwaysOn policy.
   // [AUTODBG] instrument the whole dispatch window — automations were observed
   // stalling silently right after [agent-run] start (no forward, no error).
-  clog.info(`[webhook] AUTODBG ${sessionId}: after AgentRun.start — resolving provider configs (agent=${agentSlug}, interpose=${interpose})`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: after AgentRun.start — resolving provider configs (agent=${agentSlug}, interpose=${interpose})`,
+  );
   const __t0 = process.hrtime.bigint();
   let providerConfigs: Awaited<ReturnType<typeof resolveAgentProviderConfigs>>["providerConfigs"] = {};
   let providerOrder: Awaited<ReturnType<typeof resolveAgentProviderConfigs>>["providerOrder"] = [];
@@ -2958,15 +4368,23 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
     // headlessBulk: this handler serves automations, external webhooks, and
     // the error-pipeline runner — the per-agent automationProvider downgrade
     // applies here (never to human chat/mention dispatches).
-    ({ providerConfigs, providerOrder, parent: providerParent } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
+    ({
+      providerConfigs,
+      providerOrder,
+      parent: providerParent,
+    } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
   } catch (provErr) {
-    clog.error(`[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`);
+    clog.error(
+      `[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`,
+    );
     await releaseAutomationSlot();
     res.status(502).json({ success: false, error: "provider config resolution failed" });
     return;
   }
   const __provMs = Number((process.hrtime.bigint() - __t0) / 1_000_000n);
-  clog.info(`[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`,
+  );
 
   let runRes: Response | undefined;
   try {
@@ -2982,14 +4400,22 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
         orgId: agent.orgId,
         task,
         userId,
+        ...(payload.userName ? { userName: payload.userName } : {}),
+        ...(payload.userEmail ? { userEmail: payload.userEmail } : {}),
         eventType: "automation",
+        // SDLC callers are callback-driven and only need the accepted session
+        // id here. Without detached mode this request enters the SSE bridge,
+        // whose event-consumption loop can delay flushing the outer webhook
+        // response during event-heavy setup runs. The Spaces backend then
+        // times out even though Claw continues successfully.
+        ...(sdlcProfile ? { detached: true } : {}),
         callbackUrl: clawCallbackUrl,
         ...(resultToken ? { sessionToken: resultToken } : {}),
         ...(forwardedAgentConfig ? { agentConfig: forwardedAgentConfig } : {}),
         fastMode: fastModeEnabled,
         // Primary provider — the pod keys its model off `provider` (defaults to
         // "spaces"/kimi when unset), so without this every automation ran on
-        // private-large regardless of the agent's configured provider.
+        // the platform default regardless of the agent's configured provider.
         ...(providerParent ? { provider: providerParent } : {}),
         ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
         ...(providerOrder.length > 1 ? { providerOrder } : {}),
@@ -3003,7 +4429,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       signal: AbortSignal.timeout(180_000),
     })) as unknown as Response;
   } catch (err) {
-    clog.error(`[webhook] AUTODBG forward to claw-pod failed for session ${sessionId} after ${Number((process.hrtime.bigint() - __t0) / 1_000_000n)}ms: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+    clog.error(
+      `[webhook] AUTODBG forward to claw-pod failed for session ${sessionId} after ${Number((process.hrtime.bigint() - __t0) / 1_000_000n)}ms: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+    );
     await releaseAutomationSlot();
     res.status(502).json({ success: false, error: "failed to reach claw-pod" });
     return;
@@ -3013,28 +4441,45 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
   // can distinguish "claw rejected" from "claw-auth rejected".
   const status = (runRes as unknown as { status: number }).status;
   const text = await (runRes as unknown as { text: () => Promise<string> }).text();
-  clog.info(`[webhook] AUTODBG ${sessionId}: /internal/run responded status=${status} bodyLen=${text.length} body=${text.slice(0, 200)}`);
+  clog.info(
+    `[webhook] AUTODBG ${sessionId}: /internal/run responded status=${status} bodyLen=${text.length} body=${text.slice(0, 200)}`,
+  );
   if (status < 200 || status >= 300) {
     await releaseAutomationSlot();
+  }
+  let runSessionId = sessionId!;
+  try {
+    const parsed = JSON.parse(text) as { sessionId?: string };
+    if (parsed.sessionId) runSessionId = parsed.sessionId;
+  } catch {
+    // Non-JSON body — retain the caller-provided session id.
+  }
+  if (externalResultCallback && status >= 200 && status < 300) {
+    const storedRun = await prisma.agentRun.findUnique({
+      where: { sessionId: runSessionId },
+      select: { metadata: true },
+    });
+    const metadata =
+      storedRun?.metadata && typeof storedRun.metadata === "object" && !Array.isArray(storedRun.metadata)
+        ? (storedRun.metadata as Record<string, unknown>)
+        : {};
+    await prisma.agentRun.update({
+      where: { sessionId: runSessionId },
+      data: { metadata: { ...metadata, externalResultCallback } },
+    });
   }
 
   // Crash/stall resilience — ONLY for interposed runs. When interposing, the
   // result routes through claw-auth's /webhook/result (so recovery's stored
   // SessionContext + exhausted-notice poster apply) and we hold the agent's app
-  // identity. We key recovery off claw-auth's authoritative sessionId (it mints
-  // its own; ours is ignored) so the GCS idempotency marker and the
+  // identity. We key recovery off the preserved authoritative sessionId so the
+  // GCS idempotency marker and the
   // progress-heartbeat → root mapping line up. If claw-pod stalls without a
   // completed-result marker, the worker replays this payload under a fresh
   // session — idempotency-keyed, so a finished run is never re-forwarded (no
   // double workflow-step advance). Non-interpose runs callback straight to the
   // automation engine, which owns its own retry; we deliberately don't layer on.
   if (interpose && status >= 200 && status < 300) {
-    let runSessionId = sessionId!;
-    try {
-      const parsed = JSON.parse(text) as { sessionId?: string };
-      if (parsed.sessionId) runSessionId = parsed.sessionId;
-    } catch { /* non-JSON body — fall back to our local id */ }
-
     const recoveryPayload = {
       userId: userId!,
       task: task!,
@@ -3071,12 +4516,21 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       spacesAppId: agent.spacesAppId!,
       spacesAppUserId: agent.spacesAppUserId!,
       ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+      // Explicit automation marker — see SessionContext.isAutomation. Set
+      // unconditionally: a plain-callback automation (no externalResultCallback,
+      // no interpose) otherwise carries NEITHER forward flag, and a recovery
+      // replay of it would be indistinguishable from an interactive run.
+      isAutomation: true,
       // Carry the automation's forward target through recovery. claw calls back
       // with its own sessionId (misses the Redis session keyed by the dispatch
       // id), so /webhook/result resolves ctx from THIS recovery context. Mirror
       // the interpose session (line ~2252): forward the result to the
       // automation's callback instead of posting to a (nonexistent) channel.
-      ...(interpose ? { resultForwardUrl: callbackUrl!, resolveMentions: true } : {}),
+      ...(externalResultCallback
+        ? { externalResultCallback }
+        : interpose
+          ? { resultForwardUrl: callbackUrl!, resolveMentions: true }
+          : {}),
     };
     await registerRunRecovery({
       rootSessionId: runSessionId,
@@ -3086,7 +4540,9 @@ export async function handleAutomationWebhook(req: Request, res: Response, pathA
       dispatchPayload: recoveryPayload,
       sessionContext: recoveryCtx,
     }).catch((err) => {
-      clog.warn(`[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(
+        `[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${errMsg(err)}`,
+      );
     });
   }
 
@@ -3121,12 +4577,41 @@ async function forwardResult(
   // escaped JSON.
   const isAutomationCallback = url.includes("/automations/claw-callback/");
   const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
+  const forwardToInternal = isInternalCallbackOrigin(url);
+  // Origin only — the full URL can carry a secret path segment.
+  const targetOrigin = (() => { try { return new URL(url).origin; } catch { return "(unparseable)"; } })();
+  // A dropped forward means the automation upstream waits forever for a result
+  // that will never arrive, so every non-delivery outcome here must be LOUD:
+  // error-level, event-tagged for the log bridge, and counted as a metric —
+  // not a warn that scrolls past.
+  const forwardFailure = (outcome: string, detail: string): void => {
+    clog.error(`[webhook/result] resultForward ${outcome} session=${payload.sessionId} origin=${targetOrigin} ${detail}`, {
+      event: "result_forward_failed",
+      sessionId: payload.sessionId,
+      outcome,
+      origin: targetOrigin,
+      internal: forwardToInternal,
+      automationCallback: isAutomationCallback,
+    });
+    clog.info([
+      "[metric]",
+      "name=result_forward",
+      "kind=count",
+      `outcome=${outcome}`,
+      `internal=${forwardToInternal}`,
+      `automation=${isAutomationCallback}`,
+    ].join(" "));
+  };
+  if (!forwardToInternal && !isAllowedExternalCallbackUrl(url)) {
+    forwardFailure("refused_origin", "target origin is neither internal nor an allowed external callback — result DROPPED");
+    return;
+  }
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
       body: JSON.stringify({
         sessionId: payload.sessionId,
@@ -3136,9 +4621,17 @@ async function forwardResult(
         ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
       }),
     });
-    if (!res.ok) clog.warn(`[webhook/result] resultForward returned ${res.status}`);
+    if (!res.ok) {
+      // 401/403 on an internal-classified target is the L-18 misconfiguration
+      // signature (callback origin not in selfUrl/internalUrl/xyneClawUrl, or
+      // key mismatch) — the detail names it so the fix is obvious from the log.
+      const authHint = res.status === 401 || res.status === 403
+        ? " (auth rejected — check the callback origin against SELF_URL/INTERNAL_URL/XYNE_CLAW_URL and the S2S key)"
+        : "";
+      forwardFailure(`http_${res.status}`, `delivery rejected by target${authHint}`);
+    }
   } catch (err) {
-    clog.warn(`[webhook/result] resultForward failed: ${err instanceof Error ? err.message : String(err)}`);
+    forwardFailure("network_error", errMsg(err));
   }
 }
 
@@ -3156,31 +4649,50 @@ async function persistCallbackAttachments(
   chatMessageId: string,
   uploaderUserId: string,
   attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+): Promise<Array<{ id: string; originalFilename: string; mimeType: string }>> {
+  return persistBase64ChatAttachments(chatMessageId, uploaderUserId, attachments);
+}
+
+/**
+ * Auto-publish for /design and /dashboard runs delivered into Spaces threads: the thread
+ * already holds the artifact file, so mint (or refresh) the conversation's
+ * stable share link and post it — one click to the rendered design instead of
+ * a download. Reuses the Studio share model: per (owner, conversation) row,
+ * revocable from Studio, opaque-origin serving. Best-effort — a share failure
+ * must never disturb the delivered result.
+ */
+async function publishThreadArtifactShare(
+  ctx: SessionContext,
+  runOwnerId: string,
+  created: Array<{ id: string; originalFilename: string; mimeType: string }>,
 ): Promise<void> {
-  if (!attachments?.length) return;
-  const now = new Date();
-  const year = String(now.getUTCFullYear());
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  for (const att of attachments) {
-    try {
-      const buffer = Buffer.from(att.data, "base64");
-      const safeName = att.fileName.replace(/[^\w.\-]+/g, "_").slice(0, 200);
-      const destPath = `chat-attachments/${uploaderUserId}/${year}/${month}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
-      await gcsService.uploadFile(buffer, destPath, att.mimeType);
-      await prisma.chatAttachment.create({
-        data: {
-          chatMessageId,
-          uploaderUserId,
-          storageProvider: "gcs",
-          url: destPath,
-          originalFilename: att.fileName,
-          mimeType: att.mimeType,
-          size: buffer.length,
-        },
-      });
-    } catch (err) {
-      clog.warn(`[webhook/result] failed to persist attachment ${att.fileName}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    const command = ctx.task?.trimStart().toLowerCase().match(/^\/(design|dashboard)(?:\s|$)/)?.[1];
+    if (!command) return;
+    if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.agentOrgId) return;
+    const html = [...created].reverse().find((a) =>
+      a.mimeType.toLowerCase().includes("html") || a.originalFilename.toLowerCase().endsWith(".html"),
+    );
+    if (!html) return;
+    const share = await upsertDesignShare({
+      ownerUserId: runOwnerId,
+      orgId: ctx.agentOrgId,
+      conversationId: ctx.conversationId,
+      attachmentId: html.id,
+      title: html.originalFilename.replace(/\.html?$/i, ""),
+      expiresAt: null,
+    });
+    const link = designShareUrl(share.sharePath);
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      markdownText: `🔗 **Live ${command}:** ${link}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
+      userId: ctx.spacesAppUserId,
+      metadata: { contentFormat: "markdown" },
+    }, ctx.appToken);
+    clog.info(`[webhook/result] posted design share link shareId=${share.id} conv=${ctx.conversationId}`);
+  } catch (err) {
+    clog.warn(`[webhook/result] design share publish failed (non-fatal): ${errMsg(err)}`);
   }
 }
 
@@ -3211,12 +4723,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingResponses?: Array<{ responseId: string; message: string }>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
     // one-click button below the agent's reply so the user can promote the
-    // remaining work to a /goal autonomous loop. See start-goal handler in
-    // app-callback.ts. Only present when the agent's config has
+    // remaining work to a /goal autonomous loop. See start-goal handling in
+    // flow-action.ts. Only present when the agent's config has
     // suggestGoal=true AND the tool was actually called this turn.
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
+    localHarness?: {
+      provider: string;
+      harnessName: string;
+      label: string;
+      ownerName: string;
+      deviceName?: string;
+    };
+    localHarnessUnreachable?: boolean;
+    localHarnessProvider?: string;
     fastMode?: boolean;
     // Conversation identity claw ships on every callback (see
     // xyne-claw/src/routes/run.ts:1040-1046). Used by the conv-keyed
@@ -3246,7 +4767,14 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // the same card serves other agent surfaces (a read-only profile next).
     pendingAgentCard?:
       | { variant: "draft"; agent: DraftAgentSpec }
-      | { variant: "profile"; slug?: string };
+      | { variant: "profile"; slug?: string }
+      // "which agents can do X?" — a stack of read-only cards, capped server-side.
+      | { variant: "profile-list"; slugs: string[] }
+      // "list all my agents" — counts only, with a link into the library.
+      | { variant: "summary" };
+    // Connector cards to post alongside the reply, so the user can connect
+    // without leaving the conversation.
+    pendingConnectorSuggestions?: PendingConnectorSuggestions;
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -3266,7 +4794,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       : undefined;
     clog.info(`[webhook/result] handoff callback session=${sessionId} conversation=${payload.conversationId ?? ""} agent=${payload.agentSlug ?? ""} lastTurn=${lastTurn ?? "unknown"}`);
     const handoff = await handleRunHandoff(sessionId).catch((err) => {
-      clog.warn(`[webhook/result] handoff re-dispatch failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
+      clog.warn(`[webhook/result] handoff re-dispatch failed session=${sessionId}:`, errMsg(err));
       return null;
     });
     if (handoff) {
@@ -3306,7 +4834,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // releases the slot — UNLESS a /goal turn is continuing (goalContinues),
   // which keeps the slot so the loop owns the conversation across turns.
   let goalContinues = false;
+  let experimentContinues = false;
   let skipQueueDrain = false;
+  // Recovery continuations execute under fresh physical AgentRun ids, while
+  // external callers (including SDLC Wiki) remain bound to the original
+  // logical run id. Capture the root returned by recovery settlement and use
+  // it only for the external callback identity.
+  let externalCallbackSessionId = sessionId;
   let resultConversationId = payload.conversationId ?? "";
   let resultAgentSlug = payload.agentSlug ?? "";
   // Per-user twin FIFO scope for the finalizer's drain. MUST be declared at THIS
@@ -3396,7 +4930,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
         twinAssistantMsgId = outcomeMsg.id;
       } catch (e) {
-        clog.warn(`[webhook/result] Twin: failed to persist outcome chat message for ${sessionId}: ${e instanceof Error ? e.message : String(e)}`);
+        clog.warn(`[webhook/result] Twin: failed to persist outcome chat message for ${sessionId}: ${errMsg(e)}`);
       }
     }
 
@@ -3432,7 +4966,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       clog.info(`[webhook/result] Digital Twin chose to ignore — dropping, no DM/post, session ${sessionId}`);
       await deleteSession(sessionId);
     } else if (isTwinDelivery(payload.twinDelivery)) {
-      await sendTwinReplyDraft(ctx, payload.twinDelivery, payload.toolInvocations, sessionId);
+      await sendTwinReplyDraft(ctx, payload.twinDelivery, payload.toolInvocations, sessionId, payload.attachments);
     } else {
       clog.info(`[webhook/result] Digital Twin stayed silent — no twin_deliver delivery (fail-closed), session ${sessionId}`);
       await deleteSession(sessionId);
@@ -3460,7 +4994,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         payload.result = `${payload.result.trimEnd()}\n\n${suffix}`;
       }
     } catch (err) {
-      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${errMsg(err)}`);
       // Non-fatal — the reply still posts, just without the user's suffix.
     }
   }
@@ -3504,6 +5038,63 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_Searched agent memory ${memorySearchCount} ${label}._`;
   }
 
+  // Pending write-action footer: a DETERMINISTIC, per-action-honest correction.
+  // Write tools now live in child subagent palettes too, so a parent (or child)
+  // can queue a signed write and then narrate as if it already ran. The write is
+  // execution-gated (nothing runs until the approval card is approved), but two
+  // things could still mislead the user: (1) the narration claims success, and
+  // (2) the approval card is SKIPPED when the target channel isn't app-accessible
+  // (see the loop below, which validates and `continue`s). Before that skip was
+  // silent — the user saw "queued, approve it" and no card ever came.
+  //
+  // Fix: validate every queued write HERE, against the same target-validation the
+  // card loop uses, and (a) stash the result so the loop reuses it — the footer
+  // can never claim a card the loop then drops — and (b) split the footer into
+  // "actually queued" vs "could NOT be queued (with reason)". A rejected action
+  // is stated as a failure, so there is no silent "queued" exit. The warning
+  // fires even on an empty result (seeding the message) because a dropped card
+  // must always be surfaced.
+  const pendingActionList = Array.isArray(
+    (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions,
+  )
+    ? (payload as { pendingActions: Array<Record<string, unknown>> }).pendingActions
+    : [];
+  const pendingActionValidation = new Map<
+    Record<string, unknown>,
+    { error: string | null; channelName?: string }
+  >();
+  if (ctx && payload.status === "completed" && pendingActionList.length > 0) {
+    for (const action of pendingActionList) {
+      const v = await pendingActionTargetValidation(action, ctx, ctx.appToken).catch(
+        () => ({ error: null as string | null }),
+      );
+      pendingActionValidation.set(action, v);
+    }
+    const toolOf = (a: Record<string, unknown>): string =>
+      typeof a["tool"] === "string" && a["tool"].trim() ? a["tool"].trim() : "write action";
+    const queued = pendingActionList.filter((a) => !pendingActionValidation.get(a)?.error);
+    const rejected = pendingActionList.filter((a) => pendingActionValidation.get(a)?.error);
+
+    const lines: string[] = [];
+    if (queued.length > 0) {
+      const names = [...new Set(queued.map(toolOf))].slice(0, 6).map((t) => `\`${t}\``);
+      const noun = queued.length === 1 ? "action is" : "actions are";
+      lines.push(
+        `⏳ ${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
+      );
+    }
+    for (const action of rejected) {
+      const reason = pendingActionValidation.get(action)?.error ?? "target not accessible";
+      lines.push(`⚠️ \`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
+    }
+    if (lines.length > 0) {
+      const body = lines.map((l) => `_${l}_`).join("\n\n");
+      resultWithCitations = resultWithCitations.trim()
+        ? `${resultWithCitations.trimEnd()}\n\n${body}`
+        : body;
+    }
+  }
+
   // When an active /goal loop is running, prefix every turn's user-facing reply
   // with a turn counter for clarity. The goal's turnCount is still pre-increment
   // here (recordTurnAndDecide bumps it in the relooper hook below), so the turn
@@ -3538,9 +5129,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   }
 
   if (payload.status === "completed") {
-    await handleRunCompletion(sessionId, "completed").catch((err) => {
+    const recoveryCompletion = await handleRunCompletion(sessionId, "completed").catch((err) => {
       clog.warn(`[webhook/result] Failed to mark ${sessionId} completed in run recovery:`, err instanceof Error ? err.message : err);
+      return null;
     });
+    externalCallbackSessionId = recoveryCompletion?.rootSessionId ?? sessionId;
+    if (ctx?.conversationId && ctx.agentSlug) {
+      experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
+        clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, errMsg(err));
+        return false;
+      });
+    }
   }
 
   const isSessionLockedFailure = payload.status === "failed" && payload.error === "session_locked";
@@ -3605,8 +5204,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // re-dispatch the message we just enqueued into the still-held session
     // lock, whose new session_locked result re-enters this handler (live
     // ping-pong). The lock holder's own completion drains this queue.
+    // MUST pass resultUserScope: a digital-twin slot is keyed
+    // conv:digital-twin:<userId> (see scoped() in message-queue.ts). Releasing
+    // without it targets the 2-part conv:digital-twin key, misses the real
+    // 3-part marker, and the twin slot leaks for the full 20m TTL — every new
+    // twin tag then queues behind a phantom "active run" (observed 2026-08-19).
     if (QUEUE_ENABLED && resultConversationId && resultAgentSlug) {
-      await releaseSlot(resultConversationId, resultAgentSlug).catch(() => {});
+      await releaseSlot(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
     return;
   }
@@ -3617,6 +5221,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       return null;
     });
 
+    externalCallbackSessionId = recoveryFailure?.rootSessionId ?? sessionId;
+
     if (recoveryFailure?.retried) {
       clog.info(`[webhook/result] Session ${sessionId}: retry queued (${recoveryFailure.retriesUsed}/${recoveryFailure.maxRetries})`);
       return;
@@ -3625,19 +5231,52 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
   // External API callbacks are interposed by /run: claw only ever calls this
   // internal endpoint, and claw-auth performs the untrusted outbound delivery.
-  // Prefer Redis context, with AgentRun.metadata as a durable fallback.
+  // Prefer Redis context, with AgentRun.metadata as a durable fallback. A
+  // recovery attempt may have sparse physical-run metadata, so fall back to
+  // the logical recovery root as well.
   let externalResultCallback = ctx?.externalResultCallback;
   if (!ctx && sessionId) {
-    const storedRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
-    const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
-    externalResultCallback = metadata?.externalResultCallback;
+    for (const callbackSessionId of new Set([sessionId, externalCallbackSessionId])) {
+      const storedRun = await agentRunRepository.findBySessionId(callbackSessionId).catch(() => null);
+      const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
+      externalResultCallback = metadata?.externalResultCallback;
+      if (externalResultCallback) break;
+    }
   }
   if (externalResultCallback) {
+    // HITL for API/service-token runs: the external caller receives its result
+    // via the callback, but a gated write (spaces-create-ticket, user-send-message,
+    // ...) still needs a human to approve/decline. Those approval cards are only
+    // posted on the normal channel path further below - which this branch returns
+    // before reaching. When the run is bound to a Spaces channel (the service
+    // token carried spaces:channels:post, so /run let channelId survive), post the
+    // cards into that channel BEFORE we tear the session down. Implicitly gated by
+    // ctx.channelId: headless runs with no bound channel skip this, exactly as before.
+    const externalPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
+    const cbCtx = ctx;
+    if (cbCtx?.channelId && cbCtx.appToken && externalPendingActions?.length) {
+      const cbAppToken = cbCtx.appToken;
+      let approvalCardsSent = 0;
+      for (const action of externalPendingActions) {
+        try {
+          const targetValidation = await pendingActionTargetValidation(action, cbCtx, cbAppToken);
+          if (targetValidation.error) {
+            clog.info(`[webhook/result] external-callback skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
+            continue;
+          }
+          await postWriteApprovalAction({ action, ctx: cbCtx, token: cbAppToken, targetValidation });
+          approvalCardsSent += 1;
+        } catch (err) {
+          clog.warn(`[webhook/result] external-callback approval card failed tool=${String(action["tool"] ?? "")} sessionId=${sessionId}: ${errMsg(err)}`);
+        }
+      }
+      clog.info(`[webhook/result] external-callback sent ${approvalCardsSent}/${externalPendingActions.length} write approval card(s) channelId=${cbCtx.channelId} sessionId=${sessionId}`);
+    }
     await deleteSession(sessionId);
     await sendStoredExternalResultCallback(
       externalResultCallback,
       {
-        sessionId,
+        sessionId: externalCallbackSessionId,
         status: payload.status ?? "failed",
         result: payload.result ?? "",
         ...(payload.error ? { error: payload.error } : {}),
@@ -3656,16 +5295,36 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       result: resultWithCitations,
       ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
     }).catch((err) => {
-      clog.warn(`[webhook/result] Slack delivery failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Slack delivery failed for session ${sessionId}: ${errMsg(err)}`);
     });
     return;
   }
+
+  // The run is over and will NOT continue: every path that re-dispatches or
+  // re-queues (handoff, broken-SSE retry, session_locked, recovery retry) has
+  // already returned above. Settle the plan card here, so it covers a failed or
+  // cancelled run too — those are exactly the ones that die mid-step.
+  await reconcileStalePlanTodos(
+    sessionId,
+    ctx?.conversationId ?? payload.conversationId ?? null,
+    ctx?.agentSlug ?? payload.agentSlug ?? null,
+  ).catch((err) =>
+    clog.warn(
+      "[webhook/result] plan todo reconcile failed (non-fatal):",
+      err instanceof Error ? err.message : err,
+    ),
+  );
 
   if (payload.status !== "completed") {
     // Result-forward callers (Spaces auto-draft / automations) get the failure
     // via their callback and return BEFORE the bot-mention surfacing below —
     // they want the callback, not a message posted into a thread.
     if (ctx?.resultForwardUrl) {
+      // Automation capacity failure: schedule a SILENT auto-retry before
+      // forwarding, so an over-capacity model self-heals overnight instead of
+      // the user finding it undone hours later. The retry is a fresh dispatch
+      // carrying the same resultForwardUrl, so its eventual success forwards on.
+      await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
       await forwardResult(ctx.resultForwardUrl, { sessionId, status: "failed", ...(payload.error ? { error: payload.error } : {}) }, "");
       return;
     }
@@ -3677,8 +5336,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // failed with no chain and no promote-prompt, so the user saw nothing and
     // asked "why no reply"). Cancellations are intentional and stay silent.
     let failureSurfaced = false;
+    const rawErr = String(payload.error ?? "");
+    // SHUTDOWN_DRAIN-prefixed failures are pod-restart kills (claw's drain
+    // deadline aborted the run — see cancelActiveRunsForDrain). The recovery
+    // worker refires these, so NOTHING below should treat them as agent
+    // failures: no chain escalation, no failure-investigation dispatch, no
+    // "internal error" notice. If the refire also dies it fails with a normal
+    // (unprefixed) error and the full failure path runs then — the thread is
+    // never permanently silent.
+    const isShutdownDrain = /^SHUTDOWN_DRAIN:/.test(rawErr);
     // ── Handle failure chain if configured ──
-    if (payload.status === "failed" && ctx?.agentSlug && ctx.agentOrgId) {
+    if (payload.status === "failed" && !isShutdownDrain && ctx?.agentSlug && ctx.agentOrgId) {
       try {
         const agentRow = await agentRepository.findBySlug(ctx.agentSlug, ctx.agentOrgId);
 
@@ -3842,11 +5510,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     }
 
+    // Capacity auto-retry (interactive): only when promote-provider did NOT fire
+    // — switching to a working provider is the better offer when one exists;
+    // this "wait for the same model to come back" card is for when it doesn't.
+    // Shutdown drains are pod restarts, not capacity — run-recovery refires them.
+    if (!failureSurfaced && !isShutdownDrain && ctx) {
+      const scheduled = await scheduleCapacityRetryIfNeeded(ctx, payload, true).catch(() => false);
+      if (scheduled) failureSurfaced = true;
+    }
+
     // Safety net: a failed run that nothing above surfaced must still tell the
     // user — otherwise the thread goes silent and looks like the agent ignored
     // the mention. Only for conversation-mode failures with a thread to post
     // to; cancellations and approval-mode runs stay silent by design.
-    const rawErr = String(payload.error ?? "");
     // A dropped SSE stream ("…ended without a done frame") is a TRANSIENT
     // transport flake — claw-auth retries the dispatch automatically and the
     // retry almost always completes and posts the real reply. Surfacing a
@@ -3860,14 +5536,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       payload.status === "failed" &&
       !failureSurfaced &&
       !isTransientSseDrop &&
+      !isShutdownDrain &&
       ctx?.conversationId &&
       ctx?.channelId &&
       ctx.responseMode === "conversation"
     ) {
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
-      const notice = isQuota
-        ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-        : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+      const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
+      const notice = payload.localHarnessUnreachable
+        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+        : isQuota
+          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
       await spacesAppFetch("/chat/postMessage", {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
@@ -3940,7 +5620,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // silently dropped them, so pipeline/automation runs never showed
         // their reports (e.g. the error-pipeline RCA .html) as attachments.
         .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-        .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
+        .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
     // clickable/notifying Spaces mentions before forwarding, so the
@@ -3974,8 +5655,14 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         );
         forwardText = expandSpacesMentions(resolved);
       } catch (err) {
-        log.warn(`mention resolution failed — forwarding raw text: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`mention resolution failed — forwarding raw text: ${errMsg(err)}`);
       }
+    }
+    // Capacity failure shaped as an EMPTY completed result: schedule the same
+    // silent retry as the failed path before forwarding, so the automation
+    // self-heals instead of its caller receiving a blank and nobody retrying.
+    if (payload.emptyReason === "provider_capacity" && !forwardText.trim()) {
+      await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
     }
     await forwardResult(ctx.resultForwardUrl, payload, forwardText);
     return;
@@ -3996,7 +5683,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // Clear the ephemeral agent progress signal — dashboard drops the spinner.
   // Only fires in the ephemeral path; the placeholder path clears naturally
   // when we edit the "⏳" message with the final result below.
-  if (USE_EPHEMERAL_PROGRESS) {
+  // Same deliverability guard as the per-tool push in /progress: twin runs and
+  // claw-only conversations (no Spaces channelId) never posted a spinner, so
+  // clearing would only add another guaranteed-4xx call.
+  if (USE_EPHEMERAL_PROGRESS && ctx.agentSlug !== "digital-twin" && ctx.channelId) {
     spacesAppFetch("/chat/agentProgress", {
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
@@ -4004,7 +5694,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       userId: ctx.spacesAppUserId,
       status: "done",
     }, ctx.appToken).catch((err) =>
-      log.warn("Failed to clear agent progress signal", { error: err instanceof Error ? err.message : String(err) }),
+      log.warn("Failed to clear agent progress signal", { error: errMsg(err) }),
     );
   }
 
@@ -4028,7 +5718,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // transcript row (Spaces gets them as posted files, but the claw chat
       // UI reads chat_attachments).
       .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-      .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
+      .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
   }
 
   // ── Plan mode Turn 1: post the plan card and short-circuit ──
@@ -4089,7 +5780,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           });
         } catch (e) {
           log.warn("Failed to persist plan assistant transcript row (non-fatal)", {
-            error: e instanceof Error ? e.message : String(e),
+            error: errMsg(e),
           });
         }
       }
@@ -4098,7 +5789,23 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // re-planned). Grey it out + disable its Approve button so a superseded
       // plan can't be run. Best-effort; the new card posts regardless.
       if (ctx.conversationId && ctx.agentSlug) {
-        const prevCard = await getActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => null);
+        // Redis is the fast path; the durable binding is what still finds a
+        // proposal older than the 24h TTL — without it an ancient card would
+        // stay tappable (and, now that approval survives, actually runnable)
+        // after the agent has already re-planned.
+        const prevBinding = await findProposedPlanBinding(ctx.conversationId, ctx.agentSlug).catch(() => null);
+        const prevBindingData = prevBinding ? readPlanBindingData(prevBinding) : null;
+        const prevCard =
+          (await getActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => null)) ??
+          (prevBinding?.messageId && prevBindingData
+            ? {
+                messageId: prevBinding.messageId,
+                todos: prevBindingData.todos,
+                ...(prevBindingData.title ? { title: prevBindingData.title } : {}),
+                ...(prevBindingData.desc ? { desc: prevBindingData.desc } : {}),
+                ...(prevBindingData.document ? { document: prevBindingData.document } : {}),
+              }
+            : null);
         if (prevCard?.messageId) {
           try {
             const supersededFlow = withSpacesAppId(
@@ -4125,9 +5832,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             );
           } catch (e) {
             log.warn("Failed to supersede prior plan card (non-fatal)", {
-              error: e instanceof Error ? e.message : String(e),
+              error: errMsg(e),
             });
           }
+        }
+        // Terminal in the durable store too, whether or not the card repaint
+        // above succeeded: a superseded plan must fail the approve guard forever,
+        // not just until its Redis pointer is overwritten.
+        if (prevBinding) {
+          await markPlanBindingStatus(prevBinding.id, "superseded").catch((e) => {
+            log.warn("Failed to mark prior plan binding superseded (non-fatal)", {
+              error: errMsg(e),
+            });
+          });
         }
       }
 
@@ -4190,6 +5907,39 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
             ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
           }).catch(() => {});
+          // Durable mirror of the line above. The Redis pointer and the session
+          // both expire in 24h, but the card in the thread does not — this row is
+          // what lets someone approve a plan days later. It carries everything
+          // flow-action.ts needs with NO surviving Redis state: the executable
+          // todos, the card's routing, and the proposer (the only user allowed to
+          // act on it). Best-effort: a failure here costs durability, never the
+          // card, and the Redis fast path still covers the first 24h.
+          if (ctx.agentOrgId && ctx.spacesAppId && ctx.spacesAppUserId) {
+            await upsertPlanBinding({
+              orgId: ctx.agentOrgId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+              messageId: planMessageId,
+              spacesAppId: ctx.spacesAppId,
+              spacesAppUserId: ctx.spacesAppUserId,
+              agentSlug: ctx.agentSlug,
+              data: {
+                todos: planTodos,
+                ownerUserId: ctx.senderId,
+                ...(pendingPlan.title ? { title: pendingPlan.title } : {}),
+                ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
+                ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
+              },
+            }).catch((e) => {
+              log.warn("Failed to persist plan binding — approval will expire with Redis (non-fatal)", {
+                error: errMsg(e),
+              });
+            });
+          } else {
+            log.warn(
+              `Plan card posted without org/app context — no durable binding written, approval expires in 24h (conv=${ctx.conversationId})`,
+            );
+          }
           // Fresh proposal awaiting approval: reset any prior run's exec meta so
           // stale approvedTitles/autoApproved can't leak into this plan. The
           // approve flow-action writes the real meta before it dispatches Turn 2.
@@ -4280,7 +6030,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     } catch (err) {
       log.warn("Failed to post/dispatch plan card (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg(err),
       });
     }
     return;
@@ -4331,9 +6081,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           catalog,
           ctx.senderId,
         );
+        const ownerCredit = await agentOwnerCredit(row.ownerUserId);
         const flow = withSpacesAppId(
           buildAgentCardFlow(
-            { variant: "profile", agent: identityFromAgentRow(row, resolved) },
+            { variant: "profile", agent: identityFromAgentRow(row, resolved, undefined, ownerCredit) },
             {
               agentSlug: ctx.agentSlug!,
               targetSlug,
@@ -4356,10 +6107,254 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     } catch (err) {
       // Non-fatal: the reply itself still posts below.
       log.warn("Failed to post agent profile card (non-fatal)", {
+        error: errMsg(err),
+      });
+    }
+  }
+  // Fall back to the server's own reading of the request when the model did not
+  // ask for cards. It routinely misses the moment — most often by assuming a
+  // connector is already connected — and a missing capability is exactly when
+  // the user most needs the offer. Only unconnected connectors survive the
+  // filter below, so a wrong guess costs nothing.
+  // Fail-safe: this runs before the reply is posted, so a throw here would cost
+  // the user their answer. A suggestion is never worth that.
+  let inferredTypes: string[] = [];
+  if (!payload.pendingConnectorSuggestions) {
+    try {
+      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "").slice(
+        0,
+        MCP_SUGGEST_INFERRED_MAX,
+      );
+    } catch (err) {
+      log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
       });
     }
   }
+
+  const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
+    payload.pendingConnectorSuggestions ??
+    (inferredTypes.length > 0 ? { serverTypes: inferredTypes, inferred: true } : undefined);
+  if (pendingConnectorSuggestions && agentCardDeliverable) {
+    try {
+      // Roster mode: the user asked what exists, so the SERVER picks the sample
+      // — the model must not decide which connectors represent the catalog.
+      const listAll = pendingConnectorSuggestions.listAll === true;
+      const totalCount = listAll
+        ? await prisma.mcpServer.count({ where: { enabled: true } })
+        : undefined;
+
+      // Resolve every requested type against the catalog. The model supplies
+      // names only — descriptions and display names come from the row, and an
+      // unknown type is dropped rather than rendered as an empty card.
+      const rows = listAll
+        ? await prisma.mcpServer.findMany({
+            where: { enabled: true },
+            select: { id: true, type: true, name: true, description: true },
+            orderBy: { name: "asc" },
+            take: MCP_SUGGEST_ROSTER_SAMPLE,
+          })
+        : await prisma.mcpServer.findMany({
+            where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
+            select: { id: true, type: true, name: true, description: true },
+          });
+      const byType = new Map(rows.map((row) => [row.type, row]));
+
+      const connectedIds = await availableServerIds(
+        ctx.senderId,
+        rows.map((r) => r.id),
+      );
+
+      // Roster mode is already ordered by the query; otherwise preserve the
+      // model's ordering, since it ranked them by relevance.
+      const ordered = listAll
+        ? rows
+        : pendingConnectorSuggestions.serverTypes
+            .map((type) => byType.get(type))
+            .filter((row): row is NonNullable<typeof row> => !!row);
+
+      const inferred = pendingConnectorSuggestions.inferred === true;
+
+      // Derived from the user's own words, never from the model's claim: a model
+      // that wants its card shown will assert explicit intent for a plain task
+      // request, which is exactly how an already-usable connector slipped
+      // through. The server owns this fact like every other on the card.
+      const askedToConnect = new Set(
+        connectorTypesUserAskedToConnect(ctx.rootTask ?? ctx.task ?? ""),
+      );
+
+      const connectors = ordered
+        // An unsolicited suggestion only earns its place when the connector is
+        // not already usable — personally connected or shared org-wide. Two
+        // exceptions, both genuine user intent: roster mode ("what exists?"),
+        // and the user naming a connector they want to connect, where a personal
+        // connection is a legitimate want even under an org credential.
+        .filter((row) => listAll || askedToConnect.has(row.type) || !connectedIds.has(row.id))
+        .map((row) => ({
+          serverType: row.type,
+          name: row.name,
+          ...(row.description ? { description: row.description } : {}),
+          connected: connectedIds.has(row.id),
+        }));
+
+      if (connectors.length === 0) {
+        log.info(
+          `[mcp-suggest] skipped — none of ${pendingConnectorSuggestions.serverTypes.join(", ")} are known connectors`,
+        );
+      } else {
+        const flow = withSpacesAppId(
+          buildMcpSuggestFlow({
+            connectors,
+            ...(pendingConnectorSuggestions.title
+              ? { title: pendingConnectorSuggestions.title }
+              : listAll
+                ? { title: "Connectors you can add" }
+                : {}),
+            ...(listAll ? { browseAll: true } : {}),
+            ...(inferred && !pendingConnectorSuggestions.title
+              ? { title: "Connect to unlock this" }
+              : {}),
+            ...(totalCount !== undefined ? { totalCount } : {}),
+            screenKey: `${ctx.senderId}-${connectors.map((c) => c.serverType).join("-")}`,
+            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+            userId: ctx.senderId,
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+          }),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        log.info(`[mcp-suggest] posted ${connectors.length} connector cards conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      log.warn("Failed to post connector suggestions (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (pendingAgentCard?.variant === "summary" && agentCardDeliverable && ctx.agentOrgId) {
+    try {
+      const [total, globalCount, sampleAgents] = await Promise.all([
+        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true } }),
+        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true, scope: "global" } }),
+        // Sample rows for the card. The SERVER picks them — the model must not
+        // decide which agents represent the roster.
+        prisma.agent.findMany({
+          where: { orgId: ctx.agentOrgId, enabled: true },
+          select: { slug: true, name: true, description: true },
+          orderBy: { name: "asc" },
+          take: AGENT_SUMMARY_SAMPLE,
+        }),
+      ]);
+
+      if (total === 0) {
+        log.info(`[agent-card] summary skipped — no agents in org ${ctx.agentOrgId}`);
+      } else {
+        const flow = withSpacesAppId(
+          buildAgentSummaryFlow(
+            {
+              total,
+              global: globalCount,
+              personal: total - globalCount,
+              agents: sampleAgents.map((a) => ({
+                slug: a.slug,
+                name: a.name,
+                ...(a.description ? { description: a.description } : {}),
+              })),
+            },
+            {
+              agentSlug: ctx.agentSlug!,
+              userId: ctx.senderId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+            },
+          ),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        postedAgentProfileCard = true;
+        log.info(`[agent-card] posted roster summary (${total}) conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      log.warn("Failed to post agent summary card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (pendingAgentCard?.variant === "profile-list" && agentCardDeliverable && ctx.agentOrgId) {
+    try {
+      const unique = [
+        ...new Set(pendingAgentCard.slugs.map((slug) => slug.trim()).filter((slug) => slug.length > 0)),
+      ];
+      const capped = unique.slice(0, MAX_AGENT_LIST_CARDS);
+
+      // Matches are rendered as compact roster rows, not full profile cards:
+      // "which agents can review PRs?" wants a scannable shortlist, and five
+      // stacked identity cards buries it. Each row opens the agent's own page.
+      const rows = [];
+      for (const slug of capped) {
+        const row = await agentRepository.findBySlug(slug, ctx.agentOrgId);
+        if (!row) {
+          log.info(`[agent-card] list row skipped — no agent "${slug}" in org ${ctx.agentOrgId}`);
+          continue;
+        }
+        rows.push({
+          slug: row.slug,
+          name: row.name,
+          ...(row.description ? { description: row.description } : {}),
+        });
+      }
+
+      if (rows.length === 0) {
+        log.info(`[agent-card] list card skipped — none of ${unique.length} slugs resolved`);
+      } else {
+        const flow = withSpacesAppId(
+          buildAgentSummaryFlow(
+            {
+              total: rows.length,
+              agents: rows,
+            },
+            {
+              agentSlug: ctx.agentSlug!,
+              userId: ctx.senderId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+            },
+            // Matches, not the whole roster — so the header counts what was
+            // found rather than claiming every agent in the org.
+            `${rows.length} ${rows.length === 1 ? "agent" : "agents"} that can help`,
+          ),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        postedAgentProfileCard = true;
+        log.info(`[agent-card] posted ${rows.length} matching agents conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      // Non-fatal: the reply itself still posts below.
+      log.warn("Failed to post matching agent card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   if (
     pendingAgentCard?.variant === "draft" &&
     ctx.responseMode === "conversation" &&
@@ -4444,7 +6439,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       } catch (e) {
         // Non-fatal: the card is the deliverable and still posts below.
         log.warn("Failed to post agent-draft lead-in (non-fatal)", {
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg(e),
         });
       }
 
@@ -4500,12 +6495,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
       } catch (e) {
         log.warn("Failed to persist agent-draft assistant transcript row (non-fatal)", {
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg(e),
         });
       }
     } catch (err) {
       log.error("Failed to post agent draft card", {
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg(err),
         slug: spec.slug,
       });
       try {
@@ -4524,14 +6519,47 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     return;
   }
 
+  // CHECKER RUNS ARE SILENT. Their verdicts are already persisted to the ledger
+  // via /internal/experiments/:id/reviews and surface in `/experiment findings`.
+  // Posting them to the thread adds noise AND interleaves with real
+  // conversation: a checker that finishes after the user's next message reads
+  // as a reply to it.
+  if (ctx.suppressThreadReply) {
+    log.info(`[webhook/result] suppressed thread reply for silent run session=${sessionId} agent=${ctx.agentSlug ?? ""}`);
+    await deleteSession(sessionId);
+    return;
+  }
+
   // Notify user if result is empty (but not if copilot has pendingResponses, and
   // not when a capability card was just posted — there the card IS the answer
   // and an apology under it would be nonsense).
-  if (!resultWithCitations.trim() && !payload.pendingResponses?.length && !postedAgentProfileCard) {
+  // ATTACHMENTS COUNT AS AN ANSWER. Without `!payload.attachments?.length` here,
+  // a run whose entire output is a file — a rendered video, a PDF, a report zip —
+  // falls into the empty-result branch: the user is told "I didn't have a final
+  // answer to show" and the file is DROPPED, never posted. Observed live: a
+  // 92 KB explainer.mp4 rendered successfully, the run completed, and the thread
+  // got the apology instead of the video.
+  if (
+    !resultWithCitations.trim() &&
+    !payload.attachments?.length &&
+    !payload.pendingResponses?.length &&
+    !postedAgentProfileCard
+  ) {
     if (ctx.responseMode === "approval") {
       log.warn("Empty result in approval mode — skipping (no thread message)");
       await deleteSession(sessionId);
       return;
+    }
+
+    // Capacity failures often surface as an EMPTY result (status=completed,
+    // emptyReason=provider_capacity), not status=failed — so hook the auto-retry
+    // here too. The card replaces the generic "try again in a moment" notice.
+    if (payload.emptyReason === "provider_capacity") {
+      const scheduled = await scheduleCapacityRetryIfNeeded(ctx, payload, true).catch(() => false);
+      if (scheduled) {
+        await deleteSession(sessionId).catch(() => {});
+        return;
+      }
     }
 
     log.warn("Empty result — notifying user", {
@@ -4559,7 +6587,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         metadata: { contentFormat: "markdown" },
       }, token);
     } catch (err) {
-      log.error("Failed to send empty-result notice", { error: err instanceof Error ? err.message : String(err) });
+      log.error("Failed to send empty-result notice", { error: errMsg(err) });
     }
     return;
   }
@@ -4597,7 +6625,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         );
         return expandSpacesMentions(resolved);
       } catch (err) {
-        log.warn(`pending-response mention resolution failed — posting raw: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`pending-response mention resolution failed — posting raw: ${errMsg(err)}`);
         return text;
       }
     };
@@ -4658,7 +6686,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const merged = mergeInvocationsById(...lists);
       if (merged.length > 0) citationInvocations = merged;
     } catch (e) {
-      log.warn(`Failed to assemble citation invocations for baking: ${e instanceof Error ? e.message : String(e)}`);
+      log.warn(`Failed to assemble citation invocations for baking: ${errMsg(e)}`);
     }
 
     // Build the /chat/postMessage `metadata` for a bot reply, baking in the
@@ -4666,8 +6694,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // buildThreadCitationMeta). Used by the copilot/pendingResponses posts
     // below, which deliver the answer via a different path than the normal
     // conversation branch (convMetadata) and would otherwise ship no citations.
+    const runOriginMeta: Record<string, unknown> = payload.localHarness
+      ? { clawRunOrigin: { kind: "local-harness", ...payload.localHarness } }
+      : {};
+
     const buildPostMetadata = (text: string): Record<string, unknown> => {
-      const meta: Record<string, unknown> = { contentFormat: "markdown" };
+      const meta: Record<string, unknown> = { contentFormat: "markdown", ...runOriginMeta };
       const tc = buildThreadCitationMeta(citationInvocations, text);
       if (tc) {
         meta["clawCitations"] = tc.clawCitations;
@@ -4756,7 +6788,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // only the files couldn't be delivered. Mirrors the normal result path.
           log.warn(
             `Copilot: attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
-            { error: err instanceof Error ? err.message : String(err) },
+            { error: errMsg(err) },
           );
           const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
@@ -4808,7 +6840,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           content: pendingReply,
           status: "completed",
           ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
-        }).catch((e) => log.warn("Failed to save pending-response assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+        }).catch((e) => log.warn("Failed to save pending-response assistant ChatMessage", { error: errMsg(e) }));
       }
 
       // Post pending write action approvals (e.g. spaces-memory-create) before returning
@@ -4822,39 +6854,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             continue;
           }
 
-          const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-          const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-            serverType: action["serverType"] as string,
-            tool: action["tool"] as string,
-            params: action["params"] as Record<string, unknown>,
-            userId: action["userId"] as string,
-            signature: action["signature"] as string,
-            agentSlug: ctx.agentSlug ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }), ctx.spacesAppId);
-
-          if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-            const memParams = action["params"] as Record<string, unknown>;
-            const memContent = memParams["content"] as string;
-            const memDocType = (memParams["docType"] as string) ?? "fact";
-            const form = new FormData();
-            const blob = new Blob([memContent], { type: "text/markdown" });
-            form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-            form.append("channelId", ctx.channelId);
-            form.append("conversationId", ctx.conversationId);
-            form.append("userId", ctx.spacesAppUserId);
-            form.append("flow", JSON.stringify(writeFlow));
-            await spacesAppFetchMultipart("/files/filesUpload", form, token);
-          } else {
-            await spacesAppFetch("/chat/postMessage", {
-              channelId: ctx.channelId,
-              conversationId: ctx.conversationId,
-              flow: writeFlow,
-              userId: ctx.spacesAppUserId,
-            }, token);
-          }
+          await postWriteApprovalAction({ action, ctx, token, targetValidation });
           copilotApprovalCardsSent += 1;
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
@@ -4888,6 +6888,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       );
       const convMetadata = {
         contentFormat: "markdown",
+        ...runOriginMeta,
         ...(threadCitationMeta
           ? {
               clawCitations: threadCitationMeta.clawCitations,
@@ -4951,7 +6952,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // unavailable, e.g. GCS unauthenticated.)
           log.warn(
             `Attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
-            { error: err instanceof Error ? err.message : String(err) },
+            { error: errMsg(err) },
           );
           const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
@@ -4985,14 +6986,20 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             log.info(`Updated placeholder ${ctx.progressMessageId} with final result for ${ctx.agentSlug}`);
             posted = true;
           } catch (err) {
-            log.warn("Failed to update placeholder with final result — falling back to fresh post", { error: err instanceof Error ? err.message : String(err) });
+            log.warn("Failed to update placeholder with final result — falling back to fresh post", { error: errMsg(err) });
           }
         }
         if (!posted) {
           log.info(`Posting result: channelId=${ctx.channelId} conversationId=${ctx.conversationId} resultLen=${prepared.text.length} userId=${ctx.spacesAppUserId}`);
           await spacesAppFetch("/chat/postMessage", {
             channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
+            // Channel-bound, thread-less runs (API/event-triggered) carry an
+            // empty conversationId. Sending "" explicitly fails Spaces'
+            // ChannelValidationSchema (conversationId is .min(1).optional() —
+            // "" is a string, not undefined, so it trips .min(1) → 400
+            // "Validation error"). Omit it when empty so Spaces treats the post
+            // as a top-level channel message and creates a fresh thread.
+            ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
             markdownText: prepared.text,
             userId: ctx.spacesAppUserId,
             metadata: convMetadata,
@@ -5073,23 +7080,29 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
                 return;
               }
             }
+            const refireUserId = refire["userId"];
+            if (typeof refireUserId !== "string" || !refireUserId) {
+              log.warn("[goal] refire missing userId; refusing to dispatch");
+              return;
+            }
             const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
             void fetch(runUrl, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
                 ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                "x-user-id": refireUserId,
               },
               body: JSON.stringify(refire),
             }).catch((err) => {
-              log.warn("[goal] refire failed", { error: err instanceof Error ? err.message : String(err) });
+              log.warn("[goal] refire failed", { error: errMsg(err) });
             });
             goalContinues = true;
             log.info(`[goal] continuing for conv ${ctx.conversationId}`);
           }
         } catch (err) {
           log.warn("[goal] relooper hook errored — leaving goal in current state", {
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -5158,36 +7171,33 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
                 flow,
                 userId: ctx.spacesAppUserId,
               }, token).catch((err) => {
-                log.warn("Failed to post promote-provider prompt (soft refusal)", { error: err instanceof Error ? err.message : String(err) });
+                log.warn("Failed to post promote-provider prompt (soft refusal)", { error: errMsg(err) });
               });
               log.info(`Posted promote-provider prompt for conv ${ctx.conversationId} (soft refusal, provider=${candidate})`);
             }
           }
         } catch (err) {
-          log.warn("promote-provider prompt (soft refusal) error (non-fatal)", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("promote-provider prompt (soft refusal) error (non-fatal)", { error: errMsg(err) });
         }
       }
     }
 
     // ── Post question buttons in thread ──
-    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; question: string; options: string[] }> }).pendingQuestions;
+    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; questions?: import("xyne-claw-shared").UserQuestion[]; question?: string; options?: string[] }> }).pendingQuestions;
     if (pendingQuestions?.length) {
+      let postedQuestionSets = 0;
       for (const q of pendingQuestions) {
-        const questionFlow = withSpacesAppId(buildUserQuestionFlow(q.question, q.options, {
-          questionId: q.questionId,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          userId: ctx.senderId,
-        }), ctx.spacesAppId);
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow: questionFlow,
-          userId: ctx.spacesAppUserId,
-        }, token);
+        const questions = q.questions?.length ? q.questions : q.question && q.options?.length ? [{ id: "q1", question: q.question, type: "single_choice" as const, options: q.options }] : undefined;
+        if (!questions) continue;
+        const posted = await renderUiWidget(sessionId, {
+          id: `question:${q.questionId}`,
+          type: "question",
+          operation: "create",
+          payload: { questionId: q.questionId, questions },
+        }, ctx.conversationId, ctx.agentSlug, ctx);
+        if (posted) postedQuestionSets += 1;
       }
-      log.info(`Posted ${pendingQuestions.length} question(s) in thread ${ctx.conversationId}`);
+      log.info(`Delivered ${postedQuestionSets} question set fallback(s) in thread ${ctx.conversationId}`);
     }
 
     // ── Post /goal suggestion FlowUI card in thread ──
@@ -5200,28 +7210,53 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // collapses to a confirmation line after tap via replaceFlowCardWithText.
     const goalSuggestion = payload.pendingGoalSuggestion;
     if (goalSuggestion && goalSuggestion.condition?.trim() && goalSuggestion.rationale?.trim()) {
-      // Newline-strip + length-cap defensively: matches parseSlashCommand's
-      // cap so manually-typed and button-fired goals behave identically.
-      const safeCondition = goalSuggestion.condition.replace(/\r?\n/g, " ").slice(0, 2_000);
+      const safeCondition = normalizeGoalCondition(goalSuggestion.condition);
       const safeRationale = goalSuggestion.rationale.replace(/\r?\n/g, " ").slice(0, 400);
-      const goalFlow = withSpacesAppId(buildGoalSuggestionFlow(safeRationale, {
-        condition: safeCondition,
-        agentSlug: ctx.agentSlug ?? "",
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        userId: ctx.senderId,
-      }), ctx.spacesAppId);
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        flow: goalFlow,
-        userId: ctx.spacesAppUserId,
-      }, token).catch((err) => {
-        log.warn("Failed to post /goal suggestion FlowUI card", {
-          error: err instanceof Error ? err.message : String(err),
+      if (!safeCondition) {
+        log.warn("Skipped /goal suggestion with invalid condition");
+      } else {
+        const goalAgentSlug = ctx.agentSlug ?? "";
+        const goalSpacesAppId = ctx.spacesAppId ?? "";
+        const actionNonce = crypto.randomUUID();
+        const issuedAt = Date.now();
+        const { signAction } = await import("./mcp.js");
+        const goalActionPayload = {
+          actionType: "start-goal",
+          actionId: "start-goal",
+          condition: safeCondition,
+          agentSlug: goalAgentSlug,
+          spacesAppId: goalSpacesAppId,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+          actionNonce,
+          issuedAt,
+        };
+        const goalFlow = withSpacesAppId(buildGoalSuggestionFlow(safeRationale, {
+          condition: safeCondition,
+          agentSlug: goalAgentSlug,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+        }), goalSpacesAppId);
+        goalFlow.data = {
+          ...(goalFlow.data ?? {}),
+          actionNonce,
+          issuedAt,
+          signature: signAction(goalActionPayload),
+        };
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow: goalFlow,
+          userId: ctx.spacesAppUserId,
+        }, token).catch((err) => {
+          log.warn("Failed to post /goal suggestion FlowUI card", {
+            error: errMsg(err),
+          });
         });
-      });
-      log.info(`Posted /goal suggestion in thread ${ctx.conversationId}`);
+        log.info(`Posted /goal suggestion in thread ${ctx.conversationId}`);
+      }
     }
 
     // ── Send approval DMs for pending write actions (HITL) ──
@@ -5229,46 +7264,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (pendingActionsPayload?.length) {
       let approvalCardsSent = 0;
       for (const action of pendingActionsPayload) {
-        const targetValidation = await pendingActionTargetValidation(action, ctx, token);
+        // Reuse the validation computed for the footer above so the message and
+        // the card can never disagree; fall back only if it wasn't classified
+        // (e.g. a non-completed status path that skipped the footer).
+        const targetValidation =
+          pendingActionValidation.get(action) ?? (await pendingActionTargetValidation(action, ctx, token));
         if (targetValidation.error) {
           log.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
           continue;
         }
 
-        const actionDesc = formatActionDescription(action["tool"] as string, action["params"] as Record<string, unknown>, targetValidation);
-
-        const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
-          serverType: action["serverType"] as string,
-          tool: action["tool"] as string,
-          params: action["params"] as Record<string, unknown>,
-          userId: action["userId"] as string,
-          signature: action["signature"] as string,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-        }), ctx.spacesAppId);
-
-        // Post in the same thread where the conversation happened
-        if (action["tool"] === "spaces-memory-create" && (action["params"] as Record<string, unknown>)?.["content"]) {
-          const memParams = action["params"] as Record<string, unknown>;
-          const memContent = memParams["content"] as string;
-          const memDocType = (memParams["docType"] as string) ?? "fact";
-          const form = new FormData();
-          const blob = new Blob([memContent], { type: "text/markdown" });
-          form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
-          form.append("channelId", ctx.channelId);
-          form.append("conversationId", ctx.conversationId);
-          form.append("userId", ctx.spacesAppUserId);
-          form.append("flow", JSON.stringify(writeFlow));
-          await spacesAppFetchMultipart("/files/filesUpload", form, token);
-        } else {
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            flow: writeFlow,
-            userId: ctx.spacesAppUserId,
-          }, token);
-        }
+        await postWriteApprovalAction({ action, ctx, token, targetValidation });
         approvalCardsSent += 1;
       }
 
@@ -5276,7 +7282,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
 
     // ── Agent chaining: channel-level workflow keyed by (channelId, rootAgentSlug) ──
-    if (ctx.agentSlug && ctx.agentOrgId) {
+    // Experiment/understanding epochs are exempt: they fire dozens of times per
+    // run and their result is a proof artifact, not a user turn to hand off. A
+    // chain here just makes the next agent (e.g. euler-reviewer) reject every
+    // epoch, once per epoch. The user drives the loop; the loop does not chain.
+    if (ctx.isExperiment) {
+      log.info(`Chain: skipped for experiment epoch (conversation=${ctx.conversationId})`);
+    } else if (ctx.agentSlug && ctx.agentOrgId) {
       try {
         const rootAgentSlug = ctx.rootAgentSlug ?? ctx.agentSlug;
         const binding = await agentChainWorkflowRepository.findActiveWorkflowForChannel(ctx.channelId, rootAgentSlug, ctx.senderId);
@@ -5390,6 +7402,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             chainDepth: currentDepth + 1,
             rootAgentSlug,
             workflowId: binding.workflowId,
+            triggerSource: "spaces",
             ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
           };
           await setSession(runBody.sessionId, targetContext);
@@ -5428,7 +7441,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           log.error(`Chain: failed to trigger ${targetAgentSlug}: ${runBody.error ?? "unknown"}`);
         }
       } catch (chainErr) {
-        log.error("Chain trigger failed (non-fatal):", { error: chainErr instanceof Error ? chainErr.message : String(chainErr) });
+        log.error("Chain trigger failed (non-fatal):", { error: errMsg(chainErr) });
       }
     }
   } catch (err) {
@@ -5438,7 +7451,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // updateMessage, or a token issue — and the relevant identifiers (which
     // workspace, which agent, which mode) were left implicit. Add them.
     log.error("Failed to send result", {
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
       stack: err instanceof Error ? err.stack?.split("\n").slice(0, 3).join(" | ") : undefined,
       sessionId,
       agentSlug: ctx?.agentSlug,
@@ -5460,13 +7473,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // Best-effort cleanup; the ingress key also has a TTL.
       }
     }
-    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !skipQueueDrain) {
+    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !experimentContinues && !skipQueueDrain) {
       await drainNextQueued(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
   }
 });
 
-// ── Plan card render (todo-write → kind:"plan" progress event) ──────────────
+// ── Plan card render (todo-write → ui-widget progress event) ────────────────
 // Post the live todo checklist once, then updateMessage it IN PLACE on every
 // subsequent todo-write. Renders are serialized per session so a burst of
 // todo-writes can't double-post the card before planMessageId is stored.
@@ -5488,6 +7501,21 @@ async function doRenderPlanCard(
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
   if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
 
+  // Per-agent opt-out (agent.config.postTodos === false): suppress the live
+  // plan/todo card in the Spaces thread for agents whose owner turned this off.
+  // Absent/true preserves the default (post), so existing agents are unchanged.
+  // This is the ONE choke point every plan ui-widget funnels through
+  // (the runtime todo-write tool, run.ts onPlan, consume-claw-stream), so a
+  // single guard here covers every emitter and every dispatch surface. Read
+  // fresh from the agent row (a PK lookup) — mirrors how memoryEnabled is
+  // consumed at the point of use, and lets a mid-run config change take effect.
+  if (ctx.agentId) {
+    const cfgRow = await prisma.agent
+      .findUnique({ where: { id: ctx.agentId }, select: { config: true } })
+      .catch(() => null);
+    if ((cfgRow?.config as { postTodos?: boolean } | null)?.postTodos === false) return;
+  }
+
   // Deterministic per-conversation plan facts, written BEFORE Turn 2 dispatched
   // (so they're present even for the first todo-write): whether the plan was
   // auto-approved (chip), and the whitelist of approved todo titles (reject
@@ -5508,6 +7536,15 @@ async function doRenderPlanCard(
     clog.info(
       `[plan] reject-filter: ${todos.length} → ${renderTodos.length} todos (dropped non-approved) conv=${ctx.conversationId}`,
     );
+  }
+
+  // Snapshot exactly what this card is about to show. Nothing else records the
+  // todo list, so this is what reconcileStalePlanTodos reads at run end to find
+  // a step the agent left `in_progress` and never closed.
+  const snapConversationId = ctx.conversationId ?? conversationId ?? "";
+  const snapAgentSlug = ctx.agentSlug ?? agentSlug ?? "";
+  if (snapConversationId && snapAgentSlug) {
+    await setPlanLastTodos(snapConversationId, snapAgentSlug, renderTodos).catch(() => {});
   }
 
   // Live todo cards are always in execution (auto mode). Pick the phase so the
@@ -5571,6 +7608,58 @@ function renderPlanCard(
     if (planRenderQueue.get(sessionId) === next) planRenderQueue.delete(sessionId);
   });
   return next;
+}
+
+/**
+ * Run-end reconciliation for the live plan card.
+ *
+ * A todo only leaves `in_progress` when the NEXT todo-write arrives. If the run
+ * ends without one — the model forgot to close the last step, or the run died
+ * mid-step — the card keeps rendering that row as `running`, so the user watches
+ * a spinner that can never resolve on a run that is definitively over.
+ *
+ * Those rows are reset to `pending`, NOT `completed`. The run ended without ever
+ * telling us the step succeeded, so marking it done would be inventing a result,
+ * and a false ✓ is the one outcome the user can't tell apart from a real one.
+ * `pending` also deliberately keeps the card out of the terminal 'done' phase
+ * (which needs every todo completed/failed), so the header stays "Approved"
+ * rather than claiming "Completed" over work that never finished.
+ *
+ * `failed` was the other candidate and is worse: it asserts the step broke,
+ * which is equally unverified, and it reads as an error the user should act on.
+ * Not-confirmed is the honest state, and `pending` is the only status that says
+ * that without also making a claim.
+ */
+async function reconcileStalePlanTodos(
+  sessionId: string,
+  conversationId: string | null,
+  agentSlug: string | null,
+): Promise<void> {
+  if (!conversationId || !agentSlug) return;
+  // Drain any todo-write render still queued for this session BEFORE reading the
+  // snapshot. Reading first would capture the previous render's list and then
+  // re-render it on top of the newer one, reverting a status the agent did
+  // legitimately write in its final tick.
+  await (planRenderQueue.get(sessionId) ?? Promise.resolve()).catch(() => {});
+  const last = await getPlanLastTodos(conversationId, agentSlug).catch(() => null);
+  if (!last?.length) return;
+  const stalled = last.filter((t) => t.status === "in_progress").length;
+  if (stalled === 0) {
+    // Card already settled itself — drop the snapshot so it can't be re-applied
+    // to a later run in this thread.
+    await clearPlanLastTodos(conversationId, agentSlug).catch(() => {});
+    return;
+  }
+  const reconciled: Todo[] = last.map((t) =>
+    t.status === "in_progress" ? { ...t, status: "pending" as const } : t,
+  );
+  clog.info(
+    `[plan] run ended with ${stalled} step(s) still in_progress — resetting to pending conv=${conversationId} agent=${agentSlug}`,
+  );
+  // Goes through the SAME serialized queue as every todo-write render, so it
+  // lands after any render still in flight instead of racing it.
+  await renderPlanCard(sessionId, reconciled, conversationId, agentSlug);
+  await clearPlanLastTodos(conversationId, agentSlug).catch(() => {});
 }
 
 // ── PR card render (create/merge PR subagent tool → kind:"pr" progress) ─────
@@ -5922,6 +8011,124 @@ router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) =
   });
 });
 
+// ── Unified tool-authored UI widgets ───────────────────────────────────────
+//
+// The claw runtime transports typed domain payloads only. This is the single
+// choke point that resolves Spaces routing, signs interactive actions, builds
+// Flow JSON, and chooses create vs update behavior. A future widget adds one
+// shared union variant and one branch here; HTTP/SSE plumbing stays unchanged.
+const UI_WIDGET_DELIVERY_TTL_SECONDS = 24 * 60 * 60;
+const UI_WIDGET_CLAIM_TTL_SECONDS = 30;
+
+function uiWidgetDeliveryKey(sessionId: string, widgetId: string): string {
+  return `ui-widget-delivery:${sessionId}:${widgetId}`;
+}
+
+async function acquireCreateWidget(sessionId: string, widgetId: string): Promise<string | null> {
+  const redis = redisService.getConnection();
+  const key = uiWidgetDeliveryKey(sessionId, widgetId);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const token = crypto.randomUUID();
+    const acquired = await redis.set(key, `posting:${token}`, "EX", UI_WIDGET_CLAIM_TTL_SECONDS, "NX");
+    if (acquired === "OK") return token;
+    const state = await redis.get(key);
+    if (state === "delivered") return null;
+    // A final-callback fallback can race the live event. Wait for the first
+    // renderer to commit instead of posting a duplicate card.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for widget delivery claim (${widgetId})`);
+}
+
+async function finishCreateWidget(sessionId: string, widgetId: string, token: string, delivered: boolean): Promise<void> {
+  const redis = redisService.getConnection();
+  const key = uiWidgetDeliveryKey(sessionId, widgetId);
+  const current = await redis.get(key);
+  if (current !== `posting:${token}`) return;
+  if (delivered) {
+    await redis.set(key, "delivered", "EX", UI_WIDGET_DELIVERY_TTL_SECONDS);
+  } else {
+    await redis.del(key);
+  }
+}
+
+async function renderUiWidget(
+  sessionId: string,
+  widget: UiWidget,
+  conversationId?: string | null,
+  agentSlug?: string | null,
+  knownContext?: SessionContext,
+): Promise<boolean> {
+  if (widget.type === "plan") {
+    await renderPlanCard(sessionId, widget.payload.todos, conversationId, agentSlug);
+    return true;
+  }
+
+  const claim = await acquireCreateWidget(sessionId, widget.id);
+  if (!claim) return false;
+  let delivered = false;
+  try {
+    const ctx = knownContext ?? await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
+    if (!ctx || !ctx.channelId || !ctx.appToken) return false;
+    // Static/live artifacts historically render only for conversation replies;
+    // clarification questions also support approval-mode agent runs.
+    if (widget.type !== "question" && ctx.responseMode !== "conversation") return false;
+    const log = createLogger("webhook/ui-widget", ctx.traceId ?? sessionId.slice(0, 8));
+    let flow;
+
+    switch (widget.type) {
+      case "question": {
+        const { questionId, questions } = widget.payload;
+        if (!questionId || questions.length === 0) return false;
+        const { signAction } = await import("./mcp.js");
+        flow = withSpacesAppId(buildUserQuestionFlow(questions, {
+          questionId,
+          agentSlug: ctx.agentSlug ?? "",
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+        }), ctx.spacesAppId);
+        flow.data = {
+          ...(flow.data ?? {}),
+          signature: signAction({
+            actionType: "user-answer",
+            questionId,
+            userId: ctx.senderId,
+            agentSlug: ctx.agentSlug ?? "",
+            spacesAppId: ctx.spacesAppId ?? "",
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+          }),
+        };
+        break;
+      }
+      case "code":
+        if (!widget.payload.code.trim()) return false;
+        flow = withSpacesAppId(buildCodeFlow(widget.payload.code, widget.payload.language), ctx.spacesAppId);
+        break;
+      case "diff":
+        if (!widget.payload.path.trim() || !widget.payload.patch.trim()) return false;
+        flow = withSpacesAppId(buildDiffFlow(widget.payload.path.trim(), widget.payload.patch), ctx.spacesAppId);
+        break;
+      case "chart":
+        flow = withSpacesAppId(buildChartFlow(widget.payload), ctx.spacesAppId);
+        break;
+    }
+
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, ctx.appToken);
+    delivered = true;
+    log.info(`Posted ${widget.type} UI widget ${widget.id} in thread ${ctx.conversationId}`);
+    return true;
+  } finally {
+    await finishCreateWidget(sessionId, widget.id, claim, delivered).catch(() => {});
+  }
+}
+
 // ── POST /webhook/progress — live tool-call update from xyne-claw ───────────
 //
 // xyne-claw POSTs here on every tool_execution_start (throttled to 10s).
@@ -5961,24 +8168,64 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       const ctx = sessionId ? await getSession(sessionId).catch(() => null) : null;
       if (ctx?.mentionedUserId) {
         await refreshSlot(conversationId, agentSlug, undefined, ctx.mentionedUserId).catch(() => {});
+        if (sessionId) await attachSlotSession(conversationId, agentSlug, sessionId, ctx.mentionedUserId).catch(() => {});
       }
     } else {
       await refreshSlot(conversationId, agentSlug).catch(() => {});
+      if (sessionId) await attachSlotSession(conversationId, agentSlug, sessionId).catch(() => {});
     }
   }
 
   if (!sessionId) return;
 
-  // Plan/todo card: claw's todo-write tool fires kind:"plan" with the full
-  // todo list. Render (first time) or update-in-place the live checklist in
-  // the thread. Serialized per session; best-effort — never blocks the ack.
-  if ((req.body as { kind?: string }).kind === "plan") {
-    // A todo-write proves the run is still active — keep the recovery TTL alive
-    // too (normal tool-progress events do this below; plan events return early).
+  const body = req.body as Record<string, unknown>;
+  let widget: UiWidget | null = isUiWidget(body["widget"]) ? body["widget"] : null;
+
+  // Rolling-deploy compatibility: accept the widget-specific progress shapes
+  // emitted by older claw pods and normalize them into the unified contract.
+  // New widget types never add another transport branch here.
+  if (!widget && body["kind"] === "plan" && Array.isArray(body["todos"])) {
+    widget = { id: "plan", type: "plan", operation: "upsert", payload: { todos: body["todos"] as Todo[] } };
+  } else if (!widget && body["kind"] === "code" && typeof body["code"] === "string") {
+    widget = {
+      id: `legacy-code:${crypto.randomUUID()}`,
+      type: "code",
+      operation: "create",
+      payload: { code: body["code"], ...(typeof body["language"] === "string" ? { language: body["language"] } : {}) },
+    };
+  } else if (!widget && body["kind"] === "diff" && typeof body["path"] === "string" && typeof body["patch"] === "string") {
+    widget = {
+      id: `legacy-diff:${crypto.randomUUID()}`,
+      type: "diff",
+      operation: "create",
+      payload: { path: body["path"], patch: body["patch"] },
+    };
+  } else if (!widget && body["kind"] === "chart") {
+    const caption = typeof body["caption"] === "string" && body["caption"].trim() ? body["caption"].trim() : undefined;
+    if ((body["type"] === "line" || body["type"] === "area") && Array.isArray(body["series"])) {
+      const series = body["series"].map((row) => row as { x: string; y: number; series?: string });
+      widget = {
+        id: `legacy-chart:${crypto.randomUUID()}`,
+        type: "chart",
+        operation: "create",
+        payload: { type: body["type"], series, ...(caption ? { caption } : {}) },
+      };
+    } else if ((body["type"] === "bar" || body["type"] === "pie" || body["type"] === "donut") && Array.isArray(body["points"])) {
+      const points = body["points"].map((point) => point as { label: string; value: number });
+      widget = {
+        id: `legacy-chart:${crypto.randomUUID()}`,
+        type: "chart",
+        operation: "create",
+        payload: { type: body["type"], points, ...(caption ? { caption } : {}) },
+      };
+    }
+  }
+
+  if (widget && !isUiWidget(widget)) widget = null;
+  if (widget) {
     void touchRunRecovery(sessionId).catch(() => {});
-    const todos = ((req.body as { todos?: unknown }).todos ?? []) as Todo[];
-    renderPlanCard(sessionId, todos, conversationId, agentSlug).catch((e) =>
-      clog.warn(`[webhook/progress] renderPlanCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
+    void renderUiWidget(sessionId, widget, conversationId, agentSlug).catch((err) =>
+      clog.warn(`[webhook/progress] ${widget?.type ?? "unknown"} widget failed for ${sessionId}:`, err instanceof Error ? err.message : err),
     );
     return;
   }
@@ -6027,6 +8274,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
               agentSlug: ctx.agentSlug,
               userId: ctx.senderId,
               toolInvocation,
+              ...(ctx.triggerSource ? { triggerSource: ctx.triggerSource } : {}),
               ts: Date.now(),
             });
           }
@@ -6056,7 +8304,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       }, ctx.appToken);
       log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId})`);
     } catch (err) {
-      log.warn("Failed to announce sandbox preview", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to announce sandbox preview", { error: errMsg(err) });
     }
     return;
   }
@@ -6085,6 +8333,19 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
   const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
 
+  // Spaces-side progress needs a real Spaces surface. Two cases produce
+  // thousands of guaranteed-4xx calls a day (prod 2026-08-11):
+  //  - digital-twin: the shared twin app user isn't a participant of most
+  //    channels its runs fire in → 403 "does not have access" per tool step.
+  //    Twin activity has its own draft/DM surface; it never needs the spinner.
+  //  - claw-only conversations (agent-chat/v3): ctx.conversationId is a
+  //    claw-auth UUID with no Spaces row → 404 "Conversation not found".
+  //    Spaces-origin runs always carry the channelId from the webhook payload,
+  //    so a missing channelId marks a conversation Spaces can't resolve.
+  // The v3 live tap above already delivered the label to claw's own UI.
+  const spacesProgressDeliverable = ctx.agentSlug !== "digital-twin" && Boolean(ctx.channelId);
+  if (!spacesProgressDeliverable) return;
+
   try {
     if (USE_EPHEMERAL_PROGRESS) {
       await spacesAppFetch("/chat/agentProgress", {
@@ -6106,14 +8367,13 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     }
     // else: placeholder mode with no placeholderId (initial post failed) — silently skip
   } catch (err) {
-    log.warn("Failed to publish agent progress signal", { error: err instanceof Error ? err.message : String(err) });
+    log.warn("Failed to publish agent progress signal", { error: errMsg(err) });
   }
 });
 
 // Register the agent-specific webhook route (AFTER /result to avoid param catch).
 // `verifySpacesSignature` HMAC-checks the body using the agent's per-app
-// signing secret stored in agents.signingSecret. It fails closed by default;
-// SPACES_WEBHOOK_VERIFY_MODE=warn is only an explicit rollout escape hatch.
+// signing secret stored in agents.signingSecret and always fails closed.
 //
 // The bare-path `/webhook` (no agent slug) used to fall through to a
 // default-agent dispatch — verified dead in 7d of prod logs (0 hits across
@@ -6142,7 +8402,7 @@ async function proxyFlowAction(req: Request, res: Response, headers: Record<stri
       body: rawBody ?? JSON.stringify(req.body),
     })) as unknown as Response;
   } catch (err) {
-    clog.error(`[webhook/flow-action-proxy] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    clog.error(`[webhook/flow-action-proxy] fetch failed: ${errMsg(err)}`);
     res.status(502).json({ type: "error", message: "flow-action proxy failed" });
     return;
   }
@@ -6159,11 +8419,22 @@ router.post("/app/:spacesAppId", async (req: Request, res: Response): Promise<vo
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
+  // TEMPORARY (2026-08-10): s2s-authenticated callers that don't sign yet
+  // (SDLC surface's ClawAgentService) are let through with a loud warning
+  // instead of a 401. Scope is deliberately narrow: the s2s key must match
+  // AND the signature header must be entirely absent — a present-but-invalid
+  // signature still rejects, and non-s2s callers are unchanged. Remove once
+  // every s2s caller signs (the SDLC team is adding X-Xyne-Signature).
+  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
+  if (unsignedS2S) {
+    clog.warn(`[webhook/app] UNSIGNED s2s request allowed spacesAppId=${spacesAppId} — caller must add X-Xyne-Signature; this bypass is temporary`);
+  } else {
+    let verified = false;
+    await verifySpacesSignature(req, res, () => {
+      verified = true;
+    });
+    if (!verified || res.headersSent) return;
+  }
 
   if (isAutomationRequest) {
     const agent = await agentRepository.findBySpacesAppId(spacesAppId);
@@ -6194,11 +8465,19 @@ router.post("/:agentSlug", async (req: Request, res: Response): Promise<void> =>
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
+  // TEMPORARY (2026-08-10): same unsigned-s2s bypass as /app/:spacesAppId —
+  // warn and allow ONLY when the s2s key matches and the signature header is
+  // entirely absent. Remove once every s2s caller signs.
+  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
+  if (unsignedS2S) {
+    clog.warn(`[webhook] UNSIGNED s2s request allowed agentSlug=${agentSlug} — caller must add X-Xyne-Signature; this bypass is temporary`);
+  } else {
+    let verified = false;
+    await verifySpacesSignature(req, res, () => {
+      verified = true;
+    });
+    if (!verified || res.headersSent) return;
+  }
 
   if (isAutomationRequest) {
     await handleAutomationWebhook(req, res, agentSlug);

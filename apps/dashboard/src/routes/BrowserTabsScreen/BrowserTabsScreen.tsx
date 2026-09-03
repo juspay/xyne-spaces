@@ -16,6 +16,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
@@ -24,6 +25,8 @@ import { useActivityTracking } from '../../hooks/useActivityTracking';
 import { logger, Event } from '../../utils/logger';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
+import { BrowserHintBar } from '../../components/BrowserPanel/BrowserHintBar';
+import { useLinkOpenHintDismissed } from '../../hooks/useLinkOpenHintDismissed';
 import { usePlatform } from '../../hooks/usePlatform';
 
 // Define WebviewTag interface locally since Electron types may not be available in renderer
@@ -168,7 +171,11 @@ function WebviewTab({
           new CustomEvent('xyne-ai-browser-context-ready', { detail: contextPill }),
         );
       } catch (error) {
-        console.error('[BrowserTabsScreen] Failed to store browser context:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[BrowserTabsScreen] Failed to store browser context:'),
+          error: error,
+        });
       }
     };
 
@@ -250,7 +257,8 @@ export function BrowserTabsScreen({
   const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
   const findInputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
-  const { isMobile } = usePlatform();
+  const { isMobile, isMac } = usePlatform();
+  const { hintDismissed, dismissHint } = useLinkOpenHintDismissed();
   const { track } = useActivityTracking();
   const navigate = useNavigate();
 
@@ -827,6 +835,22 @@ export function BrowserTabsScreen({
           </form>
         </div>
       )}
+
+      <AnimatePresence>
+        {isElectronApp() && !hintDismissed && (
+          <BrowserHintBar
+            key='browser-hint-bar'
+            isMac={isMac}
+            onOpenPreferences={() => {
+              dismissHint();
+              window.dispatchEvent(
+                new CustomEvent('xyne-open-preferences', { detail: { section: 'messaging' } }),
+              );
+            }}
+            onDismiss={dismissHint}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Browser Content Area - webview elements render as real DOM */}
       <div className='flex-1 bg-muted relative overflow-hidden'>

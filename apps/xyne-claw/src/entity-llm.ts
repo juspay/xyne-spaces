@@ -22,9 +22,36 @@ const log = createLogger("entity-llm");
 // Own model knob: entity extraction deliberately runs a different (cheaper,
 // non-reasoning) model than the agent loop, so this is not LITELLM.model.
 const ENTITY_MODEL = process.env["ENTITY_EXTRACTION_MODEL"] ?? "glm-latest";
+/**
+ * Per-attempt budget for one LiteLLM call.
+ *
+ * Deliberately well under claw-auth's transport timeout. A real 60k-char batch
+ * completes in ~15s; 120s is generous headroom, and anything beyond it is a
+ * stuck request, not a slow one — waiting the old 300s bought nothing and cost
+ * the caller its entire budget.
+ */
 const ENTITY_TIMEOUT_MS = Number(
-  process.env["ENTITY_EXTRACTION_TIMEOUT_MS"] ?? 300_000,
+  process.env["ENTITY_EXTRACTION_TIMEOUT_MS"] ?? 120_000,
 );
+
+/**
+ * Retries AFTER the first attempt. One, not the client default of three.
+ *
+ * Retrying past the point the caller gave up is not resilience, it is damage:
+ * the reply goes nowhere, and at ENTITY_LLM_MAX_CONCURRENT=1 the dead request
+ * holds the only slot while every live one queues behind it. Three retries at
+ * the old 300s timeout meant a single stuck call blocked entity extraction for
+ * ~21 minutes.
+ *
+ * The whole budget — attempts plus backoff — must stay under the caller's
+ * timeout, which ENTITY_TOTAL_BUDGET_MS asserts below.
+ */
+const ENTITY_MAX_RETRIES = Number(process.env["ENTITY_LLM_MAX_RETRIES"] ?? 1);
+
+/** Worst case: every attempt burns its full timeout, plus the 5s first backoff. */
+const ENTITY_TOTAL_BUDGET_MS =
+  ENTITY_TIMEOUT_MS * (ENTITY_MAX_RETRIES + 1) + 5_000 * ENTITY_MAX_RETRIES;
+
 
 /**
  * Entity extraction is background work; a live agent turn is not. Even inside
@@ -43,13 +70,55 @@ const ENTITY_MAX_CONCURRENT = Math.max(
   Number(process.env["ENTITY_LLM_MAX_CONCURRENT"] ?? 1),
 );
 
+/**
+ * How long a request may wait for the single entity slot before giving up.
+ *
+ * This bound is the difference between a slow run and a dead one. The wait
+ * happens BEFORE the LiteLLM call, so an unbounded queue means the caller's
+ * socket times out while its request has not even started — claw-auth sees
+ * `TypeError: fetch failed` with no status and no upstream error to report.
+ *
+ * Worse, it is self-sustaining at concurrency 1: one slow call parks the slot,
+ * every queued request ages past the caller's timeout, and the backlog outlives
+ * the congestion that caused it. Refusing fast turns that into a 503 the caller
+ * can log, count and retry sanely.
+ */
+const ENTITY_SLOT_WAIT_MS = Number(process.env["ENTITY_LLM_SLOT_WAIT_MS"] ?? 45_000);
+
+// Surfaced at boot so a bad override is caught by reading one log line, rather
+// than by watching a run die 300s at a time. Declared here, below every value
+// it reads, since these are const bindings and not hoisted.
+log.info(
+  `[entity-llm] model=${ENTITY_MODEL} attemptTimeout=${ENTITY_TIMEOUT_MS}ms ` +
+    `retries=${ENTITY_MAX_RETRIES} worstCase=${Math.round(ENTITY_TOTAL_BUDGET_MS / 1000)}s ` +
+    `slotWait=${Math.round(ENTITY_SLOT_WAIT_MS / 1000)}s concurrency=${ENTITY_MAX_CONCURRENT}`,
+);
+
 let entityActive = 0;
 const entityWaiters: Array<() => void> = [];
 
 async function withEntitySlot<T>(fn: () => Promise<T>): Promise<T> {
   if (entityActive >= ENTITY_MAX_CONCURRENT) {
-    await new Promise<void>((resolve) => entityWaiters.push(resolve));
+    let waiter!: () => void;
+    const admitted = await new Promise<boolean>((resolve) => {
+      waiter = () => resolve(true);
+      entityWaiters.push(waiter);
+      setTimeout(() => resolve(false), ENTITY_SLOT_WAIT_MS);
+    });
+
+    if (!admitted) {
+      // Drop our own waiter so a later release does not hand the slot to a
+      // request that has already been refused.
+      const index = entityWaiters.indexOf(waiter);
+      if (index !== -1) entityWaiters.splice(index, 1);
+      throw new EntityLlmError(
+        `Entity LLM slot busy for ${Math.round(ENTITY_SLOT_WAIT_MS / 1000)}s ` +
+          `(${entityActive}/${ENTITY_MAX_CONCURRENT} in use, ${entityWaiters.length} queued)`,
+        503,
+      );
+    }
   }
+
   entityActive += 1;
   try {
     return await fn();
@@ -119,6 +188,7 @@ export async function completeEntityPrompt(
         },
         {
           timeoutMs: ENTITY_TIMEOUT_MS,
+          maxRetries: ENTITY_MAX_RETRIES,
           label: `entity-llm${purpose ? `:${purpose}` : ""}`,
         },
       ),

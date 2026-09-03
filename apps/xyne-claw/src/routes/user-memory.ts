@@ -100,11 +100,16 @@ userMemoryRouter.post("/internal/user-memory/synthesize-file", validateS2SKey, a
       fileName: body.fileName,
       description: typeof body.description === "string" ? body.description : "",
       facts: body.facts.filter((f): f is string => typeof f === "string"),
-      maxChars: typeof body.maxChars === "number" ? body.maxChars : 10_000,
+      maxChars: typeof body.maxChars === "number" ? body.maxChars : 20_000,
       ...(typeof body.currentContent === "string" ? { currentContent: body.currentContent } : {}),
       ...(body.preserveEdits === true ? { preserveEdits: true } : {}),
     });
-    res.json({ success: !!result.content, content: result.content, ...(result.error ? { error: result.error } : {}) });
+    res.json({
+      success: !!result.content,
+      content: result.content,
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.trace ? { trace: result.trace } : {}),
+    });
   } catch (err) {
     log.error(`[user-memory-route] synthesize-file failed: ${err instanceof Error ? err.message : String(err)}`);
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Internal error" });

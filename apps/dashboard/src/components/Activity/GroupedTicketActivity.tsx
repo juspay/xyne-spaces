@@ -33,6 +33,11 @@ const ACTION_LABELS: Record<string, string> = {
   ticket_pr_declined: 'PR',
   ticket_pr_reviewer_assigned: 'PR reviewer',
   ticket_qa_assigned: 'QA',
+  ticket_release_started: 'release',
+  ticket_release_completed: 'release',
+  ticket_release_cancelled: 'release',
+  ticket_release_paused: 'release',
+  ticket_release_planning: 'release',
 };
 
 function getActionLabel(actorAction: string): string {

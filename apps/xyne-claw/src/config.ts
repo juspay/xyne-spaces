@@ -43,6 +43,17 @@ const litellmFastModel = process.env["LITELLM_FAST_MODEL"]?.trim() || litellmMod
 export const LITELLM = {
   url: process.env["LITELLM_URL"] ?? "http://localhost:4000",
   apiKey: process.env["LITELLM_API_KEY"] ?? "",
+  // Separate low-priority key for non-interactive load: automation/scheduled
+  // agent runs and background curators. Keeps batch traffic from saturating
+  // the interactive key's max_parallel_requests pool (prod incident 2026-07-29:
+  // email-followup-classifier + curators pinned the shared key at 50/50 slots,
+  // queueing human mentions for minutes). Falls back to the main key so the
+  // split can deploy before the second key is provisioned.
+  automationApiKey: process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? ""),
+  // Optional cheaper/faster model for automation/scheduled runs. Falls back to
+  // the main model, and a per-agent modelSettings.model still wins over this —
+  // it only replaces the PLATFORM DEFAULT for batch traffic.
+  automationModel: process.env["LITELLM_AUTOMATION_MODEL"]?.trim() || litellmModel,
   model: litellmModel,
   // Cheap-and-fast model used by judge/boss roles (chain-judge, goal-judge).
   // Boss decisions are short structured calls; running them on the same big

@@ -1,24 +1,24 @@
-import { Phone, Video, PhoneOff, X } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useEffect, useRef, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuth } from '../../../hooks/useAuth';
 import { callActor } from '../../../machines/callMachine';
 import { roomActor } from '../../../machines/roomMachine';
-import { CallOrigin, CallParticipant, CallType, Channel } from '@xyne/shared';
+import { CallParticipant, Channel } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
-import { InvitationResponse, ChannelScopeType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-
-import { Button, ButtonType, ButtonSize, ButtonSubType } from '@juspay/blend-design-system';
-import Avatar from '../../ui/Avatar/Avatar';
 import { useUsers } from '../../../hooks/useUsers';
-import { cn } from '../../../utils/classNames';
-import { Dialog } from '../../ui/Dialog/Dialog';
+import { IncomingCallCard } from '../IncomingCall/IncomingCallCard';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import {
+  buildIncomingCallViewModel,
+  isRingableCall,
+  type IncomingCallRow,
+} from '../IncomingCall/IncomingCallCard.utils';
+import type { IncomingCallViewModel } from '../IncomingCall/IncomingCallCard.types';
 
 type CallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -32,6 +32,7 @@ export function IncomingCallModal(): React.ReactElement | null {
   const incomingCallQueue = useSelector(callActor, snapshot => snapshot.context.incomingCallQueue);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastViewModelRef = useRef<IncomingCallViewModel | null>(null);
 
   // Get active calls from roomActor context and filter for incoming calls (where user is invited)
   const allActiveCalls = useSelector(roomActor, state => state.context.activeCalls);
@@ -62,46 +63,24 @@ export function IncomingCallModal(): React.ReactElement | null {
     return map;
   }, [allChannels]);
 
-  // Filter for calls where user has 'INVITED' status
-  // Exclude calls from DEFAULT scope channels (channel calls should not show invitation modal)
-  // Also exclude the call active in the room (if we just joined it via notification)
+  // Lookup shared by the dispatcher below and by the view-model builder.
+  const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
+
+  // Which active calls should ring this user. The rules themselves live in
+  // isRingableCall so that loosening them is a change in exactly one place —
+  // the card renders correctly for calls they currently reject.
   const incomingCalls = allActiveCalls?.filter(call => {
-    // If we are already in this call (connecting/connected), don't show incoming modal for it
-    if (currentCallId && call.externalId === currentCallId) {
-      return false;
-    }
-
-    // If this call was joined via native VoIP notification (cold start), exclude it
-    // This prevents the modal from showing before Zero syncs the participant status
-    if (nativeActiveCallId && call.externalId === nativeActiveCallId) {
-      return false;
-    }
-
     const callWithRelations = call as CallWithRelations;
-    const channel = call.channelId ? channelMap.get(call.channelId) : null;
-
-    // Filter out DEFAULT scope channel calls
-    if (
-      channel?.scopeType === ChannelScopeType.DEFAULT &&
-      callWithRelations.callOrigin === CallOrigin.CHANNEL
-    ) {
-      return false;
-    }
-
-    // Don't show notification for scheduled calls that haven't started yet
-    if (call.startsAt) {
-      const startTime = new Date(call.startsAt).getTime();
-      const now = Date.now();
-      if (now < startTime) {
-        return false;
-      }
-    }
-
-    const userParticipant = callWithRelations.participants?.find(
-      (p: CallParticipant) => p.userId === user?.id,
-    );
-    // Exclude if user has already left the call (leftAt !== null) or if not invited
-    return userParticipant?.response === InvitationResponse.INVITED;
+    return isRingableCall({
+      call: callWithRelations as unknown as IncomingCallRow,
+      channel: call.channelId ? channelMap.get(call.channelId) : undefined,
+      myParticipant: callWithRelations.participants?.find(
+        (p: CallParticipant) => p.userId === user?.id,
+      ),
+      currentCallId,
+      nativeActiveCallId,
+      now: Date.now(),
+    });
   });
 
   useEffect(() => {
@@ -115,21 +94,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       // Only process incoming calls when in stable states (not during transitions)
       if (!canShowIncomingCalls) return;
 
-      // Get current active call IDs from database
-      const activeCallIds = new Set(incomingCalls?.map(call => String(call.externalId)) || []);
-
-      // Check if current ringing call is still active in database
-      const currentCall = incomingCallQueue[0];
-      if (currentCall && !activeCallIds.has(currentCall.callId)) {
-        // Call was ended/cancelled by initiator, auto-reject it
-        callActor.send({ type: 'REJECT' });
-        return;
-      }
-
       if (!incomingCalls?.length) return;
-
-      // Build a quick lookup for users by ID from XState store
-      const usersById = new Map(allUsers.map(u => [u.id, u]));
 
       incomingCalls.forEach(call => {
         const callId = String(call.externalId);
@@ -153,7 +118,6 @@ export function IncomingCallModal(): React.ReactElement | null {
             picture: inviterUser?.picture ?? '',
           },
           callType: call.callType,
-          ...(callWithRelations.title && { title: callWithRelations.title }),
         };
 
         callActor.send({
@@ -169,6 +133,27 @@ export function IncomingCallModal(): React.ReactElement | null {
       }
     };
   }, [incomingCalls, incomingCallQueue, canShowIncomingCalls, user?.id]);
+
+  // The caller hanging up removes the call from activeCalls. Tear the modal
+  // down on that change rather than inside the debounce below — half a second
+  // of a card for a call that has already ended reads as an unresponsive UI,
+  // and the debounce exists to settle calls *arriving*, not leaving.
+  const ringingCallId = incomingCallQueue[0]?.callId;
+  const ringableIdsKey = (incomingCalls ?? [])
+    .map(call => String(call.externalId))
+    .sort()
+    .join(',');
+
+  const hasLoadedActiveCalls = allActiveCalls !== undefined;
+
+  useEffect(() => {
+    if (!ringingCallId) return;
+    // An empty list because the query has not loaded is not the same as a call
+    // that ended — concluding otherwise would hang up on a live caller.
+    if (!hasLoadedActiveCalls) return;
+    if (ringableIdsKey.split(',').includes(ringingCallId)) return;
+    callActor.send({ type: 'REJECT' });
+  }, [ringingCallId, ringableIdsKey, hasLoadedActiveCalls]);
 
   // Initialize audio once
   useEffect(() => {
@@ -303,8 +288,10 @@ export function IncomingCallModal(): React.ReactElement | null {
         if (!callInQueue) return;
 
         if (data.action === 'accept') {
+          globalClickTracker.trackManualEvent('CALLS', 'ACCEPT_INCOMING_CALL_NATIVE');
           handleAcceptCall(data.callId);
         } else if (data.action === 'reject') {
+          globalClickTracker.trackManualEvent('CALLS', 'REJECT_INCOMING_CALL_NATIVE');
           handleRejectCall(data.callId);
         }
       },
@@ -321,190 +308,52 @@ export function IncomingCallModal(): React.ReactElement | null {
 
   // Show incoming call modal when in ringing state
   if (isRinging && incomingCallData) {
+    // Read the live row rather than the queued snapshot: the roster changes as
+    // people join or decline, and an ad-hoc thread call's title is written by
+    // an LLM a beat *after* the phone starts ringing. Both reach the card on
+    // their own through Zero.
     const latestCallData = allActiveCalls?.find(
       call => call.externalId === incomingCallData.callId,
-    );
-    const title = latestCallData?.title || incomingCallData.title;
-    const metadata = latestCallData?.metadata as { conversationId?: string } | undefined;
-    const conversationId = metadata?.conversationId;
-    const callUpdatesChannelId = latestCallData?.callUpdatesChannel ?? latestCallData?.channelId;
-    const callOrigin = (latestCallData as CallWithRelations)?.callOrigin;
-    const notificationWithTitle = {
-      ...incomingCallData,
-      ...(title && { title }),
-    };
+    ) as CallWithRelations | undefined;
+
+    const built = buildIncomingCallViewModel({
+      callId: incomingCallData.callId,
+      call: latestCallData as unknown as IncomingCallRow | undefined,
+      caller: incomingCallData.caller,
+      channelMap,
+      usersById,
+      currentUserId: user?.id,
+      isInActiveCall,
+    });
+
+    // Two things happen in the beat between the caller hanging up and this
+    // modal unmounting: the call leaves activeCalls, and every participant row
+    // picks up a `leftAt`. Rebuilt from either, a group call collapses into a
+    // lone pinging avatar — so the card is pinned to the last good version of
+    // itself, and a stack is never allowed to become a solo mid-ring.
+    const previous =
+      lastViewModelRef.current?.callId === incomingCallData.callId
+        ? lastViewModelRef.current
+        : null;
+
+    let vm = built;
+    if (previous) {
+      if (!latestCallData) {
+        vm = { ...previous, isInActiveCall };
+      } else if (previous.identity.mode === 'stack' && built.identity.mode === 'solo') {
+        vm = { ...built, identity: previous.identity };
+      }
+    }
+    lastViewModelRef.current = vm;
 
     return (
-      <CallNotificationUI
-        notification={notificationWithTitle}
-        {...(conversationId && { conversationId })}
-        {...(callUpdatesChannelId && { channelId: callUpdatesChannelId })}
-        {...(callOrigin && { callOrigin })}
+      <IncomingCallCard
+        vm={vm}
         onAccept={() => handleAcceptCall(incomingCallData.callId)}
         onReject={() => handleRejectCall(incomingCallData.callId)}
-        isInActiveCall={isInActiveCall}
       />
     );
   }
 
   return null;
-}
-
-interface CallNotificationUIProps {
-  notification: {
-    callId: string;
-    caller: {
-      id: string;
-      name: string;
-      email: string;
-      picture?: string;
-    };
-    callType: CallType;
-    title?: string;
-  };
-  conversationId?: string;
-  channelId?: string;
-  callOrigin?: CallOrigin;
-  queuedCallsCount?: number; // Number of calls in queue
-  isInActiveCall?: boolean; // Whether user is currently in an active call
-  onAccept: () => void;
-  onReject: () => void;
-}
-
-function CallNotificationUI({
-  notification,
-  conversationId,
-  channelId,
-  callOrigin,
-  queuedCallsCount = 0,
-  isInActiveCall = false,
-  onAccept,
-  onReject,
-}: CallNotificationUIProps): React.ReactElement {
-  const { caller, callType } = notification;
-  const navigate = useNavigate();
-  const hasTitle = !!(notification.title && notification.title.trim());
-
-  // Handle title click - navigate to conversation for thread calls
-  const handleTitleClick = useCallback(() => {
-    if (conversationId && channelId && callOrigin === CallOrigin.CONVERSATION) {
-      onReject();
-      void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`);
-    }
-  }, [conversationId, channelId, callOrigin, navigate, onReject]);
-
-  return (
-    <Dialog
-      open={true}
-      onOpenChange={open => !open && onReject()}
-      title={`Incoming ${callType === CallType.VIDEO ? 'Video' : 'Audio'} Call`}
-    >
-      <div className='space-y-6' data-testid='incoming-call-modal'>
-        {/* Visible Title Header */}
-        <div className='relative px-6 pt-6 pb-4 border-b border-border dark:border-border'>
-          <h2 className='text-lg font-semibold text-foreground dark:text-foreground text-left'>
-            Incoming {callType === CallType.VIDEO ? 'Video' : 'Audio'} Call
-          </h2>
-          {/* Close button */}
-          <button
-            type='button'
-            onClick={onReject}
-            className='absolute right-6 top-6 rounded-sm transition-opacity hover:opacity-70 focus:outline-none disabled:pointer-events-none'
-            aria-label='Close'
-            data-track-category='CALLS'
-            data-track-name='incoming-call-modal-close'
-          >
-            <X className='h-4 w-4 text-muted-foreground dark:text-muted-foreground' />
-          </button>
-        </div>
-
-        <div className='px-6 pb-6 space-y-6 text-center'>
-          {isInActiveCall && (
-            <div className='bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 px-3 py-2 rounded-md text-sm font-medium'>
-              ⚠️ This will end your current call
-            </div>
-          )}
-
-          {queuedCallsCount > 0 && (
-            <div className='bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 px-3 py-2 rounded-md text-sm'>
-              {queuedCallsCount === 1
-                ? 'You have another incoming call'
-                : `You have ${queuedCallsCount} incoming calls waiting`}
-            </div>
-          )}
-
-          {/* Call Title */}
-          <div className='min-h-[1.75rem] flex items-center justify-center'>
-            {hasTitle && notification.title && (
-              <button
-                type='button'
-                className={cn(
-                  'text-lg font-medium text-foreground dark:text-foreground bg-transparent border-none p-0',
-                  conversationId && channelId ? 'cursor-pointer hover:underline' : 'cursor-default',
-                )}
-                onClick={handleTitleClick}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') handleTitleClick();
-                }}
-                data-track-category='CALLS_NOTIFICATIONS'
-                data-track-name='CALL_TITLE_CLICK'
-              >
-                {notification.title}
-              </button>
-            )}
-          </div>
-
-          {/* Caller Avatar */}
-          <div className='flex justify-center'>
-            <Avatar userId={caller.id} size='lg' rounded showActiveStatus={false} />
-          </div>
-
-          {/* Call Info */}
-          <div className='space-y-2'>
-            <p className='text-lg font-medium text-foreground dark:text-foreground'>
-              {caller.name}
-            </p>
-            <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
-              {caller.email}
-            </p>
-          </div>
-
-          {/* Call Type Icon */}
-          <div className='flex justify-center'>
-            {callType === CallType.VIDEO ? (
-              <Video className='h-8 w-8 text-blue-500 dark:text-blue-400 animate-pulse' />
-            ) : (
-              <Phone className='h-8 w-8 text-green-500 dark:text-green-400 animate-pulse' />
-            )}
-          </div>
-
-          {/* Action Buttons */}
-          <div className='flex gap-4 justify-center'>
-            <Button
-              onClick={onReject}
-              buttonType={ButtonType.DANGER}
-              size={ButtonSize.LARGE}
-              subType={ButtonSubType.ICON_ONLY}
-              leadingIcon={<PhoneOff className='h-6 w-6' />}
-              data-track-category='CALLS_NOTIFICATIONS'
-              data-track-name='REJECT_INCOMING_CALL'
-              data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
-            />
-
-            <Button
-              onClick={onAccept}
-              buttonType={ButtonType.SUCCESS}
-              size={ButtonSize.LARGE}
-              text={isInActiveCall ? 'Switch Call' : ''}
-              subType={isInActiveCall ? ButtonSubType.DEFAULT : ButtonSubType.ICON_ONLY}
-              leadingIcon={<Phone className='h-6 w-6' />}
-              data-track-category='CALLS_NOTIFICATIONS'
-              data-track-name='ACCEPT_INCOMING_CALL'
-              data-track-metadata={JSON.stringify({ isInActiveCall, callId: notification.callId })}
-            />
-          </div>
-        </div>
-      </div>
-    </Dialog>
-  );
 }

@@ -1,30 +1,44 @@
-import { useLayoutEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type DependencyList,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { cn } from '@/utils/classNames';
 
 export const PROSE_BOX_HEIGHT = 298;
 
-interface ProseBoxProps {
-  children: string;
+interface ScrollFadeBoxProps {
+  children: ReactNode;
   height?: number;
   className?: string;
+  /** Re-measures when the content behind these changes. */
+  resetKeys?: DependencyList;
 }
 
-export function ProseBox({
+/**
+ * Fixed-height scroll area with a bottom fade that only appears while there is
+ * more to scroll — so a short body doesn't sit under a pointless gradient.
+ */
+export function ScrollFadeBox({
   children,
   height = PROSE_BOX_HEIGHT,
   className,
-}: ProseBoxProps): ReactElement {
+  resetKeys = [],
+}: ScrollFadeBoxProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showFade, setShowFade] = useState(false);
 
   const sync = (): void => {
     const el = scrollRef.current;
     if (!el) return;
-    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowFade(remaining > 1);
+    setShowFade(el.scrollHeight - el.scrollTop - el.clientHeight > 1);
   };
 
-  useLayoutEffect(sync, [children, height]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(sync, [height, ...resetKeys]);
 
   return (
     <div className='relative w-full' style={{ height }}>
@@ -32,13 +46,11 @@ export function ProseBox({
         ref={scrollRef}
         onScroll={sync}
         className={cn(
-          'h-full w-full overflow-y-auto rounded-2xl border border-border bg-card p-4',
+          'h-full w-full overflow-y-auto rounded-2xl border-[0.8px] border-border bg-muted/30 p-4',
           className,
         )}
       >
-        <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
-          {children}
-        </p>
+        {children}
       </div>
       {showFade && (
         <span
@@ -47,5 +59,23 @@ export function ProseBox({
         />
       )}
     </div>
+  );
+}
+
+export function ProseBox({
+  children,
+  height = PROSE_BOX_HEIGHT,
+  className,
+}: {
+  children: string;
+  height?: number;
+  className?: string;
+}): ReactElement {
+  return (
+    <ScrollFadeBox height={height} {...(className ? { className } : {})} resetKeys={[children]}>
+      <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+        {children}
+      </p>
+    </ScrollFadeBox>
   );
 }

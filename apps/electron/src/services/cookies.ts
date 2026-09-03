@@ -1,5 +1,6 @@
 import { session } from 'electron';
 import log from 'electron-log/main';
+import { Logger } from './logger/Logger';
 
 /**
  * Clears all cookies from the default session
@@ -12,7 +13,7 @@ export async function clearAllCookies(): Promise<void> {
       await session.defaultSession.cookies.remove(url, cookie.name);
     }
   } catch (error) {
-    console.error('Failed to clear cookies:', error);
+    Logger.logError('cookies.clear.failed', error);
   }
 }
 
@@ -80,7 +81,7 @@ export async function setCookiesFromHeaders(
       sameSite: 'no_restriction',
       ...(expirationDate !== undefined && { expirationDate }),
     }).catch((error) => {
-      console.error('Failed to set cookie:', error);
+      Logger.logError('cookies.set.failed', error, { cookie_name: name });
     });
   });
 
@@ -94,9 +95,9 @@ export async function clearBrowserTabsData(): Promise<void> {
   try {
     const browserSession = session.fromPartition('persist:browser-tabs');
     await browserSession.clearStorageData();
-    console.log('Cleared browser tabs data');
+    log.info('Cleared browser tabs data');
   } catch (error) {
-    console.error('Failed to clear browser tabs data:', error);
+    Logger.logError('browser-tabs.storage.clear.failed', error);
   }
 }
 
@@ -124,7 +125,7 @@ export async function syncXyneCookiesToBrowserPanel(xyneUrl: string): Promise<vo
   try {
     origin = new URL(xyneUrl).origin;
   } catch (error) {
-    console.warn('[syncXyneCookiesToBrowserPanel] Invalid URL:', xyneUrl, error);
+    log.warn('[syncXyneCookiesToBrowserPanel] Invalid URL:', xyneUrl, error);
     return;
   }
 
@@ -149,15 +150,13 @@ export async function syncXyneCookiesToBrowserPanel(xyneUrl: string): Promise<vo
             }),
           })
           .catch((error) => {
-            console.error(
-              '[syncXyneCookiesToBrowserPanel] Failed to set cookie:',
-              cookie.name,
-              error,
-            );
+            Logger.logError('browser-tabs.cookies.set.failed', error, {
+              cookie_name: cookie.name,
+            });
           }),
       ),
     );
   } catch (error) {
-    console.error('[syncXyneCookiesToBrowserPanel] Failed:', error);
+    Logger.logError('browser-tabs.cookies.sync.failed', error);
   }
 }

@@ -1,24 +1,35 @@
 import { ReactElement, ReactNode, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Loader2,
-  CornerDownLeft,
-  Hash,
-  AtSign,
-  ChevronUp,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
+  Spinner,
+  ArrowTurnDownLeft,
+  Hashtag,
+  AtMark,
+  ChevronBigUp,
+  ChevronBigLeft,
+  ChevronBigRight,
   ArrowUp,
   ArrowLeft,
-  Pencil,
-  MessageSquareX,
-} from 'lucide-react';
+  PencilEditAi,
+  PencilEraserEditLine,
+  ChatCancel,
+} from '@xyne/icons';
 import { Button } from '../../ui/Button';
+import { Tooltip } from '../../ui/Tooltip';
+import Avatar from '../../ui/Avatar/Avatar';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { cn } from '../../../utils/classNames';
+import { useUser } from '../../../hooks/useUsers';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
+import {
+  buildClawCitationToolNumbers,
+  linkifyAndGroupClawCitations,
+  stripCitationMarks,
+} from '../../ui/TipTapExtensions/CitationMark';
+import { registerClawIcons } from '../XyneAISidebar/utils/clawCitationUrl';
+import type { ToolInvocation } from '../XyneAISidebar/utils/XyneAITypes';
+import { TwinReasoningPopover } from './TwinReasoningPopover';
 import type { TwinReplyDraftView, PostedTarget } from './twinReplyDraftApi';
 import type { AssistTab } from './useThreadAssist';
 
@@ -37,6 +48,8 @@ const swap = {
 } as const;
 
 export interface TwinSourceInfo {
+  /** Id of the person being replied to — resolves their real profile picture. */
+  userId?: string;
   name?: string;
   text?: string;
   onJump?: () => void;
@@ -57,7 +70,10 @@ interface ThreadAssistDockProps {
     decline: (draftId: string) => Promise<void>;
   };
   onPosted: (target: PostedTarget | null) => void;
-  onOpenReasoning: (draft: TwinReplyDraftView) => void;
+  onReasoningOpenChange: (draft: TwinReplyDraftView, open: boolean) => void;
+  reasoningOpen?: boolean;
+  /** Conversation the reasoning popover's debug tab reads its session from. */
+  conversationId: string;
   resolveSource?: (draft: TwinReplyDraftView) => TwinSourceInfo;
   attached?: boolean;
   onBeginEdit?: (draft: TwinReplyDraftView) => void;
@@ -74,7 +90,9 @@ export function ThreadAssistDock({
   recap,
   reply,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen = false,
+  conversationId,
   resolveSource,
   attached = true,
   onBeginEdit,
@@ -113,6 +131,9 @@ export function ThreadAssistDock({
   const headerName = selectedSource?.name ?? selectedDraft?.senderName;
   const editing = !!onEditBack;
   const bodyOpen = !collapsed && !editing;
+  const fused = attached && !bodyOpen;
+  const mutedHeader = collapsed && !editing;
+  const ease = 'duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]';
 
   return (
     <motion.div
@@ -120,37 +141,43 @@ export function ThreadAssistDock({
       initial='initial'
       animate='animate'
       exit='exit'
-      className={attached ? '-mb-3' : undefined}
+      className={cn('transition-[margin]', ease, attached && (fused ? '-mb-3' : 'mb-2'))}
     >
       <div
         className={cn(
-          'overflow-hidden border border-input bg-card',
-          attached ? 'rounded-t-2xl border-b-0' : 'rounded-2xl',
+          'overflow-hidden border border-border bg-background',
+          'transition-[box-shadow,border-color]',
+          ease,
+          fused
+            ? 'rounded-t-xl border-b-transparent shadow-none'
+            : 'rounded-xl shadow-[0_-5px_17px_0_rgba(0,0,0,0.06)]',
         )}
       >
-        {editing ? (
-          <EditHeader senderName={headerName} onBack={onEditBack} />
-        ) : collapsed ? (
-          <CollapsedBar
-            hasReply={hasReply}
-            replyCount={replyCount}
-            senderNames={senderNames}
-            recapLabel={hasRecap ? 'Thread recap' : 'Suggested reply'}
-            onExpand={onToggleCollapse}
-          />
-        ) : (
-          <ExpandedHeader
-            tab={tab}
-            hasRecap={hasRecap}
-            hasReply={hasReply}
-            replyCount={replyCount}
-            active={active}
-            senderName={headerName}
-            onGoTo={goTo}
-            onTabChange={onTabChange}
-            onCollapse={onToggleCollapse}
-          />
-        )}
+        <div className={cn('transition-colors', ease, mutedHeader ? 'bg-muted' : 'bg-transparent')}>
+          {editing ? (
+            <EditHeader senderName={headerName} onBack={onEditBack} />
+          ) : collapsed ? (
+            <CollapsedBar
+              hasReply={hasReply}
+              replyCount={replyCount}
+              senderNames={senderNames}
+              recapLabel={hasRecap ? 'Thread recap' : 'Suggested reply'}
+              onExpand={onToggleCollapse}
+            />
+          ) : (
+            <ExpandedHeader
+              tab={tab}
+              hasRecap={hasRecap}
+              hasReply={hasReply}
+              replyCount={replyCount}
+              active={active}
+              senderName={headerName}
+              onGoTo={goTo}
+              onTabChange={onTabChange}
+              onCollapse={onToggleCollapse}
+            />
+          )}
+        </div>
 
         <AnimatePresence initial={false}>
           {bodyOpen && (
@@ -162,7 +189,7 @@ export function ThreadAssistDock({
               transition={{ height: bodySpring, opacity: { duration: 0.15 } }}
               className='overflow-hidden'
             >
-              <div className='px-3.5 pb-3 pt-2'>
+              <div className='px-3.5 pb-4 pt-2.5'>
                 {tab === 'recap' ? (
                   <RecapPane content={recap.content} loading={recap.loading} />
                 ) : selectedDraft ? (
@@ -181,7 +208,9 @@ export function ThreadAssistDock({
                         approve={edited => reply.approve(selectedDraft.id, edited)}
                         decline={() => reply.decline(selectedDraft.id)}
                         onPosted={onPosted}
-                        onOpenReasoning={() => onOpenReasoning(selectedDraft)}
+                        onReasoningOpenChange={next => onReasoningOpenChange(selectedDraft, next)}
+                        reasoningOpen={reasoningOpen}
+                        conversationId={conversationId}
                         {...(onBeginEdit && { onBeginEdit: () => onBeginEdit(selectedDraft) })}
                       />
                     </motion.div>
@@ -206,7 +235,7 @@ function EditHeader({
   onBack: () => void;
 }): ReactElement {
   return (
-    <div className='relative flex h-[42px] select-none items-center gap-1.5 px-2 pb-3'>
+    <div className='relative flex select-none items-center gap-1.5 px-3.5 pb-5 pt-2'>
       <button
         type='button'
         onClick={onBack}
@@ -215,10 +244,10 @@ function EditHeader({
         data-track-name='edit-back'
         className='absolute inset-0 cursor-pointer transition-colors hover:bg-muted/20'
       />
-      <span className='pointer-events-none relative flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground'>
+      <span className='pointer-events-none relative flex h-[22px] w-4 shrink-0 items-center justify-center text-muted-foreground'>
         <ArrowLeft size={16} />
       </span>
-      <span className='pointer-events-none relative flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-foreground'>
+      <span className='pointer-events-none relative flex min-w-0 items-center gap-1.5 text-sm font-semibold leading-[22px] tracking-[-0.1px] text-foreground'>
         <span className='flex shrink-0'>
           <XyneAIStar size={14} />
         </span>
@@ -253,23 +282,21 @@ function CollapsedBar({
         aria-label='Expand AI replies'
         data-track-category='twin-dock'
         data-track-name='expand'
-        className='flex h-[42px] w-full select-none items-center gap-2 bg-muted/60 px-3 pb-3 text-left transition-colors hover:bg-muted'
+        className='flex w-full select-none items-center gap-1.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/[0.04]'
       >
-        <span className='flex shrink-0'>
-          <XyneAIStar size={14} />
-        </span>
-        <span className='shrink-0 text-[13px] font-semibold text-foreground'>
-          {replyCount === 1 ? '1 AI reply ready' : `${replyCount} AI replies ready`}
+        <span className='flex shrink-0 items-center gap-1'>
+          <span className='flex h-4 w-4 items-center justify-center text-[color:var(--mention-color)]'>
+            <PencilEditAi size={12} />
+          </span>
+          <span className='text-sm font-semibold leading-[22px] tracking-[-0.1px] text-[color:var(--mention-color)]'>
+            {replyCount === 1 ? '1 AI reply ready' : `${replyCount} AI replies ready`}
+          </span>
         </span>
         {senderNames.length > 0 && (
-          <>
-            <AvatarCluster names={senderNames} />
-            <span className='min-w-0 truncate text-[13px] text-muted-foreground'>
-              {senderNames.join(', ')}
-            </span>
-          </>
+          <span className='min-w-0 truncate text-[13px] font-medium leading-[22px] tracking-[-0.1px] text-foreground/60'>
+            {senderNames.join(', ')}
+          </span>
         )}
-        <ChevronUp size={15} className='ml-auto shrink-0 text-muted-foreground' />
       </button>
     );
   }
@@ -279,10 +306,12 @@ function CollapsedBar({
       aria-label='Expand'
       data-track-category='twin-dock'
       data-track-name='expand'
-      className='flex h-[42px] w-full select-none items-center gap-2.5 bg-muted/60 px-3 pb-3 text-left transition-colors hover:bg-muted'
+      className='flex w-full select-none items-center gap-2.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/[0.04]'
     >
-      <span className='text-xs font-semibold text-foreground'>{recapLabel}</span>
-      <ChevronUp size={15} className='ml-auto text-muted-foreground' />
+      <span className='text-sm font-semibold leading-[22px] tracking-[-0.1px] text-foreground'>
+        {recapLabel}
+      </span>
+      <ChevronBigUp size={15} className='ml-auto text-muted-foreground' />
     </button>
   );
 }
@@ -310,7 +339,7 @@ function ExpandedHeader({
 }): ReactElement {
   const showToggle = hasRecap && hasReply;
   return (
-    <div className='relative flex h-9 select-none items-center gap-2 border-b border-border/60 px-3'>
+    <div className='relative flex select-none items-center gap-2 px-3.5 pb-1.5 pt-2'>
       <button
         type='button'
         onClick={onCollapse}
@@ -330,11 +359,11 @@ function ExpandedHeader({
           <HeaderTab active={tab === 'recap'} onClick={() => onTabChange('recap')} label='Recap' />
         </div>
       ) : tab === 'recap' ? (
-        <span className='pointer-events-none relative text-[13px] font-semibold text-foreground'>
+        <span className='pointer-events-none relative text-sm font-semibold leading-[22px] text-foreground'>
           Thread recap
         </span>
       ) : (
-        <span className='pointer-events-none relative flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-foreground'>
+        <span className='pointer-events-none relative flex min-w-0 items-center gap-2 text-sm font-semibold leading-[22px] text-[color:var(--mention-color)]'>
           <span className='flex shrink-0'>
             <XyneAIStar size={14} />
           </span>
@@ -344,11 +373,10 @@ function ExpandedHeader({
         </span>
       )}
 
-      <div className='pointer-events-none relative ml-auto flex items-center gap-1.5'>
+      <div className='pointer-events-none relative ml-auto flex items-center'>
         {tab === 'reply' && replyCount > 1 && (
           <Pager active={active} total={replyCount} onGoTo={onGoTo} />
         )}
-        <ChevronDown size={16} className='text-muted-foreground' />
       </div>
     </div>
   );
@@ -371,7 +399,7 @@ function HeaderTab({
       data-track-category='twin-dock'
       data-track-name={`tab-${label.toLowerCase()}`}
       className={cn(
-        'pointer-events-auto flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors',
+        'pointer-events-auto flex h-[22px] items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors',
         active
           ? 'bg-muted font-semibold text-foreground'
           : 'font-medium text-muted-foreground hover:bg-muted/50',
@@ -380,16 +408,6 @@ function HeaderTab({
       {icon && <span className='flex shrink-0'>{icon}</span>}
       {label}
     </button>
-  );
-}
-
-function AvatarCluster({ names }: { names: string[] }): ReactElement {
-  return (
-    <div className='flex shrink-0 -space-x-1.5'>
-      {names.slice(0, 3).map((n, i) => (
-        <SourceAvatar key={`${n}-${i}`} name={n} size={16} />
-      ))}
-    </div>
   );
 }
 
@@ -403,73 +421,72 @@ function Pager({
   onGoTo: (index: number) => void;
 }): ReactElement {
   const btn =
-    'pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+    'pointer-events-auto flex h-4 w-4 items-center justify-center text-muted-foreground transition-colors hover:text-foreground';
   return (
-    <div className='flex items-center'>
-      <button
-        onClick={() => onGoTo((active - 1 + total) % total)}
-        aria-label='Previous draft'
-        data-track-category='twin-dock'
-        data-track-name='pager-prev'
-        className={btn}
-      >
-        <ChevronLeft size={14} />
-      </button>
+    <div className='flex items-center gap-1.5'>
+      <Tooltip content='Previous draft' side='top'>
+        <button
+          onClick={() => onGoTo((active - 1 + total) % total)}
+          aria-label='Previous draft'
+          data-track-category='twin-dock'
+          data-track-name='pager-prev'
+          className={btn}
+        >
+          <ChevronBigLeft size={16} />
+        </button>
+      </Tooltip>
       <span
         role='status'
         aria-live='polite'
-        className='min-w-[34px] text-center text-[11px] tabular-nums text-muted-foreground'
+        className='text-[13px] font-semibold leading-[1.2] tabular-nums tracking-[-0.1px] text-foreground/60'
       >
-        {active + 1} / {total}
+        {active + 1}/{total}
       </span>
-      <button
-        onClick={() => onGoTo((active + 1) % total)}
-        aria-label='Next draft'
-        data-track-category='twin-dock'
-        data-track-name='pager-next'
-        className={btn}
-      >
-        <ChevronRight size={14} />
-      </button>
+      <Tooltip content='Next draft' side='top'>
+        <button
+          onClick={() => onGoTo((active + 1) % total)}
+          aria-label='Next draft'
+          data-track-category='twin-dock'
+          data-track-name='pager-next'
+          className={btn}
+        >
+          <ChevronBigRight size={16} />
+        </button>
+      </Tooltip>
     </div>
   );
 }
 
-const AVATAR_COLORS = [
-  '#e11d48',
-  '#7c3aed',
-  '#0891b2',
-  '#d97706',
-  '#059669',
-  '#2563eb',
-  '#db2777',
-  '#4f46e5',
-];
-function avatarColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]!;
-}
-
+/**
+ * The person the twin is replying to, drawn with the shared `Avatar` so the photo
+ * and the identity colour agree with every other avatar in the app. This used to
+ * hash the display NAME into a private eight-colour palette, so the same person
+ * came out one colour here and a different one in the thread right above.
+ *
+ * `useUser` only resolves ids already in the loaded workspace roster, and Avatar
+ * handed an unknown id renders blank initials over a colour hashed from that id
+ * (handed none, it renders the CURRENT user). Either is a confidently wrong
+ * identity, so an unresolved sender falls back to a neutral initial: the colour
+ * is right or absent, never misleading.
+ */
 function SourceAvatar({
+  userId,
   name,
-  size = 16,
 }: {
+  userId?: string | undefined;
   name?: string | undefined;
-  size?: number;
 }): ReactElement {
-  const label = (name ?? '').trim();
-  const initial = (label[0] ?? '?').toUpperCase();
+  const user = useUser(userId ?? '');
+  if (userId && user) {
+    // size-[18px] beats Avatar's own size-4 through tailwind-merge; `rounded`
+    // likewise beats its rounded-sm, and the image inherits that radius.
+    return (
+      <Avatar userId={userId} size='xs' showActiveStatus={false} className='size-[18px] rounded' />
+    );
+  }
+  const initial = ((name ?? '').trim()[0] ?? '?').toUpperCase();
   return (
-    <span
-      className='inline-flex shrink-0 items-center justify-center rounded-full font-semibold uppercase leading-none text-white'
-      style={{
-        width: size,
-        height: size,
-        fontSize: Math.round(size * 0.52),
-        backgroundColor: avatarColor(label),
-      }}
-    >
+    <span className='inline-flex size-[18px] shrink-0 items-center justify-center rounded bg-muted text-[9px] font-semibold uppercase leading-none text-muted-foreground'>
       {initial}
     </span>
   );
@@ -490,7 +507,7 @@ function RecapPane({
           <MarkdownMessageRenderer content={content} markdownComponents={markdownComponents} />
         ) : loading ? (
           <span className='flex items-center gap-2'>
-            <Loader2 size={14} className='animate-spin' /> Generating summary…
+            <Spinner size={14} className='animate-spin' /> Generating summary…
           </span>
         ) : (
           <span>No summary available for this thread yet.</span>
@@ -512,7 +529,7 @@ function destinationInfo(draft: TwinReplyDraftView): {
   switch (draft.destinationKind) {
     case 'origin_channel':
       return {
-        icon: <Hash size={12} />,
+        icon: <Hashtag size={12} />,
         verb: 'post',
         where: (
           <>
@@ -522,7 +539,7 @@ function destinationInfo(draft: TwinReplyDraftView): {
       };
     case 'channel':
       return {
-        icon: <Hash size={12} />,
+        icon: <Hashtag size={12} />,
         verb: 'post',
         where: (
           <>
@@ -532,7 +549,7 @@ function destinationInfo(draft: TwinReplyDraftView): {
       };
     case 'thread':
       return {
-        icon: <CornerDownLeft size={12} />,
+        icon: <ArrowTurnDownLeft size={12} />,
         verb: 'post',
         where: (
           <>
@@ -550,7 +567,7 @@ function destinationInfo(draft: TwinReplyDraftView): {
       };
     case 'dm_sender':
       return {
-        icon: <AtSign size={12} />,
+        icon: <AtMark size={12} />,
         verb: 'send',
         where: (
           <>
@@ -560,7 +577,7 @@ function destinationInfo(draft: TwinReplyDraftView): {
       };
     case 'dm':
       return {
-        icon: <AtSign size={12} />,
+        icon: <AtMark size={12} />,
         verb: 'send',
         where: (
           <>
@@ -571,7 +588,7 @@ function destinationInfo(draft: TwinReplyDraftView): {
     case 'origin_thread':
     default:
       return {
-        icon: <CornerDownLeft size={12} />,
+        icon: <ArrowTurnDownLeft size={12} />,
         verb: 'reply',
         where: (
           <>
@@ -600,25 +617,76 @@ function SourcePreview({ source }: { source: TwinSourceInfo }): ReactElement | n
             }
           : undefined
       }
-      title={clickable ? 'Jump to message' : undefined}
+      aria-label={clickable ? 'Jump to message' : undefined}
       data-track-category='twin-dock'
       data-track-name='jump-to-source'
       className={cn(
-        'group flex w-full min-w-0 items-center gap-1.5 py-0.5 text-[11px] text-muted-foreground/60',
+        'group flex w-full min-w-0 items-center gap-2 rounded-md border-[0.4px] border-border/60 bg-muted py-2 pl-2 pr-2.5',
         clickable && 'cursor-pointer',
       )}
     >
-      <SourceAvatar name={source.name} size={14} />
-      {source.name && (
-        <span className='max-w-[45%] shrink-0 truncate font-medium text-muted-foreground/80'>
-          {source.name}
+      <span className='w-[3px] shrink-0 self-stretch rounded-[2px] bg-[color:var(--mention-color)]' />
+      <SourceAvatar
+        {...(source.userId && { userId: source.userId })}
+        {...(source.name && { name: source.name })}
+      />
+      <div className='flex min-w-0 flex-1 items-center gap-1.5'>
+        {source.name && (
+          <span className='max-w-[45%] shrink-0 truncate text-[13px] font-bold leading-[1.2] tracking-[-0.1px] text-foreground/90'>
+            {source.name}:
+          </span>
+        )}
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-sm font-normal text-foreground/60',
+            clickable && 'group-hover:underline',
+          )}
+        >
+          {source.text}
         </span>
-      )}
-      <span className={cn('min-w-0 flex-1 truncate', clickable && 'group-hover:underline')}>
-        {source.text}
-      </span>
+      </div>
     </div>
   );
+}
+
+function DraftBody({ draft }: { draft: TwinReplyDraftView }): ReactElement {
+  const message = draft.message ?? '';
+
+  const clawCitationCtx = useMemo(() => {
+    const clawCitations = draft.clawCitations as ToolInvocation[] | undefined;
+    if (!clawCitations?.length) return undefined;
+    registerClawIcons(draft.clawCitationIcons);
+    const toolNumbers = buildClawCitationToolNumbers(message);
+    if (toolNumbers.size === 0) return undefined;
+    return { toolInvocations: clawCitations, toolNumbers };
+  }, [draft.clawCitations, draft.clawCitationIcons, message]);
+
+  const content = useMemo(() => {
+    if (message.indexOf('clf-') === -1) return message;
+    const linkified = clawCitationCtx
+      ? linkifyAndGroupClawCitations(message, clawCitationCtx.toolNumbers)
+      : message;
+    return stripCitationMarks(linkified);
+  }, [message, clawCitationCtx]);
+
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(`twin-draft-${draft.id}`, clawCitationCtx),
+    [draft.id, clawCitationCtx],
+  );
+
+  return (
+    <div className='bot-markdown-content max-h-[220px] overflow-y-auto px-1 text-sm leading-[22px] text-foreground'>
+      <MarkdownMessageRenderer content={content} markdownComponents={markdownComponents} />
+    </div>
+  );
+}
+
+function provenanceLabel(draft: TwinReplyDraftView): string | null {
+  const cites = draft.clawCitations as ToolInvocation[] | undefined;
+  if (!cites?.length) return null;
+  const total = cites.reduce((acc, c) => acc + (c.citations?.length ?? 0), 0);
+  if (total === 0) return null;
+  return `Derived from ${total} source${total > 1 ? 's' : ''}...`;
 }
 
 function ReplyCard({
@@ -628,7 +696,9 @@ function ReplyCard({
   approve,
   decline,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen,
+  conversationId,
   onBeginEdit,
 }: {
   draft: TwinReplyDraftView;
@@ -637,7 +707,9 @@ function ReplyCard({
   approve: (edited?: string) => Promise<PostedTarget | null>;
   decline: () => Promise<void>;
   onPosted: (t: PostedTarget | null) => void;
-  onOpenReasoning: () => void;
+  onReasoningOpenChange: (open: boolean) => void;
+  reasoningOpen: boolean;
+  conversationId: string;
   onBeginEdit?: () => void;
 }): ReactElement {
   const [editing, setEditing] = useState(false);
@@ -666,6 +738,14 @@ function ReplyCard({
     );
   }
 
+  const provenance = provenanceLabel(draft);
+  const footerNote: ReactNode = provenance ?? (
+    <span className='inline-flex items-center gap-1'>
+      {hasReply && dest.icon}
+      {intent}
+    </span>
+  );
+
   const beginEdit = (): void => {
     if (onBeginEdit) {
       onBeginEdit();
@@ -681,20 +761,12 @@ function ReplyCard({
   };
 
   return (
-    <div className='flex flex-col gap-1.5'>
-      <div className='flex items-center gap-1.5 text-[11px] text-muted-foreground/60'>
-        {hasReply && dest.icon}
-        <span>{intent}</span>
-        <span className='ml-auto shrink-0'>Only you can see this</span>
-      </div>
-
-      <div className='flex min-h-[22px] items-center'>
+    <div className='flex flex-col gap-4'>
+      <div className='flex flex-col gap-3.5'>
         {source ? <SourcePreview source={source} /> : null}
-      </div>
 
-      <div className='mt-0.5 h-[76px] overflow-y-auto rounded-md border border-dashed border-border bg-muted/30 px-3 py-2'>
         {hasReact && !hasReply ? (
-          <div className='flex h-full items-center gap-2.5'>
+          <div className='flex items-center gap-2.5 px-1'>
             <span className='flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-xl'>
               {draft.emoji}
             </span>
@@ -709,50 +781,91 @@ function ReplyCard({
             onChange={e => setEditText(e.target.value)}
             data-track-category='twin-dock'
             data-track-name='edit-draft'
-            className='h-full w-full resize-none rounded bg-background px-2 py-1.5 text-sm text-foreground outline-none ring-1 ring-border focus:ring-foreground/40'
+            className='h-[120px] w-full resize-none rounded-md bg-background px-2 py-1.5 text-sm leading-[22px] text-foreground outline-none ring-1 ring-border focus:ring-foreground/40'
           />
         ) : (
-          <div className='whitespace-pre-wrap text-sm text-foreground'>{draft.message}</div>
+          <DraftBody draft={draft} />
         )}
       </div>
 
-      <div className='flex items-center gap-1'>
-        {draft.reasoning && (
-          <button
-            onClick={onOpenReasoning}
-            aria-label='Why this reply'
-            data-track-category='twin-dock'
-            data-track-name='open-reasoning'
-            className='flex h-8 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-          >
-            Why?
-          </button>
-        )}
-        <div className='ml-auto flex items-center gap-1'>
+      <div className='flex items-center gap-8 px-1'>
+        {/* Provenance only — plain text. It used to double as the reasoning
+            trigger, which made a full-width line of prose clickable and easy to
+            hit by accident; the "Why?" button below owns that job now. */}
+        <span className='min-w-0 flex-1 truncate text-xs font-medium text-foreground/40'>
+          {footerNote}
+        </span>
+
+        <div className='flex shrink-0 items-center gap-2'>
+          <div className='flex items-center'>
+            {draft.reasoning && (
+              // A non-modal popover rather than a drawer, so the thread stays
+              // readable behind it. No tooltip on the trigger: Radix owns the
+              // click here, and the label already says what it opens.
+              <TwinReasoningPopover
+                open={reasoningOpen}
+                onOpenChange={onReasoningOpenChange}
+                draft={draft}
+                conversationId={conversationId}
+                trigger={
+                  <button
+                    aria-label='See why this reply was drafted'
+                    aria-haspopup='dialog'
+                    aria-expanded={reasoningOpen}
+                    data-track-category='twin-dock'
+                    data-track-name='open-reasoning'
+                    // Same px-[9px] py-1.5 band as the icon buttons beside it, so
+                    // the four controls read as one row.
+                    className={cn(
+                      'flex items-center justify-center px-[9px] py-1.5 text-xs font-medium transition-colors hover:text-foreground',
+                      reasoningOpen ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    Why?
+                  </button>
+                }
+              />
+            )}
+            <Tooltip content='Discard draft' side='top'>
+              <Button
+                variant='ghost'
+                onClick={() => void decline()}
+                disabled={loading}
+                trackId='twin_decline_draft'
+                aria-label='Discard draft'
+                data-track-category='twin-dock'
+                data-track-name='decline'
+                className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
+              >
+                <ChatCancel size={14} />
+              </Button>
+            </Tooltip>
+            {hasReply && (
+              <Tooltip content={editing ? 'Cancel edit' : 'Edit draft'} side='top'>
+                <button
+                  onClick={editing ? () => setEditing(false) : beginEdit}
+                  disabled={loading}
+                  aria-label={editing ? 'Cancel edit' : 'Edit draft'}
+                  data-track-category='twin-dock'
+                  data-track-name='edit'
+                  className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
+                >
+                  <PencilEraserEditLine size={14} />
+                </button>
+              </Tooltip>
+            )}
+          </div>
           <Button
-            size='iconSm'
-            variant='ghost'
-            onClick={() => void decline()}
+            size='sm'
+            data-track-category='twin-dock'
+            data-track-name='send-draft'
+            trackId='twin_send_reply'
+            trackAction={send}
             disabled={loading}
-            aria-label='Reject'
-            className='text-muted-foreground hover:text-foreground'
+            loading={loading}
+            className='h-7 gap-1 rounded-lg px-[9px] text-[13px] font-medium'
           >
-            <MessageSquareX size={17} />
-          </Button>
-          {hasReply && (
-            <Button
-              size='iconSm'
-              variant='ghost'
-              onClick={editing ? () => setEditing(false) : beginEdit}
-              disabled={loading}
-              aria-label={editing ? 'Cancel edit' : 'Edit'}
-              className='text-muted-foreground hover:text-foreground'
-            >
-              <Pencil size={16} />
-            </Button>
-          )}
-          <Button size='sm' onClick={() => void send()} disabled={loading} loading={loading}>
-            {!loading && <ArrowUp size={15} />}
+            {!loading && <ArrowUp size={14} className='size-3.5' />}
             {hasReact && !hasReply ? 'Send reaction' : editing ? 'Send edited' : 'Send'}
           </Button>
         </div>

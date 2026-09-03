@@ -1,5 +1,6 @@
 import { MouseEvent, ReactElement, useMemo } from 'react';
-import { Sparkles, Pencil, Wand2, Loader2 } from 'lucide-react';
+import { Wand2 } from 'lucide-react';
+import { SparkleAi02 as Sparkles, PencilEdit as Pencil, Spinner as Loader2 } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { findEmailAddress, parseFirstEmailAddress } from '../../../utils/emailAddress';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
@@ -354,6 +355,16 @@ export const TicketListRow = ({
             {formatDate(createdDate)} · {formatTime(createdDate)}
           </span>
         </Tooltip>
+      </div>
+      <div
+        className={cn(
+          'flex min-w-0 items-center overflow-hidden',
+          getTicketListColumnAlignClass('age'),
+        )}
+      >
+        <span className='overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+          {Math.max(0, Math.floor((Date.now() - ticket.createdAt) / 86400000))}d
+        </span>
       </div>
       <div
         className={cn(

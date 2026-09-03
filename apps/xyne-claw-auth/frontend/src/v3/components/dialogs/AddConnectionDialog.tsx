@@ -6,6 +6,7 @@ import { ServerIcon } from "../ui/ServerIcon";
 import { ArrowLeftIcon, PlusIcon } from "@phosphor-icons/react";
 import { useState, useEffect, type FormEvent, type ChangeEvent } from "react";
 import type { McpServer, CredentialField } from "../../../lib/types";
+import type { CreateServerResult } from "../../../lib/api";
 
 interface Props {
   open: boolean;
@@ -22,7 +23,7 @@ interface Props {
     httpConfigTemplate?: { url: string; headers: Record<string, string> };
     healthcheckSpec?: { name: string; params: Record<string, unknown> };
     writeToolPolicy?: { mode?: "allowlist" | "denylist" | "allAsk" | "allowAll"; tools?: string[] };
-  }) => Promise<McpServer>;
+  }) => Promise<CreateServerResult>;
   servers: McpServer[];
   credentialFields: Record<string, CredentialField[]>;
   connectedServerIds?: Set<string>;
@@ -33,8 +34,47 @@ interface Props {
 
 type Step = "pick" | "configure";
 type Mode = "existing" | "new";
-type BuilderCredentialField = CredentialField & { optional?: boolean };
+type BuilderCredentialField = CredentialField & { id: string; optional?: boolean };
 type BuilderKvRow = { key: string; value: string };
+
+let builderCredentialRowId = 0;
+
+function createBuilderCredentialField(
+  field: Partial<CredentialField> = {},
+): BuilderCredentialField {
+  builderCredentialRowId += 1;
+  return {
+    id: `credential-field-${builderCredentialRowId}`,
+    name: field.name ?? "",
+    label: field.label ?? "",
+    type: field.type === "text" ? "text" : "password",
+    placeholder: field.placeholder ?? "",
+    optional: field.optional ?? false,
+  };
+}
+
+function credentialFieldsFromSchema(
+  schema: Record<string, unknown> | null | undefined,
+): CredentialField[] {
+  if (!schema || typeof schema !== "object") return [];
+  const properties = schema.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return [];
+  const required = new Set(
+    Array.isArray(schema.required) ? schema.required.map((name) => String(name)) : [],
+  );
+  return Object.entries(properties).map(([name, raw]) => {
+    const property = raw && typeof raw === "object" && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : {};
+    return {
+      name,
+      label: String(property.title ?? property.label ?? name),
+      type: property.format === "password" || property.secret === true ? "password" : "text",
+      placeholder: String(property.placeholder ?? ""),
+      optional: !required.has(name),
+    };
+  });
+}
 
 const compactInput =
   "w-full rounded-full border border-xyne-border bg-xyne-surface px-3 py-1.5 text-[13px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:shadow-[var(--comp-focus-ring)] focus:outline-none disabled:opacity-60";
@@ -101,7 +141,7 @@ export function AddConnectionDialog({
   const [newServerType, setNewServerType] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
   const [newServerDescription, setNewServerDescription] = useState("");
-  const [newServerTransport, setNewServerTransport] = useState<"stdio" | "http">("stdio");
+  const [newServerTransport, setNewServerTransport] = useState<"stdio" | "http">("http");
   const [newCredentialFields, setNewCredentialFields] = useState<string>(
     JSON.stringify(
       [{ name: "apiKey", label: "API Key", type: "password", placeholder: "Enter API key" }],
@@ -137,7 +177,7 @@ export function AddConnectionDialog({
   const [createdServer, setCreatedServer] = useState<McpServer | null>(null);
   const [builderEnabled, setBuilderEnabled] = useState(true);
   const [builderCredentialFields, setBuilderCredentialFields] = useState<BuilderCredentialField[]>(
-    [{ name: "", label: "", type: "password", placeholder: "", optional: false }],
+    [createBuilderCredentialField()],
   );
   const [builderCommandType, setBuilderCommandType] = useState<
     "npx" | "uvx" | "node" | "docker" | "binary"
@@ -173,6 +213,110 @@ export function AddConnectionDialog({
     } catch {
       throw new Error(`Invalid JSON in ${label}`);
     }
+  };
+
+  const parseCredentialFieldsForBuilder = (text: string): BuilderCredentialField[] => {
+    const parsed = parseJson<unknown>("credential fields", text);
+    if (!Array.isArray(parsed)) throw new Error("Credential Fields JSON must be an array.");
+    return parsed
+      .filter((field): field is Record<string, unknown> =>
+        !!field && typeof field === "object" && !Array.isArray(field),
+      )
+      .map((field) => createBuilderCredentialField({
+        name: String(field.name ?? ""),
+        label: String(field.label ?? field.name ?? ""),
+        type: field.type === "password" ? "password" : "text",
+        placeholder: String(field.placeholder ?? ""),
+        optional: Boolean(field.optional ?? false),
+      }))
+      .filter((field) => field.name.trim().length > 0);
+  };
+
+  const recordToRows = (value: unknown): BuilderKvRow[] => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return [{ key: "", value: "" }];
+    }
+    const rows = Object.entries(value as Record<string, unknown>).map(([key, rowValue]) => ({
+      key,
+      value: String(rowValue ?? ""),
+    }));
+    return rows.length > 0 ? rows : [{ key: "", value: "" }];
+  };
+
+  const switchToBuilder = () => {
+    try {
+      const parsedFields = parseCredentialFieldsForBuilder(newCredentialFields);
+      const health = parseJson<Record<string, unknown>>("healthcheck spec", newHealthcheck);
+      const writePolicy = parseJson<Record<string, unknown>>("write tool policy", newWritePolicy);
+
+      setBuilderCredentialFields(
+        parsedFields.length > 0 ? parsedFields : [createBuilderCredentialField()],
+      );
+      setBuilderHealthMode(health.name === "__list_tools__" ? "listTools" : "toolCall");
+      setBuilderHealthTool(health.name === "__list_tools__" ? "" : String(health.name ?? "ping"));
+      setBuilderHealthParamsText(JSON.stringify(health.params ?? {}, null, 2));
+
+      const writeMode = String(writePolicy.mode ?? "allowlist");
+      setBuilderWriteMode(
+        writeMode === "denylist" || writeMode === "allAsk" || writeMode === "allowAll"
+          ? writeMode
+          : "allowlist",
+      );
+      setBuilderWriteToolsText(
+        Array.isArray(writePolicy.tools) ? writePolicy.tools.map(String).join("\n") : "",
+      );
+
+      if (newServerTransport === "http") {
+        const http = parseJson<Record<string, unknown>>("HTTP config", newHttpConfig);
+        const httpUrl = String(http.url ?? "");
+        setBuilderHttpUrl(httpUrl);
+        setNewServerUrl(httpUrl);
+        setBuilderHeaderRows(recordToRows(http.headers));
+      } else {
+        const launch = parseJson<Record<string, unknown>>("launch config", newLaunchConfig);
+        const cmd = String(launch.cmd ?? "");
+        const args = Array.isArray(launch.args) ? launch.args.map(String) : [];
+        if (!["npx", "uvx", "node", "docker"].includes(cmd)) {
+          throw new Error(
+            `The Builder cannot represent the command “${cmd || "(empty)"}”. Keep using Advanced JSON for this connector.`,
+          );
+        }
+
+        setBuilderCommandType(cmd as "npx" | "uvx" | "node" | "docker");
+        if (cmd === "npx") {
+          const withoutFlag = args[0] === "-y" ? args.slice(1) : args;
+          setBuilderCommandTarget(withoutFlag[0] ?? "");
+          setBuilderCommandArgsText(withoutFlag.slice(1).join("\n"));
+        } else if (cmd === "docker") {
+          const withoutRun = args[0] === "run" ? args.slice(1) : args;
+          const withoutRm = withoutRun[0] === "--rm" ? withoutRun.slice(1) : withoutRun;
+          setBuilderCommandTarget(withoutRm[0] ?? "");
+          setBuilderCommandArgsText(withoutRm.slice(1).join("\n"));
+        } else {
+          setBuilderCommandTarget(args[0] ?? "");
+          setBuilderCommandArgsText(args.slice(1).join("\n"));
+        }
+        setBuilderEnvRows(recordToRows(launch.env));
+      }
+
+      setCreateError(null);
+      setBuilderEnabled(true);
+    } catch (err) {
+      setCreateError(
+        err instanceof Error
+          ? `${err.message} Fix it before switching to Builder.`
+          : "Could not convert JSON to Builder fields.",
+      );
+    }
+  };
+
+  const toggleBuilderMode = () => {
+    if (builderEnabled) {
+      setCreateError(null);
+      setBuilderEnabled(false);
+      return;
+    }
+    switchToBuilder();
   };
 
   // ── effects: sync step when dialog opens in a specific mode ─────────
@@ -354,8 +498,23 @@ export function AddConnectionDialog({
   // ── derived ─────────────────────────────────────────────────────────
   const isEditMode = !!editServerId;
   const isDefinitionEditMode = !!editDefinitionServerId;
+  // A shared (scope=global) connector cannot be edited in place — saving queues
+  // the change for admin approval. Drives the button label and the notice.
+  const definitionServer = isDefinitionEditMode
+    ? servers.find((s) => s.id === editDefinitionServerId)
+    : undefined;
+  const isGlobalDefinitionEdit =
+    (definitionServer?.connectorMeta as { scope?: string } | null | undefined)?.scope ===
+    "global";
   const selectedServer = createdServer ?? servers.find((s) => s.id === selectedServerId);
-  const fields = selectedServer ? (credentialFields[selectedServer.type] ?? []) : [];
+  const fields = (() => {
+    if (!selectedServer) return [];
+    const resolvedFields = credentialFields[selectedServer.type] ?? [];
+    const savedFields = selectedServer.credentialForm?.fields ?? [];
+    if (resolvedFields.length > 0) return resolvedFields;
+    if (savedFields.length > 0) return savedFields;
+    return credentialFieldsFromSchema(selectedServer.credentialSchema);
+  })();
 
   let newModeFields: CredentialField[] = [];
   let newModeFieldsError: string | null = null;
@@ -390,7 +549,7 @@ export function AddConnectionDialog({
   const dialogTitle = (() => {
     if (step === "pick") return "Add MCP Connector";
     if (isDefinitionEditMode) return "Edit MCP Connector Definition";
-    if (isEditMode) return "Update Connection";
+    if (isEditMode) return selectedServer ? `Reconnect ${selectedServer.name}` : "Reconnect MCP";
     if (mode === "new") return "New MCP Connector";
     return selectedServer ? `Connect ${selectedServer.name}` : "Connect Connector";
   })();
@@ -404,6 +563,20 @@ export function AddConnectionDialog({
   };
 
   const handlePickCustom = () => {
+    setNewServerName("");
+    setNewServerType("");
+    setNewServerUrl("");
+    setNewServerDescription("");
+    setNewServerTransport("http");
+    setBuilderCredentialFields([createBuilderCredentialField()]);
+    setBuilderHttpUrl("");
+    setBuilderHeaderRows([{ key: "", value: "" }]);
+    setBuilderHealthMode("listTools");
+    setBuilderHealthTool("");
+    setBuilderHealthParamsText("{}");
+    setBuilderWriteMode("allowlist");
+    setBuilderWriteToolsText("");
+    setBuilderEnabled(true);
     setMode("new");
     setStep("configure");
     setCameFromPick(true);
@@ -425,6 +598,7 @@ export function AddConnectionDialog({
     const form = new FormData(e.currentTarget);
     let activeServerId = selectedServerId;
     let activeServer = selectedServer;
+    let definitionEditQueued = false;
 
     if (mode === "new") {
       if (!newServerName.trim() || !newServerType.trim() || !newServerUrl.trim()) {
@@ -465,10 +639,16 @@ export function AddConnectionDialog({
             tools?: string[];
           }>("write tool policy", newWritePolicy),
         } as const;
-        const created = await onCreateServer(payload);
-        setCreatedServer(created);
-        activeServer = created;
-        activeServerId = created.id;
+        const result = await onCreateServer(payload);
+        if (result.kind === "editRequest") {
+          // Shared connector edit queued for admin approval — there is no live
+          // server to reconnect and the page already showed the approval toast.
+          definitionEditQueued = true;
+        } else {
+          setCreatedServer(result.server);
+          activeServer = result.server;
+          activeServerId = result.server.id;
+        }
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : "Failed to create connector");
         setCreating(false);
@@ -478,11 +658,22 @@ export function AddConnectionDialog({
       }
     }
 
+    if (definitionEditQueued) {
+      // Nothing to reconnect for a shared connector awaiting approval — close.
+      handleOpenChange(false);
+      return;
+    }
+
     if (!activeServerId || !activeServer) return;
-    const activeFields =
-      activeServer.type in credentialFields
-        ? (credentialFields[activeServer.type] ?? [])
-        : parseJson<CredentialField[]>("credential fields", newCredentialFields);
+    const resolvedActiveFields = credentialFields[activeServer.type] ?? [];
+    const savedActiveFields = activeServer.credentialForm?.fields ?? [];
+    const activeFields = resolvedActiveFields.length > 0
+      ? resolvedActiveFields
+      : savedActiveFields.length > 0
+        ? savedActiveFields
+        : mode === "new"
+          ? parseJson<CredentialField[]>("credential fields", newCredentialFields)
+          : credentialFieldsFromSchema(activeServer.credentialSchema);
     const credentials: Record<string, string> = {};
     for (const field of activeFields) {
       const val = (form.get(field.name) as string | null)?.trim() ?? "";
@@ -549,12 +740,16 @@ export function AddConnectionDialog({
                 disabled={creating || (mode === "existing" && !selectedServerId)}
               >
                 {creating
-                  ? "Saving…"
+                  ? isGlobalDefinitionEdit
+                    ? "Sending…"
+                    : "Saving…"
                   : isEditMode
-                    ? "Update"
+                    ? "Save & Reconnect"
                     : mode === "new"
                       ? isDefinitionEditMode
-                        ? "Save & Reconnect"
+                        ? isGlobalDefinitionEdit
+                          ? "Send for approval"
+                          : "Save & Reconnect"
                         : "Create & Connect"
                       : "Connect"}
               </Button>
@@ -667,9 +862,15 @@ export function AddConnectionDialog({
               {mode === "existing" && selectedServer && fields.length > 0 && (
                 <div data-id="add-connection-creds" className="space-y-3">
                   {isEditMode && (
-                    <p className="text-[12px] text-xyne-fg-muted">
-                      Leave fields blank to keep existing values.
-                    </p>
+                    <div className="rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2.5">
+                      <p className="text-[12px] font-medium text-xyne-fg-secondary">
+                        Replace connection credentials
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-4 text-xyne-fg-muted">
+                        For security, saved values are never shown. Enter all required fields again;
+                        saving replaces the stored credentials and reconnects this MCP.
+                      </p>
+                    </div>
                   )}
                   {fields.map((field) => (
                     <TextField
@@ -678,7 +879,7 @@ export function AddConnectionDialog({
                       name={field.name}
                       label={field.optional ? `${field.label} (optional)` : field.label}
                       type={field.type}
-                      required={!field.optional && !isEditMode}
+                      required={!field.optional}
                       placeholder={field.placeholder}
                     />
                   ))}
@@ -687,36 +888,47 @@ export function AddConnectionDialog({
 
               {mode === "existing" && selectedServer && fields.length === 0 && (
                 <p className="text-[13px] text-xyne-fg-secondary">
-                  Click <strong>Connect</strong> to authorize.
+                  This connector does not define credential fields. Continue to reconnect it without
+                  credentials, or edit its connector definition first.
                 </p>
               )}
 
               {/* ── New connector definition form ──────────────────── */}
               {mode === "new" && !isEditMode && (
                 <div className="space-y-3">
-                  <p className="text-[12px] text-xyne-fg-muted">
+                  <p className="text-[12px] leading-5 text-xyne-fg-muted">
                     {isDefinitionEditMode
-                      ? "Edit connector definition and overwrite the existing type, then reconnect with credentials below."
-                      : "Create a connector definition, then connect with credentials below."}
+                      ? isGlobalDefinitionEdit
+                        ? "This is a shared connector. Edit the definition below — your changes are sent to an admin for approval, not applied immediately."
+                        : "Edit connector definition and overwrite the existing type, then reconnect with credentials below."
+                      : "Define the MCP endpoint and the fields each user must enter. You will test it with your own credentials before publishing it for others."}
                   </p>
                   <TextField
                     label="Connector name"
                     placeholder="e.g. Notion"
+                    hint="The friendly name users will see in the connector catalog."
                     value={newServerName}
                     onChange={(e) => setNewServerName(e.target.value)}
                   />
                   <TextField
                     label="Connector type key"
                     placeholder="e.g. notion"
+                    hint="A unique, stable key such as expense-mcp. It cannot be changed after creation."
                     value={newServerType}
                     onChange={(e) => setNewServerType(e.target.value)}
                     disabled={isDefinitionEditMode}
                   />
                   <TextField
-                    label="Base URL"
+                    label="MCP endpoint"
                     placeholder="https://..."
+                    hint="The Streamable HTTP endpoint Claw connects to, for example https://mcp.example.com/mcp."
                     value={newServerUrl}
-                    onChange={(e) => setNewServerUrl(e.target.value)}
+                    onChange={(e) => {
+                      setNewServerUrl(e.target.value);
+                      if (newServerTransport === "http" && builderEnabled) {
+                        setBuilderHttpUrl(e.target.value);
+                      }
+                    }}
                   />
                   <TextField
                     label="Description"
@@ -726,8 +938,15 @@ export function AddConnectionDialog({
                   />
                   <SelectField
                     label="Transport"
+                    hint="Choose HTTP for a hosted MCP server. Local stdio servers require a code-reviewed adapter."
                     value={newServerTransport}
-                    onValueChange={(v) => setNewServerTransport(v === "http" ? "http" : "stdio")}
+                    onValueChange={(v) => {
+                      const transport = v === "http" ? "http" : "stdio";
+                      setNewServerTransport(transport);
+                      if (transport === "http" && !builderHttpUrl.trim()) {
+                        setBuilderHttpUrl(newServerUrl.trim());
+                      }
+                    }}
                     options={[
                       { value: "stdio", label: "stdio (npx/uvx/node/docker)" },
                       { value: "http", label: "http (remote MCP endpoint)" },
@@ -740,7 +959,7 @@ export function AddConnectionDialog({
                     </p>
                     <button
                       type="button"
-                      onClick={() => setBuilderEnabled((v) => !v)}
+                      onClick={toggleBuilderMode}
                       className="rounded-full border border-xyne-border bg-xyne-surface-subtle px-2.5 py-1 text-[12px] text-xyne-fg-primary transition hover:bg-xyne-surface"
                     >
                       {builderEnabled ? "Switch to Advanced JSON" : "Switch to Builder"}
@@ -749,43 +968,89 @@ export function AddConnectionDialog({
 
                   {builderEnabled && (
                     <div className="space-y-3">
-                      <p className="text-[12px] text-xyne-fg-muted">Credential fields</p>
+                      <div className="rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2.5">
+                        <p className="text-[12px] font-medium text-xyne-fg-secondary">1. User credential form</p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-xyne-fg-muted">
+                          Add what every user must enter. The field key becomes a reusable template,
+                          for example <code>{"{{email}}"}</code> or <code>{"{{password}}"}</code>.
+                        </p>
+                      </div>
                       {builderCredentialFields.map((f, idx) => (
-                        <div key={`${f.name}-${idx}`} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                          <input
-                            value={f.name}
-                            onChange={(e) =>
-                              setBuilderCredentialFields((prev) =>
-                                prev.map((x, i) =>
-                                  i === idx ? { ...x, name: e.target.value } : x,
-                                ),
-                              )
-                            }
-                            placeholder="apiKey (field key)"
-                            className={compactInput}
-                          />
-                          <input
-                            value={f.label}
-                            onChange={(e) =>
-                              setBuilderCredentialFields((prev) =>
-                                prev.map((x, i) =>
-                                  i === idx ? { ...x, label: e.target.value } : x,
-                                ),
-                              )
-                            }
-                            placeholder="API Key (field label)"
-                            className={compactInput}
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setBuilderCredentialFields((prev) => prev.filter((_, i) => i !== idx))
-                            }
-                            className="rounded-full border border-xyne-border px-2.5 py-1 text-[12px] text-xyne-fg-muted transition hover:bg-xyne-surface-subtle"
-                            aria-label="Delete credential field"
-                          >
-                            Delete
-                          </button>
+                        <div key={f.id} className="space-y-2 rounded-xl border border-xyne-border-subtle p-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              value={f.name}
+                              onChange={(e) =>
+                                setBuilderCredentialFields((prev) =>
+                                  prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x),
+                                )
+                              }
+                              placeholder="Field key, e.g. email"
+                              aria-label={`Credential ${idx + 1} field key`}
+                              className={compactInput}
+                            />
+                            <input
+                              value={f.label}
+                              onChange={(e) =>
+                                setBuilderCredentialFields((prev) =>
+                                  prev.map((x, i) => i === idx ? { ...x, label: e.target.value } : x),
+                                )
+                              }
+                              placeholder="User label, e.g. Email"
+                              aria-label={`Credential ${idx + 1} label`}
+                              className={compactInput}
+                            />
+                          </div>
+                          <div className="grid grid-cols-[1fr_1.5fr_auto_auto] items-center gap-2">
+                            <select
+                              value={f.type}
+                              onChange={(e) =>
+                                setBuilderCredentialFields((prev) =>
+                                  prev.map((x, i) => i === idx
+                                    ? { ...x, type: e.target.value === "password" ? "password" : "text" }
+                                    : x),
+                                )
+                              }
+                              aria-label={`Credential ${idx + 1} input type`}
+                              className={compactInput}
+                            >
+                              <option value="text">Text</option>
+                              <option value="password">Password / secret</option>
+                            </select>
+                            <input
+                              value={f.placeholder}
+                              onChange={(e) =>
+                                setBuilderCredentialFields((prev) =>
+                                  prev.map((x, i) => i === idx ? { ...x, placeholder: e.target.value } : x),
+                                )
+                              }
+                              placeholder="Placeholder (optional)"
+                              aria-label={`Credential ${idx + 1} placeholder`}
+                              className={compactInput}
+                            />
+                            <label className="flex items-center gap-1.5 whitespace-nowrap text-[12px] text-xyne-fg-secondary">
+                              <input
+                                type="checkbox"
+                                checked={!f.optional}
+                                onChange={(e) =>
+                                  setBuilderCredentialFields((prev) =>
+                                    prev.map((x, i) => i === idx ? { ...x, optional: !e.target.checked } : x),
+                                  )
+                                }
+                              />
+                              Required
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setBuilderCredentialFields((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              className="rounded-full border border-xyne-border px-2.5 py-1 text-[12px] text-xyne-fg-muted transition hover:bg-xyne-surface-subtle"
+                              aria-label="Delete credential field"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       ))}
                       <button
@@ -793,7 +1058,7 @@ export function AddConnectionDialog({
                         onClick={() =>
                           setBuilderCredentialFields((prev) => [
                             ...prev,
-                            { name: "", label: "", type: "text", placeholder: "", optional: true },
+                            createBuilderCredentialField({ type: "text", optional: false }),
                           ])
                         }
                         className="rounded-full border border-xyne-border bg-xyne-surface-subtle px-2.5 py-1 text-[12px] text-xyne-fg-primary transition hover:bg-xyne-surface"
@@ -883,14 +1148,23 @@ export function AddConnectionDialog({
                         </>
                       ) : (
                         <>
-                          <p className="text-[12px] text-xyne-fg-muted">HTTP MCP endpoint</p>
+                          <div className="rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2.5">
+                            <p className="text-[12px] font-medium text-xyne-fg-secondary">2. MCP endpoint and authentication</p>
+                            <p className="mt-0.5 text-[11px] leading-4 text-xyne-fg-muted">
+                              Enter the Streamable HTTP MCP endpoint. Map user fields into headers
+                              with templates such as <code>{"{{email}}"}</code> and <code>{"{{password}}"}</code>.
+                            </p>
+                          </div>
                           <input
                             value={builderHttpUrl}
-                            onChange={(e) => setBuilderHttpUrl(e.target.value)}
+                            onChange={(e) => {
+                              setBuilderHttpUrl(e.target.value);
+                              setNewServerUrl(e.target.value);
+                            }}
                             placeholder="https://your-mcp-endpoint.example.com/mcp"
                             className={compactInput}
                           />
-                          <p className="text-[12px] text-xyne-fg-muted">Headers</p>
+                          <p className="text-[12px] text-xyne-fg-muted">Request headers</p>
                           {builderHeaderRows.map((row, idx) => (
                             <div
                               key={`hdr-${idx}`}
@@ -905,7 +1179,7 @@ export function AddConnectionDialog({
                                     ),
                                   )
                                 }
-                                placeholder="Authorization"
+                                placeholder="Header name, e.g. X-User-Email"
                                 className={compactInput}
                               />
                               <input
@@ -917,7 +1191,7 @@ export function AddConnectionDialog({
                                     ),
                                   )
                                 }
-                                placeholder="Bearer {{apiKey}}"
+                                placeholder="Value template, e.g. {{email}}"
                                 className={compactInput}
                               />
                               <button
@@ -1068,7 +1342,13 @@ export function AddConnectionDialog({
               {/* Credential fields for a freshly-created server */}
               {mode === "new" && !isEditMode && newModeFields.length > 0 && (
                 <div>
-                  <p className="mb-2 text-[12px] text-xyne-fg-muted">Connection Credentials</p>
+                  <div className="mb-2 rounded-xl border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2.5">
+                    <p className="text-[12px] font-medium text-xyne-fg-secondary">3. Test your connection</p>
+                    <p className="mt-0.5 text-[11px] leading-4 text-xyne-fg-muted">
+                      Enter your own values below. They are encrypted and saved only to your
+                      connection; publishing shares the connector definition, never your credentials.
+                    </p>
+                  </div>
                   <div className="space-y-3">
                     {newModeFields.map((field) => (
                       <TextField

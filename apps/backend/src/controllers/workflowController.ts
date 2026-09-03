@@ -790,7 +790,7 @@ export class WorkflowController {
           stepName: step.stepName,
           type: step.type,
           previousStepId: step.previousStepId,
-          data: step.data ? JSON.parse(step.data) : null,
+          // Step payloads are returned by the by-id route, not in the list.
           status: step.status,
           createdAt: step.createdAt,
           updatedAt: step.updatedAt,

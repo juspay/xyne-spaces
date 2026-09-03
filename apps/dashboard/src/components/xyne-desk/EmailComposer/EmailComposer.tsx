@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, {
   ReactElement,
   useCallback,
@@ -78,6 +79,7 @@ import { RecipientPillExtension } from '../../ui/TipTapExtensions';
 import { Popover } from '../../ui/Popover/Popover';
 import { RecipientMentionSelector } from './RecipientMentionSelector';
 import { RecipientField as RecipientFieldRow } from './RecipientField';
+import { Button } from '../../ui/Button/Button';
 
 import {
   buildContactPool,
@@ -415,13 +417,18 @@ export const EmailComposer = ({
 
   const lastLoadedContentRef = React.useRef<string>('');
   const justLoadedDraftRef = React.useRef(false);
+  const isDirty = emailContent !== lastLoadedContentRef.current;
+  const hydratedConversationRef = React.useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (isComposeMode) return;
+    const draftKey = conversationId ?? null;
+    if (hydratedConversationRef.current === draftKey && isDirty) return;
     const next = draft?.draftContent ?? '';
     setEmailContent(next);
     lastLoadedContentRef.current = next;
     justLoadedDraftRef.current = true;
-  }, [draft?.draftContent, conversationId, isComposeMode]);
+    hydratedConversationRef.current = draftKey;
+  }, [draft?.draftContent, conversationId, isComposeMode, isDirty]);
 
   const handleEditorChange = useCallback((html: string): void => {
     setEmailContent(html);
@@ -432,7 +439,6 @@ export const EmailComposer = ({
   }, []);
 
   const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
-  const isDirty = emailContent !== lastLoadedContentRef.current;
   const hasInlineImages = useMemo(
     () =>
       /\sdata-att-id=["']/i.test(emailContent) ||
@@ -462,8 +468,8 @@ export const EmailComposer = ({
   const [isToExpanded, setIsToExpanded] = useState(false);
   const [isCcExpanded, setIsCcExpanded] = useState(false);
   const [isBccExpanded, setIsBccExpanded] = useState(false);
-  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => {});
-  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => {});
+  const onRemoveRecipientFromBodyRef = useRef<(email: string) => void>(() => undefined);
+  const onAddRecipientToFromBodyRef = useRef<(email: string) => void>(() => undefined);
 
   const applyRecipients = useCallback(
     (next: { to: string[]; cc: string[]; bcc: string[] }): void => {
@@ -1532,7 +1538,11 @@ export const EmailComposer = ({
         (error instanceof Error ? error.message : null) ||
         (isComposeMode ? 'Failed to send email' : 'Failed to send reply');
       toast.error(message);
-      console.warn('Failed to send email:', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to send email:'),
+        context: [error],
+      });
     } finally {
       setIsSending(false);
     }
@@ -1545,7 +1555,11 @@ export const EmailComposer = ({
   const runSendEmail = (): void => {
     handleSendEmail().catch(error => {
       toast.error('Failed to send');
-      console.error('Failed to send email:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to send email:'),
+        error: error,
+      });
     });
   };
 
@@ -2165,13 +2179,15 @@ export const EmailComposer = ({
                   >
                     Back to edit
                   </button>
-                  <button
+                  <Button
                     type='button'
+                    variant='default'
                     onClick={runSendEmail}
                     disabled={isSending}
                     className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
                     data-track-category='Support'
                     data-track-name='ConfirmTwoStepSend'
+                    trackId='send_email_confirm'
                   >
                     {isSending ? (
                       <Loader2 size={14} className='animate-spin' />
@@ -2179,7 +2195,7 @@ export const EmailComposer = ({
                       <Send size={14} />
                     )}
                     {isSending ? 'Sending…' : 'Send email'}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -2220,7 +2236,7 @@ export const EmailComposer = ({
               type='button'
               className='w-full flex items-center gap-2 cursor-pointer text-left py-1'
               onClick={handleExpand}
-              data-track-category='SUPPORT'
+              data-track-category='Support'
               data-track-name='ExpandReplyComposer'
               data-track-metadata={JSON.stringify({
                 toCount: toEmails.length,
@@ -2270,7 +2286,7 @@ export const EmailComposer = ({
                         type='button'
                         className='flex items-center gap-2 pb-1 pt-1 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors'
                         aria-label={`Switch reply mode. Current: ${replyMode === 'replyAll' ? 'Reply all' : 'Reply'}`}
-                        data-track-category='SUPPORT'
+                        data-track-category='Support'
                         data-track-name='ComposerReplyModeDropdown'
                       >
                         <div className='flex items-center gap-1'>
@@ -2327,7 +2343,7 @@ export const EmailComposer = ({
                     onClick={() => setIsExpanded(false)}
                     className='flex-shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
                     title='Collapse'
-                    data-track-category='SUPPORT'
+                    data-track-category='Support'
                     data-track-name='CollapseReplyComposer'
                     data-track-metadata={JSON.stringify({
                       toEmails: toEmails,
@@ -2384,7 +2400,7 @@ export const EmailComposer = ({
                         <button
                           onClick={() => setShowCc(true)}
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                          data-track-category='SUPPORT'
+                          data-track-category='Support'
                           data-track-name='ShowCcField'
                           data-track-metadata={JSON.stringify({
                             ccMails: ccEmails,
@@ -2400,7 +2416,7 @@ export const EmailComposer = ({
                         <button
                           onClick={() => setShowBcc(true)}
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                          data-track-category='SUPPORT'
+                          data-track-category='Support'
                           data-track-name='ShowBccField'
                           data-track-metadata={JSON.stringify({
                             ccCount: ccEmails.length,
@@ -2413,8 +2429,9 @@ export const EmailComposer = ({
                         </button>
                       )}
                       {onClose && features.showDiscardButton && (
-                        <button
+                        <Button
                           type='button'
+                          variant='ghost'
                           onMouseDown={() => {
                             if (!isComposeMode) suppressNextReplyAutosaveRef.current = true;
                           }}
@@ -2483,9 +2500,10 @@ export const EmailComposer = ({
                           title='Discard draft'
                           data-track-category='Support'
                           data-track-name='DiscardComposerDraft'
+                          trackId='discard_composer_draft'
                         >
                           <Trash2 size={14} />
-                        </button>
+                        </Button>
                       )}
                       {onClose && features.showMinimizeButton && (
                         <button
@@ -2602,7 +2620,7 @@ export const EmailComposer = ({
               className='flex-1 text-sm py-1 outline-none bg-transparent'
               disabled={isSending}
               aria-label='Subject'
-              data-track-category='SUPPORT'
+              data-track-category='Support'
               data-track-name='EditComposeSubject'
             />
             {/* AI subject suggestion — disabled until the body has content
@@ -2615,8 +2633,9 @@ export const EmailComposer = ({
                 side='bottom'
                 delayDuration={300}
               >
-                <button
+                <Button
                   type='button'
+                  variant='ghost'
                   onClick={() => {
                     void (async (): Promise<void> => {
                       const suggested = await subjectAI.generate(stripHtml(emailContent));
@@ -2628,13 +2647,14 @@ export const EmailComposer = ({
                   aria-label='Suggest subject with AI'
                   data-track-category='Support'
                   data-track-name='SuggestComposeSubject'
+                  trackId='generate_compose_subject'
                 >
                   {subjectAI.isGenerating ? (
                     <RefreshCw size={14} className='animate-spin' />
                   ) : (
                     <Wand2 size={14} />
                   )}
-                </button>
+                </Button>
               </Tooltip>
             )}
           </div>
@@ -2871,7 +2891,7 @@ export const EmailComposer = ({
                     disabled={isSending || isUploadingAttachments}
                     className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                     aria-label='Attach files'
-                    data-track-category='SUPPORT'
+                    data-track-category='Support'
                     data-track-name='AddEmailAttachment'
                     data-track-metadata={JSON.stringify({
                       conversationId,
@@ -2908,6 +2928,8 @@ export const EmailComposer = ({
                         const base = channelId ? `${supportBase}/${channelId}` : supportBase;
                         void composerNavigate(`${base}?openSettings=signatures`);
                       }}
+                      data-track-category='Support'
+                      data-track-name='OPEN_SUPPORT_FROM_COMPOSER'
                       className='text-xs text-muted-foreground'
                     >
                       Manage signatures
@@ -2915,6 +2937,8 @@ export const EmailComposer = ({
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => setSelectedSignatureId(null)}
+                      data-track-category='Support'
+                      data-track-name='CLEAR_EMAIL_SIGNATURE'
                       className={!selectedSignatureId ? 'font-medium' : ''}
                     >
                       No signature
@@ -2923,6 +2947,8 @@ export const EmailComposer = ({
                       <DropdownMenuItem
                         key={sig.id}
                         onClick={() => setSelectedSignatureId(sig.id)}
+                        data-track-category='Support'
+                        data-track-name='SELECT_EMAIL_SIGNATURE'
                         className={selectedSignatureId === sig.id ? 'font-medium' : ''}
                       >
                         {sig.name}
@@ -3004,7 +3030,8 @@ export const EmailComposer = ({
                   </button>
                 </Tooltip>
               )}
-              <button
+              <Button
+                variant='default'
                 className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
                 onClick={runSendEmail}
                 disabled={
@@ -3024,13 +3051,14 @@ export const EmailComposer = ({
                   conversationId,
                   attachmentCount: attachments.length,
                 })}
+                trackId='send_email'
               >
                 {isSending ? (
                   <RefreshCw size={16} className='animate-spin' />
                 ) : (
                   <ArrowUp size={16} />
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         )}

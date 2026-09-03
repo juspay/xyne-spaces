@@ -12,7 +12,10 @@ import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { Channel } from '@xyne/shared';
-import { useCmdkAllDefaultRankProfile } from '../../../hooks/useCmdkSearchConfig';
+import {
+  useCmdkDefaultRankProfiles,
+  cmdkTabKeyForDocType,
+} from '../../../hooks/useCmdkSearchConfig';
 
 interface SearchFilterBarProps {
   filters: SearchResultsFilters;
@@ -92,23 +95,22 @@ const SORT_OPTIONS = [
   { value: 'oldest' as const, label: 'Oldest' },
 ];
 
-// Hardcoded Vespa rank profiles, scoped to the schema(s) each docType resolves to.
-// '' means "send nothing" => backend default (default_native). Only profiles that exist
-// in every schema the type queries are listed, because Vespa rejects a rank profile that
-// is missing from any queried schema. Selecting a single type prunes the query's sources
-// to that one schema (see searchService.ts), which is what makes the chat-only and
-// mail-only profiles below valid.
+// Explicit rank-profile picks per docType, scoped to the schema(s) each type queries —
+// Vespa rejects a profile missing from any queried schema. getRankProfileOptions()
+// prepends a `value: ''` row ("no explicit pick"), labeled with the per-tab CAC default
+// (useCmdkDefaultRankProfiles) at render time — the default is never hardcoded here.
 type RankProfileOption = { value: string; label: string };
 const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   Record<SearchResultsFilters['docType'], RankProfileOption[]>
 > = {
   all: [
     { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'unified', label: 'unified' },
   ],
   messages: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
     { value: 'personalized', label: 'personalized' },
     { value: 'default_random', label: 'default_random' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
@@ -118,16 +120,19 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
     })),
   ],
   files: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
   ],
   tickets: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'semantic_ranking', label: 'semantic_ranking' },
   ],
   desk: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'global_sorted', label: 'global_sorted' },
     { value: 'default_bm25', label: 'default_bm25' },
@@ -135,8 +140,17 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   ],
 };
 
-function getRankProfileOptions(docType: SearchResultsFilters['docType']): RankProfileOption[] {
-  return RANK_PROFILE_OPTIONS_BY_TYPE[docType] ?? [];
+function getRankProfileOptions(
+  docType: SearchResultsFilters['docType'],
+  resolvedDefault: string,
+): RankProfileOption[] {
+  const explicit = RANK_PROFILE_OPTIONS_BY_TYPE[docType];
+  if (!explicit) return [];
+  return [
+    { value: '', label: resolvedDefault },
+    // drop the explicit row the default row already covers
+    ...explicit.filter(o => o.value !== resolvedDefault),
+  ];
 }
 
 function useListKeyNav(
@@ -219,7 +233,7 @@ function openOnArrowDown(open: boolean, setOpen: (v: boolean) => void) {
 }
 
 export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarProps): ReactElement {
-  const allDefaultRankProfile = useCmdkAllDefaultRankProfile();
+  const defaultRankProfileFor = useCmdkDefaultRankProfiles();
   const [typeOpen, setTypeOpen] = useState(false);
   const [fromOpen, setFromOpen] = useState(false);
   const [inOpen, setInOpen] = useState(false);
@@ -248,12 +262,13 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const isAssigneeActive = filters.assigneeIds.length > 0;
   const isSortActive = filters.sortBy !== 'relevance';
 
-  const rankProfileOptions = getRankProfileOptions(filters.docType);
+  const resolvedDefaultRankProfile = defaultRankProfileFor(cmdkTabKeyForDocType(filters.docType));
+  const rankProfileOptions = getRankProfileOptions(filters.docType, resolvedDefaultRankProfile);
   const showRankProfile = rankProfileOptions.length > 0;
   const isRankActive = filters.rankProfile !== '';
+  // fallback: a profile not in the list — show it verbatim
   const rankProfileLabel =
-    rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ??
-    (filters.docType === 'all' ? allDefaultRankProfile : 'default_native');
+    rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ?? filters.rankProfile;
 
   const showFromIn = filters.docType !== 'channels' && filters.docType !== 'people';
   const showAssignee = filters.docType === 'tickets' || filters.docType === 'all';
@@ -777,7 +792,12 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                   <Check
                     className={cn(
                       'size-3.5 shrink-0',
-                      filters.rankProfile === opt.value ? 'opacity-100' : 'opacity-0',
+                      // the default row also owns an explicit pick equal to the default
+                      // (its own row is deduped away; both send the same profile)
+                      filters.rankProfile === opt.value ||
+                        (opt.value === '' && filters.rankProfile === resolvedDefaultRankProfile)
+                        ? 'opacity-100'
+                        : 'opacity-0',
                     )}
                   />
                   {opt.label}

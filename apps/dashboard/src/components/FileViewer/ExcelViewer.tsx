@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { BaseViewerProps } from './utils';
@@ -86,7 +87,11 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
         setActiveSheet(0);
         setLoading(false);
       } else if (type === 'ERROR') {
-        console.error('Error parsing Excel file:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error parsing Excel file:'),
+          error: error,
+        });
         setLoading(false);
       }
 
@@ -98,7 +103,11 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
     };
 
     worker.onerror = error => {
-      console.error('Worker error:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Worker error:'),
+        error: error,
+      });
       setLoading(false);
       worker.terminate();
       if (workerRef.current === worker) {

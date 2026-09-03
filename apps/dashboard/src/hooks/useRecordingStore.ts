@@ -3,6 +3,9 @@ import { useSyncExternalStore } from 'react';
 import type { RecordingLayout, RecordingState, TranscriptEntry } from '../stores/recordingStore';
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 import { recordingStore as _rawStore } from '../stores/recordingStore';
+import { calculateRecordingElapsedMs } from '../utils/recordingUtils';
+import { formatDuration } from '../utils/dateUtils';
+import { setWorkspaceSwitchToast } from '../utils/workspaceSwitchToast';
 
 interface RecordingStoreSnapshot {
   status: 'active' | 'done' | 'error' | 'stopped';
@@ -12,13 +15,15 @@ interface RecordingStoreSnapshot {
 }
 
 export type RecordingStoreEvent =
-  | { type: 'requestAutoStart' }
+  | { type: 'requestAutoStart'; conversationId?: string; channelId?: string }
   | { type: 'clearAutoStart' }
   | { type: 'requestStop' }
   | {
       type: 'startRecording';
       sttModel?: 'google' | 'azure' | 'deepgram';
       defaultLayout?: RecordingLayout;
+      conversationId?: string;
+      channelId?: string;
     }
   | {
       type: 'recordingStarted';
@@ -31,7 +36,7 @@ export type RecordingStoreEvent =
     }
   | { type: 'pauseRecording' }
   | { type: 'resumeRecording' }
-  | { type: 'stopRecording' }
+  | { type: 'stopRecording'; silent?: boolean }
   | { type: 'setStatus'; status: RecordingState['status'] }
   | { type: 'error'; error: string }
   | { type: 'reset' }
@@ -74,14 +79,47 @@ export function getRecordingStatus(): RecordingState['status'] {
   return store.getSnapshot().context.status;
 }
 
-/** Stop whatever is in flight because the page or the machine is going away. */
-export function stopRecordingForTeardown(): void {
+/**
+ * Stop whatever is in flight because the page or the machine is going away.
+ * `silent` skips the "Recording stopped" toast for a caller that is about to
+ * navigate away and will show its own toast once the destination page mounts —
+ * the default toast would just be torn down mid-display by that navigation.
+ */
+export function stopRecordingForTeardown(options?: { silent?: boolean }): void {
   const status = getRecordingStatus();
   if (status === 'starting') {
     sendRecordingEvent({ type: 'requestStop' });
   } else if (status === 'recording' || status === 'paused') {
-    sendRecordingEvent({ type: 'stopRecording' });
+    sendRecordingEvent({ type: 'stopRecording', ...(options?.silent ? { silent: true } : {}) });
   }
+}
+
+/**
+ * Stop for a caller that is about to perform a same-origin hard navigation
+ * (workspace switch, reload). The normal "Recording stopped" toast would be
+ * torn down mid-display by that navigation, so it's stashed instead and shown
+ * once the destination page mounts (see `WorkspaceSwitchToastListener`).
+ */
+export function stopRecordingForNavigation(): void {
+  const { status, startTime, pauseStartedAt, accumulatedPausedMs } = store.getSnapshot().context;
+
+  // Still connecting — no room/duration to report yet. Fall back to the
+  // existing requestStop path; its own (non-silent) toast fires once the
+  // pending start resolves, same as before this helper existed.
+  if (status === 'starting') {
+    stopRecordingForTeardown();
+    return;
+  }
+  if (status !== 'recording' && status !== 'paused') return;
+
+  const durationMs = startTime
+    ? calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs)
+    : null;
+  setWorkspaceSwitchToast({
+    title: 'Recording stopped',
+    description: `Recording saved (${durationMs ? formatDuration(durationMs) : 'Unknown duration'})`,
+  });
+  stopRecordingForTeardown({ silent: true });
 }
 
 export interface UseTranscriptStreamReturn {

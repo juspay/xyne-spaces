@@ -7,6 +7,7 @@ import {
   type TransformedSearchResult,
 } from './resultTransform';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
 
@@ -213,7 +214,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       priority,    // Priority (HIGH, MEDIUM, LOW) - comma-separated
       searchId,
       board,       // Board name/ID
-      tags,        // Comma-separated tags
+      tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
+      threadType,  // Thread classification type(s) - comma-separated; matches thread roots
+      messageActs, // Thread type(s) a message was cited as evidence for - comma-separated
       dynamicFieldValues, // Dynamic field filters
       dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
       before,      // Created before date (multiple formats)
@@ -311,9 +314,36 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
             cluster: config.cluster,
           });
           const fields = (raw?.fields ?? {}) as Record<string, any>;
-          // Enforce the same per-user gate the YQL-based search does.
+          // Access rule:
+          //   - PRIVATE doc (isPrivate !== false): owner OR in `permissions`.
+          //   - PUBLIC doc  (isPrivate === false): owner OR in `permissions`
+          //     OR a participant of the doc's chat channel (`channelRef`).
           const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
-          if (perms.length > 0 && !perms.includes(userId)) {
+          const isOwner = fields.ownerId === userId;
+          const isShared = perms.includes(userId);
+          const isPublic = fields.isPrivate === false;
+          // Private docs: owner or explicit `permissions` only.
+          // Public docs: owner, `permissions`, OR a participant of the doc's
+          // chat channel (via `channelRef`).
+          let allowed = isOwner || isShared;
+          // Channel-participant access: a doc may belong to a chat channel via
+          // `channelRef` (format `id:namespace:chat_container::<channelId>`).
+          // Only consulted for public docs, and only when the cheaper checks
+          // above didn't already pass.
+          if (!allowed && isPublic) {
+            const channelRef =
+              typeof fields.channelRef === 'string' ? fields.channelRef : '';
+            const channelId = channelRef ? (channelRef.split('::').pop() ?? '') : '';
+            if (channelId) {
+              const participant =
+                await repositories.channelParticipants.findParticipant(
+                  channelId,
+                  userId,
+                );
+              allowed = participant !== null;
+            }
+          }
+          if (!allowed) {
             res.status(403).json({ success: false, error: 'Forbidden' });
             return;
           }
@@ -747,6 +777,16 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
     if (channelMentions) {
       options.slack.mentionedChannelIds = channelMentions;
+    }
+    // Thread classification. threadType matches a thread's ROOT message, so it returns one
+    // hit per thread; messageActs matches the individual messages the classifier cited as
+    // evidence. Sent together they AND, which is how you ask for "the message that made this
+    // an ISSUE" rather than either on its own.
+    if (threadType) {
+      options.slack.threadType = toFilterValues(threadType, 'threadType');
+    }
+    if (messageActs) {
+      options.slack.messageActs = toFilterValues(messageActs, 'messageActs');
     }
     // Highlight-only: exact display names to bold in result snippets (kept out of the YQL filter).
     if (mentionHighlights) {

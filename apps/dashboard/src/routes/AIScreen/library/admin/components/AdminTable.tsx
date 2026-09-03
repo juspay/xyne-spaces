@@ -8,20 +8,21 @@ export function AdminTable({
   headers,
   children,
 }: {
-  headers: readonly { label: string; align?: 'right' }[];
+  headers: readonly { label: string; align?: 'right'; width?: string }[];
   children: ReactNode;
 }): ReactElement {
   return (
-    <div className='overflow-x-auto rounded-xl border border-border'>
+    <div className='min-h-0 overflow-auto rounded-xl border border-border'>
       <table className='w-max min-w-full text-sm'>
         <thead>
-          <tr className='border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground'>
+          <tr className='text-left text-xs uppercase tracking-wide text-muted-foreground'>
             {headers.map(header => (
               <th
                 key={header.label}
                 className={cn(
-                  'whitespace-nowrap px-4 py-2.5',
+                  'sticky top-0 z-10 whitespace-nowrap bg-[color-mix(in_srgb,hsl(var(--muted))_50%,hsl(var(--background)))] px-4 py-2.5 shadow-[inset_0_-1px_0_hsl(var(--border))]',
                   header.align === 'right' && 'text-right',
+                  header.width,
                 )}
               >
                 {header.label}
@@ -51,7 +52,10 @@ export function AdminPager({
   total: number;
   onPrev: () => void;
   onNext: () => void;
-}): ReactElement {
+}): ReactElement | null {
+  const hasPages = offset > 0 || offset + count < total;
+  if (!hasPages) return null;
+
   return (
     <div className='flex items-center justify-between text-xs text-muted-foreground'>
       <span>
@@ -62,6 +66,8 @@ export function AdminPager({
           type='button'
           variant='outline'
           onClick={onPrev}
+          data-track-category='Claw Admin'
+          data-track-name='ADMIN_PAGER_PREV'
           disabled={offset === 0}
           className='disabled:pointer-events-auto'
         >
@@ -72,6 +78,8 @@ export function AdminPager({
           type='button'
           variant='outline'
           onClick={onNext}
+          data-track-category='Claw Admin'
+          data-track-name='ADMIN_PAGER_NEXT'
           disabled={offset + count >= total}
           className='disabled:pointer-events-auto'
         >

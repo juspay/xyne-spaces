@@ -19,6 +19,7 @@ export interface CreateMessageAttachmentInput {
   workspaceId: string;
   metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   createdAt?: Date;
+  uploadStatus?: string;
 }
 
 export class MessageAttachmentRepository {
@@ -42,6 +43,7 @@ export class MessageAttachmentRepository {
         conversationId: data.conversationId,
         workspaceId: data.workspaceId,
         metadata: data.metadata || {},
+        ...(data.uploadStatus && { uploadStatus: data.uploadStatus }),
         ...(data.createdAt && { createdAt: data.createdAt })
       }
     });
@@ -279,6 +281,18 @@ export class MessageAttachmentRepository {
       },
       orderBy: { createdAt: 'asc' }
     });
+  }
+
+  async hasEmailAttachment(emailId: string): Promise<boolean> {
+    const attachment = await this.db.messageAttachment.findFirst({
+      where: {
+        entityId: emailId,
+        entityType: AttachmentEntityType.EMAIL,
+        isDeleted: false,
+      },
+      select: { id: true },
+    });
+    return attachment !== null;
   }
 
   async updateVersion(id: string, metadata: Record<string, any>): Promise<MessageAttachment> { // eslint-disable-line @typescript-eslint/no-explicit-any

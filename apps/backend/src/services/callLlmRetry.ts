@@ -2,6 +2,9 @@ import { Agent, LLMClient, createUserMessage } from '@framework';
 import { config } from '@/config/env';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { logger } from '@/utils/logger';
+import { repositories } from '@/database/repositories';
+import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 120_000; // 2 minutes
@@ -25,12 +28,28 @@ export type StreamingLlmResult =
   | { ok: true; content: string }
   | { ok: false; reason: StreamingLlmFailureReason; error?: string };
 
+// Per-user recording-summary model tier. 'fast' (default) uses
+// config.llm.callRecordingFastLitellmModel; 'thinking' uses callRecordingThinkingLitellmModel.
+export type SummaryModelType = 'fast' | 'thinking';
+
+/** Resolve the litellm model name for a summary model tier. */
+export function resolveSummaryModel(modelType: SummaryModelType | undefined): string {
+  return modelType === 'thinking'
+    ? config.llm.callRecordingThinkingLitellmModel || DEFAULT_MODEL
+    : config.llm.callRecordingFastLitellmModel || DEFAULT_MODEL;
+}
+
 export interface ExecuteStreamingLlmOptions {
   userPrompt: string;
   systemPrompt?: string;
   operation: string;
   callId?: string;
   abortSignal?: AbortSignal;
+  /**
+   * Which model tier to use for this request: 'fast' (default) or 'thinking'.
+   * Overrides the streaming client's default model per request.
+   */
+  modelType?: SummaryModelType;
   /**
    * Invoked as content deltas arrive, with the full text accumulated so far.
    * Lets a caller render partial output live (e.g. stream into a canvas).
@@ -40,7 +59,16 @@ export interface ExecuteStreamingLlmOptions {
   onDelta?: (accumulatedContent: string) => void | Promise<void>;
 }
 
-let streamingLlmClient: LLMClient | null = null;
+interface StreamingLlmCreds {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+// Clients are keyed by the resolved credential tuple so that orgs with their
+// own provisioned LiteLLM keys each get an isolated client (and cache entry),
+// while callers without org provisioning share the env-configured one.
+const streamingLlmClients = new Map<string, LLMClient>();
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
@@ -188,28 +216,60 @@ export async function executeCallLlmWithRetry(
 }
 
 /**
- * Returns a singleton LLMClient for streaming requests against the call LiteLLM
- * deployment. Returns null when credentials are not configured.
+ * Resolves the LiteLLM credentials for a streaming request. Delegates all
+ * DB / DEFAULT-purpose / env fallback logic to orgLLMCredentialService.
+ * Returns null when no credential is available (service's env fallback
+ * also empty).
  */
-function getStreamingLlmClient(): LLMClient | null {
-  const apiKey = config.llm.callLitellmApiKey;
-  const baseUrl = config.llm.litellmBaseUrl;
+async function resolveStreamingLlmCreds(callId?: string): Promise<StreamingLlmCreds | null> {
+  let userId: string | null = null;
 
-  if (!apiKey || !baseUrl) {
+  if (callId) {
+    try {
+      userId =
+        (await repositories.calls.findByExternalId(callId))?.createdByUserId ?? null;
+    } catch (error) {
+      logger.warn(`[${callId}] call lookup failed for org credential resolution`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const credential = await orgLLMCredentialService.getCredentialByUserId(
+    userId,
+    OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+  );
+
+  if (!credential?.apiKey || !credential.baseUrl) {
     return null;
   }
 
-  if (!streamingLlmClient) {
-    streamingLlmClient = new LLMClient({
+  return {
+    apiKey: credential.apiKey,
+    baseUrl: credential.baseUrl,
+    model: credential.defaultModel || config.llm.callLitellmModel || DEFAULT_MODEL,
+  };
+}
+
+/**
+ * Returns a cached LLMClient for the given resolved credentials; callers must
+ * resolve credentials first via resolveStreamingLlmCreds.
+ */
+function getStreamingLlmClient(creds: StreamingLlmCreds): LLMClient {
+  const cacheKey = `${creds.apiKey}\n${creds.baseUrl}\n${creds.model}`;
+
+  let client = streamingLlmClients.get(cacheKey);
+  if (!client) {
+    client = new LLMClient({
       provider: {
         type: 'litellm',
         config: {
-          apiKey,
-          baseUrl,
+          apiKey: creds.apiKey,
+          baseUrl: creds.baseUrl,
           timeout: STREAMING_REQUEST_TIMEOUT_MS,
         },
       },
-      defaultModel: config.llm.callLitellmModel || DEFAULT_MODEL,
+      defaultModel: creds.model,
       retry: {
         maxAttempts: MAX_ATTEMPTS,
         baseDelay: BASE_DELAY_MS,
@@ -217,9 +277,10 @@ function getStreamingLlmClient(): LLMClient | null {
         exponentialBackoff: true,
       },
     });
+    streamingLlmClients.set(cacheKey, client);
   }
 
-  return streamingLlmClient;
+  return client;
 }
 
 /**
@@ -238,9 +299,9 @@ export async function executeStreamingLlmRequest(
     return { ok: false, reason: 'cancelled' };
   }
 
-  const client = getStreamingLlmClient();
+  const creds = await resolveStreamingLlmCreds(options.callId);
 
-  if (!client) {
+  if (!creds) {
     logger.warn(`[${callId}] ${options.operation}_skipped`, {
       reason: 'litellm_credentials_missing',
     });
@@ -250,6 +311,8 @@ export async function executeStreamingLlmRequest(
       reason: 'litellm_credentials_missing',
     };
   }
+
+  const client = getStreamingLlmClient(creds);
 
   // The framework's client-level retry is a no-op for streaming: it retries the
   // synchronous call that constructs the async generator, which always
@@ -273,6 +336,9 @@ export async function executeStreamingLlmRequest(
       const streamResult = await client.generateStream({
         systemPrompt: options.systemPrompt,
         messages: [createUserMessage(options.userPrompt)],
+        // Override the cached client's default model per request so 'fast' and
+        // 'thinking' both resolve explicitly (never leak the wrong default).
+        model: resolveSummaryModel(options.modelType),
         abortSignal: options.abortSignal,
       });
 

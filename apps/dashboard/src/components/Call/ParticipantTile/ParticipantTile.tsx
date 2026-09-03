@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ConnectionQuality, Track } from 'livekit-client';
 import { useSelector } from '@xstate/react';
 import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
-import { Hand, MicOff, Monitor, ImagePlus } from 'lucide-react';
+import { Hand, MicOff, Monitor, ImagePlus, Maximize2 } from 'lucide-react';
 import { SignalBars } from '../components/SignalBars';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
@@ -16,7 +16,6 @@ import { SlashedBot } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 
 // Import LiveKit's built-in hooks that handle track management with observables
 import { VideoTrack } from '@livekit/components-react';
-import { AudioTrack } from '@livekit/components-react';
 import { useIsSpeaking } from '@livekit/components-react';
 
 interface ParticipantTileProps {
@@ -33,6 +32,12 @@ interface ParticipantTileProps {
   requestedAiController?: boolean;
   isHandRaised?: boolean | undefined;
   onToggleHandRaise?: (() => void) | undefined;
+  /** Shows a hover "expand" button (top-right) that opens this tile full-screen. */
+  onExpand?: (() => void) | undefined;
+  /** Hide the participant name overlay (used by presentation mode's full-bleed tile) */
+  hideNameLabel?: boolean | undefined;
+  /** Drop the speaking/raised-hand glow ring (a full-screen coloured frame looks wrong) */
+  hideSpeakingIndicator?: boolean | undefined;
 }
 
 export function ParticipantTile({
@@ -49,14 +54,14 @@ export function ParticipantTile({
   requestedAiController,
   isHandRaised = false,
   onToggleHandRaise,
+  onExpand,
+  hideNameLabel = false,
+  hideSpeakingIndicator = false,
 }: ParticipantTileProps): React.ReactElement {
   // Get track publications - these are observables that update automatically
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
   const screenSharePublication = participant.participant?.getTrackPublication(
     Track.Source.ScreenShare,
-  );
-  const microphonePublication = participant.participant?.getTrackPublication(
-    Track.Source.Microphone,
   );
 
   // Determine if video should be shown
@@ -64,7 +69,7 @@ export function ParticipantTile({
   const hasVideo =
     (participant.isCameraEnabled && cameraPublication?.isSubscribed) || hasScreenShareVideo;
 
-  const isClickable = isScreenShare && onClick;
+  const isClickable = !!onClick;
 
   // Background blur state (web only) — surfaced as a toggle on the local tile.
   const isBackgroundBlurEnabled = useSelector(
@@ -146,17 +151,6 @@ export function ParticipantTile({
     [hasScreenShareVideo, screenSharePublication, cameraPublication, participant.participant],
   );
 
-  const audioTrackRef = useMemo(
-    () =>
-      microphonePublication && participant.participant
-        ? {
-            participant: participant.participant,
-            source: Track.Source.Microphone,
-            publication: microphonePublication,
-          }
-        : undefined,
-    [microphonePublication, participant.participant],
-  );
   const videoTrackStyle = useMemo(
     () => (participant.isLocal && !isScreenShare ? { transform: 'scaleX(-1)' } : undefined),
     [isScreenShare, participant.isLocal],
@@ -169,6 +163,16 @@ export function ParticipantTile({
     }
     if (isScreenShare) {
       return 'border-blue-400 border-2 cursor-pointer hover:border-blue-300';
+    }
+    // General "this tile is the current main/focused view" highlight — used e.g.
+    // when a camera tile has been pinned to the main stage during screen share.
+    if (isFocused) {
+      return 'border-blue-400 border-2';
+    }
+    // Presentation mode fills the screen, so any state ring becomes a coloured
+    // frame around the whole viewport — drop the border entirely there.
+    if (hideSpeakingIndicator) {
+      return 'border-0';
     }
     // Hand raised — amber glow to draw attention (a raised hand usually means
     // the person is waiting to speak, so it takes precedence over the speaking ring).
@@ -190,6 +194,7 @@ export function ParticipantTile({
       className={cn(
         'relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg overflow-hidden flex items-center justify-center transition-all duration-200',
         compact ? 'shadow-lg' : 'shadow-lg group',
+        isClickable && !isScreenShare && 'cursor-pointer hover:brightness-110',
         getBorderClass(),
         className,
       )}
@@ -204,6 +209,33 @@ export function ParticipantTile({
         participantName: participant.name,
       })}
     >
+      {/* Expand-to-fullscreen button — top-right corner, hover-revealed (mirrors the
+          screen-share tile's expand affordance). Not shown for screen-share tiles
+          (ScreenShareView already has its own fullscreen entry point) or compact
+          tiles (mini call view), and never overlaps the AI agent's actions menu
+          since that only renders on agent tiles. */}
+      {onExpand && !isScreenShare && !compact && !isAIAgent && (
+        <button
+          onClick={e => {
+            e.stopPropagation();
+            onExpand();
+          }}
+          title='Expand'
+          aria-label={`Expand ${participant.isLocal ? 'your' : `${participant.name}'s`} video`}
+          data-track-category='CALLS'
+          data-track-name='Expand_Participant_Tile'
+          data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
+          className={cn(
+            'absolute top-1 right-1 sm:top-2 sm:right-2 z-20 flex items-center justify-center',
+            'rounded-md p-1.5 sm:p-2 bg-black/50 text-white/90 shadow-md transition-all duration-200',
+            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/70 hover:text-white',
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60',
+          )}
+        >
+          <Maximize2 className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
+        </button>
+      )}
+
       {/* Agent-tile actions. Host: "Remove from call" opens the transcription popover
           (one-click stop/start there) — the reversible soft kill-switch, not a hard
           removal. Non-host: a disabled note pointing them to the host. */}
@@ -262,6 +294,10 @@ export function ParticipantTile({
           trackRef={videoTrackRef}
           className={cn(
             'w-full h-full',
+            // Camera tiles: object-cover so the tile is always fully filled with
+            // no empty letterbox bars, matching Discord/Google Meet's grid tiles
+            // (they crop-to-fill from center rather than pillarboxing). Screen
+            // shares stay object-contain — cropping a shared screen would hide content.
             isScreenShare ? 'object-contain bg-black' : 'object-cover',
           )}
           style={videoTrackStyle}
@@ -309,20 +345,28 @@ export function ParticipantTile({
         </div>
       )}
 
-      {/* Audio Track - Using LiveKit's AudioTrack component (only for remote participants) */}
-      {!participant.isLocal && audioTrackRef && <AudioTrack trackRef={audioTrackRef} />}
+      {/* No per-tile <AudioTrack> here: `RoomAudioRenderer` is mounted once,
+          globally, in GlobalCallOverlay.tsx and already plays every remote
+          participant's audio exactly once for the whole call — regardless of
+          how many ParticipantTile instances visually represent them (grid,
+          spotlight main stage, spotlight sidebar, fullscreen modal, mini
+          view, etc). Rendering a second <AudioTrack> per tile here used to
+          double (or triple, whenever a participant appeared in more than one
+          tile at once) their audio. */}
 
       {/* Participant Info Overlay */}
-      <div
-        className={cn(
-          'absolute text-white font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] visual-regression-hide',
-          compact
-            ? 'bottom-0.5 left-0.5 text-[9px]'
-            : 'bottom-1 left-1 sm:bottom-2 sm:left-2 text-[10px] sm:text-xs max-w-[calc(100%-0.5rem)] truncate',
-        )}
-      >
-        {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
-      </div>
+      {!hideNameLabel && (
+        <div
+          className={cn(
+            'absolute text-white font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] visual-regression-hide',
+            compact
+              ? 'bottom-0.5 left-0.5 text-[9px]'
+              : 'bottom-1 left-1 sm:bottom-2 sm:left-2 text-[10px] sm:text-xs max-w-[calc(100%-0.5rem)] truncate',
+          )}
+        >
+          {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
+        </div>
+      )}
 
       {/* Background Blur Toggle - local tile only, when camera is on */}
       {showBlurToggle && (

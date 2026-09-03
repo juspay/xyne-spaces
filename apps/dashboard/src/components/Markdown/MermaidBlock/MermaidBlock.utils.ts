@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import mermaid from 'mermaid';
 import DOMPurify from 'dompurify';
 import { v4 as uuidv4 } from 'uuid';
@@ -57,6 +58,7 @@ export const generateMermaidId = (): string => {
 interface RenderDiagramParams {
   chart: string;
   messageId: string | undefined;
+  isDark: boolean;
   lastRenderedChart: string;
   onSuccess: (svg: string, chart: string) => void;
   onError: (error: string) => void;
@@ -69,6 +71,7 @@ interface RenderDiagramParams {
 export const renderMermaidDiagram = async ({
   chart,
   messageId,
+  isDark,
   lastRenderedChart,
   onSuccess,
   onError,
@@ -80,8 +83,9 @@ export const renderMermaidDiagram = async ({
     return;
   }
 
-  // Skip if chart hasn't changed
-  if (lastRenderedChart === chart) return;
+  // Theme is part of the render identity; switching themes must replace the
+  // SVG even when the diagram source is unchanged.
+  if (lastRenderedChart === `${isDark ? 'dark' : 'light'}:${chart}`) return;
 
   // Validate Mermaid syntax
   const hasValidSyntax = isValidMermaidSyntax(chart);
@@ -93,9 +97,10 @@ export const renderMermaidDiagram = async ({
   }
 
   // Try to load from cache first if messageId is provided
-  if (messageId) {
+  const themedMessageId = messageId ? `${messageId}:${isDark ? 'dark' : 'light'}` : undefined;
+  if (themedMessageId) {
     try {
-      const cached = await loadMermaidDiagram(messageId);
+      const cached = await loadMermaidDiagram(themedMessageId);
       if (cached && cached.diagram === chart && cached.renderedSvg) {
         // Re-sanitize: cache entries may predate the securityLevel fix.
         onSuccess(sanitizeMermaidSvg(cached.renderedSvg), chart);
@@ -105,13 +110,24 @@ export const renderMermaidDiagram = async ({
       }
     } catch (err) {
       // Cache load failed, continue with rendering
-      console.warn('Failed to load cached mermaid diagram:', err);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to load cached mermaid diagram:'),
+        context: [err],
+      });
     }
   }
 
   onLoading(true);
 
   try {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: isDark ? 'dark' : 'default',
+      securityLevel: 'antiscript',
+      fontFamily: 'Inter, sans-serif',
+      suppressErrorRendering: true,
+    });
     // Generate unique ID for each diagram
     const id = generateMermaidId();
 
@@ -122,11 +138,15 @@ export const renderMermaidDiagram = async ({
     onError('');
 
     // Save the sanitized SVG so cached entries are clean going forward
-    if (messageId) {
-      void saveMermaidDiagram(messageId, chart, safeSvg);
+    if (themedMessageId) {
+      void saveMermaidDiagram(themedMessageId, chart, safeSvg);
     }
   } catch (err) {
-    console.error('Mermaid rendering error:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Mermaid rendering error:'),
+      error: err,
+    });
     // Only set error if it looks like a complete diagram
     if (chart.split('\n').length > 2) {
       onError('Failed to render diagram');
@@ -144,7 +164,11 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
     await navigator.clipboard.writeText(text);
     return true;
   } catch (err) {
-    console.error('Failed to copy code:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to copy code:'),
+      error: err,
+    });
     return false;
   }
 };
@@ -216,11 +240,18 @@ export const downloadDiagramAsPng = (svgElement: SVGElement): void => {
     };
 
     img.onerror = (): void => {
-      console.error('Failed to load SVG image');
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to load SVG image'),
+      });
     };
 
     img.src = svgDataUrl;
   } catch (err) {
-    console.error('Failed to download diagram:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to download diagram:'),
+      error: err,
+    });
   }
 };

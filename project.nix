@@ -103,7 +103,7 @@
         
         # Get project root (where we were invoked from)
         PROJECT_ROOT="$PWD"
-        BACKEND_DIR="$PROJECT_ROOT/backend"
+        BACKEND_DIR="$PROJECT_ROOT/apps/backend"
         
         echo "Project root: $PROJECT_ROOT"
         echo "Backend dir: $BACKEND_DIR"

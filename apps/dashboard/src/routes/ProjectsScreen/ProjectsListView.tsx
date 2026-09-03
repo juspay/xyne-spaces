@@ -2,7 +2,8 @@ import { ReactElement, useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
-import { Button, ButtonType, Modal } from '@juspay/blend-design-system';
+import { Button } from '../../components/ui/Button';
+import { Dialog } from '../../components/ui/Dialog';
 import { ProjectForm, ProjectCard } from '../../components/Project';
 import { apiInstance } from '../../services/clients/apiClient';
 import { queries } from '../../zero/queries';
@@ -12,7 +13,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
-import { Download } from 'lucide-react';
+import { DownloadDown as Download } from '@xyne/icons';
 
 const ProjectsListView = (): ReactElement => {
   const zero = useZero();
@@ -116,12 +117,13 @@ const ProjectsListView = (): ReactElement => {
                 </button>
               )}
               <Button
-                buttonType={ButtonType.PRIMARY}
-                text='New'
+                size='sm'
                 onClick={() => setShowCreateModal(true)}
                 data-track-category='Projects'
                 data-track-name='CreateProject'
-              />
+              >
+                New
+              </Button>
             </div>
           </div>
           <p className='text-xs text-muted-foreground'>Manage your projects</p>
@@ -169,37 +171,32 @@ const ProjectsListView = (): ReactElement => {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <Modal
-          isOpen={true}
-          onClose={() => setShowCreateModal(false)}
-          title='Create New Project'
-          showCloseButton={true}
-          closeOnBackdropClick={false}
+        <Dialog
+          open={true}
+          onOpenChange={open => !open && setShowCreateModal(false)}
+          title='Create new project'
+          description='Name your project and pick a code for its ticket IDs.'
+          testId='create-project-dialog'
         >
-          <div data-testid='create-project-dialog'>
-            <ProjectForm
-              onSubmit={handleCreateProject}
-              onCancel={() => setShowCreateModal(false)}
-            />
-          </div>
-        </Modal>
+          <ProjectForm onSubmit={handleCreateProject} onCancel={() => setShowCreateModal(false)} />
+        </Dialog>
       )}
 
       {/* Edit Modal */}
       {editingProject && (
-        <Modal
-          isOpen={true}
-          onClose={() => setEditingProject(null)}
-          title='Edit Project'
-          showCloseButton={true}
-          closeOnBackdropClick={false}
+        <Dialog
+          open={true}
+          onOpenChange={open => !open && setEditingProject(null)}
+          title='Edit project'
+          description='Update the name and description for this project.'
+          testId='edit-project-dialog'
         >
           <ProjectForm
             project={editingProject}
             onSubmit={data => handleUpdateProject(editingProject.id, data)}
             onCancel={() => setEditingProject(null)}
           />
-        </Modal>
+        </Dialog>
       )}
     </div>
   );

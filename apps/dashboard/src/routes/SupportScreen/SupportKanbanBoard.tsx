@@ -333,10 +333,15 @@ export const SupportKanbanBoard = ({
   // drag-and-drop hook reads the live `localTickets` directly, so reordering is
   // unaffected — only the settled column layout is deferred a frame.
   const deferredLocalTickets = useDeferredValue(localTickets);
-  const ticketsByStage = useMemo(
-    () => groupTicketsByStage(deferredLocalTickets, stageColumns),
-    [deferredLocalTickets, stageColumns],
-  );
+  const ticketsByStage = useMemo(() => {
+    const grouped = groupTicketsByStage(deferredLocalTickets, stageColumns);
+    for (const stageId of Object.keys(grouped)) {
+      const stageTickets = grouped[stageId];
+      if (!stageTickets) continue;
+      grouped[stageId] = [...stageTickets].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    }
+    return grouped;
+  }, [deferredLocalTickets, stageColumns]);
 
   // Stage form modal state — shown when moving a ticket to a stage that has a form.
   const [stageFormModal, setStageFormModal] = useState<{

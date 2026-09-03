@@ -35,7 +35,8 @@ export interface IGitProvider {
     title: string|undefined,
     description: string,
     xyneId?: string,
-    ticketId?: string
+    ticketId?: string,
+    draft?: boolean,
   ): Promise<string | undefined>;
 
   /**

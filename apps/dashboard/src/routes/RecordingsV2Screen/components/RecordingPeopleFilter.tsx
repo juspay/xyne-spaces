@@ -6,7 +6,7 @@ import { Button } from '../../../components/ui/Button/Button';
 import { EntitySelector } from '../../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../../components/ui/EntitySelector/EntitySelector.types';
 import { cn } from '../../../utils/classNames';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, matchesUserQuery } from '../../../utils/userDisplayName';
 
 interface RecordingPeopleFilterProps {
   creators: User[];
@@ -26,11 +26,7 @@ export function RecordingPeopleFilter({
   const options = useMemo<SelectorOption[]>(() => {
     const query = searchValue.trim().toLowerCase();
     const matchedCreators = query
-      ? creators.filter(
-          creator =>
-            getUserDisplayName(creator).toLowerCase().includes(query) ||
-            (creator.email ?? '').toLowerCase().includes(query),
-        )
+      ? creators.filter(creator => matchesUserQuery(creator, searchValue))
       : creators;
 
     const creatorOptions = matchedCreators.map(creator => ({
@@ -94,7 +90,8 @@ export function RecordingPeopleFilter({
         placeholder='People'
         searchPlaceholder='Search people...'
         inputClassName={cn(
-          'h-9 rounded-xl pl-3 pr-7 text-sm font-medium shadow-sm',
+          'h-9 max-w-[9rem] rounded-xl pl-3 pr-7 text-sm font-medium shadow-sm',
+          '[&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:!whitespace-nowrap',
           selectedUserId && '!border-foreground',
         )}
         onSearchChange={setSearchValue}

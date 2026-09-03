@@ -3,7 +3,7 @@ import { useIdleTimer } from 'react-idle-timer';
 import { activityApi } from '../api/activityApi';
 import { ActivityEvent, ActivityStatus, ActivityLogPayload } from '@xyne/shared';
 import { useAuth } from './useAuth';
-import { logger } from '../utils/logger';
+import { logger, Event as LogEvent } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { ENABLE_ACTIVITY_LOG } from '../config';
 
@@ -71,7 +71,11 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       // Handle the promise properly instead of using void
       activityApi.logActivity(payload).catch(error => {
         // Log error but don't throw to avoid disrupting user experience
-        console.warn('Activity logging failed:', error);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('Activity logging failed:'),
+          context: [error],
+        });
       });
     },
     [user?.id, user?.email],
@@ -81,7 +85,10 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
    * Handle idle event (user inactive for 60s)
    */
   const handleIdle = useCallback(() => {
-    console.log('🔵 ACTIVITY_TRACE [Frontend]: handleIdle() triggered - user went idle');
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('🔵 ACTIVITY_TRACE [Frontend]: handleIdle() triggered - user went idle'),
+    });
 
     const now = Date.now();
 
@@ -95,8 +102,14 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       lastActiveStartTime.current = null;
     }
 
-    console.log('🔵 ACTIVITY_TRACE [Frontend]: Active period ended', {
-      activeDurationSec,
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String('🔵 ACTIVITY_TRACE [Frontend]: Active period ended'),
+      context: [
+        {
+          activeDurationSec,
+        },
+      ],
     });
 
     const currentPage = currentPathname || window.location.pathname;
@@ -108,9 +121,12 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
    */
   const handleActive = useCallback(
     (event?: Event) => {
-      console.log(
-        '🔵 ACTIVITY_TRACE [Frontend]: handleActive() triggered - user returned from idle',
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(
+          '🔵 ACTIVITY_TRACE [Frontend]: handleActive() triggered - user returned from idle',
+        ),
+      });
 
       const eventType = event?.type || 'unknown';
       const now = Date.now();
@@ -118,9 +134,15 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       // Start new active period
       lastActiveStartTime.current = now;
 
-      console.log('🔵 ACTIVITY_TRACE [Frontend]: New active period started', {
-        pageDurationSec: 0,
-        triggerEvent: eventType,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String('🔵 ACTIVITY_TRACE [Frontend]: New active period started'),
+        context: [
+          {
+            pageDurationSec: 0,
+            triggerEvent: eventType,
+          },
+        ],
       });
 
       const currentPage = currentPathname || window.location.pathname;
@@ -222,8 +244,16 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       // Use the ref to get the LATEST pathname, not the one from when timeout was set
       const finalPage = latestPathnameRef.current;
 
-      console.log('🔵 ACTIVITY_TRACE [Frontend]: Initial active state after settle (debounced)', {
-        page: finalPage,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(
+          '🔵 ACTIVITY_TRACE [Frontend]: Initial active state after settle (debounced)',
+        ),
+        context: [
+          {
+            page: finalPage,
+          },
+        ],
       });
 
       // Initialize tracking
@@ -286,10 +316,16 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
         const pageDurationMs = startTime - lastOnActionTime.current;
         const pageDurationSec = Math.round(pageDurationMs / 1000);
 
-        console.log('🔵 ACTIVITY_TRACE [Frontend]: Page changed (debounced)', {
-          from: oldPage,
-          to: currentPage,
-          timeOnPreviousPage: pageDurationSec,
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('🔵 ACTIVITY_TRACE [Frontend]: Page changed (debounced)'),
+          context: [
+            {
+              from: oldPage,
+              to: currentPage,
+              timeOnPreviousPage: pageDurationSec,
+            },
+          ],
         });
 
         // Log page change with duration since last onAction (use first segment of original page)

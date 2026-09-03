@@ -35,6 +35,7 @@ export interface RankableOption {
 }
 
 type SearchableUserOption<T extends RankableOption> = T & {
+  id: string;
   name: string;
   email: string;
   displayName?: string | null;
@@ -43,6 +44,9 @@ type SearchableUserOption<T extends RankableOption> = T & {
 
 const toSearchableUserOption = <T extends RankableOption>(option: T): SearchableUserOption<T> => ({
   ...option,
+  // `value` (e.g. "user:<id>") is unique per option — used as the stable key for searchUsers'
+  // token-pass dedup.
+  id: option.value,
   name: typeof option.name === 'string' && option.name ? option.name : option.label,
   email: typeof option.email === 'string' ? option.email : '',
   displayName: typeof option.displayName === 'string' ? option.displayName : null,

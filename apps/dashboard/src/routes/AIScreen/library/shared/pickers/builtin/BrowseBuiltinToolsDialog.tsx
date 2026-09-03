@@ -1,4 +1,6 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { cn } from '@/utils/classNames';
+import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
 import { Pill } from '../../primitives/Pill';
@@ -49,7 +51,7 @@ const BuiltinCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open built-in detail'
-      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+      className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
@@ -84,7 +86,7 @@ const BuiltinCard = ({
       title={enabled ? `Remove ${entry.label}` : `Add all ${entry.label} tools`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle built-in group'
-      className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {enabled ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />

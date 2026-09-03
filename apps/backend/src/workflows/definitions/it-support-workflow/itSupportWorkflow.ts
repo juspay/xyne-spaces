@@ -180,8 +180,6 @@ async function classifyQueryWithAI(
     const parsed = JSON.parse(jsonMatch[0])
     logger.info(`[SupportWorkflow] Combined result:`, parsed)
     logger.info('[SupportWorkflow] Raw combined output:', rawOutput)
-    console.dir(rawOutput, { depth: null });
-
     return {
       matchedId: parsed.matchedId,
       responseText: parsed.responseText || 'No response generated',
