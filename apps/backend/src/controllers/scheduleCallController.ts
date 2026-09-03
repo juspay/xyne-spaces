@@ -97,152 +97,66 @@ export class ScheduleCallController {
   }
 
   /**
-   * Decide what `userId` may change on `call`:
-   *   - organizer                                    → every field
-   *   - participant of a direct (DM/GROUP_DM) call   → may only change the invite list:
+   * Decide what `userId` may change on a scheduled call or a recurring series:
+   *   - organizer                                     → every field
+   *   - participant of a direct (DM/GROUP_DM) subject → may only change the invite list:
    *     add anyone, and remove only the people they themselves invited
-   *   - anyone else                                  → nothing
-   * On success returns the participants that must survive the edit: empty for the
-   * organizer, and for a participant editor everyone they did NOT invite, so a missing id
-   * in their `targetUserIds` can only ever remove their own invitees.
+   *   - anyone else                                   → nothing
+   * On success returns the participants that must survive the edit: empty for the organizer,
+   * and for a participant editor everyone they did NOT invite, so a missing id in their
+   * `targetUserIds` can only ever drop their own invitees.
+   *
+   * `hasEditsBeyondParticipants` is computed by the caller, which is the only place that
+   * knows its own request fields — a call has startsAt/endsAt, a series has the recurrence.
    */
-  private async authorizeScheduledCallEdit(params: {
-    call: { id: string; channelId: string | null; createdByUserId: string };
+  private async authorizeParticipantEdit(params: {
+    subject: { id: string; kind: 'call' | 'series'; channelId: string | null; organizerId: string };
     userId: string;
-    edits: {
-      title?: unknown;
-      startsAt?: unknown;
-      endsAt?: unknown;
-      channelId?: unknown;
-      callUpdatesChannel?: unknown;
-      externalInvitees?: unknown;
-      targetUserIds?: string[] | undefined;
-    };
+    hasEditsBeyondParticipants: boolean;
+    targetUserIds: string[] | undefined;
+    /** Internal participants of the subject, each with the user who invited them. */
+    loadParticipants: () => Promise<Array<{ userId: string; invitedBy: string }>>;
   }): Promise<
     { allowed: true; pinnedParticipantIds: string[] } | { allowed: false; status: number; error: string }
   > {
-    const { call, userId, edits } = params;
+    const { subject, userId, hasEditsBeyondParticipants, targetUserIds, loadParticipants } = params;
+    const noun = subject.kind === 'series' ? 'this series' : 'this call';
 
-    if (call.createdByUserId === userId) {
+    if (subject.organizerId === userId) {
       return { allowed: true, pinnedParticipantIds: [] };
     }
 
     // Read the scope via getScopeType, not findById: the channel behind a large group call
     // is the organizer's self-DM, which this caller isn't a member of, so the per-user
     // channel ACL would hide it and every non-organizer edit would 403.
-    const channelScopeType = call.channelId
-      ? await repositories.channels.getScopeType(call.channelId)
+    const channelScopeType = subject.channelId
+      ? await repositories.channels.getScopeType(subject.channelId)
       : null;
     const isDirectCall =
       channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
-    const isParticipant = !!(await repositories.calls.findParticipant(call.id, userId));
+    const participants = await loadParticipants();
+    const isParticipant = participants.some((p) => p.userId === userId);
 
-    // Calls scoped to a real channel stay organizer-only: their invite list is the channel's.
+    // Subjects scoped to a real channel stay organizer-only: their invite list is the channel's.
     if (!isDirectCall || !isParticipant) {
       logger.warn(
-        `[authorizeScheduledCallEdit] forbidden | callId=${call.id} userId=${userId} channelScopeType=${channelScopeType} isParticipant=${isParticipant}`,
+        `[authorizeParticipantEdit] forbidden | ${subject.kind}=${subject.id} userId=${userId} channelScopeType=${channelScopeType} isParticipant=${isParticipant}`,
       );
-      return { allowed: false, status: 403, error: 'Only the organizer can edit a scheduled call' };
+      return { allowed: false, status: 403, error: `Only the organizer can edit ${noun}` };
     }
 
-    const editsBeyondParticipants =
-      edits.title !== undefined ||
-      edits.startsAt !== undefined ||
-      edits.endsAt !== undefined ||
-      edits.channelId !== undefined ||
-      edits.callUpdatesChannel !== undefined ||
-      edits.externalInvitees !== undefined;
-
-    if (editsBeyondParticipants || edits.targetUserIds === undefined) {
+    if (hasEditsBeyondParticipants || targetUserIds === undefined) {
       return {
         allowed: false,
         status: 403,
-        error: 'Participants can only change who is invited to this call',
+        error: `Participants can only change who is invited to ${noun}`,
       };
     }
 
-    // Pin everyone this editor did not invite — they may drop their own invitees, but
-    // nobody else's. findParticipants already excludes external invitees.
-    const pinnedParticipantIds = (await repositories.calls.findParticipants(call.id))
-      .filter((p) => p.invitedBy !== userId)
-      .map((p) => p.userId);
-    return { allowed: true, pinnedParticipantIds };
-  }
-
-  /**
-   * Series counterpart of `authorizeScheduledCallEdit` — same rule, one level up:
-   *   - organizer                                       → every field
-   *   - participant of a direct (DM/GROUP_DM) series     → may only change the invite list:
-   *     add anyone, and remove only the people they themselves invited
-   *   - anyone else                                     → nothing
-   * Returns the participants that must survive the edit: empty for the organizer, and for a
-   * participant editor everyone they did NOT invite.
-   */
-  private async authorizeRecurringSeriesEdit(params: {
-    series: { id: string; channelId: string; organizerId: string };
-    userId: string;
-    edits: {
-      title?: unknown;
-      recurrenceRule?: unknown;
-      startTime?: unknown;
-      endTime?: unknown;
-      startsOn?: unknown;
-      endsOn?: unknown;
-      timezone?: unknown;
-      channelId?: unknown;
-      callUpdatesChannel?: unknown;
-      externalInvitees?: unknown;
-      targetUserIds?: string[] | undefined;
+    return {
+      allowed: true,
+      pinnedParticipantIds: participants.filter((p) => p.invitedBy !== userId).map((p) => p.userId),
     };
-  }): Promise<
-    { allowed: true; pinnedParticipantIds: string[] } | { allowed: false; status: number; error: string }
-  > {
-    const { series, userId, edits } = params;
-
-    if (series.organizerId === userId) {
-      return { allowed: true, pinnedParticipantIds: [] };
-    }
-
-    // getScopeType, not findById — see authorizeScheduledCallEdit for why the ACL can't be used.
-    const channelScopeType = await repositories.channels.getScopeType(series.channelId);
-    const isDirectCall =
-      channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
-    const seriesParticipants = await repositories.recurringCallParticipants.findInternalParticipants(
-      series.id,
-    );
-    const isParticipant = seriesParticipants.some((p) => p.userId === userId);
-
-    if (!isDirectCall || !isParticipant) {
-      logger.warn(
-        `[authorizeRecurringSeriesEdit] forbidden | seriesId=${series.id} userId=${userId} channelScopeType=${channelScopeType} isParticipant=${isParticipant}`,
-      );
-      return { allowed: false, status: 403, error: 'Only the organizer can edit this series' };
-    }
-
-    const editsBeyondParticipants =
-      edits.title !== undefined ||
-      edits.recurrenceRule !== undefined ||
-      edits.startTime !== undefined ||
-      edits.endTime !== undefined ||
-      edits.startsOn !== undefined ||
-      edits.endsOn !== undefined ||
-      edits.timezone !== undefined ||
-      edits.channelId !== undefined ||
-      edits.callUpdatesChannel !== undefined ||
-      edits.externalInvitees !== undefined;
-
-    if (editsBeyondParticipants || edits.targetUserIds === undefined) {
-      return {
-        allowed: false,
-        status: 403,
-        error: 'Participants can only change who is invited to this series',
-      };
-    }
-
-    const pinnedParticipantIds = seriesParticipants
-      .filter((p) => p.invitedBy !== userId)
-      .map((p) => p.userId);
-    return { allowed: true, pinnedParticipantIds };
   }
 
   private async resolveRecurringInternalParticipantUserIds(params: {
@@ -635,18 +549,24 @@ export class ScheduleCallController {
 
       logger.info(`[updateScheduledCall] call found | callId=${call.id} currentChannelId=${call.channelId} status=${call.status} organizer=${call.createdByUserId}`);
 
-      const auth = await this.authorizeScheduledCallEdit({
-        call,
-        userId,
-        edits: {
-          title,
-          startsAt,
-          endsAt,
-          channelId: reqChannelId,
-          callUpdatesChannel: reqCallUpdatesChannel,
-          externalInvitees: normalizedExternalInvitees,
-          targetUserIds,
+      const auth = await this.authorizeParticipantEdit({
+        subject: {
+          id: call.id,
+          kind: 'call',
+          channelId: call.channelId,
+          organizerId: call.createdByUserId,
         },
+        userId,
+        hasEditsBeyondParticipants:
+          title !== undefined ||
+          startsAt !== undefined ||
+          endsAt !== undefined ||
+          reqChannelId !== undefined ||
+          reqCallUpdatesChannel !== undefined ||
+          normalizedExternalInvitees !== undefined,
+        targetUserIds,
+        // findParticipants already excludes external invitees.
+        loadParticipants: () => repositories.calls.findParticipants(call.id),
       });
       if (!auth.allowed) {
         res.status(auth.status).json({ success: false, error: auth.error });
@@ -879,21 +799,27 @@ export class ScheduleCallController {
 
       logger.info(`[updateRecurringSeries] series found | currentChannelId=${series.channelId} organizerId=${series.organizerId}`);
 
-      const auth = await this.authorizeRecurringSeriesEdit({
-        series,
-        userId,
-        edits: {
-          title,
-          recurrenceRule,
-          startTime,
-          endTime,
-          endsOn,
-          timezone,
-          channelId: reqChannelId,
-          callUpdatesChannel: reqCallUpdatesChannel,
-          externalInvitees: normalizedExternalInvitees,
-          targetUserIds,
+      const auth = await this.authorizeParticipantEdit({
+        subject: {
+          id: series.id,
+          kind: 'series',
+          channelId: series.channelId,
+          organizerId: series.organizerId,
         },
+        userId,
+        hasEditsBeyondParticipants:
+          title !== undefined ||
+          recurrenceRule !== undefined ||
+          startTime !== undefined ||
+          endTime !== undefined ||
+          endsOn !== undefined ||
+          timezone !== undefined ||
+          reqChannelId !== undefined ||
+          reqCallUpdatesChannel !== undefined ||
+          normalizedExternalInvitees !== undefined,
+        targetUserIds,
+        loadParticipants: () =>
+          repositories.recurringCallParticipants.findInternalParticipants(series.id),
       });
       if (!auth.allowed) {
         res.status(auth.status).json({ success: false, error: auth.error });

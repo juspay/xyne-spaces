@@ -88,6 +88,7 @@ export interface CreateCallWithParticipantsInput {
   startsAt: Date;
   endsAt: Date;
   targetUserIds?: string[];
+  participantInviters?: Record<string, string>;
   externalInvitees?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
   callUpdatesChannel?: string | null;
@@ -647,7 +648,7 @@ export class CallRepository {
         callId: params.callId,
         workspaceId,
         userId,
-        invitedBy: params.createdByUserId,
+        invitedBy: params.participantInviters?.[userId] ?? params.createdByUserId,
         invitedAt: new Date(),
         response: InvitationResponse.INVITED,
         meetingStatus: userId === params.createdByUserId ? MeetingStatus.ACCEPTED : MeetingStatus.PENDING,

@@ -192,17 +192,29 @@ export class RecurringCallParticipantRepository {
     return participants.map(p => p.userId);
   }
 
+  /**
+   * Everything a generated occurrence needs to mirror the series' invite list, including
+   * each participant's inviter — without it every new instance would credit the organizer
+   * for everyone, and a participant editor could no longer remove people they added.
+   */
   async findInstanceSeed(
     recurringSeriesId: string,
     tx?: Prisma.TransactionClient,
-  ): Promise<{ targetUserIds?: string[]; externalInvitees: string[] }> {
-    const internalParticipantUserIds = await this.findInternalParticipantUserIds(recurringSeriesId, tx);
+  ): Promise<{
+    targetUserIds?: string[];
+    participantInviters: Record<string, string>;
+    externalInvitees: string[];
+  }> {
+    const internalParticipants = await this.findInternalParticipants(recurringSeriesId, tx);
     const externalInvitees = await this.findExternalInviteeEmails(recurringSeriesId, tx);
 
     return {
-      targetUserIds: internalParticipantUserIds.length > 0
-        ? internalParticipantUserIds
+      targetUserIds: internalParticipants.length > 0
+        ? internalParticipants.map(p => p.userId)
         : undefined,
+      participantInviters: Object.fromEntries(
+        internalParticipants.map(p => [p.userId, p.invitedBy]),
+      ),
       externalInvitees,
     };
   }

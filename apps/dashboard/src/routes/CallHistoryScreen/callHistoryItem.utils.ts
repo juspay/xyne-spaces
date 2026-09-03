@@ -376,6 +376,7 @@ export function canEditScheduledCallParticipants(
 ): boolean {
   if (!currentUserId || call.status !== CallStatus.SCHEDULED || !call.channelId) return false;
   if (isScheduledCallManageable(call, currentUserId)) return false;
+  if (visibleChannels.length === 0) return false;
 
   const channel = visibleChannels.find(c => c.id === call.channelId);
   return (

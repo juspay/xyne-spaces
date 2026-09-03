@@ -9,7 +9,11 @@ import { useZero } from '../../../hooks/useZero';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
-import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
+import {
+  ApiError,
+  callService,
+  type ScheduleCallRequest,
+} from '../../../services/Call/callService';
 import DOMPurify from 'dompurify';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -863,8 +867,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         recurringSeriesId: initialCall?.recurringSeriesId ?? null,
         error: err instanceof Error ? err.message : String(err),
       });
-      toast.error('Error scheduling call', {
-        description: 'Failed to schedule call',
+      toast.error(isEditMode ? 'Error updating call' : 'Error scheduling call', {
+        // Surface the API's reason (e.g. the participant-edit 403) instead of a generic line.
+        description:
+          err instanceof ApiError && err.message
+            ? err.message
+            : isEditMode
+              ? 'Failed to update call'
+              : 'Failed to schedule call',
         duration: 5000,
       });
     }
@@ -947,6 +957,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     setStep('participants');
     setSearchQuery('');
     setNotFoundUsers([]);
+    expandedGroupMembersRef.current.clear();
     resetRecurringState(defaultStart);
     setEditEntireSeries(false);
     resetPostCallUpdates();
