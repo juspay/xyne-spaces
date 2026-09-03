@@ -29,6 +29,7 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
+  GitBranch,
   type PikaIconProps,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
@@ -94,6 +95,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
+  { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
   { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
   {

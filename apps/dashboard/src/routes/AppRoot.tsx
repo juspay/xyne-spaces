@@ -209,6 +209,7 @@ import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { WorkflowScreen } from './WorkflowScreen';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
@@ -1416,6 +1417,16 @@ export const router = createBrowserRouter(
                 {
                   path: 'search-results',
                   element: <SearchResults />,
+                },
+                {
+                  // Splat: @xyne/workflow-ui owns every screen below /workflows and
+                  // routes between them itself, handing the sub-path back via onNavigate.
+                  path: 'workflows/*',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
+                      <WorkflowScreen />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'product-insights',
