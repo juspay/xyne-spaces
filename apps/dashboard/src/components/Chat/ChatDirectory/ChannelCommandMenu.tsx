@@ -3971,11 +3971,7 @@ const ChannelCommandMenu = ({
                                     selectMention(index);
                                   }}
                                   className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    index === selectedMentionIndex
-                                      ? hasNavigated
-                                        ? 'cmdk-active-row'
-                                        : 'bg-muted'
-                                      : ''
+                                    index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
@@ -4017,11 +4013,7 @@ const ChannelCommandMenu = ({
                                     selectMention(adjustedIndex);
                                   }}
                                   className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    adjustedIndex === selectedMentionIndex
-                                      ? hasNavigated
-                                        ? 'cmdk-active-row'
-                                        : 'bg-muted'
-                                      : ''
+                                    adjustedIndex === selectedMentionIndex ? 'cmdk-active-row' : ''
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
@@ -4076,11 +4068,7 @@ const ChannelCommandMenu = ({
                                       selectMention(index);
                                     }}
                                     className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                      index === selectedMentionIndex
-                                        ? hasNavigated
-                                          ? 'cmdk-active-row'
-                                          : 'bg-muted'
-                                        : ''
+                                      index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                     } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                     style={{ WebkitTapHighlightColor: 'transparent' }}
                                   >
@@ -4146,11 +4134,7 @@ const ChannelCommandMenu = ({
                                     selectMention(index);
                                   }}
                                   className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    index === selectedMentionIndex
-                                      ? hasNavigated
-                                        ? 'cmdk-active-row'
-                                        : 'bg-muted'
-                                      : ''
+                                    index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
@@ -4197,11 +4181,7 @@ const ChannelCommandMenu = ({
                               selectMention(index);
                             }}
                             className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                              index === selectedMentionIndex
-                                ? hasNavigated
-                                  ? 'cmdk-active-row'
-                                  : 'bg-muted'
-                                : ''
+                              index === selectedMentionIndex ? 'cmdk-active-row' : ''
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
@@ -4247,11 +4227,7 @@ const ChannelCommandMenu = ({
                                 selectMention(index);
                               }}
                               className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                index === selectedMentionIndex
-                                  ? hasNavigated
-                                    ? 'cmdk-active-row'
-                                    : 'bg-muted'
-                                  : ''
+                                index === selectedMentionIndex ? 'cmdk-active-row' : ''
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
@@ -4306,11 +4282,7 @@ const ChannelCommandMenu = ({
                                   selectMention(index);
                                 }}
                                 className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                  index === selectedMentionIndex
-                                    ? hasNavigated
-                                      ? 'cmdk-active-row'
-                                      : 'bg-muted'
-                                    : ''
+                                  index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                 } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
@@ -4372,11 +4344,7 @@ const ChannelCommandMenu = ({
                                 selectMention(index);
                               }}
                               className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                index === selectedMentionIndex
-                                  ? hasNavigated
-                                    ? 'cmdk-active-row'
-                                    : 'bg-muted'
-                                  : ''
+                                index === selectedMentionIndex ? 'cmdk-active-row' : ''
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
