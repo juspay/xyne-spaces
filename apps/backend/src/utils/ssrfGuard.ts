@@ -42,6 +42,22 @@ blockedV6.addSubnet('fc00::', 7, 'ipv6');
 blockedV6.addSubnet('fe80::', 10, 'ipv6');
 blockedV6.addSubnet('ff00::', 8, 'ipv6');
 
+// A stricter subset that is refused even when internal webhook hosts are otherwise
+// allowed: loopback and link-local / cloud-metadata (169.254.x — the instance
+// metadata endpoint that can return the workload's credentials).
+const metadataV4 = new BlockList();
+metadataV4.addRange('0.0.0.0', '0.255.255.255');
+metadataV4.addRange('127.0.0.0', '127.255.255.255');
+metadataV4.addRange('169.254.0.0', '169.254.255.255');
+const metadataV6 = new BlockList();
+metadataV6.addAddress('::', 'ipv6');
+metadataV6.addAddress('::1', 'ipv6');
+metadataV6.addSubnet('fe80::', 10, 'ipv6');
+// The IPv6 instance-metadata prefix (fd00:ec2::/32) sits inside the fc00::/7 ULA
+// range that internal webhooks are otherwise allowed to reach — refuse just this
+// metadata prefix without blocking legitimate internal ULA addresses.
+metadataV6.addSubnet('fd00:ec2::', 32, 'ipv6');
+
 function ipv4FromMapped(addr: string): string | null {
   const lower = addr.toLowerCase();
   const dotted = lower.match(/^::ffff:((?:\d{1,3}\.){3}\d{1,3})$/);
@@ -67,6 +83,64 @@ function isBlockedV6(addr: string): boolean {
   const mapped = ipv4FromMapped(addr);
   if (mapped) return isBlockedV4(mapped);
   return blockedV6.check(addr, 'ipv6');
+}
+
+function isMetadataV4(addr: string): boolean {
+  return metadataV4.check(addr);
+}
+
+function isMetadataV6(addr: string): boolean {
+  const mapped = ipv4FromMapped(addr);
+  if (mapped) return isMetadataV4(mapped);
+  return metadataV6.check(addr, 'ipv6');
+}
+
+// Hostnames refused even when internal webhook targets are allowed.
+function isMetadataHostname(host: string): boolean {
+  const lower = host.toLowerCase().trim();
+  return (
+    lower === 'localhost' ||
+    lower === 'metadata.google.internal' ||
+    lower === 'metadata' ||
+    lower === 'instance-data'
+  );
+}
+
+/**
+ * Validate a webhook host when WEBHOOK_ALLOW_INTERNAL_HOSTS is enabled: allow
+ * private / internal destinations but always refuse loopback and link-local /
+ * cloud-metadata (the instance-metadata credential endpoint). Resolves the host so
+ * a name that maps to a refused address is rejected too. Throws on a disallowed
+ * destination; returns on success.
+ */
+async function assertWebhookHostAllowingInternal(host: string): Promise<void> {
+  const trimmed = host.trim();
+  if (!trimmed) throw new SsrfBlockedError(host, null, 'empty host');
+  if (isMetadataHostname(trimmed)) {
+    throw new SsrfBlockedError(trimmed, null, 'loopback / metadata host is never allowed');
+  }
+  const literalKind = isIP(trimmed);
+  if (literalKind === 4) {
+    if (isMetadataV4(trimmed)) throw new SsrfBlockedError(trimmed, trimmed, 'loopback / link-local / metadata');
+    return;
+  }
+  if (literalKind === 6) {
+    if (isMetadataV6(trimmed)) throw new SsrfBlockedError(trimmed, trimmed, 'loopback / link-local / metadata');
+    return;
+  }
+  const [v4, v6] = await Promise.all([
+    dns.resolve4(trimmed).catch(() => [] as string[]),
+    dns.resolve6(trimmed).catch(() => [] as string[]),
+  ]);
+  if (v4.length === 0 && v6.length === 0) {
+    throw new SsrfBlockedError(trimmed, null, 'no DNS records (hostname does not resolve)');
+  }
+  for (const addr of v4) {
+    if (isMetadataV4(addr)) throw new SsrfBlockedError(trimmed, addr, 'resolves to loopback / link-local / metadata');
+  }
+  for (const addr of v6) {
+    if (isMetadataV6(addr)) throw new SsrfBlockedError(trimmed, addr, 'resolves to loopback / link-local / metadata');
+  }
 }
 
 function isBlockedHostname(host: string): boolean {
@@ -159,8 +233,14 @@ export async function assertWebhookUrlSafe(rawUrl: string): Promise<void> {
   } catch {
     throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
   }
-  // Webhooks honor the private-host bypass only in local development, not in
-  // shared non-prod where DATA_SOURCE_ALLOW_PRIVATE_HOSTS may be set for
+  // When WEBHOOK_ALLOW_INTERNAL_HOSTS is set, internal webhook targets are allowed
+  // while loopback and cloud-metadata stay refused.
+  if (config.webhooks.allowInternalHosts) {
+    await assertWebhookHostAllowingInternal(parsed.hostname);
+    return;
+  }
+  // Otherwise webhooks honor the private-host bypass only in local development, not
+  // in shared non-prod where DATA_SOURCE_ALLOW_PRIVATE_HOSTS may be set for
   // data-source connectors.
   const allowPrivate = isAllowPrivate() && config.env === 'development';
   await assertHostIsExternal(parsed.hostname, allowPrivate);
