@@ -2,7 +2,7 @@
 
 An MCP server that lets a coding agent read and write Xyne Spaces — channels, threads,
 messages, tickets, calls, canvases and search — through
-[`@xyne/spaces-sdk`](../xyne-spaces-sdk), using the same credential the SDK takes.
+[`@xyne/spaces-sdk`](../xyne-spaces-sdk).
 
 33 tools over the Spaces public API. Not 483: the SDK exposes every operation the
 product itself performs, and this exposes the ones an agent actually reaches for, each
@@ -12,16 +12,9 @@ with an exact schema.
 
 ## Quick start
 
-**1. Mint a key.** Spaces dashboard → **Apps** → **API keys** → *Create key*, choosing a
-lifetime of 30, 60, or 90 days. The key is shown once, and you may hold two live keys at
-a time. An `xyne_sso_` token from the SDK's device flow works here too — see
-[SSO.md](../xyne-spaces-sdk/SSO.md) — though at its current one-day lifetime a minted
-key is the better fit for a long-running server.
-
-**2. Tell the server about it.** Either an environment variable:
+**1. Configure the server.** Set environment variables:
 
 ```bash
-export XYNE_SPACES_API_KEY="xyne_sk_…"
 export XYNE_SPACES_BASE_URL="https://spaces.xyne.juspay.net"   # optional; this is the default
 export XYNE_SPACES_TIMEOUT_MS=120000                           # optional; this is the default
 ```
@@ -30,17 +23,7 @@ export XYNE_SPACES_TIMEOUT_MS=120000                           # optional; this 
 return an entire result set in one response — the user directory, a project's tickets —
 and the underlying SDK aborts a request that outlives its timeout.
 
-…or a file, which keeps the key out of a committed config:
-
-```jsonc
-// ~/.xyne/agent/spaces.json
-{
-  "baseUrl": "https://spaces.xyne.juspay.net",
-  "apiKey": "xyne_sk_…"
-}
-```
-
-**3. Register the server.**
+**2. Register the server.**
 
 <details open>
 <summary><b>Claude Code</b></summary>
@@ -66,7 +49,7 @@ or in `.mcp.json`:
 <details>
 <summary><b>Cursor, Windsurf, Zed, Continue, or any other stdio MCP client</b></summary>
 
-The same three fields, in whichever file that client reads. `.mcp.json` in this package
+The same fields, in whichever file that client reads. `.mcp.json` in this package
 is a copyable sample — replace the placeholder path.
 
 ```json
@@ -74,8 +57,7 @@ is a copyable sample — replace the placeholder path.
   "mcpServers": {
     "xyne-spaces": {
       "command": "node",
-      "args": ["/absolute/path/to/packages/xyne-spaces-mcp/dist/index.js"],
-      "env": { "XYNE_SPACES_API_KEY": "xyne_sk_…" }
+      "args": ["/absolute/path/to/packages/xyne-spaces-mcp/dist/index.js"]
     }
   }
 }
@@ -98,7 +80,6 @@ from mcp.client.stdio import stdio_client
 params = StdioServerParameters(
     command="node",
     args=["/absolute/path/to/packages/xyne-spaces-mcp/dist/index.js"],
-    env={"XYNE_SPACES_API_KEY": "xyne_sk_…"},
 )
 
 async with stdio_client(params) as (read, write):
@@ -109,8 +90,8 @@ async with stdio_client(params) as (read, write):
 ```
 </details>
 
-**4. Check it works.** Ask the agent to run `spaces_whoami`. It should name you, your
-workspace, and when the key expires.
+**3. Check it works.** Ask the agent to run `spaces_whoami`. It should name you and your
+workspace.
 
 ### Compatibility
 
@@ -132,12 +113,12 @@ SDK all take the same `command` + `args` + `env` triple in their own config file
 
 ---
 
-## What the key can do
+## Permissions
 
-**A key acts as you.** Zero's per-table ACL is folded into every read and every write, so
-these tools reach exactly what your Spaces user reaches — no more. A private channel you
-are not in does not appear in `spaces_channels_list` and its threads are not readable,
-even by id.
+The SDK acts as the currently logged-in user. Zero's per-table ACL is folded into every
+read and every write, so these tools reach exactly what your Spaces user reaches — no
+more. A private channel you are not in does not appear in `spaces_channels_list` and its
+threads are not readable, even by id.
 
 Two consequences worth internalising:
 
@@ -303,21 +284,13 @@ spaces_notifications_mark_read  { notification_id }
 
 ## Errors
 
-Failures come back as text with the API's stable error code, and the auth cases say what
-to do:
-
-```
-This API key has expired. Create a new one from the Apps page. Set XYNE_SPACES_API_KEY
-to a key minted in the Spaces dashboard, under Apps → API keys. Keys last at most
-90 days, and can be revoked from that page.
-```
-
-The API speaks five codes, one per status:
+Failures come back as text with the API's stable error code. The API speaks five codes,
+one per status:
 
 | Code | Status | Means |
 |---|---|---|
 | `validation_failed` | 400 | An argument the server rejects, **or** a business rule refusing the operation (an unsupported stage move). The message says which |
-| `unauthenticated` | 401 | No key configured, or it is malformed, expired, or revoked — deliberately indistinguishable |
+| `unauthenticated` | 401 | Not logged in or session expired |
 | `forbidden` | 403 | Your user is not allowed this. Not a bug in the tool |
 | `not_found` | 404 | Absent, or invisible to you — deliberately indistinguishable. Also: no operation by that name |
 | `internal` | 500 | A server-side failure, including search or Claw being down. Retryable |
@@ -328,11 +301,6 @@ retrying. A 500 message is deliberately generic; the detail is server-side.
 Anything unexpected carries the server's error code in parentheses. The `request_id` is
 no longer surfaced: it is on the HTTP response, and `SdkError` does not carry it
 through. Quote the message and the code when reporting a server-side failure.
-
-A key can be revoked at any time from the dashboard, and stops working on its
-very next request — the server checks its stored status on every call, not just
-its signature. If a key leaks, revoke it; you do not have to wait out its
-lifetime.
 
 ---
 
