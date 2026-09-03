@@ -5,7 +5,7 @@ import { logger } from '@/utils/logger';
 
 export class TranscriptionAgentRolloutController {
   /**
-   * GET /internal/transcription-agent/agents
+   * GET /api/transcriptionAgent/agents
    * Lists every row (every role's current active holder plus inactive history), so an
    * operator can see what's currently assigned before attempting a rollout.
    */
@@ -20,7 +20,7 @@ export class TranscriptionAgentRolloutController {
   };
 
   /**
-   * POST /internal/transcription-agent/rollout
+   * POST /api/transcriptionAgent/rollout
    * Body: { agentName, role, actor }
    *
    * Human-triggered path — kept as a fallback for when a pod's own self-report never
@@ -29,7 +29,8 @@ export class TranscriptionAgentRolloutController {
    * live-verifies agentName against LiveKit before ever writing to the DB, so a typo'd
    * name is rejected outright rather than silently accepted. `actor` is logged only (no
    * DB audit table by design — audit trail is backend logs) since this endpoint's auth
-   * is a shared secret with no per-caller identity of its own.
+   * (TRANSCRIPTION_AGENT_API_KEY, same as register-agent/transcript-ready) is a shared
+   * secret with no per-caller identity of its own.
    */
   rollout = async (req: Request, res: Response): Promise<void> => {
     const { agentName, role, actor, reason } = (req.body ?? {}) as {

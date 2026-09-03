@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { transcriptionAgentController } from '@/controllers/transcriptionAgentController';
+import { transcriptionAgentRolloutController } from '@/controllers/transcriptionAgentRolloutController';
 
 const router = Router();
 
@@ -23,5 +24,12 @@ router.get('/user-names', transcriptionAgentController.getUserNames);
 
 // Self-registration: a pod calls this once on startup with its own {agentName, role}
 router.post('/register-agent', transcriptionAgentController.registerAgent);
+
+// Manual ops fallback: list current agent assignments / flip a role to a new agentName.
+// Same auth as the rest of this router (TRANSCRIPTION_AGENT_API_KEY) — these are hit by
+// a human running curl, not a logged-in app user, so they don't belong behind the
+// internal-service-to-service secret.
+router.get('/agents', transcriptionAgentRolloutController.listAgents);
+router.post('/rollout', transcriptionAgentRolloutController.rollout);
 
 export default router;
