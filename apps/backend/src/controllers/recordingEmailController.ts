@@ -8,7 +8,10 @@ import type { OutgoingAttachment } from '@/integrations/core/baseMailReplySender
 import { callRecordingService } from '@/services/callRecordingService';
 import { callShareService } from '@/services/callShareService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import {
+  convertBlockNoteToMarkdown,
+  resolveDetailedSummaryCanvasId,
+} from '@/services/canvasService';
 import { transcriptService } from '@/services/transcriptService';
 import { normalizeStoragePath } from '@xyne/storage';
 import { extractEmailAddress } from '@/utils/email';
@@ -24,6 +27,10 @@ const RECORDING_EMAIL_ATTACHMENT_KINDS = [
 
 type RecordingEmailAttachmentKind = (typeof RECORDING_EMAIL_ATTACHMENT_KINDS)[number];
 type RecordingCall = NonNullable<Awaited<ReturnType<typeof repositories.calls.findByExternalId>>>;
+
+/** Recordings and regular calls share these endpoints, so copy names whichever it is. */
+const subjectFor = (call: Pick<RecordingCall, 'callType'>): string =>
+  call.callType === CallType.HEADLESS ? 'recording' : 'call';
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -171,15 +178,13 @@ export class RecordingEmailController {
     }
 
     const call = await repositories.calls.findByExternalId(callId);
-    if (
-      !call ||
-      call.callType !== CallType.HEADLESS ||
-      (call.workspaceId !== null && call.workspaceId !== workspaceId)
-    ) {
+    if (!call || (call.workspaceId !== null && call.workspaceId !== workspaceId)) {
       throw new RecordingEmailError('Recording not found', 404);
     }
 
-    const canView = await callShareService.canView(call, userId, workspaceId);
+    // Recordings and regular calls both come through here; canViewCall applies
+    // whichever visibility rule the call's own type uses.
+    const canView = await callShareService.canViewCall(call, userId, workspaceId);
     if (!canView) {
       throw new RecordingEmailError('Access denied', 403);
     }
@@ -426,6 +431,8 @@ export class RecordingEmailController {
       }
     }
 
+    // Notes are a recordings-only canvas, so a regular call simply offers one
+    // attachment fewer — metadataCanvasId returns null and the descriptor drops out.
     const metadata = call.metadata;
     const [notes, detailedSummary] = await Promise.all([
       this.getCanvasDescriptor(
@@ -435,7 +442,7 @@ export class RecordingEmailController {
         'notes'
       ),
       this.getCanvasDescriptor(
-        metadataCanvasId(metadata, 'detailedSummaryCanvasId'),
+        await resolveDetailedSummaryCanvasId(call),
         workspaceId,
         userId,
         'detailed-summary'
@@ -551,7 +558,7 @@ export class RecordingEmailController {
     if (selected.has('detailed-summary')) {
       attachments.push(
         await this.buildCanvasAttachment(
-          metadataCanvasId(metadata, 'detailedSummaryCanvasId'),
+          await resolveDetailedSummaryCanvasId(call),
           workspaceId,
           userId,
           'detailed-summary'
@@ -593,8 +600,9 @@ export class RecordingEmailController {
         ...(sender ? { channelId: sender.channelId } : { channelId: null }),
         ...(!sender
           ? {
-              unavailableReason:
-                'Connect an email account matching your Xyne account before sending recording recaps.',
+              unavailableReason: `Connect an email account matching your Xyne account before sending ${subjectFor(
+                call,
+              )} recaps.`,
             }
           : {}),
         attachments,
