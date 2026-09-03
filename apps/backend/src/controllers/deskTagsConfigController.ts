@@ -13,6 +13,7 @@ import { EmailClassificationRepository } from '@/database/repositories/emailClas
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
 import { tagRepository } from '@/database/repositories/tagRepository';
+import { syncTicketTagsFromEmail } from '@/tags/deskTicket';
 
 /**
  * Epoch-ms query param as a Date, or null when it is missing or unusable. The
@@ -428,6 +429,9 @@ export class DeskTagsConfigController {
           },
         });
       });
+
+      // Sync ticket tags outside the transaction — raw tx bypasses tagService hooks.
+      await syncTicketTagsFromEmail(emailId);
 
       res.status(201).json({ success: true });
     } catch (error: any) {
