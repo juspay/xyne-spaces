@@ -15,6 +15,7 @@ import {
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
 import { toast } from 'sonner';
+import { isAxiosError } from 'axios';
 import { Button } from '../../ui/Button';
 import {
   DropdownMenu,
@@ -659,6 +660,52 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       selectedCanvas?.accessLevel === CanvasRole.OWNER ||
       selectedCanvas?.createdBy === user?.id);
   const canArchiveSelectedCanvas = selectedCanvas?.createdBy === user?.id;
+
+  const [hasRequestedEdit, setHasRequestedEdit] = useState(false);
+  const [isRequestingEdit, setIsRequestingEdit] = useState(false);
+  const selectedCanvasIdForRequest = selectedCanvas?.id;
+  useEffect(() => {
+    setHasRequestedEdit(false);
+    if (!selectedCanvasIdForRequest || canEdit) return;
+    let cancelled = false;
+    void canvasService
+      .myAccessRequestStatus(selectedCanvasIdForRequest)
+      .then(({ pending }) => {
+        if (!cancelled) setHasRequestedEdit(pending);
+      })
+      .catch(() => {
+        // Non-fatal: button stays enabled; the server dedupe still applies.
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [selectedCanvasIdForRequest, canEdit]);
+  const handleRequestEditAccess = async (): Promise<void> => {
+    if (!selectedCanvas || isRequestingEdit) return;
+    setIsRequestingEdit(true);
+    try {
+      const result = await canvasService.requestEditAccess(selectedCanvas.id);
+      setHasRequestedEdit(true);
+      if (result.alreadyRequested) {
+        toast.info('Edit access already requested', {
+          description: 'The canvas owners have already been notified.',
+        });
+      } else {
+        toast.success('Edit access requested', {
+          description: 'The canvas owners have been notified.',
+        });
+      }
+    } catch (error) {
+      if (isAxiosError<{ error?: string }>(error) && error.response?.status === 400) {
+        // "You already have edit access" — participant data hasn't synced yet
+        toast.info(error.response.data?.error ?? 'You already have edit access');
+      } else {
+        toast.error('Failed to request edit access');
+      }
+    } finally {
+      setIsRequestingEdit(false);
+    }
+  };
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
     previewVersionRef,
@@ -1358,6 +1405,28 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                             </span>
                           )}
                         </button>
+
+                        {/* Request edit access (viewers only) */}
+                        {!canEdit && !selectedCanvas.isArchived && (
+                          <button
+                            type='button'
+                            onClick={() => void handleRequestEditAccess()}
+                            disabled={hasRequestedEdit || isRequestingEdit}
+                            className='h-7 shrink-0 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60 disabled:hover:bg-transparent'
+                            title={
+                              hasRequestedEdit ? 'Edit access requested' : 'Request edit access'
+                            }
+                            data-track-category='CANVAS'
+                            data-track-name='Request_Edit_Access'
+                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
+                          >
+                            {hasRequestedEdit
+                              ? 'Requested'
+                              : isRequestingEdit
+                                ? 'Requesting…'
+                                : 'Request edit access'}
+                          </button>
+                        )}
 
                         {/* Share */}
                         <button
