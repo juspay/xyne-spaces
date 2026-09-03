@@ -1,3 +1,10 @@
+## [1.268.0-release-20260903.3](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.2...v1.268.0-release-20260903.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* shortcut api call fix ([#1491](https://github.com/juspay/xyne-spaces/issues/1491)) ([b091027](https://github.com/juspay/xyne-spaces/commit/b091027922d1f20f937f329ae64b1ddebd2f44a4))
+
 ## [1.268.0-release-20260903.2](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.1...v1.268.0-release-20260903.2) (2026-09-03)
 
 
