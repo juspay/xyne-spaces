@@ -14,6 +14,7 @@ import { useUsers } from '../../../hooks/useUsers';
 import { IncomingCallCard } from '../IncomingCall/IncomingCallCard';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
+  buildCallNotificationBody,
   buildIncomingCallViewModel,
   isRingableCall,
   type IncomingCallRow,
@@ -256,11 +257,28 @@ export function IncomingCallModal(): React.ReactElement | null {
       return;
     }
 
+    // Reuse the modal's view model so the OS notification says the same thing
+    // the in-app card would: scheduled calls name the place, everything else
+    // reads as `<inviter> is inviting you to a call`.
+    const latestCallData = allActiveCalls?.find(
+      call => call.externalId === incomingCallData.callId,
+    ) as CallWithRelations | undefined;
+    const vm = buildIncomingCallViewModel({
+      callId: incomingCallData.callId,
+      call: latestCallData as unknown as IncomingCallRow | undefined,
+      caller: incomingCallData.caller,
+      channelMap,
+      usersById,
+      currentUserId: user?.id,
+      isInActiveCall,
+    });
+
     window.electronAPI.showCallNotification({
       callId: incomingCallData.callId,
       callerName: incomingCallData.caller.name,
       callerEmail: incomingCallData.caller.email,
       callType: incomingCallData.callType,
+      body: buildCallNotificationBody(vm, incomingCallData.caller.name),
       ...(incomingCallData.caller.picture && { callerPicture: incomingCallData.caller.picture }),
     });
 
@@ -269,7 +287,7 @@ export function IncomingCallModal(): React.ReactElement | null {
         window.electronAPI.closeCallNotification(incomingCallData.callId);
       }
     };
-  }, [isRinging, incomingCallData]);
+  }, [isRinging, incomingCallData, allActiveCalls, channelMap, usersById, user?.id, isInActiveCall]);
 
   // Handle Electron notification action callbacks (accept/reject from notification)
   useEffect(() => {

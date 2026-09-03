@@ -349,3 +349,27 @@ export function buildIncomingCallViewModel(input: {
     invitedBy: myParticipant?.invitedBy ?? null,
   };
 }
+
+
+// ---------------------------------------------------------------------------
+// OS (Electron) notification body
+// ---------------------------------------------------------------------------
+
+/**
+ * The body text for the desktop OS call notification. Scheduled calls reuse the
+ * modal's own context line (e.g. `Scheduled call in #engineering`,
+ * `Scheduled thread call in #engineering`); every other kind reads as
+ * `<inviter> is inviting you to a call`. The modal renders a group DM as
+ * `group DM`, but the product copy for this notification says `group`, so that
+ * one phrase is normalized here without touching the modal line.
+ */
+export function buildCallNotificationBody(
+  vm: Pick<IncomingCallViewModel, 'context'>,
+  callerName: string,
+): string {
+  const { kind, text } = vm.context;
+  if (kind === 'scheduled' || kind === 'scheduled-thread' || kind === 'calendar') {
+    return text.replace(/\bgroup DM\b/, 'group');
+  }
+  return `${callerName} is inviting you to a call`;
+}
