@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { EmailMergeMode, AutoDraftMode, ChannelType, ChannelRole } from '@xyne/shared';
+import {
+  EmailMergeMode,
+  AutoDraftMode,
+  ChannelType,
+  ChannelRole,
+  isDeskChannelType,
+} from '@xyne/shared';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import {
   useDeskChannelPreferenceAutoSave,
@@ -96,6 +102,7 @@ export function useDeskSettingsForm(
   const isApp = channelType === ChannelType.APP;
   const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
+  const isDeskChannel = isDeskChannelType(channelType);
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
   const [channelParticipants] = useCachedQuery(
     queries.channelParticipants({ channelId: channelId ?? '' }),
@@ -457,6 +464,7 @@ export function useDeskSettingsForm(
     isApp,
     isSocial,
     isCall,
+    isDeskChannel,
     isDirty,
     saving,
     save,

@@ -97,6 +97,7 @@ import { isPreviewableDocument } from '../../../services/documentThumbnailServic
 import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
+import { InlineVideoPreview } from './InlineVideoPreview';
 import { loadEmojiData } from '../../../utils/emojiLookup';
 import { RecordingShareContent } from './RecordingShareContent';
 import { useRecordingShareMessage } from './recordingShareMessage';
@@ -130,50 +131,6 @@ const hasDocumentThumbnail = (attachment: AttachmentType): boolean => {
 const isHtmlAttachment = (attachment: AttachmentType): boolean => {
   return attachment.mimetype === 'text/html' || /\.html?$/i.test(attachment.originalFilename);
 };
-
-function InlineVideoPreview({
-  callId,
-  recordingId,
-}: {
-  callId: string;
-  recordingId?: string;
-}): React.ReactElement {
-  const [blobUrl, setBlobUrl] = React.useState<string | null>(null);
-  const blobUrlRef = React.useRef<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    // Per-recording download when we have a recordingId; fall back to the legacy
-    // latest-recording path for older messages that predate the field.
-    const fetchBlob = recordingId
-      ? recordingService.downloadCallRecordingBlob(callId, recordingId)
-      : recordingService.downloadRecordingBlob(callId);
-    fetchBlob
-      .then(blob => {
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        blobUrlRef.current = url;
-        setBlobUrl(url);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    };
-  }, [callId, recordingId]);
-
-  if (!blobUrl) return <></>;
-  return (
-    <video
-      src={blobUrl}
-      controls
-      className='mt-2 rounded-md max-w-sm w-full'
-      style={{ maxHeight: '240px' }}
-    >
-      <track kind='captions' />
-    </video>
-  );
-}
 
 /**
  * AttachmentsBlock renders message attachments with expand/collapse functionality.
@@ -629,6 +586,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'transcript' ||
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'identified_transcript',
   );
+  // The recording message carries its own attachment row (filtered out of the
+  // attachments block below). Its id lets InlineVideoPreview stream the file
+  // through the range-request endpoint instead of downloading it whole.
+  const recordingAttachmentId =
+    metadata?.messageSubtype === 'recording'
+      ? attachments.find(a => {
+          const attMeta = a.metadata as { type?: string; recordingId?: string } | null;
+          if (attMeta?.type !== 'recording' || !a.mimetype.startsWith('video/')) return false;
+          // Older messages predate recordingId on the metadata — match on type alone there.
+          return !metadata?.recordingId || attMeta.recordingId === String(metadata.recordingId);
+        })?.id
+      : undefined;
   const isCallNoTranscript =
     isCallMessage && !isActiveCall && !isForwardedMessage && !hasTranscript;
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
@@ -1316,6 +1285,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         {...(metadata?.recordingId
                           ? { recordingId: String(metadata.recordingId) }
                           : {})}
+                        {...(recordingAttachmentId ? { attachmentId: recordingAttachmentId } : {})}
                       />
                     ) : (
                       <div className='mt-2'>

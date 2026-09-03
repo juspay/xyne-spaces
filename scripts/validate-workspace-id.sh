@@ -12,9 +12,20 @@
 # Only runs against genuinely NEW models (added in this diff) — existing models
 # are untouched, so this never blocks unrelated schema edits.
 #
-# Escape hatch: a model that is intentionally global/cross-tenant (e.g. a shared
-# lookup table) can opt out by placing `// workspace-check:ignore` on the line
-# directly above `model X {`.
+# Escape hatch #1 (inline, per-model): a model that is intentionally global/cross-tenant
+# (e.g. a shared lookup table) can opt out by placing `// workspace-check:ignore` on the
+# line directly above `model X {`.
+#
+# Escape hatch #2 (list): add the model name to TENANT_KEY_EXCLUDED_MODELS in
+# apps/backend/src/database/tenant/tenant-key-exclusions.ts instead. Same effect,
+# centralized and reviewable in one diff instead of scattered comments — and it's the
+# same list apps/backend/src/database/tenant/tenant-key-guard.test.ts checks against
+# the FULL schema, so there is exactly one place to maintain exclusions, not two.
+#
+# Neither hatch excuses the model from tenant scoping in code — it only silences this
+# shape check. The No-Default-ACL guard below (and the backend's exhaustive ACL-factory
+# switches it protects) still forces an explicit, reviewed access-control decision
+# (a real scoped ACL, or UnscopedACL) for every model, excluded or not.
 #
 # No-Default-ACL Guard
 #
@@ -32,6 +43,33 @@ SCHEMA_PATHS=(
     "apps/backend/prisma/schema.prisma"
     "apps/xyne-claw-auth/backend/prisma/schema.prisma"
 )
+
+# Single source of truth for the exclusion list — same file the backend's
+# tenant-key-guard.test.ts reads, so a table only needs to be listed once.
+TENANT_KEY_EXCLUSIONS_TS="apps/backend/src/database/tenant/tenant-key-exclusions.ts"
+
+# Parses the quoted model names out of the TENANT_KEY_EXCLUDED_MODELS array literal in
+# TENANT_KEY_EXCLUSIONS_TS (plain text parsing, no TS/node dependency — this script only
+# needs bash+git). Reads the staged version when available, so a staged edit to the
+# exclusion list is honored immediately; falls back to the working-tree file otherwise.
+load_excluded_models() {
+    local ts_file="$1"
+    [ -f "$ts_file" ] || return
+
+    local content
+    content=$(git show ":$ts_file" 2>/dev/null || cat "$ts_file" 2>/dev/null || echo "")
+
+    echo "$content" | awk '
+        /TENANT_KEY_EXCLUDED_MODELS/ { found=1 }
+        found { print }
+        found && /\];/ { exit }
+    ' | sed -E 's#//.*$##' | grep -oE "'[^']*'" | sed -E "s/^'|'\$//g"
+}
+
+EXCLUDED_MODELS=()
+while IFS= read -r model_name; do
+    [ -n "$model_name" ] && EXCLUDED_MODELS+=("$model_name")
+done < <(load_excluded_models "$TENANT_KEY_EXCLUSIONS_TS")
 
 # ACL factory switches that must enumerate every table explicitly — a `default:`
 # branch in any of these files is a blocking failure.
@@ -73,6 +111,15 @@ extract_new_models() {
         grep -E '^\+model[[:space:]]+[A-Za-z0-9_]+' | \
         sed -E 's/^\+model[[:space:]]+([A-Za-z0-9_]+).*/\1/' | \
         sort -u
+}
+
+# Whether the model name is listed in EXCLUDED_MODELS.
+model_is_excluded() {
+    local model_name="$1"
+    local excluded
+    for excluded in "${EXCLUDED_MODELS[@]}"; do
+        [ "$excluded" = "$model_name" ] && { echo "yes"; return; }
+    done
 }
 
 # Whether the model is annotated with the opt-out comment on the line before `model X {`.
@@ -129,6 +176,11 @@ validate_workspace_id() {
         while IFS= read -r model; do
             [ -z "$model" ] && continue
 
+            if [ "$(model_is_excluded "$model")" = "yes" ]; then
+                log_info "  ⏭ model '$model' is in EXCLUDED_MODELS — skipping"
+                continue
+            fi
+
             if [ "$(model_opts_out "$schema_file" "$model")" = "yes" ]; then
                 log_info "  ⏭ model '$model' has workspace-check:ignore — skipping"
                 continue
@@ -162,7 +214,8 @@ validate_workspace_id() {
         echo ""
         echo "New tables must carry a non-nullable tenant key:"
         echo "  Add a non-nullable 'workspaceId String' (or 'orgId String') field to the model."
-        echo "  If the table is intentionally global/cross-tenant, add"
+        echo "  If the table is intentionally global/cross-tenant, either add the model name"
+        echo "  to TENANT_KEY_EXCLUDED_MODELS in $TENANT_KEY_EXCLUSIONS_TS, or add"
         echo "  '// workspace-check:ignore' on the line directly above 'model X {'."
         echo ""
         return 1

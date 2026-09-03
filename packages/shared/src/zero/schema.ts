@@ -2009,7 +2009,6 @@ export const releaseChangeTypeTable = table('release_change_types')
   })
   .primaryKey('id');
 
-
 export const rcaTable = table('rcas')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -2191,6 +2190,18 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
     fieldValue: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const viewAccessTable = table('view_access')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -4634,6 +4645,22 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['configId'],
       destSchema: savedUserConfigurationValueTable,
     }),
+    viewAccess: many({
+      sourceField: ['id'],
+      destField: ['viewId'],
+      destSchema: viewAccessTable,
+    }),
+  }),
+);
+
+export const viewAccessTableRelationships = relationships(
+  viewAccessTable,
+  ({ one }) => ({
+    view: one({
+      sourceField: ['viewId'],
+      destField: ['id'],
+      destSchema: savedUserConfigurationTable,
+    }),
   }),
 );
 
@@ -4874,6 +4901,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTable,
     savedUserConfigurationValueTable,
+    viewAccessTable,
     // Knowledge Base
     collectionTable,
     collectionItemTable,
@@ -5007,6 +5035,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTableRelationships,
     savedUserConfigurationValueTableRelationships,
+    viewAccessTableRelationships,
     // Knowledge Base
     collectionTableRelationships,
     collectionItemTableRelationships,
@@ -5151,6 +5180,7 @@ export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 
 // Knowledge Base Types
 export type Collection = Row<typeof schema.tables.collections>;

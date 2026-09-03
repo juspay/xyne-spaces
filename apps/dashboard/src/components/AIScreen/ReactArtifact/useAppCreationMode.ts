@@ -17,9 +17,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePinnedArtifactApps } from '../../../hooks/usePinnedArtifactApps';
 import {
   getArtifactApp,
+  restoreArtifactAppVersion,
+  updateArtifactAppIcon,
+  type ArtifactAppDetail,
+  type ArtifactAppRestoreEvent,
   type ArtifactAppVersionSummary,
 } from '../../../services/claw/artifactAppsService';
 
@@ -38,10 +43,29 @@ export interface AppCreationMode {
   viewing: ArtifactAppVersionSummary | null;
   /** Every version, newest first. Empty until the app loads. */
   versions: ArtifactAppVersionSummary[];
+  /** Recorded head-moved-backward events, oldest first. The transcript merges
+   *  these in by time so a rollback stays readable long after it happened. */
+  restores: ArtifactAppRestoreEvent[];
   headVersionId: string | null;
+  /** The saved row itself — owner, visibility, timestamps. Carried whole rather
+   *  than unpacked field by field: Settings reads most of it, and every added
+   *  column would otherwise mean another member here. Null until the app loads. */
+  app: ArtifactAppDetail | null;
   title: string | null;
+  /** The app's icon id, or null for the fallback mark. */
+  icon: string | null;
+  /** Whether the viewer may change the icon (and restore). */
+  isOwner: boolean;
+  /** Owner-only. Durable: the session path never overwrites a set icon. */
+  setIcon: (icon: string | null) => void;
   /** View an older build. A VIEW, not a restore — head does not move. */
   viewVersion: (versionId: string | null) => void;
+  /** Make a version current: moves HEAD on the server. Unlike `viewVersion`
+   *  this is durable and is what the agent's next update builds on. */
+  restoreVersion: (versionId: string) => void;
+  /** True while a restore is in flight, so the menu can disable itself. */
+  restoring: boolean;
+  restoreError: string | null;
   /** Open the pane (also used by the reopen affordance). */
   open: () => void;
   /** Close the pane; inline cards go live again. */
@@ -79,14 +103,32 @@ export function useAppCreationMode(
     [setSearchParams],
   );
 
+  // Whether the mode SHOULD be on, independent of whether the URL says so yet.
+  //
+  // Entry used to be a single `setMode(true)`, and it was order-dependent. The
+  // artifact lands at stream completion — the same instant the draft acquires
+  // its server id — so two URL writers fired in one commit: this hook adding
+  // `?mode=create-app`, and AIScreen navigating to `/chat/<id>` carrying the
+  // *rendered* `location.search`, which did not have the param yet. Both built
+  // on a stale location; whichever landed second could drop the other's write.
+  // Entry worked or did not depending on effect order.
+  //
+  // So entry is now an intent that is re-asserted until the URL agrees. If a
+  // racing navigate strips the param, the effect below sees `modeOn` false with
+  // the intent still set and writes it again — onto the pathname that has now
+  // settled. It converges in one extra render regardless of who wrote last.
+  const wantMode = useRef(false);
+  useEffect(() => {
+    if (wantMode.current && !modeOn && conversationId) setMode(true);
+  }, [modeOn, conversationId, setMode]);
+
   // Leaving a thread drops everything thread-specific. Without this the pane
   // keeps showing the previous chat's app and a pinned version leaks across.
   const lastConversation = useRef<string | null>(conversationId);
-  const autoEnteredFor = useRef<string | null>(null);
   useEffect(() => {
     if (lastConversation.current === conversationId) return;
     lastConversation.current = conversationId;
-    autoEnteredFor.current = null;
+    wantMode.current = false;
     setPinnedVersionId(null);
   }, [conversationId]);
 
@@ -95,18 +137,18 @@ export function useAppCreationMode(
   // lingering param kept mode-derived layout (the collapsed sidebar) armed on
   // /ai/chat/new. The next thread that generates an app re-enters on its own.
   useEffect(() => {
-    if (!conversationId && modeOn) setMode(false);
+    if (!conversationId && modeOn) {
+      wantMode.current = false;
+      setMode(false);
+    }
   }, [conversationId, modeOn, setMode]);
 
-  // Auto-enter ONCE per conversation. Tracking it per conversation is what lets
-  // an explicit close stick: closing marks this thread handled, so a later
-  // generation reopens nothing, while switching threads starts fresh.
-  useEffect(() => {
-    if (!appId) return;
-    if (autoEnteredFor.current === conversationId) return;
-    autoEnteredFor.current = conversationId;
-    if (!modeOn) setMode(true);
-  }, [appId, conversationId, modeOn, setMode]);
+  // Entry itself is driven by the artifact cards: each one, on mount, asks for
+  // the mode via `enterForApp` (see appCreationModeContext). A card mounts
+  // exactly when a build appears in the thread — on history load, and on every
+  // new generation — which is precisely the set of moments the mode should
+  // open. The card mounts once, so an explicit close sticks until the NEXT
+  // build lands, at which point the new card asks again.
 
   const { data } = useQuery({
     queryKey: ['artifact-app', appId],
@@ -132,12 +174,55 @@ export function useAppCreationMode(
     if (!known) void queryClient.invalidateQueries({ queryKey: ['artifact-app', appId] });
   }, [appId, latestVersionId, queryClient]);
 
-  const open = useCallback(() => setMode(true), [setMode]);
+  const restore = useMutation({
+    mutationFn: (versionId: string) => restoreArtifactAppVersion(appId as string, versionId),
+    onSuccess: () => {
+      // Head moved on the server. Drop the local pin so the pane follows the new
+      // head rather than staying stuck on whatever was being previewed, and
+      // refetch so every consumer of this key — the pane, the Saved chip, the
+      // "Newer version" chips — re-evaluates against the new head at once.
+      setPinnedVersionId(null);
+      void queryClient.invalidateQueries({ queryKey: ['artifact-app', appId] });
+    },
+  });
+  const restoreVersion = useCallback(
+    (versionId: string) => {
+      if (!appId) return;
+      restore.mutate(versionId);
+    },
+    [appId, restore],
+  );
+
+  const { updatePinnedApp } = usePinnedArtifactApps();
+  const iconMutation = useMutation({
+    mutationFn: (icon: string | null) => updateArtifactAppIcon(appId as string, icon),
+    onSuccess: (_result, icon) => {
+      void queryClient.invalidateQueries({ queryKey: ['artifact-app', appId] });
+      // The library lists render from their own cache, and the sidebar from a
+      // localStorage snapshot — both must learn the new mark or the pane shows
+      // one icon while the rail shows another.
+      void queryClient.invalidateQueries({ queryKey: ['artifact-apps'] });
+      if (appId) updatePinnedApp(appId, { icon });
+    },
+  });
+  const setIcon = useCallback(
+    (icon: string | null) => {
+      if (!appId) return;
+      iconMutation.mutate(icon);
+    },
+    [appId, iconMutation],
+  );
+
+  const open = useCallback(() => {
+    wantMode.current = true;
+    setMode(true);
+  }, [setMode]);
   const exit = useCallback(() => {
-    // Mark handled so the next generation does not reopen what was just closed.
-    autoEnteredFor.current = conversationId;
+    // Dropping the intent is what makes a close stick: nothing re-asserts the
+    // param until a new build's card asks for the mode again.
+    wantMode.current = false;
     setMode(false);
-  }, [setMode, conversationId]);
+  }, [setMode]);
   const headVersionId = data?.app.headVersionId ?? null;
 
   const viewVersion = useCallback(
@@ -151,6 +236,7 @@ export function useAppCreationMode(
     [headVersionId],
   );
   const versions = useMemo(() => data?.versions ?? [], [data]);
+  const restores = useMemo(() => data?.restores ?? [], [data]);
 
   /** The build the pane should render — the manifest comes from here, so the
    *  pane never needs a second fetch to know what it is showing. */
@@ -162,7 +248,10 @@ export function useAppCreationMode(
   // Memoized: this object is a prop to the pane and is read by the context
   // provider, so a fresh identity every render re-renders the pane (and through
   // it the Sandpack) for no reason.
+  const app = data?.app ?? null;
   const title = data?.app.title ?? null;
+  const icon = data?.app.icon ?? null;
+  const isOwner = data?.app.isOwner ?? false;
   const hasApp = Boolean(appId);
   const active = hasApp && modeOn;
 
@@ -174,12 +263,39 @@ export function useAppCreationMode(
       viewingVersionId: viewing?.id ?? null,
       viewing,
       versions,
+      restores,
       headVersionId,
+      app,
       title,
+      icon,
+      isOwner,
+      setIcon,
       viewVersion,
+      restoreVersion,
+      restoring: restore.isPending,
+      restoreError: restore.error ? String(restore.error) : null,
       open,
       exit,
     }),
-    [active, hasApp, appId, viewing, versions, headVersionId, title, viewVersion, open, exit],
+    [
+      active,
+      hasApp,
+      appId,
+      viewing,
+      versions,
+      restores,
+      headVersionId,
+      app,
+      title,
+      icon,
+      isOwner,
+      setIcon,
+      viewVersion,
+      restoreVersion,
+      restore.isPending,
+      restore.error,
+      open,
+      exit,
+    ],
   );
 }

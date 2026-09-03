@@ -2,6 +2,7 @@ import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 
 import { useSelector } from '@xstate/react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Loader2, FileText } from 'lucide-react';
+import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { useCallPRD } from '../../hooks/useCallPRD';
@@ -21,6 +22,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useAllChannels, useAllVisibleChannels } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
+import { CallLabelPicker } from './CallLabelPicker';
+import { callService } from '../../services/Call/callService';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -29,10 +32,17 @@ const getCanvasIdFromUrl = (url: unknown): string | null => {
   return url.split('/').filter(Boolean).pop() ?? null;
 };
 
+const EMPTY_LABEL_SUGGESTIONS: string[] = [];
+
 export default function CallDetailScreen(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
-  const call = (location.state as { call: Call } | null)?.call;
+  const navState = location.state as { call: Call; labelSuggestions?: string[] } | null;
+  const call = navState?.call;
+  // The labels the history screen had loaded when this call was opened. Only the
+  // picker's suggestion list — a deep link arrives without them and just offers
+  // whatever is already on the call.
+  const labelSuggestions = navState?.labelSuggestions ?? EMPTY_LABEL_SUGGESTIONS;
   const { isMobile } = usePlatform();
 
   // Hoist derived values so they're available to all hooks below
@@ -207,6 +217,43 @@ export default function CallDetailScreen(): ReactElement {
     };
   }, [call, isMobile, openAI]);
 
+  const canEditLabels = Boolean(
+    user?.id &&
+    call &&
+    (call.createdByUserId === user.id ||
+      call.participants?.some(p => p.userId === user.id) ||
+      (call.channelId && visibleChannels.some(c => c.id === call.channelId))),
+  );
+
+  // `call` comes off navigation state and never re-resolves from Zero, so labels
+  // are held here and reseeded when a different call is opened.
+  const [labels, setLabels] = useState<string[]>(call?.labels ?? []);
+  const labelsUpdateSeqRef = useRef(0);
+  useEffect(() => {
+    setLabels(call?.labels ?? []);
+    // Keyed on the call alone: re-running on the labels array would undo an
+    // optimistic edit, since navigation state keeps the pre-edit value forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call?.id]);
+
+  /** Labels apply optimistically and roll back if the call rejects the write. */
+  const handleLabelsChange = async (next: string[]): Promise<void> => {
+    if (!call) return;
+    const previousLabels = labels;
+    const seq = ++labelsUpdateSeqRef.current;
+    setLabels(next);
+
+    try {
+      // Raw text typed in the picker becomes a real Tag server-side, so swap in
+      // the ids the response returns rather than keeping the optimistic strings.
+      const resolved = await callService.updateCallLabels(call.externalId, next);
+      if (labelsUpdateSeqRef.current === seq) setLabels(resolved);
+    } catch {
+      toast.error('Failed to update labels');
+      if (labelsUpdateSeqRef.current === seq) setLabels(previousLabels);
+    }
+  };
+
   const title = call?.title ?? 'Untitled Call';
   const heldOn = formatCallHeldOn(call?.startedAt);
   const callLength = formatCallLength(durationMs);
@@ -327,8 +374,18 @@ export default function CallDetailScreen(): ReactElement {
               )}
             </div>
 
-            {/* Participants */}
-            <CallParticipantsPopover call={call} currentUserId={user?.id} className='mt-3.5' />
+            {/* Participants + labels — one row, as on the recording detail header */}
+            <div className='mt-3.5 flex flex-wrap items-center gap-2'>
+              <CallParticipantsPopover call={call} currentUserId={user?.id} />
+              {(canEditLabels || labels.length > 0) && (
+                <CallLabelPicker
+                  labels={labels}
+                  canEdit={canEditLabels}
+                  suggestions={labelSuggestions}
+                  onChange={next => void handleLabelsChange(next)}
+                />
+              )}
+            </div>
 
             {/* Recording */}
             {hasRecording && (

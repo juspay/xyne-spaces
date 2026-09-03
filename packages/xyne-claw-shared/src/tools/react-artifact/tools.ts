@@ -21,6 +21,8 @@ import {
   type ReactArtifactDataRequirement,
 } from "./dataSources.js";
 
+import { ICON_META, ICON_SECTIONS } from "@xyne/icons/meta";
+
 export type { ArtifactDataSource, ReactArtifactDataRequirement } from "./dataSources.js";
 
 const ARTIFACT_MIME = "application/json";
@@ -103,10 +105,59 @@ const SHADCN_UI_COMPONENTS = [
 
 const RESERVED_PATH_PREFIXES = ["/components/ui/", "/lib/utils", "/lib/xyne-data", "/public/"] as const;
 
+/**
+ * The icon vocabulary is the Xyne icon set itself — `@xyne/icons/meta` is the
+ * package's own generated index, imported here (React-free) so the tool can
+ * reject a name the dashboard could not draw. Kebab-case ids, e.g. "kanban-board".
+ */
+const ICON_NAMES: ReadonlySet<string> = new Set(ICON_META.map((m) => m.name));
+
+/**
+ * Examples surfaced to the model. Nine hundred names is not guidance; a few
+ * dozen good ones for common app shapes is. Filtered against the real set at
+ * load so a renamed icon drops out of the description instead of teaching the
+ * model a name that no longer exists.
+ */
+const SUGGESTED_ICONS = [
+  "barchart-default", "barchart-line", "graph-chart-average", "grid-table", "grid-dashboard-01",
+  "kanban-board", "list-check", "ticket-token", "calendar-default", "clock-default", "timer-default",
+  "notification-bell-on", "chat-default", "user-ai", "search-big", "file-search", "folder-search",
+  "code", "terminal-console-square", "database", "server", "rocket-ship", "cloud-default",
+  "map", "map-pin", "globe", "link-horizontal", "shopping-cart", "money-dollar-bag", "wallet-arrow-up",
+  "trophy", "dice-1", "play-circle", "music-beam-note", "camera", "video-call-default",
+  "home-default", "star", "heart", "bookmark-default", "tag",
+].filter((n) => ICON_NAMES.has(n));
+
 /** Agent slugs an app may name. A short list: this is a preference, not a menu —
  *  the viewer's own access is always the real ceiling. */
 const MAX_DECLARED_AGENTS = 4;
 const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Config keys these tools receive at execution time.
+ *
+ * This block is load-bearing, not boilerplate: xyne-claw builds each tool's
+ * context with `resolveToolConfig(tool.configSchema, config)`, so a tool that
+ * declares no schema is handed an EMPTY config object. Without it the S2S key
+ * is undefined, the read-back goes out unauthenticated, and claw-auth answers
+ * 401 — which is exactly how incremental updates silently degraded into full
+ * rebuilds (observed 2026-09-02: every `mode:"update"` returned
+ * "could not load the current app (HTTP 401)").
+ */
+export const REACT_ARTIFACT_CONFIG_SCHEMA = {
+  XYNE_CLAW_AUTH_URL: {
+    label: "Claw Auth Service URL",
+    default: "http://localhost:3003",
+    required: true as const,
+    placeholder: "http://localhost:3003",
+  },
+  XYNE_CLAW_S2S_KEY: {
+    label: "Claw S2S Key (reads the conversation's current app before an update)",
+    default: "",
+    required: false as const,
+    placeholder: "Shared secret between xyne-claw and xyne-claw-auth",
+  },
+};
 
 export interface ReactArtifactFile {
   path: string;
@@ -127,6 +178,10 @@ export interface ReactArtifactPayload {
   writes?: boolean;
   /** Set when the app calls useXyneAgent. Drives a UI badge only. */
   invokesAgents?: boolean;
+  /** Xyne icon id (kebab-case) the agent chose to represent the app. Seeded
+   *  onto the app on creation; the user can change it afterwards, and that
+   *  choice wins — later builds never overwrite it. */
+  icon?: string;
   /** Agents the app prefers, by slug. NARROWING only: the run is authorized
    *  against what the viewer can reach, so naming an agent here can never grant
    *  access to it. Absent/empty means "any agent the viewer can reach". */
@@ -145,6 +200,7 @@ export interface ReactArtifactManifest {
   writes?: boolean;
   invokesAgents?: boolean;
   agents?: string[];
+  icon?: string;
 }
 
 /**
@@ -403,6 +459,26 @@ function parseDataRequirements(raw: unknown): ReactArtifactDataRequirement[] {
  * a slug exists, and whether the person opening the app may use it, is decided
  * per-viewer at dispatch time and cannot be decided here.
  */
+/**
+ * Validate the icon against the real set. On a miss the error carries the
+ * closest names, because a model guessing "bar-chart" for "barchart-default"
+ * should fix itself in one retry, not by being told only that it was wrong.
+ */
+function parseIcon(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const name = asString(raw).trim().toLowerCase();
+  if (ICON_NAMES.has(name)) return name;
+
+  const words = name.split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  const near = [...ICON_NAMES]
+    .filter((n) => words.some((w) => n.includes(w)))
+    .slice(0, 8);
+  const hint = near.length
+    ? ` Closest matches: ${near.join(", ")}.`
+    : ` Examples: ${SUGGESTED_ICONS.slice(0, 10).join(", ")}.`;
+  fail(`"${name}" is not a Xyne icon.${hint} Omit \`icon\` to use the default.`);
+}
+
 function parseAgents(raw: unknown): string[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) fail("`agents` must be an array of agent slugs.");
@@ -424,6 +500,96 @@ function parseAgents(raw: unknown): string[] {
     agents.push(slug);
   }
   return agents;
+}
+
+/**
+ * Fold an incremental update onto the project the conversation already has.
+ *
+ * Produces raw params, NOT a payload, so the merged whole then goes through
+ * `buildReactArtifact` unchanged. That ordering is the point: a patch must not
+ * be able to reach storage past validation that a full build would have failed —
+ * entry still present, path rules, per-file and total size limits all apply to
+ * the RESULT, not to the handful of files the model happened to send.
+ *
+ * Merge rules:
+ *  - `files` replace by path; everything untouched is inherited.
+ *  - `deleteFiles` removes, since a patch cannot express absence.
+ *  - Every other field is replace-if-present, inherit otherwise — the model
+ *    sends `dependencies` only when they changed, and omitting them must not
+ *    silently uninstall the project's packages.
+ *  - `summary` is the exception: it describes THIS turn, so it is never
+ *    inherited.
+ *
+ * Exported for unit tests; `execute` is the only production caller.
+ */
+export function mergeArtifactParams(
+  base: ReactArtifactPayload,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const deletions = parseDeleteFiles(params["deleteFiles"]);
+
+  const byPath = new Map<string, ReactArtifactFile>();
+  for (const file of base.files) byPath.set(file.path, file);
+
+  // Deletions first, so re-sending a path you also deleted is a no-op rather
+  // than order-dependent.
+  for (const path of deletions) {
+    if (!byPath.has(path)) {
+      fail(`Cannot delete "${path}": the app has no such file. Current files: ${base.files.map((f) => f.path).join(", ")}.`);
+    }
+    byPath.delete(path);
+  }
+
+  const incoming = params["files"];
+  if (incoming !== undefined && incoming !== null) {
+    if (!Array.isArray(incoming)) {
+      fail("`files` must be an array of {path, content}.");
+    }
+    for (const entry of incoming) {
+      const path = asString((entry as ReactArtifactFile | undefined)?.path).trim();
+      const content = asString((entry as ReactArtifactFile | undefined)?.content);
+      if (!path) fail("Every file needs a non-empty `path`.");
+      byPath.set(path, { path, content });
+    }
+  }
+
+  if (byPath.size === 0) {
+    fail("An update cannot delete every file. Send at least one file, or use mode \"create\" to start over.");
+  }
+
+  const has = (key: string): boolean => params[key] !== undefined && params[key] !== null;
+
+  return {
+    title: has("title") ? params["title"] : base.title,
+    entry: has("entry") ? params["entry"] : base.entry,
+    files: [...byPath.values()],
+    dependencies: has("dependencies") ? params["dependencies"] : base.dependencies,
+    dataRequirements: has("dataRequirements") ? params["dataRequirements"] : base.dataRequirements,
+    writes: has("writes") ? params["writes"] : base.writes,
+    invokesAgents: has("invokesAgents") ? params["invokesAgents"] : base.invokesAgents,
+    agents: has("agents") ? params["agents"] : base.agents,
+    icon: has("icon") ? params["icon"] : base.icon,
+    // Describes this turn's change, so never inherited.
+    ...(has("summary") ? { summary: params["summary"] } : {}),
+  };
+}
+
+/** Paths an update removes. Validated like any other path so a traversal or a
+ *  reserved prefix cannot slip in through the delete channel. */
+function parseDeleteFiles(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) fail("`deleteFiles` must be an array of file paths.");
+  if (raw.length > MAX_FILES) {
+    fail(`Too many deletions: ${raw.length}. The limit is ${MAX_FILES}.`);
+  }
+  const paths: string[] = [];
+  for (const entry of raw) {
+    const path = asString(entry).trim();
+    if (!path) fail("`deleteFiles` entries must be non-empty file paths.");
+    validatePath(path);
+    if (!paths.includes(path)) paths.push(path);
+  }
+  return paths;
 }
 
 export interface BuiltReactArtifact {
@@ -458,6 +624,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
   const writes = params["writes"] === true;
   const agents = parseAgents(params["agents"]);
   const invokesAgents = params["invokesAgents"] === true || agents.length > 0;
+  const icon = parseIcon(params["icon"]);
 
   const payload: ReactArtifactPayload = {
     version: ARTIFACT_VERSION,
@@ -470,6 +637,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     ...(writes ? { writes: true } : {}),
     ...(invokesAgents ? { invokesAgents: true } : {}),
     ...(agents.length ? { agents } : {}),
+    ...(icon ? { icon } : {}),
   };
 
   const manifest: ReactArtifactManifest = {
@@ -483,9 +651,92 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     ...(writes ? { writes: true } : {}),
     ...(invokesAgents ? { invokesAgents: true } : {}),
     ...(agents.length ? { agents } : {}),
+    ...(icon ? { icon } : {}),
   };
 
   return { payload, manifest, summary };
+}
+
+/** How long to wait for claw-auth when reading the current build. Generous:
+ *  this is one small GCS-backed read on the internal network, and timing out
+ *  early would push the model into a needless full rebuild. */
+const READ_BACK_TIMEOUT_MS = 15_000;
+
+type ReadBackResult =
+  | { ok: true; payload: ReactArtifactPayload; versionNumber: number }
+  | { ok: false; error: string };
+
+/**
+ * Fetch the build this conversation is currently on, so an update can be folded
+ * onto it.
+ *
+ * Every failure here returns a RETRYABLE error and never falls back to treating
+ * the call as a create. A silent full rebuild is precisely the behaviour Step 2
+ * exists to remove: it would discard the user's current app and re-imagine it
+ * from conversational memory at the exact moment we know we cannot see it.
+ */
+async function readConversationApp(context?: ToolExecutionContext): Promise<ReadBackResult> {
+  const conversationId = context?.meta?.["conversationId"];
+  if (!conversationId) {
+    return {
+      ok: false,
+      error:
+        'Error: `mode: "update"` needs a conversation that already owns an app, and this run has no conversation. Call create-app with `mode: "create"`.',
+    };
+  }
+
+  const authUrl = context?.config?.["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
+  const s2sKey = context?.config?.["XYNE_CLAW_S2S_KEY"] ?? "";
+  const url = `${authUrl}/claw/api/v1/internal/artifact-apps/by-conversation/${encodeURIComponent(conversationId)}/payload`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { ...(s2sKey ? { "x-s2s-key": s2sKey } : {}) },
+      signal: AbortSignal.timeout(READ_BACK_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      error: `Error: could not load the current app (${message}). This is temporary — retry the same update. Do not rebuild the whole project unless the user asks for a fresh one.`,
+    };
+  }
+
+  if (res.status === 404) {
+    return {
+      ok: false,
+      error:
+        'Error: this conversation has no app yet, so there is nothing to update. Call create-app with `mode: "create"`.',
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: `Error: could not load the current app (HTTP ${res.status}). This is temporary — retry the same update rather than rebuilding the project.`,
+    };
+  }
+
+  let body: { payload?: unknown; versionNumber?: unknown };
+  try {
+    body = (await res.json()) as { payload?: unknown; versionNumber?: unknown };
+  } catch {
+    return { ok: false, error: "Error: the current app came back unreadable. Retry the same update." };
+  }
+
+  const payload = body.payload as ReactArtifactPayload | undefined;
+  if (!payload || !Array.isArray(payload.files) || payload.files.length === 0) {
+    return {
+      ok: false,
+      error: "Error: the current app has no readable files. Retry, or call create-app with `mode: \"create\"`.",
+    };
+  }
+
+  return {
+    ok: true,
+    payload,
+    versionNumber: typeof body.versionNumber === "number" ? body.versionNumber : 0,
+  };
 }
 
 /** Serialize a built artifact into the marker string the claw runtime parses. */
@@ -506,17 +757,36 @@ export const createReactArtifactTool: ToolDefinition = {
   // custom-tool palette — a tool declared builtin is silently absent from the
   // model's tool list no matter what the agent config selects.
   source: "custom:react-artifact",
+  configSchema: REACT_ARTIFACT_CONFIG_SCHEMA,
   description:
     "Build a small, self-contained React app that the user can view and interact with, instead of " +
     "describing a UI in prose. Use it when the answer is better shown than told — a dashboard, a chart, " +
     "a comparison table, an interactive explainer. Write TypeScript React (.tsx) and default-export a " +
     "component from the `entry` file.\n\n" +
     "ONE APP PER CONVERSATION — this thread has a single app. Your FIRST call creates it; " +
-    "every later call REPLACES its contents as a new version of that same app. So when asked " +
-    "to change or fix something, re-send the whole project with the change applied — do not " +
-    "announce a new app, do not rename it unless asked, and do not drop features you built " +
-    "earlier just because the latest message did not mention them. Users can roll back to any " +
-    "earlier version, so a mistake is recoverable — but a silent regression is not obvious.\n\n" +
+    "every later call produces a new version of that same app. Do not announce a new app and do " +
+    "not rename it unless asked.\n\n" +
+    "CHANGING AN EXISTING APP — use `mode: \"update\"` and send ONLY the files you changed:\n" +
+    "  1. Call `read-app-file` with no path to list the current files, then with a path to read " +
+    "each file you intend to change. You cannot edit code you have not read — you do not " +
+    "otherwise see the app you built, and guessing at it from memory is how features silently " +
+    "disappear.\n" +
+    "  2. Call create-app with `mode: \"update\"` and `files` containing just the changed files. " +
+    "Use `deleteFiles` to remove one. Everything you omit — other files, title, entry, " +
+    "dependencies, dataRequirements — is inherited unchanged.\n" +
+    "Each file you send REPLACES that file whole, so write it out complete: do not drop features " +
+    "you built earlier just because the latest message did not mention them.\n" +
+    "Sending the whole project on every tweak is slow, truncates large apps, and reintroduces " +
+    "bugs you already fixed. Only use `mode: \"create\"` for the first build, or when the user " +
+    "genuinely wants a different app. Users can roll back to any earlier version, so a mistake " +
+    "is recoverable — but a silent regression is not obvious.\n\n" +
+    "ICON — on the FIRST build, set `icon` to the Xyne icon that best says what the app is about; it " +
+    "becomes the app's mark in the sidebar and library. Pick for the app's SUBJECT (a stopwatch → " +
+    "\"timer-default\", a ticket board → \"kanban-board\", a sales chart → \"barchart-default\"), not " +
+    "for the UI widgets it happens to use. Names are kebab-case from these categories: " +
+    `${ICON_SECTIONS.join(", ")}. Good choices for common apps: ${SUGGESTED_ICONS.join(", ")}. ` +
+    "An unknown name is rejected with the closest matches, so retry with one of those. Omit " +
+    "`icon` on updates unless asked — the user may have chosen their own, and theirs wins.\n\n" +
     "DESIGN SYSTEM — the project is preloaded with Tailwind v4 and the shadcn/ui base set. Do NOT " +
     "write these yourself and do NOT list them in `dependencies`; they are injected for you:\n" +
     `  • shadcn/ui components at /components/ui/<name>: ${SHADCN_UI_COMPONENTS.join(", ")}\n` +
@@ -619,9 +889,28 @@ export const createReactArtifactTool: ToolDefinition = {
   inputSchema: {
     type: "object",
     properties: {
+      mode: {
+        type: "string",
+        enum: ["create", "update"],
+        description:
+          'Defaults to "create". Use "update" to change an app this conversation already built: send ONLY the files you changed and the tool merges them onto the current build. Every other field you omit is inherited.',
+      },
+      deleteFiles: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          'Paths to remove, e.g. ["/OldChart.tsx"]. Only meaningful with mode "update" — a patch cannot express a deletion any other way.',
+      },
       title: {
         type: "string",
         description: "Short, user-facing name for the app, e.g. \"Weekly ticket volume\".",
+      },
+      icon: {
+        type: "string",
+        description:
+          "Kebab-case id of a Xyne icon that represents what the app IS — shown in the sidebar and " +
+          "library card. e.g. \"kanban-board\" for a task board, \"barchart-default\" for a chart. " +
+          "See the ICON section for the vocabulary.",
       },
       summary: {
         type: "string",
@@ -713,14 +1002,32 @@ export const createReactArtifactTool: ToolDefinition = {
         },
       },
     },
-    required: ["title", "entry", "files"],
+    // `title` and `entry` are required for a CREATE and inherited on an UPDATE,
+    // which a static schema cannot express — `buildReactArtifact` fails with an
+    // actionable message when a create omits them.
+    required: ["files"],
   },
   execute: async (
     params: Record<string, unknown>,
-    _context?: ToolExecutionContext,
+    context?: ToolExecutionContext,
   ): Promise<string> => {
     try {
-      return formatReactArtifactResult(buildReactArtifact(params));
+      const mode = asString(params["mode"]).trim() || "create";
+      if (mode !== "create" && mode !== "update") {
+        return 'Error: `mode` must be "create" or "update".';
+      }
+
+      if (mode === "create") {
+        return formatReactArtifactResult(buildReactArtifact(params));
+      }
+
+      const base = await readConversationApp(context);
+      if (!base.ok) return base.error;
+
+      // Merge first, then validate the WHOLE — never the fragment.
+      return formatReactArtifactResult(
+        buildReactArtifact(mergeArtifactParams(base.payload, params)),
+      );
     } catch (err) {
       if (err instanceof ValidationError) {
         return `Error: ${err.message} Fix the input and call create-app again.`;

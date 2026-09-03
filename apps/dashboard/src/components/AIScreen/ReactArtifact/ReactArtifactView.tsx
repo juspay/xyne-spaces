@@ -11,6 +11,7 @@ import {
 import {
   Check,
   Code2,
+  Settings2,
   Loader2,
   Maximize2,
   Pencil,
@@ -20,7 +21,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { useCacConfig } from '@xyne/shared/hooks';
+import { Button } from '../../ui/Button/Button';
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
   loadArtifactPayload,
@@ -36,18 +37,11 @@ import { useArtifactDataBridge, type PreviewClientRef } from './useArtifactDataB
 import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
+import { ArtifactBootOverlay } from './ArtifactBootOverlay';
+import { ArtifactErrorOverlay } from './ArtifactErrorOverlay';
+import { AppLoaderMark } from '../../AppLoader/AppLoaderMark';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { TOP_BAR_HEIGHT_CLASS } from '../../AppNavigator/topBarHeight';
-import {
-  DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
-  REACT_ARTIFACT_AGENT_CAC_KEY,
-  type ReactArtifactAgentCacConfig,
-} from './reactArtifactAgentCacConfig';
-import {
-  REACT_ARTIFACT_WRITE_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_WRITE_CAC_CONFIG,
-  type ReactArtifactWriteCacConfig,
-} from './reactArtifactWriteCacConfig';
 // Forces Sandpack's own auto-height wrapper elements to fill the frame; see the
 // file header for why `--sp-layout-height` alone is not enough.
 import './sandpackOverrides.css';
@@ -67,6 +61,7 @@ const SANDPACK_FILL_CSS = `
 .xyne-artifact-sandpack .sp-stack,
 .xyne-artifact-sandpack .sp-preview-container { height: 100%; min-height: 0; }
 .xyne-artifact-sandpack .sp-layout { border: none; border-radius: 0; }
+.xyne-artifact-sandpack .sp-overlay.sp-loading { display: none; }
 .xyne-artifact-sandpack .sp-preview-iframe {
   height: 100% !important;
   min-height: 0 !important;
@@ -104,6 +99,7 @@ const ArtifactSandpack = memo(
     currentUserId,
     appId,
     attachmentId,
+    fill,
   }: {
     payload: ReactArtifactPayload;
     theme: 'light' | 'dark';
@@ -117,6 +113,9 @@ const ArtifactSandpack = memo(
     attachmentId?: string;
     /** Stable ref object — passing a changing prop here would remount the sandbox. */
     refreshRef: MutableRefObject<(() => Promise<void>) | null>;
+    /** Drives the boot overlay's scale and surface. A plain boolean, so the
+     *  memo's shallow compare still holds and the iframe is never torn down. */
+    fill: boolean;
   }): ReactElement => {
     const previewRef = useRef<PreviewClientRef | null>(null);
 
@@ -160,8 +159,16 @@ const ArtifactSandpack = memo(
     return (
       <SandpackProvider template='react-ts' theme={theme} files={files} customSetup={customSetup}>
         <SandpackLayout>
-          <SandpackPreview ref={previewRef} showOpenInCodeSandbox={false} />
+          {/* Sandpack's error overlay is replaced by ArtifactErrorOverlay below,
+              which shows the same failure with a way to act on it. */}
+          <SandpackPreview
+            ref={previewRef}
+            showOpenInCodeSandbox={false}
+            showSandpackErrorOverlay={false}
+          />
         </SandpackLayout>
+        <ArtifactBootOverlay fill={fill} />
+        <ArtifactErrorOverlay fill={fill} previewRef={previewRef} />
       </SandpackProvider>
     );
   },
@@ -182,24 +189,18 @@ export const ReactArtifactView = ({
   artifact,
   fill = false,
   onExpand,
+  expandLabel = 'Open full screen',
   onClose,
   titleSlot,
+  settingsSlot,
   onSave,
   saveState = 'idle',
 }: ReactArtifactViewProps): ReactElement => {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
-  const [tab, setTab] = useState<'preview' | 'code'>('preview');
+  const [tab, setTab] = useState<'preview' | 'code' | 'settings'>('preview');
   const [refreshingData, setRefreshingData] = useState(false);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
-  const { config: writeConfig } = useCacConfig<ReactArtifactWriteCacConfig>({
-    key: REACT_ARTIFACT_WRITE_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_WRITE_CAC_CONFIG,
-  });
   const auth = useAuthContextValues();
-  const { config: agentConfig } = useCacConfig<ReactArtifactAgentCacConfig>({
-    key: REACT_ARTIFACT_AGENT_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
-  });
   const theme = useMemo(() => sandpackThemeName(), []);
   const { attachmentId, inlineData, savedAppId, versionId } = artifact;
 
@@ -253,10 +254,12 @@ export const ReactArtifactView = ({
           style={bodyStyle}
         >
           {state.status === 'loading' ? (
-            <span className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <span className='h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent' />
-              Loading app…
-            </span>
+            // Same mark the sandbox overlay uses, so fetching the payload and
+            // booting the bundler read as one wait instead of two loaders
+            // swapping places.
+            <div role='status' aria-label='Loading app'>
+              <AppLoaderMark size={fill ? 'md' : 'sm'} />
+            </div>
           ) : (
             <>
               <p className='text-sm font-medium text-foreground'>Could not open this app</p>
@@ -278,7 +281,14 @@ export const ReactArtifactView = ({
           // AppNavigator, so it has to match both its height and its seam
           // colour. Inline in a transcript it is a card header, not a top bar:
           // content-sized, with the ordinary card border.
-          fill ? `${TOP_BAR_HEIGHT_CLASS} border-sidebar-border-muted` : 'border-border py-2'
+          fill
+            ? // Filling a panel, this sits on the same row as the chat's own
+              // top bar, which reads white because it is transparent over a
+              // `bg-background` panel. The pane's shell has no background of
+              // its own, so state it here or the window grey shows through and
+              // the two headers do not match across the split.
+              `${TOP_BAR_HEIGHT_CLASS} border-sidebar-border-muted bg-background`
+            : 'border-border py-2'
         }`}
       >
         {titleSlot ?? (
@@ -295,6 +305,9 @@ export const ReactArtifactView = ({
                 [
                   ['preview', Play],
                   ['code', Code2],
+                  // Only when a caller supplied settings — the inline card and
+                  // the dialog have no app behind them to configure.
+                  ...(settingsSlot ? ([['settings', Settings2]] as const) : []),
                 ] as const
               ).map(([value, Icon]) => (
                 <button
@@ -316,7 +329,7 @@ export const ReactArtifactView = ({
               ))}
             </div>
           )}
-          {payload.invokesAgents && agentConfig.enabled && (
+          {payload.invokesAgents && (
             <span
               className='flex shrink-0 items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400'
               title='This app can run an AI agent as you. Runs continue if you close the app.'
@@ -325,7 +338,7 @@ export const ReactArtifactView = ({
               Uses AI agents
             </span>
           )}
-          {payload.writes && writeConfig.enabled && (
+          {payload.writes && (
             <span
               className='flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400'
               title='This app can change data in your workspace. Changes are immediate and cannot be undone.'
@@ -338,7 +351,9 @@ export const ReactArtifactView = ({
             <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -355,10 +370,12 @@ export const ReactArtifactView = ({
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
                 aria-hidden='true'
               />
-            </button>
+            </Button>
           )}
           {onSave && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
@@ -375,14 +392,15 @@ export const ReactArtifactView = ({
               ) : (
                 <Save className='h-3.5 w-3.5' aria-hidden='true' />
               )}
-            </button>
+            </Button>
           )}
           {onExpand && (
             <button
               type='button'
               onClick={() => onExpand(artifact)}
               className='shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              aria-label='Open full screen'
+              aria-label={expandLabel}
+              title={expandLabel}
               data-track-category='AskAI'
               data-track-name='ReactArtifactExpand'
             >
@@ -422,8 +440,9 @@ export const ReactArtifactView = ({
           payload={payload}
           theme={theme}
           refreshRef={refreshRef}
-          canWrite={writeConfig.enabled}
-          canInvokeAgents={agentConfig.enabled}
+          fill={fill}
+          canWrite
+          canInvokeAgents
           currentUserId={auth.userID ?? ''}
           {...(artifact.savedAppId ? { appId: artifact.savedAppId } : {})}
           {...(!artifact.savedAppId && attachmentId ? { attachmentId } : {})}
@@ -432,6 +451,14 @@ export const ReactArtifactView = ({
       {fill && tab === 'code' && (
         <div style={bodyStyle}>
           <ArtifactCodeView payload={payload} />
+        </div>
+      )}
+      {fill && tab === 'settings' && settingsSlot && (
+        // Explicit background: Preview paints its own (the Sandpack iframe) and
+        // Code paints its own (the editor), so the pane shell deliberately has
+        // none. A plain panel has to supply it or the app behind shows through.
+        <div style={bodyStyle} className='overflow-y-auto bg-background'>
+          {settingsSlot}
         </div>
       )}
     </div>

@@ -20,7 +20,10 @@
 
 import type { ReactElement } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
-import { DiamondComponent } from '@xyne/icons';
+import { RotateLeft } from '@xyne/icons';
+import { AppIcon } from '../../AppIcon/AppIcon';
+import { IconPicker } from '../../AppIcon/IconPicker';
+import { ArtifactAppSettings } from './ArtifactAppSettings';
 import { ReactArtifactView } from './ReactArtifactView';
 import type { ReactArtifactRef } from './ReactArtifact.types';
 import type { AppCreationMode } from './useAppCreationMode';
@@ -36,7 +39,21 @@ interface ArtifactAppPaneProps {
 }
 
 export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | null => {
-  const { appId, viewing, versions, headVersionId, title, viewVersion, exit } = mode;
+  const {
+    appId,
+    viewing,
+    versions,
+    headVersionId,
+    title,
+    icon,
+    isOwner,
+    setIcon,
+    viewVersion,
+    restoreVersion,
+    restoring,
+    restoreError,
+    exit,
+  } = mode;
 
   if (!appId || !viewing) return null;
 
@@ -51,7 +68,18 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
 
   const titleSlot = (
     <div className='flex min-w-0 items-center gap-2'>
-      <DiamondComponent size={16} className='shrink-0 text-muted-foreground' aria-hidden='true' />
+      {/* The mark doubles as the picker for the owner. A viewer of someone
+          else's published app just sees the icon. */}
+      {isOwner ? (
+        <IconPicker value={icon} onChange={setIcon} size={16} className='-ml-1' />
+      ) : (
+        <AppIcon
+          name={icon}
+          size={16}
+          className='shrink-0 text-muted-foreground'
+          aria-hidden='true'
+        />
+      )}
       <span className='truncate text-sm font-medium text-foreground'>{title ?? 'App'}</span>
 
       <DropdownMenu>
@@ -82,8 +110,28 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
                   aria-hidden='true'
                 />
                 <span className='flex-1'>Version {v.versionNumber}</span>
-                {v.id === headVersionId && (
+                {v.id === headVersionId ? (
                   <span className='text-[11px] text-muted-foreground'>current</span>
+                ) : (
+                  // Restore MOVES HEAD on the server; selecting the row only
+                  // previews. Two verbs, one row — hence the nested control and
+                  // the stopPropagation, so restoring never reads as "view".
+                  <button
+                    type='button'
+                    disabled={restoring}
+                    onClick={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      restoreVersion(v.id);
+                    }}
+                    className='flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
+                    title={`Make version ${v.versionNumber} current — the agent's next update builds on it`}
+                    data-track-category='AskAI'
+                    data-track-name='ArtifactAppRestoreVersion'
+                  >
+                    <RotateLeft size={12} aria-hidden='true' />
+                    Restore
+                  </button>
                 )}
               </span>
             </DropdownMenuItem>
@@ -93,5 +141,29 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
     </div>
   );
 
-  return <ReactArtifactView artifact={artifact} fill titleSlot={titleSlot} onClose={exit} />;
+  return (
+    <div className='flex h-full min-h-0 flex-col'>
+      {restoreError && (
+        <p className='shrink-0 border-b border-border bg-destructive/10 px-3 py-1.5 text-xs text-destructive'>
+          Could not restore that version. {restoreError}
+        </p>
+      )}
+      <div className='min-h-0 flex-1'>
+        <ReactArtifactView
+          artifact={artifact}
+          fill
+          titleSlot={titleSlot}
+          settingsSlot={
+            <ArtifactAppSettings
+              app={mode.app}
+              viewing={viewing}
+              versions={versions}
+              onIconChange={setIcon}
+            />
+          }
+          onClose={exit}
+        />
+      </div>
+    </div>
+  );
 };

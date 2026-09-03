@@ -1,7 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanelService';
 import { API_BASE_URL, APP_BASE_PATH } from '../../config';
 import { logger, Logger } from '../../utils/logger';
 import {
@@ -37,42 +36,6 @@ function sanitizeUrl(url: string): string {
     url,
   );
 }
-
-/**
- * Helper function to track API latency with mixpanel
- * @param config - The axios request config
- * @param statusCode - The HTTP status code
- * @param success - Whether the request was successful
- * @param errorMessage - Optional error message for failed requests
- */
-const trackApiLatency = (
-  config: InternalAxiosRequestConfig & { metadata?: { startTime: number } },
-  statusCode: number | undefined,
-  success: boolean,
-  errorMessage?: string,
-): void => {
-  try {
-    const startTime = config.metadata?.startTime;
-
-    if (startTime) {
-      const latency = Date.now() - startTime;
-      const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url || 'unknown';
-      const sanitizedUrl = sanitizeUrl(fullUrl);
-
-      mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-        type: EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.API_LATENCY,
-        apiUrl: sanitizedUrl,
-        method: config.method?.toUpperCase() || 'unknown',
-        statusCode,
-        latency,
-        success,
-        ...(errorMessage && { errorMessage }),
-      });
-    }
-  } catch {
-    // Silently fail if tracking fails
-  }
-};
 
 // Create the main Axios instance with interceptors
 const apiConfig: AxiosInstance = axios.create({
@@ -159,11 +122,9 @@ apiConfig.interceptors.response.use(
     // Token refresh is now handled by backend via HTTP-only cookies
     // No need to manually update tokens from frontend
 
-    // Track API latency for successful requests
     const config = response.config as InternalAxiosRequestConfig & {
       metadata?: { startTime: number; requestId: string };
     };
-    trackApiLatency(config, response.status, true);
     const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url || 'unknown';
     const latency = config.metadata?.startTime ? Date.now() - config.metadata.startTime : 0;
     const sanitizedUrl = sanitizeUrl(fullUrl);
@@ -218,12 +179,9 @@ apiConfig.interceptors.response.use(
       url: axiosError.config?.url,
     });
 
-    // Track API latency for failed requests
     const config = axiosError.config as InternalAxiosRequestConfig & {
       metadata?: { startTime: number; requestId: string };
     };
-    trackApiLatency(config, axiosError.response?.status, false, axiosError.message);
-
     const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url || 'unknown';
     const latency = config.metadata?.startTime ? Date.now() - config.metadata.startTime : 0;
     const sanitizedUrl = sanitizeUrl(fullUrl);
@@ -267,14 +225,6 @@ apiConfig.interceptors.response.use(
         message: 'Received 401 Unauthorized. Logging out.',
         serverError: responseData?.error,
         serverMessage: responseData?.message,
-      });
-
-      // Track app refresh before reload
-      mixpanelService.track(EVENTS.APP_REFRESH, {
-        trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.API_SESSION_EXPIRED,
-        errorMessage: 'Session refresh failed - please re-authenticate',
-        url: window.location.href,
-        sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
       });
 
       clearAuthTokens();

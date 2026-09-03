@@ -14,6 +14,27 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
 import { tagRepository } from '@/database/repositories/tagRepository';
 
+/**
+ * Epoch-ms query param as a Date, or null when it is missing or unusable. The
+ * blank guard is trimmed: Number('') and Number('  ') are both 0, so `?startMs=`
+ * or `?startMs=%20` would otherwise read as epoch 0 and scan all history.
+ */
+const epochMsToDate = (raw: unknown): Date | null => {
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  const ms = trimmed ? Number(trimmed) : NaN;
+  const date = new Date(ms);
+  return Number.isFinite(ms) && !Number.isNaN(date.getTime()) ? date : null;
+};
+
+/**
+ * Server-side ceiling on the generated-tags window. The Topics Explorer caps at
+ * 7 calendar days client-side, but that is not a control: without this a
+ * hand-crafted multi-year request reads the channel's whole email table and
+ * every tag row hanging off it. A 7-day inclusive range runs 00:00 on day one
+ * to 23:59 on day seven, so it measures one millisecond under the cap.
+ */
+const MAX_TAG_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 export class DeskTagsConfigController {
   private channelParticipantRepo = new ChannelParticipantRepository();
   private channelRepo = new ChannelRepository();
@@ -246,6 +267,61 @@ export class DeskTagsConfigController {
     } catch (error) {
       logger.error('[DESK-TAGS-CONFIG] filterConversationsByTags failed', { channelId, generatedTags, error });
       res.status(500).json({ error: 'Failed to filter conversations by tags' });
+    }
+  };
+
+  /**
+   * GET /api/channels/:channelId/tags-config/generated-tags-by-conversation?startMs=…&endMs=…
+   *
+   * Tag values per conversation for this channel in the given date range. Tags
+   * live in the `non_zero` schema, which Zero does not mirror, so this is the
+   * only read path for grouping tickets by tag category.
+   * ACL: channel member.
+   */
+  getGeneratedTagsByConversation = async (req: Request, res: Response): Promise<void> => {
+    const { channelId } = req.params;
+    const userId = await this.assertAccess(req, res, channelId);
+    if (!userId) return;
+
+    const start = epochMsToDate(req.query['startMs']);
+    const end = epochMsToDate(req.query['endMs']);
+    if (!start || !end || start > end) {
+      res.status(400).json({
+        error: 'startMs and endMs must be epoch-millisecond values, with startMs before endMs',
+      });
+      return;
+    }
+    if (end.getTime() - start.getTime() > MAX_TAG_RANGE_MS) {
+      res.status(400).json({
+        error: `Date range cannot exceed ${MAX_TAG_RANGE_MS / (24 * 60 * 60 * 1000)} days`,
+      });
+      return;
+    }
+
+    try {
+      const rows = await tagRepository.findGeneratedTagsByConversation(
+        channelId,
+        deskEmailConfigKey(channelId),
+        start,
+        end,
+      );
+
+      const byConversation = new Map<string, { category: string; tag: string }[]>();
+      for (const row of rows) {
+        const tags = byConversation.get(row.conversationId) ?? [];
+        tags.push({ category: row.tagCategory, tag: row.tag });
+        byConversation.set(row.conversationId, tags);
+      }
+
+      const conversations = [...byConversation].map(([conversationId, tags]) => ({
+        conversationId,
+        tags,
+      }));
+
+      res.status(200).json({ conversations });
+    } catch (error) {
+      logger.error('[DESK-TAGS-CONFIG] getGeneratedTagsByConversation failed', { channelId, error });
+      res.status(500).json({ error: 'Failed to load generated tags by conversation' });
     }
   };
 

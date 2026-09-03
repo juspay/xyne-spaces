@@ -10,23 +10,23 @@ import { transcriptService, type TranscriptEntry } from '@/services/transcriptSe
 import type { SummaryModelType } from '@/services/callLlmRetry';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess, NotificationType } from '@xyne/shared';
+import { callLabelService } from '@/services/callLabelService';
+import { TagMethod, EntityUserAccess, NotificationType, ActivityClassification } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
 import { notificationService } from '@/services/notificationService';
+import { activityService } from '@/services/activity/activityService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
 } from '@/services/recordingSummaryMarkedItems';
 
-// Generic Tag framework sourceType/category for note-taker call labels. No
-// configKey is used, so tagService.createTag skips the "category must be
-// configured" check entirely (see assertManualCategoryOrOverride).
-const NOTE_TAKER_TAG_SOURCE_TYPE = 'CALL';
-const NOTE_TAKER_LABEL_CATEGORY = 'topic';
+// Activity.actorAction for "the AI summary for this recording is ready".
+// Rendered by the dashboard's RecordingSummaryActivity.
+const RECORDING_SUMMARY_READY_ACTION = 'recording_summary_ready';
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
@@ -139,7 +139,12 @@ class NoteTakerTranscriptService {
       // for generated decisions/actions and their transcript timestamps.
       const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript, summaryModelType);
       const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript, undefined, summaryModelType);
-      const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
+      const labelsPromise = transcriptService.generateAndSaveLabels(
+        call,
+        formattedTranscript,
+        TagMethod.LLM,
+        'note_taker',
+      );
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -224,6 +229,9 @@ class NoteTakerTranscriptService {
         resolvedModelType,
       );
     } catch (error) {
+      // generateDetailedSummaryCanvas swallows its own failures, so reaching
+      // here means something outside it threw and nothing has logged yet.
+      logDetailedSummaryFailed(call.externalId, 'unexpected_error', error);
       await this.markDetailedSummaryStatus(call, 'failed');
       throw error;
     }
@@ -266,9 +274,10 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Notify the recording owner that the detailed summary finished generating.
-   * Best-effort: a notification failure must never fail the generation flow,
-   * so errors are logged and swallowed.
+   * Notify the recording owner that the detailed summary finished generating:
+   * an ephemeral notification plus a persistent Activity-feed entry.
+   * Best-effort: neither may fail the generation flow, so each is wrapped
+   * independently and its errors are logged and swallowed.
    */
   private async notifySummaryReady(call: Call): Promise<void> {
     try {
@@ -294,6 +303,55 @@ class NoteTakerTranscriptService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    await this.recordSummaryReadyActivity(call);
+  }
+
+  /**
+   * Persist the Activity-feed entry for a finished summary, so the owner can
+   * still find it after the notification toast is gone (same reasoning as the
+   * KB ingestion activity). Regenerating a summary bumps the existing row back
+   * to unread instead of stacking a second entry for the same recording.
+   */
+  private async recordSummaryReadyActivity(call: Call): Promise<void> {
+    try {
+      if (!call.workspaceId) return;
+
+      const existing = await db.activity.findFirst({
+        where: {
+          callId: call.id,
+          userId: call.createdByUserId,
+          actorAction: RECORDING_SUMMARY_READY_ACTION,
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        // `updatedAt` is @updatedAt, so this also re-sorts the row to the top
+        // of the feed (which orders by updatedAt desc).
+        await db.activity.update({ where: { id: existing.id }, data: { isRead: false } });
+        return;
+      }
+
+      await activityService.createActivity({
+        userId: call.createdByUserId,
+        // System event: the recording is the subject, and its owner is both the
+        // notional actor and the only recipient.
+        actorId: call.createdByUserId,
+        actorAction: RECORDING_SUMMARY_READY_ACTION,
+        actionSource: 'call',
+        actionSourceId: call.id,
+        callId: call.id,
+        workspaceId: call.workspaceId,
+        // Purely informational — classify up front so the LLM classifier
+        // worker never picks it up (it claims every PENDING row).
+        classification: ActivityClassification.FYI,
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] summary_ready_activity_failed`, {
+        path: 'note_taker',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -304,7 +362,12 @@ class NoteTakerTranscriptService {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
 
-    const labelIds = await this.generateAndSaveLabels(call, formattedTranscript, TagMethod.AUTOMATED);
+    const labelIds = await transcriptService.generateAndSaveLabels(
+      call,
+      formattedTranscript,
+      TagMethod.AUTOMATED,
+      'note_taker',
+    );
     if (labelIds.length > 0) {
       await repositories.calls.appendLabels(call.id, labelIds);
     }
@@ -718,19 +781,13 @@ class NoteTakerTranscriptService {
           modelType,
         );
         if (!generated) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'generation_failed',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'generation_failed');
           return null;
         }
 
         const xyneAutomaticBot = await xyneAutomaticBotPromise;
         if (!xyneAutomaticBot) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'bot_not_found',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'bot_not_found');
           return null;
         }
 
@@ -753,10 +810,7 @@ class NoteTakerTranscriptService {
           workspaceId,
         );
         if (!canvasId) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'canvas_update_failed',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'canvas_update_failed');
           return null;
         }
 
@@ -783,9 +837,18 @@ class NoteTakerTranscriptService {
         if (!newCanvasId || latestMarkdown === renderedMarkdown) return;
 
         const snapshot = latestMarkdown;
+        const xyneAutomaticBot = await xyneAutomaticBotPromise;
+        if (!xyneAutomaticBot) {
+          logger.warn(`[${callId}] recording_summary_canvas_stream_sync_failed`, {
+            canvas_id: newCanvasId,
+            reason: 'xyne_automatic_bot_not_found',
+          });
+          return;
+        }
         const synced = await callDocumentService.syncStreamingDetailedSummaryCanvas(
           newCanvasId,
           snapshot,
+          xyneAutomaticBot.id,
           citationCtx,
         );
         if (synced) {
@@ -891,10 +954,7 @@ class NoteTakerTranscriptService {
       }
 
       if (!generated) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'generation_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'generation_failed');
         return null;
       }
 
@@ -907,19 +967,13 @@ class NoteTakerTranscriptService {
 
       const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: initializationFailure?.message ?? 'canvas_create_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'canvas_create_failed', initializationFailure);
         return null;
       }
 
       const xyneAutomaticBot = await xyneAutomaticBotPromise;
       if (!xyneAutomaticBot) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'bot_not_found',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'bot_not_found');
         return null;
       }
 
@@ -940,10 +994,7 @@ class NoteTakerTranscriptService {
         citationCtx,
       );
       if (!finalized) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'canvas_finalize_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
         return null;
       }
 
@@ -953,57 +1004,9 @@ class NoteTakerTranscriptService {
         markedItems: generated.markedItems,
       };
     } catch (error) {
-      logger.error(`[${callId}] detailed_summary_failed`, {
-        stage: 'detailed_summary_generation',
-        path: 'note_taker',
-        error,
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      logDetailedSummaryFailed(callId, 'unexpected_error', error);
       return null;
     }
-  }
-
-  /**
-   * Generate a small set of topical labels and persist each as a generic Tag
-   * row (sourceId = call.id, sourceType = 'CALL'), returning the resulting
-   * tag ids for Call.labels. Returns [] on any failure — callers treat that
-   * as "nothing to add", never clobbering a previously-saved good result.
-   */
-  private async generateAndSaveLabels(
-    call: Call,
-    formattedTranscript: string,
-    method: TagMethod = TagMethod.LLM,
-  ): Promise<string[]> {
-    const callId = call.externalId;
-    if (!call.workspaceId) {
-      logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: 'note_taker' });
-      return [];
-    }
-
-    const labels = await transcriptService.generateCallLabels(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_labels_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-      return [] as string[];
-    });
-    if (labels.length === 0) return [];
-
-    const tagIds: string[] = [];
-    for (const rawLabel of labels) {
-      if (tagIds.length >= 4) break;
-      const slug = this.slugifyLabel(rawLabel);
-      if (!slug) continue;
-      try {
-        const tagId = await this.getOrCreateLabelTag(call, slug, method);
-        if (tagId && !tagIds.includes(tagId)) tagIds.push(tagId);
-      } catch (error) {
-        logger.error(`[${callId}] label_tag_failed`, { label: slug, path: 'note_taker', error });
-      }
-    }
-
-    return tagIds;
   }
 
   /**
@@ -1022,61 +1025,13 @@ class NoteTakerTranscriptService {
         ids.push(entry);
         continue;
       }
-      const slug = this.slugifyLabel(entry);
+      const slug = callLabelService.slugifyLabel(entry);
       if (!slug) continue;
-      const id = await this.getOrCreateLabelTag(call, slug, TagMethod.MANUAL);
+      const id = await callLabelService.getOrCreateLabelTag(call, slug, TagMethod.MANUAL);
       if (id) ids.push(id);
     }
 
     return [...new Set(ids)];
-  }
-
-  /** Normalize an LLM-generated label into the Tag framework's required format (lowercase, hyphenated). */
-  private slugifyLabel(raw: string): string | null {
-    const slug = normalizeTagName(raw);
-    if (!slug) return null;
-    const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
-    return TAG_FORMAT_REGEX.test(safe) ? safe : null;
-  }
-
-  /**
-   * Reuse an existing label tag for this call if a prior run already created
-   * it, else create it via the generic Tag framework. No configKey is passed,
-   * so tagService.createTag doesn't require a workspace-level TagsConfig for
-   * the "topic" category (see assertManualCategoryOrOverride).
-   */
-  private async getOrCreateLabelTag(
-    call: Call,
-    slug: string,
-    method: TagMethod,
-  ): Promise<string | null> {
-    const existing = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
-    if (existing) {
-      // Typing a label an LLM/automated pass only suggested asserts it just as the tick button does.
-      if (method === TagMethod.MANUAL && existing.method !== TagMethod.MANUAL) {
-        await tagService.confirmTag(existing.id, call.workspaceId!);
-      }
-      return existing.id;
-    }
-
-    try {
-      const created = await tagService.createTag(
-        call.id,
-        NOTE_TAKER_TAG_SOURCE_TYPE,
-        call.workspaceId!,
-        NOTE_TAKER_LABEL_CATEGORY,
-        slug,
-        method,
-      );
-      return created.id;
-    } catch (error) {
-      // 409 = another run/racing worker created the same tag between the find and create above.
-      if (error instanceof TagServiceError && error.status === 409) {
-        const raced = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
-        return raced?.id ?? null;
-      }
-      throw error;
-    }
   }
 
   // Indexing only — not a message post. Uses the Call's own denormalized

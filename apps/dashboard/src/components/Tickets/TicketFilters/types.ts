@@ -63,6 +63,8 @@ export interface TicketFiltersProps {
   onBoardDropdownOpenChange?: (open: boolean) => void;
   /** True while the Source channels submenu is open; drives lazy board→project resolution in the parent */
   onSourceChannelsOpenChange?: (open: boolean) => void;
+  /** True while the More Filters dropdown is open; drives lazy board data fetch in parent */
+  onFiltersDropdownOpenChange?: (open: boolean) => void;
   isTicketsSyncing?: boolean;
   /** True when the selected board is a non-linear board */
   isNonLinearBoard?: boolean;

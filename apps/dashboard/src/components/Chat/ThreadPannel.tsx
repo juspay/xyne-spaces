@@ -63,8 +63,6 @@ import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@x
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
 import { ShortcutTooltip } from '../ui/ShortcutTooltip';
-import { mixpanelService } from '../../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
 import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
@@ -557,34 +555,12 @@ export const ThreadMessages = ({
     return () => cancelAnimationFrame(rafId);
   }, [derivedConversationId, isMobile, previewCardMode]);
 
-  const trackMessageLoadedPerformance = (startTime: number, messageType: string) => {
-    const scopeType =
-      channel?.scopeType && channel.scopeType !== ChannelScopeType.DEFAULT
-        ? channel.scopeType
-        : 'Channel';
-
-    const timeTakenMs = Date.now() - startTime;
-
-    mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-      type: messageType,
-      timeTakenMs,
-      channelLength: messages?.length || 0,
-      scopeType,
-      isInThread: true,
-    });
-  };
-
   // Track thread message loading performance
   useEffect(() => {
     if (messagesDetails.type === 'unknown') {
       messageLoadStartTimeRef.current = Date.now();
     } else if (messagesDetails.type === 'complete') {
       if (messageLoadStartTimeRef.current !== null) {
-        trackMessageLoadedPerformance(
-          messageLoadStartTimeRef.current,
-          EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.MESSAGES_LOADED,
-        );
-
         const duration = Date.now() - messageLoadStartTimeRef.current;
         logger.info(Event.THREAD_MESSAGES_LOADED, {
           source: 'ThreadPannel',
@@ -605,11 +581,6 @@ export const ThreadMessages = ({
       }
     } else if (messagesDetails.type === 'error') {
       if (messageLoadStartTimeRef.current !== null) {
-        trackMessageLoadedPerformance(
-          messageLoadStartTimeRef.current,
-          EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.MESSAGES_LOAD_FAILED,
-        );
-
         const duration = Date.now() - messageLoadStartTimeRef.current;
         logger.info(Event.THREAD_MESSAGES_LOADED, {
           source: 'ThreadPannel',

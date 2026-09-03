@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
+  ExternalLink as SquareArrowOutUpRight,
   GitBranch,
   LockClose as Lock,
   LinkBrokenSlant as Unlink,
@@ -79,6 +80,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
+import { getTicketStatusColor } from '../../Tickets/CalendarView/CompactTicketBadge/utils';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
@@ -213,7 +215,6 @@ const toVespaProjectTicket = (result: {
 });
 
 const fetchProjectTicketsPageFromVespa = async (
-  projectId: string,
   query: string,
   offset: number,
 ): Promise<{
@@ -226,7 +227,6 @@ const fetchProjectTicketsPageFromVespa = async (
     query: query || '*',
     type: 'tickets',
     apps: 'ticket',
-    projectId,
     limit: 200,
     offset,
   });
@@ -1122,14 +1122,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     setProjectTicketSearch('');
     setIsAddTicketMenuOpen(false);
     projectTicketsRequestIdRef.current += 1;
-  }, [ticket?.projectId]);
+  }, [ticket?.id]);
 
   const loadProjectTicketsPage = useCallback(
     async (offset: number, replace: boolean): Promise<void> => {
-      if (!ticket?.projectId) {
-        return;
-      }
-
       const normalizedQuery = projectTicketSearch.trim();
       const requestId = ++projectTicketsRequestIdRef.current;
       const isInitialLoad = replace || offset === 0;
@@ -1141,11 +1137,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       try {
-        const response = await fetchProjectTicketsPageFromVespa(
-          ticket.projectId,
-          normalizedQuery,
-          offset,
-        );
+        const response = await fetchProjectTicketsPageFromVespa(normalizedQuery, offset);
 
         if (requestId !== projectTicketsRequestIdRef.current) {
           return;
@@ -1178,7 +1170,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           message: String('[TicketDetails] Failed to load Vespa project tickets'),
           context: [
             {
-              projectId: ticket.projectId,
               offset,
               query: normalizedQuery || '*',
               error,
@@ -1199,11 +1190,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }
       }
     },
-    [projectTicketSearch, ticket?.projectId],
+    [projectTicketSearch],
   );
 
   useEffect(() => {
-    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+    if (!isAddTicketMenuOpen) {
       return;
     }
 
@@ -1213,7 +1204,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (projectTicketSearch.trim()) {
       void loadProjectTicketsPage(0, true);
     }
-  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+  }, [isAddTicketMenuOpen, loadProjectTicketsPage, projectTicketSearch]);
 
   const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
     setIsAddTicketMenuOpen(open);
@@ -2996,28 +2987,32 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             )}
           </div>
           {onUnmerge && (
-            <button
+            <Button
               type='button'
+              variant='ghost'
               onClick={onUnmerge}
+              trackId='unmerge_ticket'
               className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='UnmergeTicket'
             >
               Unmerge
-            </button>
+            </Button>
           )}
           {allowEdit && (
-            <button
+            <Button
               type='button'
+              variant='ghost'
               className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
+              trackId='remove_ticket_reference'
               aria-label='Remove reference'
               data-track-category='Tickets'
               data-track-name='RemoveReference'
               data-track-metadata={JSON.stringify({ referenceId: reference.id })}
             >
               <X size={14} />
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -3695,8 +3690,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
                             {tag.tagName}
                             {
-                              <button
+                              <Button
+                                variant='ghost'
                                 onClick={() => void handleRemoveTag(tag.id)}
+                                trackId='remove_ticket_tag'
                                 className={`ml-1 p-0.5 rounded transition-colors`}
                                 aria-label='Remove label'
                                 data-track-category='Tickets'
@@ -3707,7 +3704,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 })}
                               >
                                 <X size={12} />
-                              </button>
+                              </Button>
                             }
                           </span>
                         );
@@ -3745,8 +3742,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       {/* Tag List */}
                       <div className='max-h-48 overflow-y-auto'>
                         {tagSearchQuery.trim() && !exactMatch && (
-                          <button
+                          <Button
+                            variant='ghost'
                             onClick={() => void handleToggleTag(tagSearchQuery)}
+                            trackId='create_ticket_tag'
                             className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
                             data-track-category='Tickets'
                             data-track-name='CreateTag'
@@ -3756,16 +3755,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <span className='text-foreground font-medium'>
                               Create &quot;{tagSearchQuery.trim()}&quot;
                             </span>
-                          </button>
+                          </Button>
                         )}
 
                         {filteredTags.map(tagName => {
                           const isSelected = selectedTagNames.has(tagName);
 
                           return (
-                            <button
+                            <Button
                               key={tagName}
+                              variant='ghost'
                               onClick={() => void handleToggleTag(tagName)}
+                              trackId='toggle_ticket_tag'
                               className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
                               data-track-category='Tickets'
                               data-track-name='ToggleTag'
@@ -3784,7 +3785,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   <Check size={14} />
                                 </span>
                               )}
-                            </button>
+                            </Button>
                           );
                         })}
                       </div>
@@ -3815,7 +3816,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   {stageReadOnly ? (
                     <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <TicketStatusIcon size={14} />
+                      <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       {ticket.stageName || 'Not set'}
                     </span>
                   ) : (
@@ -3824,7 +3825,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       selectedValue={ticket.stageName}
                       onValueChange={handleStageChange}
                       placeholder='Set Status'
-                      icon={<TicketStatusIcon size={14} />}
+                      icon={
+                        <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
+                      }
+                      getItemIcon={item =>
+                        (() => {
+                          const stage = selectorStages.find(s => s.name === item.name);
+                          const itemStatusV2 = stage?.defaultTicketStatusV2 ?? ticket.statusV2;
+                          return (
+                            <TicketStatusIcon
+                              size={14}
+                              color={getTicketStatusColor(itemStatusV2)}
+                            />
+                          );
+                        })()
+                      }
                       noBorder={true}
                       isItemDisabled={item => item.name === ticket.stageName}
                     />
@@ -4405,7 +4420,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isDraft && !item.formId && (
-                                <button
+                                <Button
+                                  variant='ghost'
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4420,13 +4436,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Request submitted for approval');
                                   }}
+                                  trackId='submit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='SubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Submit Request
-                                </button>
+                                </Button>
                               )}
                               {isSubmitted && item.formId && (
                                 <>
@@ -4592,7 +4609,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isRejected && !item.formId && (
-                                <button
+                                <Button
+                                  variant='ghost'
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4607,13 +4625,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Stage change request resubmitted for approval');
                                   }}
+                                  trackId='resubmit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Resubmit request
-                                </button>
+                                </Button>
                               )}
                             </>
                           ) : (
@@ -4676,6 +4695,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <span className='flex flex-col text-left'>
                   <span className='text-sm font-semibold text-foreground'>{rcaButtonTitle}</span>
                   <span className='text-xs text-muted-foreground'>{rcaButtonSubtitle}</span>
+                </span>
+              </span>
+              <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
+            </button>
+          </div>
+        )}
+
+        {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
+          <div className='mt-4'>
+            <button
+              type='button'
+              onClick={() =>
+                void navigate(`/listProjects/${ticket.projectId}/releases/${ticket.id}`, {
+                  state: { returnToUrl: location.pathname + location.search },
+                })
+              }
+              data-track-category='Tickets'
+              data-track-name='OpenReleaseViewFromTicket'
+              data-testid='open-release-view-button'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+            >
+              <span className='inline-flex items-center gap-3'>
+                <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
+                  <SquareArrowOutUpRight size={18} />
+                </span>
+                <span className='flex flex-col text-left'>
+                  <span className='text-sm font-semibold text-foreground'>Open release view</span>
+                  <span className='text-xs text-muted-foreground'>
+                    Dev tickets, envs, migrations &amp; timeline for this release
+                  </span>
                 </span>
               </span>
               <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />

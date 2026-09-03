@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 
 import { InputBox } from '../../ui/InputBox';
+import { Button } from '../../ui/Button/Button';
 import {
   MessageType,
   ChannelScopeType,
@@ -42,11 +43,6 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
 import { getSlashCommandArtifactDefinition } from '@xyne/shared';
@@ -76,7 +72,7 @@ import { useThreadBroadcastMentions } from '../../../hooks/useThreadBroadcastMen
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
-import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { useChannelCommands, useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
@@ -228,49 +224,36 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       [conversationId, openArtifacts],
     );
 
-    // Slash commands for this channel — filtered by context (thread vs chat)
-    const [channelCommands, setChannelCommands] = useState<CommandItem[]>(
-      SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
-    );
     // Registry command id of the artifact currently being drafted, if any.
     const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
-    // Global shortcuts for this channel
-    const [globalShortcuts, setGlobalShortcuts] = useState<AppShortcutWithApp[]>([]);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-    useEffect(() => {
-      const isThread = !!conversation?.conversationId;
-      const filter: { commandAccessibility?: CommandAccessibility } = isThread
-        ? { commandAccessibility: CommandAccessibility.THREAD }
-        : { commandAccessibility: CommandAccessibility.CHAT };
-      appsService
-        .getChannelCommands(channelId, filter)
-        .then(cmds =>
-          setChannelCommands([
-            ...SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
-            ...cmds
-              .filter(
-                c =>
-                  !SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS.some(
-                    artifact => artifact.name === c.commandName.toLowerCase(),
-                  ),
-              )
-              .map(c => ({
-                id: c.id,
-                name: c.commandName,
-                description: c.description,
-                kind: 'app' as const,
-              })),
-          ]),
-        )
-        .catch(() => {
-          setChannelCommands(SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS);
-        });
-      // Fetch global shortcuts (not filtered by thread/chat)
-      appsService
-        .getChannelShortcuts(channelId, { type: 'GLOBAL' })
-        .then(setGlobalShortcuts)
-        .catch(() => undefined);
-    }, [channelId, conversation?.conversationId]);
+
+    // Slash commands for this channel — filtered by context (thread vs chat).
+    // Global shortcuts are not filtered by thread/chat.
+    const appCommands = useChannelCommands(
+      channelId,
+      conversation?.conversationId ? CommandAccessibility.THREAD : CommandAccessibility.CHAT,
+    );
+    const globalShortcuts = useChannelShortcuts(channelId, 'GLOBAL');
+    const channelCommands = useMemo<CommandItem[]>(
+      () => [
+        ...SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
+        ...appCommands
+          .filter(
+            c =>
+              !SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS.some(
+                artifact => artifact.name === c.commandName.toLowerCase(),
+              ),
+          )
+          .map(c => ({
+            id: c.id,
+            name: c.commandName,
+            description: c.description,
+            kind: 'app' as const,
+          })),
+      ],
+      [appCommands],
+    );
 
     // Hide, don't just reject: an artifact the user cannot post here should not
     // be offered. The send guards below still fire, because the command can also
@@ -700,10 +683,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             description: '@channel and @here are disabled in thread replies.',
           });
         }
-        const scopeType =
-          channel?.scopeType && channel.scopeType !== ChannelScopeType.DEFAULT
-            ? channel.scopeType
-            : 'Channel';
 
         // Zero normalizes every server mutation failure to { type: 'app' | 'zero', message }.
         // - 'zero' = protocol / connection / out-of-order error. The connection resets and
@@ -837,9 +816,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             isEdit: true,
             messageLength: processedHtml.length,
           });
-          mixpanelService.track(EVENTS.INITIATE_ACTION, {
-            type: EVENT_PROPERTIES.ACTION_TYPES.EDIT,
-          });
         } else if (conversationId) {
           try {
             const messageCreatedAt = Date.now();
@@ -884,11 +860,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageLength: processedHtml.length,
             });
 
-            mixpanelService.track(EVENTS.INITIATE_ACTION, {
-              type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_REPLY,
-              scopeType,
-              hasAttachments: hasFiles,
-            });
             setAlsoSendToChannel(false);
             // Invalidate summary cache when reply is sent
             onMessageChange(conversationId, channelId);
@@ -903,12 +874,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               conversationId,
               isReply: true,
               error: errorMessage,
-            });
-
-            mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
-              errorCode: 'CONVERSATION_SEND_ERROR',
-              scopeType,
-              errorReason: errorMessage,
             });
           }
         } else {
@@ -972,11 +937,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageLength: processedHtml.length,
             });
 
-            mixpanelService.track(EVENTS.INITIATE_ACTION, {
-              type: EVENT_PROPERTIES.ACTION_TYPES.DIRECT_MESSAGE,
-              scopeType,
-              hasAttachments: hasFiles,
-            });
             // Invalidate channel summary cache when new conversation is created
             // Note: We only invalidate channel summaries, not thread (no conversationId yet)
             onMessageChange('', channelId);
@@ -991,12 +951,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               channelId,
               isNewConversation: true,
               error: errorMessage,
-            });
-
-            mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
-              errorCode: 'CHANNEL_SEND_ERROR',
-              scopeType,
-              errorReason: errorMessage,
             });
           }
         }
@@ -1137,7 +1091,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       : "You're offline. Messages will be saved as drafts until you reconnect."}
                   </span>
                 </div>
-                <button
+                <Button
+                  variant='ghost'
                   type='button'
                   onClick={refreshConnection}
                   disabled={isReconnecting}
@@ -1146,11 +1101,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 cursor-wait'
                       : 'text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900 hover:bg-amber-200 dark:hover:bg-amber-800'
                   }`}
+                  trackId='reconnect_zero'
                   data-track-category='CHAT_INPUT'
                   data-track-name='RECONNECT_ZERO'
                 >
                   {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
-                </button>
+                </Button>
               </div>
             )}
             {isReconnected && (

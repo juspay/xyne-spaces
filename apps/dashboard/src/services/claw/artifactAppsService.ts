@@ -17,6 +17,12 @@ export interface ArtifactAppSummary {
   description: string | null;
   visibility: ArtifactAppVisibility;
   ownerUserId: string;
+  /** Display name of whoever created the app. Null when the id could not be
+   *  resolved — a deleted user, or no Spaces DB connection — so the UI must
+   *  treat the label as optional rather than assume it is always present. */
+  ownerName: string | null;
+  /** Xyne icon id, or null for the fallback mark. */
+  icon: string | null;
   publishedAt: string | null;
   updatedAt: string;
   manifest: ReactArtifactManifest | null;
@@ -27,6 +33,23 @@ export interface ArtifactAppVersionSummary {
   versionNumber: number;
   manifest: ReactArtifactManifest;
   sizeBytes: number;
+  createdAt: string;
+}
+
+/**
+ * One recorded restore: head moved backward at a point in time.
+ *
+ * The move itself is invisible after the fact — `headVersionId` is a pointer, so
+ * a restored app looks exactly like one that was always on that version. This is
+ * what lets the thread say what happened, and when.
+ */
+export interface ArtifactAppRestoreEvent {
+  id: string;
+  versionId: string;
+  versionNumber: number;
+  fromVersionId: string | null;
+  fromVersionNumber: number | null;
+  userId: string;
   createdAt: string;
 }
 
@@ -42,8 +65,17 @@ export interface ArtifactAppDetail {
    *  against this and not against the highest version number. Null for apps
    *  saved before head tracking. */
   headVersionId: string | null;
+  /** Xyne icon id chosen by the agent on the first build, or by the owner
+   *  since. Null renders the fallback mark. */
+  icon: string | null;
   publishedAt: string | null;
   isOwner: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Display name of whoever created the app, resolved the same way the gallery
+   *  resolves it. Only `GET /:id` joins it — the write routes return the row on
+   *  its own — so a caller must treat it as possibly absent, not just null. */
+  ownerName?: string | null;
 }
 
 /** Save a chat artifact as a new app. `attachmentId` must belong to the caller. */
@@ -77,6 +109,35 @@ export async function publishArtifactApp(
   });
 }
 
+/**
+ * Move HEAD back to an earlier version. A pointer move, not a copy: every
+ * version stays in the list, so restoring is reversible — including restoring
+ * back to the build you just left.
+ *
+ * Does not touch the published pin. Head is what the owner and the agent work
+ * on; rolling back a draft must not silently republish to the workspace.
+ */
+export async function restoreArtifactAppVersion(
+  appId: string,
+  versionId: string,
+): Promise<{ app: ArtifactAppDetail; versionId: string; versionNumber: number }> {
+  return clawRequest(`${BASE}/${encodeURIComponent(appId)}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ versionId }),
+  });
+}
+
+/** Owner-only. `null` clears the icon back to the fallback mark. */
+export async function updateArtifactAppIcon(
+  appId: string,
+  icon: string | null,
+): Promise<{ app: ArtifactAppDetail }> {
+  return clawRequest(`${BASE}/${encodeURIComponent(appId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ icon }),
+  });
+}
+
 export async function unpublishArtifactApp(appId: string): Promise<{ app: ArtifactAppDetail }> {
   return clawRequest(`${BASE}/${encodeURIComponent(appId)}/unpublish`, { method: 'POST' });
 }
@@ -88,9 +149,13 @@ export async function listArtifactApps(
   return clawRequest(`${BASE}?scope=${scope}`);
 }
 
-export async function getArtifactApp(
-  appId: string,
-): Promise<{ app: ArtifactAppDetail; versions: ArtifactAppVersionSummary[] }> {
+export async function getArtifactApp(appId: string): Promise<{
+  app: ArtifactAppDetail;
+  versions: ArtifactAppVersionSummary[];
+  /** Oldest first. Empty for non-owners — restore history describes drafts they
+   *  are not served. */
+  restores: ArtifactAppRestoreEvent[];
+}> {
   return clawRequest(`${BASE}/${encodeURIComponent(appId)}`);
 }
 

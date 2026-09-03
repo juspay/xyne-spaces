@@ -74,6 +74,7 @@ import {
   RolesACL,
   SavedUserConfigurationsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   StagesACL,
   SubTicketsACL,
@@ -283,6 +284,10 @@ export class ACLFactory {
       return new ReleaseChangeTypesACL(ctx, prisma)
     case 'releaseEvent':
       return new ReleaseEventsACL(ctx, prisma)
+    case 'releaseRepository':
+      // non_zero table (not Zero-synced); tenant scoping is enforced inline in
+      // the route/repo, so the generic ACL suffices for switch exhaustiveness.
+      return new BaseQueryACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
     case 'sdlcEntityLink':
@@ -297,6 +302,8 @@ export class ACLFactory {
       return new SavedUserConfigurationsACL(ctx, prisma)
     case 'savedUserConfigurationValue':
       return new SavedUserConfigurationValuesACL(ctx, prisma)
+    case 'viewAccess':
+      return new ViewAccessACL(ctx, prisma)
     case 'stage':
       return new StagesACL(ctx, prisma)
     case 'stageApprovers':

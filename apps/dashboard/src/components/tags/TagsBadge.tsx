@@ -1,6 +1,7 @@
 import { ChevronDown, Loader2, Plus, Tag, X } from 'lucide-react';
 import { JSX, useState } from 'react';
 import { cn } from '../../utils/classNames';
+import { Button } from '../ui/Button/Button';
 import { Popover } from '../ui/Popover/Popover';
 import { useTagEditor, useEntityTags } from '../../hooks/useSourceTags';
 import type { TagGroup } from '../../api/tagsApi';
@@ -138,10 +139,12 @@ export const TagEditorContent = ({
                   const isMutating = mutating.has(key);
                   const wouldExceedMax = !isActive && atMax;
                   return (
-                    <button
+                    <Button
                       key={allowedTag}
+                      variant='ghost'
                       type='button'
                       disabled={isMutating || wouldExceedMax}
+                      trackId='toggle_tag'
                       data-track-category='Support'
                       data-track-name='ToggleTag'
                       onClick={() => {
@@ -162,7 +165,7 @@ export const TagEditorContent = ({
                       {isMutating ? <Loader2 size={9} className='animate-spin' /> : null}
                       {allowedTag}
                       {isActive && !isMutating && <X size={9} />}
-                    </button>
+                    </Button>
                   );
                 })}
               </div>
@@ -180,9 +183,11 @@ export const TagEditorContent = ({
                           style={{ backgroundColor: safeColor(group.color) }}
                         >
                           {t.tag}
-                          <button
+                          <Button
+                            variant='ghost'
                             type='button'
                             disabled={isMutating}
+                            trackId='remove_tag'
                             data-track-category='Support'
                             data-track-name='RemoveTag'
                             onClick={() => {
@@ -196,7 +201,7 @@ export const TagEditorContent = ({
                             ) : (
                               <X size={9} />
                             )}
-                          </button>
+                          </Button>
                         </span>
                       );
                     })}
@@ -219,9 +224,11 @@ export const TagEditorContent = ({
                     {isDropdownOpen && (
                       <div className='absolute top-5 left-0 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[140px] max-h-48 overflow-y-auto'>
                         {availableToAdd.map(t => (
-                          <button
+                          <Button
                             key={t}
+                            variant='ghost'
                             type='button'
+                            trackId='add_tag'
                             data-track-category='Support'
                             data-track-name='AddTag'
                             onClick={() => {
@@ -231,7 +238,7 @@ export const TagEditorContent = ({
                             className='w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors'
                           >
                             {t}
-                          </button>
+                          </Button>
                         ))}
 
                         {opts?.isNewTagAllowed && (

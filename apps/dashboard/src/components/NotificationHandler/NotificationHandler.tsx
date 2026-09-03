@@ -21,11 +21,13 @@ import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import {
+  getRecordingStatus,
   sendRecordingEvent,
   stopRecordingForNavigation,
   stopRecordingForTeardown,
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
@@ -142,6 +144,12 @@ export const NotificationHandler: React.FC = () => {
   }, [allChannels]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
+
+  const goToRecordings = useCallback((): void => {
+    const workspaceId = activeWorkspaceIdRef.current;
+    if (!workspaceId) return;
+    void navigate(withWorkspacePrefix('/recordings', workspaceId));
+  }, [navigate]);
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
     reactNativeBridge.isAvailable(),
   );
@@ -639,20 +647,28 @@ export const NotificationHandler: React.FC = () => {
     // Sync stored preference to main process on startup
     meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
     const cleanup = meetingDetector.onStartRecordingFromMeeting(() => {
-      sendRecordingEvent({ type: 'requestAutoStart' });
+      goToRecordings();
+      const status = getRecordingStatus();
+      if (status === 'idle' || status === 'error') {
+        sendRecordingEvent({ type: 'clearTranscripts' });
+        sendRecordingEvent({ type: 'startRecording', defaultLayout: getRecordingDefaultLayout() });
+      } else {
+        sendRecordingEvent({ type: 'requestAutoStart' });
+      }
     });
     window.electronAPI?.ipcSend?.('recording:renderer-ready');
     return cleanup;
-  }, [isElectron]);
+  }, [isElectron, goToRecordings]);
 
   // Handle stop signal from the floating recording pill's Stop button
   useEffect(() => {
     const meetingDetector = window.electronAPI?.meetingDetector;
     if (!isElectron || !meetingDetector) return;
     return meetingDetector.onStopRecordingFromMeeting(() => {
+      goToRecordings();
       sendRecordingEvent({ type: 'requestStop' });
     });
-  }, [isElectron]);
+  }, [isElectron, goToRecordings]);
 
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;

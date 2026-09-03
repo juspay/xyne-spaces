@@ -1,4 +1,11 @@
-import { createBrowserRouter, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  createBrowserRouter,
+  Navigate,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
 import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
@@ -248,6 +255,7 @@ import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
+import AIDigitalTwinScreen from './AIScreen/screens/AIDigitalTwinScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
@@ -344,6 +352,7 @@ const AppRoot = (): ReactElement => {
   const browserPanelRightRef = useRef<PanelImperativeHandle>(null);
 
   const navigate = useNavigate();
+  const { workspaceId: routeWorkspaceId } = useParams<{ workspaceId?: string }>();
 
   // Shortcuts help modal state
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
@@ -414,6 +423,21 @@ const AppRoot = (): ReactElement => {
     syncStreaming();
     return xyneAIStreamManager.subscribe(syncStreaming);
   }, []);
+
+  // "View" on a background Ask AI completion toast. The stream manager lives
+  // outside the router, so it can't navigate itself — it calls back here.
+  // A thread started on /ai reopens there; a sidebar thread reopens the drawer.
+  useEffect(() => {
+    xyneAIStreamManager.setCompletionToastNavigator(({ sessionId, fromAIPage }) => {
+      if (fromAIPage) {
+        const base = routeWorkspaceId ? `/${routeWorkspaceId}/ai/chat` : '/ai/chat';
+        void navigate(`${base}/${encodeURIComponent(sessionId)}`);
+        return;
+      }
+      xyneAIActor.send({ type: 'OPEN', focusSessionId: sessionId });
+    });
+    return () => xyneAIStreamManager.setCompletionToastNavigator(null);
+  }, [navigate, routeWorkspaceId]);
 
   // Set panel refs when component mounts
   useEffect(() => {
@@ -1140,22 +1164,10 @@ export const router = createBrowserRouter(
                         </RequireOrgManager>
                       ),
                     },
+                    { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
                     {
                       element: <AISectionLayout />,
                       children: [
-                        {
-                          path: 'digital-twin',
-                          element: <ClawDigitalTwinScreen />,
-                          children: [
-                            { index: true, element: <DigitalTwinMemoriesTab /> },
-                            { path: 'hot', element: <DigitalTwinHotTab /> },
-                            { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                            { path: 'recall', element: <DigitalTwinRecallTab /> },
-                            { path: 'graph', element: <DigitalTwinGraphTab /> },
-                            { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                            { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                          ],
-                        },
                         { path: 'metrics', element: <ClawMetricsScreen /> },
                         { path: 'settings', element: <ClawSettingsScreen /> },
                       ],

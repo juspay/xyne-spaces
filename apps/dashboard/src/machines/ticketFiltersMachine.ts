@@ -46,6 +46,7 @@ export type TicketFiltersEvent =
       projectId?: string | undefined;
       boardId?: string | undefined;
       viewMode?: string | undefined;
+      viewId?: string | undefined;
       enabled?: boolean | undefined;
       selectedBoardIdFromDb?: string | null | undefined;
       searchParams: URLSearchParams;
@@ -70,6 +71,7 @@ const getStorageKey = (
   viewMode?: string,
   projectId?: string,
   boardId?: string,
+  viewId?: string,
 ): string => {
   if (viewMode === 'support' && channelId) return `${STORAGE_KEY_PREFIX}-support-${channelId}`;
   // Channel filters (for /chat/:channelId/tickets)
@@ -80,6 +82,12 @@ const getStorageKey = (
 
   // Project-level filters (for /projects/:projectId)
   if (projectId) return `${STORAGE_KEY_PREFIX}-project-${projectId}`;
+
+  // Saved-view filters (for /projects/views/:viewId) — keyed per view so one
+  // view's filters never bleed into the next.
+  if (viewMode === 'workspace-view') {
+    return `${STORAGE_KEY_PREFIX}-workspace-view-${viewId ?? 'new'}`;
+  }
 
   // General view mode filters (for /projects, my-tickets, etc.)
   if (viewMode) return `${STORAGE_KEY_PREFIX}-${viewMode}`;
@@ -448,6 +456,7 @@ export const ticketFiltersMachine = setup({
         event.viewMode,
         event.projectId,
         event.boardId,
+        event.viewId,
       );
       const enabled = event.enabled ?? true;
 

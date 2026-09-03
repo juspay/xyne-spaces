@@ -122,6 +122,7 @@ import {
   ReleaseChangesACL,
   ReleaseEventsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   SurfaceLinksACL,
   SurfaceNudgeCountsACL,
@@ -288,6 +289,8 @@ export class QueryACLFactory {
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
         return new SavedUserConfigurationValuesACL(ctx) as BaseQueryACL<TTable>;
+      case 'view_access':
+        return new ViewAccessACL(ctx) as BaseQueryACL<TTable>;
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'collections':

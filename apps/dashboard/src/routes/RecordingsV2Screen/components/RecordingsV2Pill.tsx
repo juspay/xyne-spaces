@@ -442,6 +442,7 @@ const RecordingsV2Pill = ({
               <SuggestedLabelChip
                 key={tag}
                 label={resolveLabel(tag)}
+                trackCategory='RecordingsV2'
                 onConfirm={() => void handleConfirmSuggestion(tag)}
                 onReject={() => void handleRejectSuggestion(tag)}
               />

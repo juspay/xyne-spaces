@@ -11,5 +11,6 @@ router.post('/preview', authMiddleware.authenticate, controller.previewTagGenera
 router.get('/generated-tag-categories', authMiddleware.authenticate, controller.getGeneratedTagCategories);
 router.get('/generated-tags/:tagCategory', authMiddleware.authenticate, controller.getGeneratedTagsByCategory);
 router.get('/conversations-by-tags', authMiddleware.authenticate, controller.filterConversationsByTags);
+router.get('/generated-tags-by-conversation', authMiddleware.authenticate, controller.getGeneratedTagsByConversation);
 
 export default router;
