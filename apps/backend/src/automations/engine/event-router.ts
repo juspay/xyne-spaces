@@ -16,66 +16,55 @@ import { triggerRegistry } from '../triggers/trigger-registry';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
 import type { AutomationEvent } from '../types/automation-events';
 
-type ScopeIds = Record<'boardIds' | 'projectIds' | 'channelIds', string | undefined>;
-
-// Scope ids the event carries, or null if they can't be established. Reads only entity columns
-// and emitter-stamped ids — never a value from a secondary lookup, so these can't be absent for
-// lookup reasons the way hasAttachments / isReply / performedBy.membership can.
-function eventScopeIds(eventType: string, payload: Record<string, unknown>): ScopeIds | null {
-  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-  const byChannel = (channelIds: string | undefined): ScopeIds => ({
-    boardIds: undefined,
-    projectIds: undefined,
-    channelIds,
-  });
-  const ticket = payload['ticket'] as Record<string, unknown> | undefined;
-  const email = payload['email'] as Record<string, unknown> | undefined;
+// Filter keys this event's matcher honours as scope, mapped to the id the event carries.
+// Only honoured keys may appear: judging a key the matcher ignores (a stray boardIds on an
+// email config) would drop runs that should have fired. Returning null means never
+// pre-filtered — EMAIL_SENT because its wire payload is { emailId } only and hydrating it
+// would add queries to the awaited reply-send path, WEBHOOK because it has no scope.
+function eventScope(
+  eventType: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const ticket = (payload['ticket'] ?? {}) as Record<string, unknown>;
   switch (eventType) {
     case 'TICKET_CREATED':
     case 'TICKET_UPDATED':
-    case 'TICKET_COMMENTED':
-      return ticket == null
-        ? null
-        : {
-            boardIds: str(ticket['boardId']),
-            projectIds: str(ticket['projectId']),
-            channelIds: str(ticket['channelId']),
-          };
+    case 'TICKET_COMMENTED': // mirrors matchTicketScopeFilters
+      return {
+        boardIds: ticket['boardId'],
+        projectIds: ticket['projectId'],
+        channelIds: ticket['channelId'],
+      };
     case 'EMAIL_RECEIVED':
-    case 'EMAIL_SENT':
-      return email == null ? null : byChannel(str(email['channelId']));
-    case 'MESSAGE_RECEIVED':
-      return payload['deleted'] === true ? null : byChannel(str(payload['channelId']));
     case 'TAG_GENERATED':
-      return byChannel(str(payload['channelId']));
+    case 'CALL_EVENT':
+      return { channelIds: payload['channelId'] };
+    case 'MESSAGE_RECEIVED':
+      return { channelIds: payload['channelId'], fromUserIds: payload['authorId'] };
     default:
-      return null; // CALL_EVENT / WEBHOOK / unknown — no reliable scope, never pre-filter
+      return null;
   }
 }
 
-// Only board / project / channel are judged; every other filter is left to the worker. Sound
-// because the matchers AND their scope dimensions together and OR within one, so judging a subset
-// can never reject a candidate the matcher would have accepted. Must not throw — the caller's
-// catch does not create a row.
+function configuredIds(filter: Record<string, unknown>, key: string): string[] {
+  const raw = filter[key];
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string' && !!v.trim()) : [];
+}
+
+// True only when matchFilters is guaranteed to reject: some honoured key is configured and
+// the event's actual id is known and absent from it. An unset filter or an id we cannot read
+// yields false — the pre-filter never guesses, and the worker decides.
 function isDefiniteScopeMismatch(
-  eventType: string,
-  filterConfig: Record<string, unknown>,
-  payload: Record<string, unknown>,
+  scope: Record<string, unknown>,
+  filter: Record<string, unknown>,
 ): boolean {
-  const scope = eventScopeIds(eventType, payload);
-  if (scope === null) return false;
-  for (const key of ['boardIds', 'projectIds', 'channelIds'] as const) {
-    const configured = filterConfig[key];
-    if (!Array.isArray(configured)) continue;
-    const wanted = configured.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
-    if (wanted.length === 0) continue;
-    const actual = scope[key];
-    if (actual === undefined) return true;
-    // Raw and trimmed: matchTicketScopeFilters and the message matcher trim configured ids,
-    // the email matchers' asStringArray does not.
-    if (!wanted.some(v => v === actual || v.trim() === actual)) return true;
-  }
-  return false;
+  return Object.entries(scope).some(([key, actual]) => {
+    const wanted = configuredIds(filter, key);
+    if (wanted.length === 0 || typeof actual !== 'string' || !actual) return false;
+    // Raw and trimmed: the ticket/message matchers trim configured ids, the email/tag
+    // asStringArray does not. Comparing both ways can only keep a candidate, never drop one.
+    return !wanted.some(v => v === actual || v.trim() === actual);
+  });
 }
 
 class EventRouter {
@@ -92,49 +81,28 @@ class EventRouter {
       return;
     }
 
-    // Pre-check: hydrate once for the whole batch (all candidates share this eventType's trigger
-    // impl) and skip creating a row + queue job for automations whose filters can't match. Does
-    // NOT replace the downstream filter checks — those stay as the correctness backstop.
-    const triggerImpl = triggerRegistry.has(eventType) ? triggerRegistry.get(eventType) : null;
-    let hydratedPayload: Record<string, unknown> | null = null;
-    if (triggerImpl) {
-      try {
-        hydratedPayload =
-          typeof triggerImpl.hydratePayload === 'function'
-            ? await triggerImpl.hydratePayload(payload as unknown as Record<string, unknown>)
-            : (payload as unknown as Record<string, unknown>);
-      } catch (err) {
-        logger.warn(
-          `[EVENT-ROUTER] hydratePayload failed for event=${eventType} workspaceId=${workspaceId} — skipping pre-filter, falling back to per-candidate creation:`,
-          err,
-        );
-        hydratedPayload = null;
-      }
-    }
-    const preCheckEnabled = triggerImpl !== null && hydratedPayload !== null;
+    // Skip creating a row + queue job for candidates whose scope cannot match this event.
+    // Does NOT replace the worker's matchFilters — that stays the correctness backstop.
+    const skipIds = await this.scopeMismatches(
+      eventType,
+      payload as unknown as Record<string, unknown>,
+      candidates,
+      workspaceId,
+    ).catch(err => {
+      logger.warn(`[EVENT-ROUTER] pre-filter failed for event=${eventType} — enqueuing all:`, err);
+      return new Set<string>();
+    });
 
     let enqueued = 0;
     let preFiltered = 0;
 
     for (const workflow of candidates) {
+      if (skipIds.has(workflow.id)) {
+        preFiltered += 1;
+        continue;
+      }
+
       try {
-        const candidateConfig = parseAutomationConfig(workflow.context);
-        // SCHEDULED automations always get a row (unchanged) — deferring is only meaningful for
-        // candidates that already matched. trigger.type check guards against a stale/mismatched
-        // context being evaluated with the wrong trigger's filter logic.
-        const filterConfig = (candidateConfig.trigger.config ?? {}) as Record<string, unknown>;
-        const canPreFilter =
-          preCheckEnabled &&
-          hydratedPayload &&
-          candidateConfig.schedule?.type !== 'SCHEDULED' &&
-          candidateConfig.trigger.type === eventType;
-
-        if (canPreFilter && hydratedPayload &&
-            isDefiniteScopeMismatch(eventType, filterConfig, hydratedPayload)) {
-          preFiltered += 1;
-          continue;
-        }
-
         const metadata = parseAutomationMetadata(workflow.metadata);
         const initialContext = {
           automation: {
@@ -183,6 +151,55 @@ class EventRouter {
     logger.info(
       `[EVENT-ROUTER] event=${eventType} workspaceId=${workspaceId} candidates=${candidates.length} preFiltered=${preFiltered} enqueued=${enqueued} chain=${chain.join(' → ') || '∅'}`,
     );
+  }
+
+  /**
+   * Ids of candidates whose configured scope cannot match this event. Fails open at every
+   * step — an event with no scope, a config that does not parse into this trigger's shape,
+   * nothing scoped, a failed hydration — so an unjudged candidate still gets its row.
+   */
+  private async scopeMismatches(
+    eventType: string,
+    payload: Record<string, unknown>,
+    candidates: Workflow[],
+    workspaceId: string,
+  ): Promise<Set<string>> {
+    const skip = new Set<string>();
+    const keys = Object.keys(eventScope(eventType, {}) ?? {});
+    if (keys.length === 0) return skip;
+
+    // Only a candidate whose stored trigger is this event can be judged with this event's
+    // scope semantics. parseAutomationConfig is an unvalidated JSON.parse ("null" and "{}"
+    // both parse fine), so read defensively — an unreadable config is simply not judged.
+    const scoped: Array<[string, Record<string, unknown>]> = [];
+    for (const workflow of candidates) {
+      const config = parseAutomationConfig(workflow.context) as {
+        trigger?: { type?: string; config?: unknown };
+      } | null;
+      if (config?.trigger?.type !== eventType) continue;
+      const filter = (config.trigger.config ?? {}) as Record<string, unknown>;
+      if (keys.some(key => configuredIds(filter, key).length > 0)) scoped.push([workflow.id, filter]);
+    }
+    if (scoped.length === 0) return skip; // nothing to judge — never hydrate
+
+    let scope = eventScope(eventType, payload);
+    // Ticket events are exactly the events carrying boardIds, and exactly the events whose
+    // wire payload has only ticketId — so hydrate once for the batch. Everything else is
+    // judged on wire data alone and never hydrates.
+    if (scope && 'boardIds' in scope) {
+      const impl = triggerRegistry.has(eventType) ? triggerRegistry.get(eventType) : null;
+      const hydrate = impl?.hydratePayload?.bind(impl);
+      if (!hydrate) return skip;
+      // Same tenant scope the worker hydrates under, so both see the same rows.
+      const hydrated = await runAsServiceActor('automation', workspaceId, () => hydrate(payload));
+      scope = eventScope(eventType, hydrated);
+    }
+    if (!scope) return skip;
+
+    for (const [id, filter] of scoped) {
+      if (isDefiniteScopeMismatch(scope, filter)) skip.add(id);
+    }
+    return skip;
   }
 
   private async findCandidates(
