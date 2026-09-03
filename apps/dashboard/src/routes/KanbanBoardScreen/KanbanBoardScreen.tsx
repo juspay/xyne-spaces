@@ -20,9 +20,10 @@ import {
   Poll as Vote,
   Tag,
   CheckTickSingle as CheckIcon,
+  EyeOff,
+  EyeOn,
   MultipleCrossCancelDefault as X,
   ClockDefault as Clock,
-  BarchartDefault as BarChart3,
   BookmarkDefault as Bookmark,
   Share02 as Share2,
   GitBranch,
@@ -71,7 +72,12 @@ import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import { withTicketChannelScope } from './ticketChannelScope';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
-import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
+import {
+  KanbanColumns,
+  KANBAN_COLUMN_WIDTH_CLASS,
+  KANBAN_STRIP_GAP_CLASS,
+} from '../../components/Tickets/KanbanColumns/KanbanColumns';
+import { HiddenColumnsPanel } from '../../components/Tickets/HiddenColumnsPanel/HiddenColumnsPanel';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
 import {
@@ -230,6 +236,7 @@ const WORKSPACE_VIEW_NUMERIC_KEYS = [
 const DERIVED_COLUMNS = ['stage', 'board'];
 
 const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
+const EMPTY_TICKETS_BY_STAGE: Record<string, Ticket[]> = {};
 
 function mergeSavedColumns(prev: Set<string>, saved: string[]): Set<string> {
   const next = new Set(saved);
@@ -1267,21 +1274,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Dynamic grouping options based on form fields
   const groupingOptions = useMemo(() => {
     const baseOptions = [
-      {
-        value: 'assignee' as const,
-        label: 'Group by: Assignee',
-        icon: <User className='h-4 w-4' />,
-      },
-      {
-        value: 'status' as const,
-        label: 'Group by: Status Category',
-        icon: <CircleCheckBig className='h-4 w-4' />,
-      },
-      {
-        value: 'priority' as const,
-        label: 'Group by: Priority',
-        icon: <Vote className='h-4 w-4' />,
-      },
+      { value: 'assignee' as const, label: 'Group by: Assignee' },
+      { value: 'status' as const, label: 'Group by: Status Category' },
+      { value: 'priority' as const, label: 'Group by: Priority' },
     ];
 
     const formFieldOptions = groupByFormFields.map(field => ({
@@ -1292,16 +1287,21 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         fieldType: field.fieldType,
       },
       label: `Group by: ${field.fieldName}`,
-      icon:
-        field.fieldType === FormFieldType.USER ? (
-          <User className='h-4 w-4' />
-        ) : (
-          <BarChart3 className='h-4 w-4' />
-        ),
     }));
 
     return [...baseOptions, ...formFieldOptions];
   }, [groupByFormFields]);
+
+  const groupByMenuOptions = useMemo(
+    () => [
+      { value: 'none' as const, label: 'None' },
+      ...groupingOptions.map(({ value, label }) => ({
+        value,
+        label: label.replace('Group by: ', ''),
+      })),
+    ],
+    [groupingOptions],
+  );
 
   // Use stages from selectedBoardDetail (full board details) instead of lightweight allBoards
   const stagesDataForFilteredBoard = selectedBoardDetail?.stages;
@@ -2832,6 +2832,120 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
     (channelId && viewMode === 'project' && channelViewType !== 'stage');
 
+  const hiddenColumnsStorageKey = `kanban-hidden-columns-${state.context.storageKey}`;
+  const hiddenColumnsScope = `${shouldUseStatusColumns ? 'status' : 'stage'}:${
+    filteredSingleBoardId ?? ''
+  }`;
+  const [hiddenColumnsByScope, setHiddenColumnsByScope] = useState<Record<string, string[]>>({});
+  const [isHiddenPanelOpen, setIsHiddenPanelOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(hiddenColumnsStorageKey);
+      setHiddenColumnsByScope(raw ? (JSON.parse(raw) as Record<string, string[]>) : {});
+    } catch (err) {
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: 'Failed to read hidden kanban columns from localStorage',
+        error: err,
+      });
+      setHiddenColumnsByScope({});
+    }
+  }, [hiddenColumnsStorageKey]);
+
+  const stagesById = useMemo(() => new Map(stages.map(stage => [stage.id, stage])), [stages]);
+
+  const terminalColumnIds = useMemo(
+    () =>
+      stages
+        .filter(
+          stage =>
+            stage.defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
+            stage.defaultTicketStatusV2 === TicketStatusV2.CANCELLED,
+        )
+        .map(stage => stage.id),
+    [stages],
+  );
+
+  const hiddenColumnIds = useMemo(() => {
+    const stored = hiddenColumnsByScope[hiddenColumnsScope];
+    const knownIds = new Set(stages.map(stage => stage.id));
+    return (stored ?? terminalColumnIds).filter(id => knownIds.has(id));
+  }, [hiddenColumnsByScope, hiddenColumnsScope, terminalColumnIds, stages]);
+
+  const hiddenStages = useMemo(
+    () => stages.filter(stage => hiddenColumnIds.includes(stage.id)),
+    [stages, hiddenColumnIds],
+  );
+
+  const visibleBoardStages = useMemo(
+    () => stages.filter(stage => !hiddenColumnIds.includes(stage.id)),
+    [stages, hiddenColumnIds],
+  );
+
+  const [groupedStripHeight, setGroupedStripHeight] = useState(0);
+  const groupedStripObserverRef = useRef<ResizeObserver | null>(null);
+  const groupedHeaderStripRef = useCallback((node: HTMLDivElement | null) => {
+    groupedStripObserverRef.current?.disconnect();
+    groupedStripObserverRef.current = null;
+    if (!node) return;
+    const measure = (): void =>
+      setGroupedStripHeight(prev => (prev === node.offsetHeight ? prev : node.offsetHeight));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    groupedStripObserverRef.current = observer;
+  }, []);
+
+  const allColumnsHidden = stages.length > 0 && hiddenColumnIds.length === stages.length;
+
+  const updateHiddenColumns = useCallback(
+    (update: (current: string[]) => string[]) => {
+      setHiddenColumnsByScope(prev => {
+        const knownIds = new Set(stages.map(stage => stage.id));
+        const current = (prev[hiddenColumnsScope] ?? terminalColumnIds).filter(id =>
+          knownIds.has(id),
+        );
+        const map = { ...prev, [hiddenColumnsScope]: update(current) };
+        try {
+          localStorage.setItem(hiddenColumnsStorageKey, JSON.stringify(map));
+        } catch (err) {
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: 'Failed to persist hidden kanban columns to localStorage',
+            error: err,
+          });
+        }
+        return map;
+      });
+    },
+    [hiddenColumnsScope, hiddenColumnsStorageKey, stages, terminalColumnIds],
+  );
+
+  const handleUnhideColumn = useCallback(
+    (columnId: string) => {
+      updateHiddenColumns(current => current.filter(id => id !== columnId));
+    },
+    [updateHiddenColumns],
+  );
+
+  const handleHideColumn = useCallback(
+    (columnId: string) => {
+      const columnName = stages.find(stage => stage.id === columnId)?.name ?? 'Column';
+      updateHiddenColumns(current =>
+        current.includes(columnId) ? current : [...current, columnId],
+      );
+      toast.success(`${columnName} hidden — its tickets left every count.`, {
+        action: { label: 'Undo', onClick: () => handleUnhideColumn(columnId) },
+      });
+    },
+    [handleUnhideColumn, stages, updateHiddenColumns],
+  );
+
+  const handleShowAllColumns = useCallback(() => {
+    updateHiddenColumns(() => []);
+  }, [updateHiddenColumns]);
+
   const navBaseArgs = useMemo<KanbanTicketsPageBaseArgs>(
     () => ({
       ...ticketsQueryParams,
@@ -3211,6 +3325,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ...(user?.id ? { currentUserId: user.id } : {}),
     enabled: shouldFetchKanbanCounts,
   });
+  const boardWideCounts = useKanbanCounts({
+    ...ticketsQueryParams,
+    columnType: shouldUseStatusColumns ? 'status' : 'stage',
+    filters: deferredFilters,
+    groupBy: 'none',
+    showOverdueOnly,
+    ...(user?.id ? { currentUserId: user.id } : {}),
+    enabled: shouldFetchKanbanCounts && groupBy !== 'none',
+  });
   const lastKnownKanbanGroupsRef = useRef<{
     groups: typeof kanbanCounts.groups;
   } | null>(null);
@@ -3358,10 +3481,21 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ? groupTickets.length
         : (serverCountGroup?.totalCount ?? fallbackCount);
 
+      const hiddenColumnTotal = hiddenColumnIds.reduce((sum, columnId) => {
+        const column = stagesById.get(columnId);
+        if (!column) return sum;
+        const localCount = ticketsByColumn[column.id]?.length ?? 0;
+        if (hasSearchTerm) return sum + localCount;
+        return (
+          sum + (serverColumnCounts[column.id] ?? serverColumnCounts[column.name] ?? localCount)
+        );
+      }, 0);
+
       return {
         key: groupName,
         displayName,
         count,
+        visibleCount: Math.max(0, count - hiddenColumnTotal),
         allTickets: groupTickets,
         columnData: ticketsByColumn,
         entityType,
@@ -3399,7 +3533,40 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     kanbanCounts.groupsByKey,
     kanbanColumnQueryKey,
     hasMatchingLastKnownKanbanGroups,
+    hiddenColumnIds,
+    stagesById,
   ]);
+
+  const boardWideStageCounts = useMemo(() => {
+    if (!hasSearchTerm) {
+      let serverAll: Record<string, number> | undefined;
+      if (groupBy === 'none') {
+        serverAll = processedGroups[0]?.stageCounts;
+      } else {
+        const allTickets = boardWideCounts.groups[0];
+        serverAll = shouldUseStatusColumns ? allTickets?.statuses : allTickets?.stages;
+      }
+      if (serverAll && Object.keys(serverAll).length > 0) return serverAll;
+    }
+    const seenTicketIds = new Set<string>();
+    const totals: Record<string, number> = {};
+    for (const group of processedGroups) {
+      for (const [columnKey, list] of Object.entries(group.columnData ?? {})) {
+        for (const ticket of list) {
+          if (seenTicketIds.has(ticket.id)) continue;
+          seenTicketIds.add(ticket.id);
+          totals[columnKey] = (totals[columnKey] ?? 0) + 1;
+        }
+      }
+    }
+    return totals;
+  }, [processedGroups, boardWideCounts.groups, groupBy, shouldUseStatusColumns, hasSearchTerm]);
+
+  const getHiddenColumnCount = useCallback(
+    (stage: Stage): number =>
+      boardWideStageCounts[stage.id] ?? boardWideStageCounts[stage.name] ?? 0,
+    [boardWideStageCounts],
+  );
 
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
@@ -3437,7 +3604,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   return (
     <div
       data-testid='projects-board-page'
-      className='flex flex-col h-full w-full bg-muted relative'
+      className='flex flex-col h-full w-full bg-background relative'
     >
       {/* Header */}
       <div className='flex flex-col lg:flex-row flex-wrap lg:flex-nowrap lg:items-center justify-between px-4 py-3 bg-background flex-shrink-0 gap-3'>
@@ -3993,6 +4160,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       </div>
                     </DropdownMenu.CheckboxItem>
                   ))}
+
+                  {isKanbanLayout && (
+                    <>
+                      <DropdownMenu.Separator className='my-1 h-px bg-border' />
+                      <DropdownMenu.Item
+                        className='relative flex items-center gap-3 py-3 px-4 text-sm text-foreground rounded-lg cursor-pointer outline-none select-none
+                     data-[highlighted]:bg-muted data-[highlighted]:text-foreground transition-colors'
+                        onSelect={() => setIsHiddenPanelOpen(open => !open)}
+                        data-track-category='Tickets'
+                        data-track-name='ToggleHiddenColumnsPanel'
+                      >
+                        <EyeOn className='h-4 w-4 shrink-0 text-muted-foreground' />
+                        <span className='flex-1 font-medium'>
+                          {isHiddenPanelOpen
+                            ? 'Hide the hidden-columns panel'
+                            : 'Show hidden columns'}
+                        </span>
+                        <span className='font-mono text-xs tabular-nums text-muted-foreground'>
+                          {hiddenColumnIds.length || ''}
+                        </span>
+                      </DropdownMenu.Item>
+                    </>
+                  )}
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
@@ -4000,73 +4190,50 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button
-                  className='flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-xl text-sm font-medium outline-none hover:bg-muted transition-all min-w-[160px]'
+                  className='flex items-center gap-2 h-[34px] px-3.5 bg-background border border-border rounded-[11px] text-[13.5px] font-medium text-muted-foreground outline-none hover:bg-muted transition-colors'
                   data-testid='group-by-dropdown'
                 >
-                  <div className='flex items-center gap-2 flex-1'>
-                    <span className='text-muted-foreground font-normal'>Group by:</span>
+                  <span>Group by:</span>
+                  <span className='text-foreground font-semibold'>
                     {typeof groupBy === 'object' && groupBy.type === 'formField'
                       ? groupBy.fieldName
                       : groupingOptions
                           .find(opt => typeof opt.value === 'string' && opt.value === groupBy)
                           ?.label.replace('Group by: ', '') || 'None'}
-                  </div>
-                  <ChevronDownIcon className='w-3.5 h-3.5 text-muted-foreground' />
+                  </span>
+                  <ChevronDownIcon className='w-[15px] h-[15px] text-muted-foreground' />
                 </button>
               </DropdownMenu.Trigger>
 
               <DropdownMenu.Portal>
                 <DropdownMenu.Content
                   align='end'
-                  sideOffset={8}
-                  className='z-50 min-w-[220px] p-1 bg-background border border-border rounded-lg flex flex-col gap-1 shadow-xl animate-in fade-in zoom-in-95'
+                  sideOffset={4}
+                  className='z-50 w-[196px] p-[5px] bg-background border border-border rounded-xl shadow-[0_14px_40px_rgba(20,22,26,0.18)] animate-in fade-in zoom-in-95'
                 >
-                  {/* Matching Header Style */}
-                  <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
-                    <span className='text-sm font-bold tracking-wide text-foreground'>
-                      Group by
-                    </span>
-                    {groupBy !== 'none' && (
+                  {groupByMenuOptions.map(({ value, label }) => {
+                    const isChecked =
+                      typeof value === 'string'
+                        ? groupBy === value
+                        : typeof groupBy === 'object' &&
+                          groupBy.type === 'formField' &&
+                          groupBy.fieldId === value.fieldId;
+                    return (
                       <DropdownMenu.Item
-                        className='outline-none'
-                        aria-label='Clear grouping'
-                        onSelect={() => {
-                          handleSetGroupBy('none');
-                        }}
+                        key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
+                        className='flex items-center gap-[9px] h-[34px] px-2.5 rounded-lg text-[13.5px] text-foreground cursor-pointer outline-none select-none transition-colors data-[highlighted]:bg-muted'
+                        role='menuitemradio'
+                        aria-checked={isChecked}
+                        onSelect={() => handleSetGroupBy(value as GroupByType)}
+                        data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
                       >
-                        <div className='cursor-pointer hover:bg-muted rounded p-1 transition-colors text-foreground'>
-                          <X className='w-3.5 h-3.5' />
-                        </div>
+                        <span className='flex-1 truncate'>{label}</span>
+                        {isChecked && (
+                          <CheckIcon className='w-[15px] h-[15px] shrink-0 text-foreground stroke-[2.4]' />
+                        )}
                       </DropdownMenu.Item>
-                    )}
-                  </div>
-
-                  {/* Grouping Options */}
-                  {groupingOptions.map(({ value, label, icon }) => (
-                    <DropdownMenu.CheckboxItem
-                      key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
-                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
-      transition-colors
-      data-[highlighted]:bg-muted data-[highlighted]:text-foreground
-      data-[state=checked]:bg-accent data-[state=checked]:text-foreground data-[state=checked]:font-semibold'
-                      checked={
-                        typeof value === 'string'
-                          ? groupBy === value
-                          : typeof groupBy === 'object' &&
-                            groupBy.type === 'formField' &&
-                            groupBy.fieldId === value.fieldId
-                      }
-                      onCheckedChange={() => handleSetGroupBy(value as GroupByType)}
-                      data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
-                          {icon}
-                        </span>
-                        <span className='font-medium'>{label.replace('Group by: ', '')}</span>
-                      </div>
-                    </DropdownMenu.CheckboxItem>
-                  ))}
+                    );
+                  })}
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
@@ -4886,7 +5053,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       ) : (
         /* Accordion-style Kanban View */
         <div
-          className={`flex-1 min-h-0 overflow-auto relative ${groupBy !== 'none' ? 'p-4' : 'p-0'}`}
+          className={`flex-1 min-h-0 overflow-auto relative ${
+            groupBy !== 'none' ? 'px-4 pb-4' : 'p-0'
+          }`}
         >
           <DndContext
             collisionDetection={closestCenter}
@@ -4894,123 +5063,215 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             onDragEnd={event => void handleDragEnd(event)}
             sensors={sensors}
           >
-            <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
-              {processedGroups.map(group => {
-                const isExpanded = expandedGroups.has(group.key);
-                const showGroupHeader = groupBy !== 'none';
-                const serverCountGroup = isKanbanLayout
-                  ? kanbanCounts.groupsByKey.get(group.key)
-                  : undefined;
-                const stageCounts = group.stageCounts ?? serverCountGroup?.stages;
-                const groupCount = group.count;
-                const paginatedColumnConfig = canUseKanbanColumnPagination
-                  ? {
-                      columnType: shouldUseStatusColumns ? ('status' as const) : ('stage' as const),
-                      baseArgs: {
-                        ...ticketsQueryParams,
-                        searchTerm,
-                        filters: deferredFilters,
-                        formEntityValueFieldIds: fevFieldIds,
-                        dynamicFieldVespaTokens,
-                        dynamicFieldDateRanges,
-                        zeroOnlyDynamicFieldIds,
-                        showOverdueOnly,
-                        groupBy,
-                        ...(groupBy !== 'none' ? { groupKey: group.key } : {}),
-                      },
-                    }
-                  : null;
-
-                return (
-                  <div key={group.key} className={isExpanded || !showGroupHeader ? 'h-full' : ''}>
-                    {showGroupHeader && (
-                      <button
-                        onClick={() => toggleGroupExpansion(group.key)}
-                        data-track-category='KANBAN'
-                        data-track-name='ToggleGroupExpansion'
-                        data-track-metadata={JSON.stringify({ groupKey: group.key, groupBy })}
-                        className={`flex items-center gap-3 p-4 bg-muted hover:bg-border transition-colors sticky left-0 z-10 w-full text-left border-b border-border ${isExpanded ? 'rounded-t-lg ' : 'rounded-lg'}`}
-                      >
-                        {isExpanded ? (
-                          <ChevronDownIcon className='w-4 h-4 text-muted-foreground' />
-                        ) : (
-                          <ChevronRight className='w-4 h-4 text-muted-foreground' />
-                        )}
-                        <div className='flex items-center gap-4'>
-                          <div className='flex items-center gap-2'>
-                            {/* Show avatar for user assignees */}
-                            {group.entityType === 'user' && group.entityId && (
-                              <Avatar userId={group.entityId} size='sm' className='rounded-lg' />
-                            )}
-                            {/* Show group icon for group assignees */}
-                            {group.entityType === 'group' && (
-                              <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center flex-shrink-0'>
-                                <User className='w-3 h-3 text-muted-foreground' />
-                              </div>
-                            )}
-                            {/* Show priority icon when grouping by priority */}
-                            {group.priority && (
-                              <div className='flex items-center justify-center'>
-                                {getPriorityIcon(group.priority)}
-                              </div>
-                            )}
-                            <h3 className='font-semibold text-foreground capitalize  text-sm'>
-                              {group.displayName}
-                            </h3>
-                          </div>
-                          <span className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'>
-                            {groupCount}
-                          </span>
-                        </div>
-                      </button>
-                    )}
-
-                    {/* Only show Kanban columns if expanded OR if no grouping is applied */}
-                    {(isExpanded || !showGroupHeader) && (
-                      <div
-                        className={
-                          showGroupHeader ? 'h-[calc(100vh-300px)] bg-background' : 'h-full'
-                        }
-                      >
-                        <KanbanColumns
-                          stages={stages}
-                          ticketsByStage={group.columnData}
-                          {...(stageCounts ? { stageCounts } : {})}
-                          onTicketClick={handleTicketClick}
-                          visibleColumns={visibleColumns}
-                          availableTags={availableTags || []}
-                          keyPrefix={`${group.key}::`}
-                          onTicketsChange={handleKanbanTicketsChange}
-                          allKnownTickets={localTickets ?? []}
-                          {...(paginatedColumnConfig ? { paginatedColumnConfig } : {})}
-                          {...(canCreateTicket &&
-                          channel &&
-                          !channel.isArchived &&
-                          effectiveProjectId
-                            ? {
-                                onAddTicketInColumn: (col: {
-                                  status?: TicketStatusV2 | undefined;
-                                  stageName?: string | undefined;
-                                }) =>
-                                  openCreateForColumn({
-                                    status: col.status,
-                                    stageName: col.stageName,
-                                    assignee:
-                                      group.entityType === 'user' && group.entityId
-                                        ? { type: 'assigneeTo', value: group.entityId }
-                                        : group.entityType === 'group' && group.entityId
-                                          ? { type: 'userGroup', value: group.entityId }
-                                          : null,
-                                  }),
-                              }
-                            : {})}
-                          slaPolicies={kanbanSlaPolicies}
-                        />
-                      </div>
-                    )}
+            <div className='flex h-full w-max min-w-full items-start'>
+              <div className='h-full flex-1'>
+                {allColumnsHidden ? (
+                  <div className='flex h-[calc(100vh-300px)] flex-col items-center justify-center gap-3.5'>
+                    <div className='flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-muted text-muted-foreground'>
+                      <EyeOff className='h-6 w-6' />
+                    </div>
+                    <p className='text-base font-semibold text-foreground'>
+                      Every column is hidden
+                    </p>
+                    <p className='max-w-[340px] text-center text-[13.5px] leading-[1.6] text-muted-foreground'>
+                      Hidden columns keep their tickets out of the board and out of every count.
+                      Unhide one from the panel on the right.
+                    </p>
+                    <button
+                      type='button'
+                      onClick={handleShowAllColumns}
+                      className='flex h-[34px] items-center rounded-[9px] bg-primary px-[15px] text-[13.5px] font-medium text-primary-foreground'
+                      data-track-category='Tickets'
+                      data-track-name='ShowAllKanbanColumns'
+                    >
+                      Show all columns
+                    </button>
                   </div>
-                );
-              })}
+                ) : (
+                  <div
+                    className={
+                      groupBy !== 'none'
+                        ? 'relative w-max min-w-full bg-background pb-[22px]'
+                        : 'h-full flex flex-col'
+                    }
+                  >
+                    {groupBy !== 'none' && (
+                      <>
+                        <div
+                          aria-hidden
+                          className={cn(
+                            'pointer-events-none absolute inset-0 z-0 flex',
+                            KANBAN_STRIP_GAP_CLASS,
+                          )}
+                        >
+                          {visibleBoardStages.map(stage => (
+                            <div
+                              key={stage.id}
+                              className={cn(
+                                'shrink-0 rounded-[14px] bg-muted/60',
+                                KANBAN_COLUMN_WIDTH_CLASS,
+                              )}
+                            />
+                          ))}
+                        </div>
+                        <div
+                          ref={groupedHeaderStripRef}
+                          className='sticky top-0 z-20 bg-background'
+                        >
+                          <KanbanColumns
+                            mode='headers'
+                            stages={stages}
+                            hiddenColumnIds={hiddenColumnIds}
+                            onHideColumn={handleHideColumn}
+                            ticketsByStage={EMPTY_TICKETS_BY_STAGE}
+                            stageCounts={boardWideStageCounts}
+                            onTicketClick={handleTicketClick}
+                            visibleColumns={visibleColumns}
+                            availableTags={availableTags || []}
+                          />
+                        </div>
+                      </>
+                    )}
+                    {processedGroups.map(group => {
+                      const isExpanded = expandedGroups.has(group.key);
+                      const showGroupHeader = groupBy !== 'none';
+                      const serverCountGroup = isKanbanLayout
+                        ? kanbanCounts.groupsByKey.get(group.key)
+                        : undefined;
+                      const stageCounts = group.stageCounts ?? serverCountGroup?.stages;
+                      const groupCount = group.visibleCount;
+                      const paginatedColumnConfig = canUseKanbanColumnPagination
+                        ? {
+                            columnType: shouldUseStatusColumns
+                              ? ('status' as const)
+                              : ('stage' as const),
+                            baseArgs: {
+                              ...ticketsQueryParams,
+                              searchTerm,
+                              filters: deferredFilters,
+                              formEntityValueFieldIds: fevFieldIds,
+                              dynamicFieldVespaTokens,
+                              dynamicFieldDateRanges,
+                              zeroOnlyDynamicFieldIds,
+                              showOverdueOnly,
+                              groupBy,
+                              ...(groupBy !== 'none' ? { groupKey: group.key } : {}),
+                            },
+                          }
+                        : null;
+
+                      const sharedColumnProps = {
+                        stages,
+                        hiddenColumnIds,
+                        onHideColumn: handleHideColumn,
+                        ticketsByStage: group.columnData,
+                        ...(stageCounts ? { stageCounts } : {}),
+                        onTicketClick: handleTicketClick,
+                        visibleColumns,
+                        availableTags: availableTags || [],
+                        keyPrefix: `${group.key}::`,
+                        onTicketsChange: handleKanbanTicketsChange,
+                        allKnownTickets: localTickets ?? [],
+                        ...(paginatedColumnConfig ? { paginatedColumnConfig } : {}),
+                        ...(canCreateTicket && channel && !channel.isArchived && effectiveProjectId
+                          ? {
+                              onAddTicketInColumn: (col: {
+                                status?: TicketStatusV2 | undefined;
+                                stageName?: string | undefined;
+                              }) =>
+                                openCreateForColumn({
+                                  status: col.status,
+                                  stageName: col.stageName,
+                                  assignee:
+                                    group.entityType === 'user' && group.entityId
+                                      ? { type: 'assigneeTo' as const, value: group.entityId }
+                                      : group.entityType === 'group' && group.entityId
+                                        ? { type: 'userGroup' as const, value: group.entityId }
+                                        : null,
+                                }),
+                            }
+                          : {}),
+                        slaPolicies: kanbanSlaPolicies,
+                      };
+
+                      if (!showGroupHeader) {
+                        return (
+                          <div key={group.key} className='h-full'>
+                            <KanbanColumns
+                              {...sharedColumnProps}
+                              containerClassName='pr-0 sm:pr-0'
+                            />
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={group.key} className='relative z-[1] mb-2.5'>
+                          <button
+                            onClick={() => toggleGroupExpansion(group.key)}
+                            data-track-category='KANBAN'
+                            data-track-name='ToggleGroupExpansion'
+                            data-track-metadata={JSON.stringify({ groupKey: group.key, groupBy })}
+                            style={{ top: groupedStripHeight }}
+                            className='sticky z-10 flex w-full items-center gap-3 border-t border-border bg-muted px-3 py-2.5 text-left transition-colors hover:bg-accent'
+                          >
+                            <div className='sticky left-0 flex w-max items-center gap-3'>
+                              {isExpanded ? (
+                                <ChevronDownIcon className='w-4 h-4 text-muted-foreground' />
+                              ) : (
+                                <ChevronRight className='w-4 h-4 text-muted-foreground' />
+                              )}
+                              <div className='flex items-center gap-4'>
+                                <div className='flex items-center gap-2'>
+                                  {group.entityType === 'user' && group.entityId && (
+                                    <Avatar
+                                      userId={group.entityId}
+                                      size='sm'
+                                      className='rounded-lg'
+                                    />
+                                  )}
+                                  {group.entityType === 'group' && (
+                                    <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center flex-shrink-0'>
+                                      <User className='w-3 h-3 text-muted-foreground' />
+                                    </div>
+                                  )}
+                                  {group.priority && (
+                                    <div className='flex items-center justify-center'>
+                                      {getPriorityIcon(group.priority)}
+                                    </div>
+                                  )}
+                                  <h3 className='font-semibold text-foreground capitalize text-sm'>
+                                    {group.displayName}
+                                  </h3>
+                                </div>
+                                <span className='text-[13px] tabular-nums text-muted-foreground'>
+                                  {groupCount}
+                                  {groupCount !== group.count && (
+                                    <span className='text-muted-foreground/60'>
+                                      {' / '}
+                                      {group.count}
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+
+                          {isExpanded && <KanbanColumns {...sharedColumnProps} mode='bodies' />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <HiddenColumnsPanel
+                stages={hiddenStages}
+                getCount={getHiddenColumnCount}
+                onUnhide={handleUnhideColumn}
+                isOpen={isHiddenPanelOpen}
+                onToggle={() => setIsHiddenPanelOpen(open => !open)}
+              />
             </div>
 
             <DragOverlay>
