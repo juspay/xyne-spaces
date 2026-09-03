@@ -203,9 +203,12 @@ import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { sdkConfig } from '@/api/sdk/config';
-import { apiKeyAuth } from '@/middleware/sdkApiKeyAuth';
-import sdkKeyRoutes from '@/routes/sdk-keys';
-import sdkSsoRoutes from '@/routes/sdk-sso';
+// SDK auth routes - COMMENTED OUT, using cookie-based auth instead
+// API key auth, SDK key management, and SSO routes are not needed when
+// the SDK reuses the existing Spaces session (same as dashboard).
+// import { apiKeyAuth } from '@/middleware/sdkApiKeyAuth';
+// import sdkKeyRoutes from '@/routes/sdk-keys';
+// import sdkSsoRoutes from '@/routes/sdk-sso';
 
 
 export class App {
@@ -358,31 +361,35 @@ export class App {
     this.app.use(decryptRequestBodyMiddleware);
     this.app.use(encryptResponseBodyMiddleware);
 
-    // Public SDK API. It authenticates its own API keys, so it must be mounted
-    // before the legacy catch-all `/api` session middleware. When disabled,
-    // nothing is mounted here and a request falls through to the app's own
-    // `notFoundHandler` further down.
+    // Public SDK API. Uses the same cookie-based auth as the dashboard via
+    // authMiddleware.authenticate. When disabled, nothing is mounted here
+    // and a request falls through to the app's own `notFoundHandler` further down.
     //
     // Two routers at the same prefix: the public one (version/health) is
-    // tried first and falls through on no match, then `apiKeyAuth` runs for
-    // everything else — mirroring how `/api/sdk-keys` below passes its own
-    // auth explicitly, rather than hiding it inside the router. The trailing
-    // `sdkErrorHandler` is what still gives an `apiKeyAuth` failure the SDK's
-    // own error envelope: that failure happens before the protected router is
-    // ever entered, so an error handler defined inside it would never see it.
+    // tried first and falls through on no match, then authMiddleware runs for
+    // everything else. The trailing `sdkErrorHandler` gives auth failures the
+    // SDK's own error envelope.
     if (sdkConfig.enabled) {
-      // SDK SSO device flow routes MUST be mounted first (before apiKeyAuth).
-      // These have mixed auth: init/poll are public, status/approve need session.
-      this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
-      logger.info('SDK SSO routes mounted at /api/sdk/auth/sso');
+      // SDK SSO device flow routes - COMMENTED OUT
+      // Uncomment below to enable SSO device flow for external CLI tools
+      // this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
+      // logger.info('SDK SSO routes mounted at /api/sdk/auth/sso');
 
       this.app.use('/api/sdk', createSdkPublicRouter());
-      this.app.use('/api/sdk', apiKeyAuth, createSdkRouter(), sdkErrorHandler);
+
+      // OPTION 1: Cookie-based auth (same as dashboard) - ACTIVE
+      // Uses existing Spaces session cookies for authentication
+      this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
+
+      // OPTION 2: API key auth - COMMENTED OUT
+      // Uncomment below and comment out OPTION 1 to use API key authentication
+      // this.app.use('/api/sdk', apiKeyAuth, createSdkRouter(), sdkErrorHandler);
+
       logger.info('Public SDK API mounted at /api/sdk');
 
-      // Where those keys are minted. Session-authenticated, not key-authenticated:
-      // you cannot use an API key to mint another one.
-      this.app.use('/api/sdk-keys', authMiddleware.authenticate, sdkKeyRoutes);
+      // SDK key management routes - COMMENTED OUT
+      // Not needed when using cookie-based auth (Spaces session)
+      // this.app.use('/api/sdk-keys', authMiddleware.authenticate, sdkKeyRoutes);
     }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);

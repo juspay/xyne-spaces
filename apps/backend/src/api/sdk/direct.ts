@@ -12,12 +12,17 @@
  * capturing stub: the body is intercepted, then re-emitted in the SDK shape with
  * failures translated into the SDK error envelope. The product routes those
  * controllers also serve are untouched.
+ *
+ * Authentication options:
+ * - ACTIVE: Cookie-based auth via authMiddleware (same as dashboard) - uses req.user
+ * - COMMENTED OUT: API key auth via sdkApiKeyAuth middleware - uses req.sdkAuth
  */
 
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
-import type { AuthenticatedUser } from '@/types/express';
+import { db } from '@/database/client';
+import type { AuthData } from '@/zero/mutators';
 import { ChannelController } from '@/controllers/channelController';
 import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
@@ -32,7 +37,8 @@ import {
 } from '@/services/clawAgentService';
 import { uploadMultiple } from '@/middleware/upload';
 import { config } from '@/config/env';
-import type { SdkAuth } from './auth';
+// API KEY AUTH (COMMENTED OUT) - SdkAuth type used with req.sdkAuth
+// import type { SdkAuth } from './auth';
 import { SdkApiError } from './errors';
 import { handle } from './handler';
 
@@ -42,11 +48,51 @@ const ticketController = new TicketController();
 const attachmentController = new AttachmentController();
 const draftAttachmentController = new DraftAttachmentController();
 
+// ============================================================================
+// COOKIE-BASED AUTH (ACTIVE) - Uses req.user set by authMiddleware
+// ============================================================================
+
+/**
+ * Build SDK auth data from req.user (set by authMiddleware).
+ * Fetches orgId from the database since it's not available on req.user.
+ */
+async function buildAuthData(req: Request): Promise<AuthData> {
+  const user = req.user;
+  if (!user) {
+    throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  }
+
+  // Fetch orgId from orgMember table (not available on req.user)
+  const orgMember = await db.orgMember.findUnique({
+    where: { memberId: user.memberId },
+    select: { orgId: true },
+  });
+
+  if (!orgMember) {
+    throw new SdkApiError('unauthenticated', 'Organization membership not found.');
+  }
+
+  return {
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    displayName: user.displayName ?? undefined,
+    workspaceId: user.workspaceId,
+    orgId: orgMember.orgId,
+    role: user.role,
+    orgRole: user.orgRole,
+    memberId: user.memberId,
+  };
+}
+
 /** A product controller: writes its response rather than returning it. */
 type Controller = (req: Request, res: Response) => Promise<void> | void;
 
 /** A service function: returns its payload, so nothing needs capturing. */
-type Service = (req: Request, auth: SdkAuth) => Promise<unknown>;
+// COOKIE-BASED AUTH (ACTIVE) - service receives authData built from req.user
+type Service = (req: Request, authData: AuthData) => Promise<unknown>;
+// API KEY AUTH (COMMENTED OUT) - service received SdkAuth from req.sdkAuth
+// type Service = (req: Request, auth: SdkAuth) => Promise<unknown>;
 
 interface BaseRoute {
   readonly method: 'get' | 'post';
@@ -147,21 +193,16 @@ const ROUTES: readonly DirectRoute[] = [
   },
 
   /**
-   * Who the presented key acts as.
+   * Who the authenticated user is.
    *
-   * The middleware has already resolved this, so it is a read of the request
-   * rather than a lookup. A key's own claims do not include `role` or
-   * `orgRole` — those are read fresh from the database on every request,
-   * deliberately, so this is the only way a caller gets the full picture. It
-   * also spares an SDK client from decoding a JWT itself, which this SDK has
-   * no crypto dependency to do safely. Several operations also take the
-   * acting user's id as an argument, which this is how a caller learns.
+   * COOKIE-BASED AUTH: Returns user info from req.user (authData).
+   * API KEY AUTH (COMMENTED OUT): Also returned keyExpiresAt from auth.keyExpiresAt.
    */
   {
     method: 'get',
     path: '/me',
-    service: async (_req, auth) => {
-      const { authData } = auth;
+    // COOKIE-BASED AUTH (ACTIVE) - uses authData built from req.user
+    service: async (_req, authData) => {
       return {
         id: authData.sub,
         email: authData.email,
@@ -172,9 +213,25 @@ const ROUTES: readonly DirectRoute[] = [
         memberId: authData.memberId,
         role: authData.role,
         orgRole: authData.orgRole,
-        keyExpiresAt: auth.keyExpiresAt.toISOString(),
+        // keyExpiresAt is only available with API key auth, omitted for cookie auth
       };
     },
+    // API KEY AUTH (COMMENTED OUT) - used auth.authData and auth.keyExpiresAt
+    // service: async (_req, auth) => {
+    //   const { authData } = auth;
+    //   return {
+    //     id: authData.sub,
+    //     email: authData.email,
+    //     name: authData.name,
+    //     displayName: authData.displayName ?? null,
+    //     workspaceId: authData.workspaceId,
+    //     orgId: authData.orgId,
+    //     memberId: authData.memberId,
+    //     role: authData.role,
+    //     orgRole: authData.orgRole,
+    //     keyExpiresAt: auth.keyExpiresAt.toISOString(),
+    //   };
+    // },
   },
 
   /*
@@ -198,9 +255,9 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'post',
     path: '/claw/runs',
     body: clawRunBody,
-    service: async (req, auth) => {
+    // COOKIE-BASED AUTH (ACTIVE) - uses authData built from req.user
+    service: async (req, authData) => {
       const input = clawRunBody.parse(req.body);
-      const { authData } = auth;
       const result = await runS2SClawAgent({
         agentSlug: input.agent,
         task: input.task,
@@ -225,10 +282,11 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/claw/runs/:sessionId',
-    service: async (req, auth) => {
+    // COOKIE-BASED AUTH (ACTIVE) - uses authData.sub from req.user
+    service: async (req, authData) => {
       const sessionId = req.params['sessionId'];
       if (!sessionId) throw new SdkApiError('validation_failed', 'sessionId is required.');
-      const status = await getS2SClawRunStatus(sessionId, auth.authData.sub);
+      const status = await getS2SClawRunStatus(sessionId, authData.sub);
       if (!status) throw SdkApiError.notFound('Claw run');
       return status;
     },
@@ -245,12 +303,18 @@ export function createDirectRouter(): Router {
       ...(route.middleware ?? []),
       handle(async (req: Request, res: Response) => {
         if (route.service) {
-          const auth = req.sdkAuth;
-          if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+          // COOKIE-BASED AUTH (ACTIVE) - build authData from req.user
+          const authData = await buildAuthData(req);
+          // API KEY AUTH (COMMENTED OUT) - used req.sdkAuth
+          // const auth = req.sdkAuth;
+          // if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
           if (route.query) route.query.parse(req.query);
           if (route.body) route.body.parse(req.body);
           try {
-            res.status(200).json(await route.service(req, auth));
+            // COOKIE-BASED AUTH (ACTIVE) - pass authData to service
+            res.status(200).json(await route.service(req, authData));
+            // API KEY AUTH (COMMENTED OUT) - passed auth (SdkAuth) to service
+            // res.status(200).json(await route.service(req, auth));
           } catch (err) {
             throw err instanceof SdkApiError
               ? err
@@ -282,24 +346,27 @@ interface ControllerResult {
 }
 
 /**
- * Run a product controller as the authenticated API-key caller.
+ * Run a product controller as the authenticated caller.
+ *
+ * COOKIE-BASED AUTH (ACTIVE): req.user is already set by authMiddleware.
+ * API KEY AUTH (COMMENTED OUT): Built principal from req.sdkAuth.authData.
  *
  * The controller is handed a request that looks like a session request: the
  * principal is presented on `req.user`, which is where both the controllers and
- * `tenantScopeMiddleware` read identity from. That is why the principal is set
- * on the *real* request as well as the proxy — tenant scoping resolves the user
- * lazily off the original object, so setting it only on the proxy would leave
- * these routes unscoped.
+ * `tenantScopeMiddleware` read identity from.
  */
 export async function callController(
   route: DirectRoute & { controller: Controller },
   req: Request,
 ): Promise<ControllerResult> {
-  const auth = req.sdkAuth;
-  if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
-
-  const principal = principalOf(auth.authData);
-  req.user = principal;
+  // COOKIE-BASED AUTH (ACTIVE) - req.user is already set by authMiddleware
+  const user = req.user;
+  if (!user) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  // API KEY AUTH (COMMENTED OUT) - built principal from req.sdkAuth
+  // const auth = req.sdkAuth;
+  // if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  // const principal = principalOf(auth.authData);
+  // req.user = principal;
 
   const query = route.query
     ? (route.query.parse(req.query) as Record<string, unknown>)
@@ -307,7 +374,10 @@ export async function callController(
 
   const proxyReq = Object.create(req) as Request;
   Object.defineProperties(proxyReq, {
-    user: { value: principal, writable: true, configurable: true },
+    // COOKIE-BASED AUTH (ACTIVE) - use user from req.user (set by authMiddleware)
+    user: { value: user, writable: true, configurable: true },
+    // API KEY AUTH (COMMENTED OUT) - used principal built from req.sdkAuth
+    // user: { value: principal, writable: true, configurable: true },
     params: { value: req.params, writable: true, configurable: true },
     query: {
       value: route.mapQuery ? route.mapQuery(query) : query,
@@ -387,36 +457,38 @@ function unwrapEnvelope(raw: unknown): unknown {
   return body;
 }
 
-function principalOf(authData: {
-  sub: string;
-  email: string;
-  name: string;
-  displayName?: string | null;
-  workspaceId: string;
-  role: string;
-  orgRole: string;
-  memberId: string;
-}): AuthenticatedUser {
-  return {
-    id: authData.sub,
-    // Not an OAuth-provider identity on this path. Controllers read id, email,
-    // and workspaceId; roles come from the verified principal.
-    googleId: '',
-    email: authData.email,
-    name: authData.name,
-    displayName: authData.displayName ?? null,
-    workspaceId: authData.workspaceId,
-    role: authData.role,
-    orgRole: authData.orgRole,
-    memberId: authData.memberId,
-    // Not the `isApiKeyUser` these controllers mean. That flag marks a key minted
-    // by `apiKeyService` — the environment key and scoped service keys — and two
-    // branches read it to skip the ACL check outright for an admin-role holder
-    // (middleware/acl.ts, middleware/auth.ts). An SDK key is a user acting as
-    // themselves and must get exactly a session's reach, so it stays false.
-    isApiKeyUser: false,
-  };
-}
+// API KEY AUTH (COMMENTED OUT) - principalOf was used to build AuthenticatedUser from authData
+// For cookie-based auth, req.user is already set by authMiddleware
+// function principalOf(authData: {
+//   sub: string;
+//   email: string;
+//   name: string;
+//   displayName?: string | null;
+//   workspaceId: string;
+//   role: string;
+//   orgRole: string;
+//   memberId: string;
+// }): AuthenticatedUser {
+//   return {
+//     id: authData.sub,
+//     // Not an OAuth-provider identity on this path. Controllers read id, email,
+//     // and workspaceId; roles come from the verified principal.
+//     googleId: '',
+//     email: authData.email,
+//     name: authData.name,
+//     displayName: authData.displayName ?? null,
+//     workspaceId: authData.workspaceId,
+//     role: authData.role,
+//     orgRole: authData.orgRole,
+//     memberId: authData.memberId,
+//     // Not the `isApiKeyUser` these controllers mean. That flag marks a key minted
+//     // by `apiKeyService` — the environment key and scoped service keys — and two
+//     // branches read it to skip the ACL check outright for an admin-role holder
+//     // (middleware/acl.ts, middleware/auth.ts). An SDK key is a user acting as
+//     // themselves and must get exactly a session's reach, so it stays false.
+//     isApiKeyUser: false,
+//   };
+// }
 
 function controllerError(status: number, body: unknown): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;

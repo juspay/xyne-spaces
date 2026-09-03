@@ -15,10 +15,17 @@
  * `/query` is a 400 rather than a silent read, because the two endpoints are not
  * interchangeable server-side — reads go to the replica pool and writes open a
  * transaction.
+ *
+ * Authentication options:
+ * - ACTIVE: Cookie-based auth via authMiddleware (same as dashboard) - uses req.user
+ * - COMMENTED OUT: API key auth via sdkApiKeyAuth middleware - uses req.sdkAuth
  */
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import type { Context } from '@xyne/shared';
+import { db } from '@/database/client';
+import type { AuthData } from '@/zero/mutators';
 import { handle } from '../handler';
 import { callQuery } from '../query';
 import { callMutator } from '../mutation';
@@ -39,10 +46,61 @@ const v1Request = z.object({
   args: z.unknown().optional(),
 });
 
+// ============================================================================
+// COOKIE-BASED AUTH (ACTIVE) - Uses req.user set by authMiddleware
+// ============================================================================
+
+/**
+ * Build SDK auth context from req.user (set by authMiddleware).
+ * Fetches orgId from the database since it's not available on req.user.
+ */
+async function buildAuthContext(req: Request): Promise<{ ctx: Context; authData: AuthData }> {
+  const user = req.user;
+  if (!user) {
+    throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  }
+
+  // Fetch orgId from orgMember table (not available on req.user)
+  const orgMember = await db.orgMember.findUnique({
+    where: { memberId: user.memberId },
+    select: { orgId: true },
+  });
+
+  if (!orgMember) {
+    throw new SdkApiError('unauthenticated', 'Organization membership not found.');
+  }
+
+  const ctx: Context = {
+    userID: user.id,
+    workspaceId: user.workspaceId,
+    role: user.role,
+    orgRole: user.orgRole,
+    memberId: user.memberId,
+  };
+
+  const authData: AuthData = {
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    displayName: user.displayName ?? undefined,
+    workspaceId: user.workspaceId,
+    orgId: orgMember.orgId,
+    role: user.role,
+    orgRole: user.orgRole,
+    memberId: user.memberId,
+  };
+
+  return { ctx, authData };
+}
+
 function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
   return handle(async (req: Request, res: Response) => {
-    const auth = req.sdkAuth;
-    if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+    // COOKIE-BASED AUTH (ACTIVE) - uses req.user from authMiddleware
+    const { ctx, authData } = await buildAuthContext(req);
+
+    // API KEY AUTH (COMMENTED OUT) - uses req.sdkAuth from sdkApiKeyAuth
+    // const auth = req.sdkAuth;
+    // if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
 
     const { op, args } = v1Request.parse(req.body);
 
@@ -64,11 +122,17 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
     const parsed = parseV1Args(op, args);
 
     if (endpoint === 'query') {
-      res.status(200).json({ data: await callQuery(target.name, parsed.args, auth.ctx) });
+      // COOKIE-BASED AUTH (ACTIVE)
+      res.status(200).json({ data: await callQuery(target.name, parsed.args, ctx) });
+      // API KEY AUTH (COMMENTED OUT)
+      // res.status(200).json({ data: await callQuery(target.name, parsed.args, auth.ctx) });
       return;
     }
 
-    await callMutator(target.name, parsed.args, auth.authData);
+    // COOKIE-BASED AUTH (ACTIVE)
+    await callMutator(target.name, parsed.args, authData);
+    // API KEY AUTH (COMMENTED OUT)
+    // await callMutator(target.name, parsed.args, auth.authData);
     // `generated` carries any id this layer minted, so a caller that just created
     // a row learns its id without having had to supply one.
     res.status(200).json({ success: true, ...(parsed.generated ? { generated: parsed.generated } : {}) });
@@ -76,8 +140,8 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
 }
 
 /**
- * The authenticated v1 surface. Mounted behind the same API-key middleware as
- * every other `/api/sdk` route — see `app.ts`.
+ * The authenticated v1 surface. Mounted behind authMiddleware.authenticate
+ * (cookie-based auth, same as dashboard) — see `app.ts`.
  */
 export function createSdkV1Router(): Router {
   const router = Router();

@@ -113,6 +113,7 @@ export class HttpClient {
         headers,
         body: requestBody,
         signal: controller.signal,
+        credentials: 'include', // Send cookies automatically (same-origin auth)
       });
 
       clearTimeout(timeoutId);
