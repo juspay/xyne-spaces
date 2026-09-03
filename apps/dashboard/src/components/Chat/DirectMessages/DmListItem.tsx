@@ -84,8 +84,7 @@ export const DmListItem = ({
     }
 
     const rawContent =
-      lastMessage.content ||
-      (lastMessage.hasAttachment ? 'Sent an attachment' : 'Message');
+      lastMessage.content || (lastMessage.hasAttachment ? 'Sent an attachment' : 'Message');
 
     return sanitizeHtmlString(rawContent);
   }, [lastMessage]);
