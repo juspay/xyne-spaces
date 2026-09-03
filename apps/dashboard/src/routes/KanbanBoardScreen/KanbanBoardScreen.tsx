@@ -2046,22 +2046,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Filter tickets based on view mode and filters.
   // NOTE: ALL filters including dynamic field filters are applied CLIENT-SIDE.
-  //
-  // In a channel Kanban view a board can be shared across multiple channels, so
-  // the board's tickets are not all "this channel's" tickets. Scope every ticket
-  // path (page fetch, counts, board-nav args, legacy client filter) to tickets
-  // created in this channel by forcing `sourceChannels` to the current channel.
-  // This applies both when a specific board is selected and in the "All Boards"
-  // view. The filter dropdown UI still reads the raw `filters`, so this scoping
-  // stays invisible there.
-  const scopedFilters = useMemo(() => {
-    if (channelId && viewMode === 'project') {
-      return { ...filters, sourceChannels: [channelId] };
-    }
-    return filters;
-  }, [filters, channelId, viewMode]);
-
-  const deferredFilters = useDeferredValue(scopedFilters);
+  const deferredFilters = useDeferredValue(filters);
 
   // Check if deferredFilters has caught up with scopedFilters (for boards).
   // useDeferredValue causes deferredFilters to lag, which can trigger queries with stale filters.
