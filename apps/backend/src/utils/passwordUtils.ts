@@ -31,9 +31,8 @@ export async function hashPassword(password: string): Promise<string> {
 // A syntactically valid scrypt hash in the SAME modular-crypt format and with the
 // SAME work parameters as hashPassword (ln=14, r=8, p=1). The email-login path
 // verifies against this when no account (or no password) is found, so that branch
-// runs a full scrypt derivation and takes as long as verifying a real stored hash —
-// a client-hash-shaped dummy would take the fast sha256 branch and leak, by timing,
-// whether an email is registered. Keep these parameters equal to hashPassword.
+// runs a full scrypt derivation and takes as long as verifying a real stored hash,
+// keeping verification time constant. Keep these parameters equal to hashPassword.
 // Not a credential: it is never compared for a real match, only for timing.
 export const DUMMY_PASSWORD_HASH =
   '$scrypt$ln=14,r=8,p=1$e1b76c97154e03fcc330cda38be6e271776fdbf1cecadad84b94f5671f55b3fb$46a2d60a74a198809db3674f5e93fc7458114f61232e660d9f9f4c14647801d4c3a9e4f7e635bc95d55c658f9672dcfd6aa22542f37ac64bf6c6767b8b20e3a6';
@@ -87,9 +86,8 @@ export async function verifyEmailPassword(password: string, storedHash: string):
     );
     // Stored hashes are a mix of this fast (sha256) form and the slow scrypt form
     // (passwords set via reset/change). Run one scrypt derivation here too so the
-    // verification cost does not depend on which form an account uses — otherwise
-    // login latency would reveal the format and, against the scrypt dummy used for
-    // the no-account branch, whether the email is registered at all.
+    // verification cost is the same regardless of which form an account uses,
+    // keeping login time constant.
     await verifyPassword(password, DUMMY_PASSWORD_HASH);
     return matches;
   }
