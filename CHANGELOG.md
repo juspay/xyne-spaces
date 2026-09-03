@@ -1,3 +1,17 @@
+## [1.272.0](https://github.com/juspay/xyne-spaces/compare/v1.271.0...v1.272.0) (2026-09-03)
+
+
+### Features
+
+* icons for apps and rollbacks ([#1507](https://github.com/juspay/xyne-spaces/issues/1507)) ([55ddda0](https://github.com/juspay/xyne-spaces/commit/55ddda04a1f15eb1e0c52e4c1d7d321eb8a59810))
+* public SDK API ([#1502](https://github.com/juspay/xyne-spaces/issues/1502)) ([42af8ae](https://github.com/juspay/xyne-spaces/commit/42af8ae20a512450a3ac771b90599c069fde37e0))
+
+
+### Bug Fixes
+
+* correct DmListItem attachment preview label ([#1495](https://github.com/juspay/xyne-spaces/issues/1495)) ([3cdae36](https://github.com/juspay/xyne-spaces/commit/3cdae36238687f03296b573d0f888cd96fbf8102))
+* UI Changes, has_subticket button and ticket navigation fix ([#1368](https://github.com/juspay/xyne-spaces/issues/1368)) ([1e52a43](https://github.com/juspay/xyne-spaces/commit/1e52a43a9562f449995c6e104c1cad2731ae329f))
+
 ## [1.271.0](https://github.com/juspay/xyne-spaces/compare/v1.270.0...v1.271.0) (2026-09-03)
 
 
