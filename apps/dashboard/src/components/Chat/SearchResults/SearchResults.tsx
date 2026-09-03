@@ -283,6 +283,12 @@ const SearchResults = (): ReactElement => {
     for (const ch of regularChannels) {
       result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
     }
+    // EMAIL/desk channels are excluded by groupChannelsByScope (they live in Desk). Re-include them
+    // as CHANNELS from the full set (useAllChannels) — like GlobalCommandMenu — since desk channels
+    // aren't in useAllVisibleChannels.
+    for (const ch of allChannelsForNav.filter(channel => isDeskChannelType(channel.type))) {
+      result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
+    }
     for (const ch of dmChannels) {
       const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
@@ -293,7 +299,7 @@ const SearchResults = (): ReactElement => {
       });
     }
     return result;
-  }, [starredChannels, regularChannels, dmChannels, currentUserId, usersById]);
+  }, [starredChannels, regularChannels, dmChannels, allChannelsForNav, currentUserId, usersById]);
 
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
