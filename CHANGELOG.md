@@ -1,3 +1,10 @@
+## [1.273.1](https://github.com/juspay/xyne-spaces/compare/v1.273.0...v1.273.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* show the selected Claw agent instead of falling back to the Xyne AI label ([#927](https://github.com/juspay/xyne-spaces/issues/927)) ([b5f651b](https://github.com/juspay/xyne-spaces/commit/b5f651b8675b793cad50abd2d413ba37b39d4c44))
+
 ## [1.273.0](https://github.com/juspay/xyne-spaces/compare/v1.272.0...v1.273.0) (2026-09-03)
 
 
