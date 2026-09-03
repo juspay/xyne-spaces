@@ -57,6 +57,7 @@ import {
   removeUnknownBlocks,
 } from '../../../utils/canvasUtils';
 import {
+  exportCanvasAsDocx,
   exportCanvasAsMarkdown,
   exportCanvasAsPDF,
   type CanvasExportEditor,
@@ -437,6 +438,8 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           ),
         exportPDF: (title: string) =>
           exportCanvasAsPDF(editor as unknown as CanvasExportEditor, title, containerRef.current),
+        exportDocx: (title: string) =>
+          exportCanvasAsDocx(editor as unknown as CanvasExportEditor, title, containerRef.current),
         toggleComments: () => setIsCommentsOpen(open => !open),
         selectedTheme,
       }),

@@ -1,6 +1,10 @@
 import type { PartialBlock } from '@blocknote/core';
 import { CanvasVisibility, CanvasRole, DocType, ChannelScopeType } from '@xyne/shared';
-import type { CanvasMarkdownExportResult, CanvasPdfExportResult } from '../../utils/canvasExport';
+import type {
+  CanvasDocxExportResult,
+  CanvasMarkdownExportResult,
+  CanvasPdfExportResult,
+} from '../../utils/canvasExport';
 
 export interface CanvasEditorRef {
   handlePresent: () => void;
@@ -9,6 +13,7 @@ export interface CanvasEditorRef {
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
   exportPDF: (title: string) => Promise<CanvasPdfExportResult>;
+  exportDocx: (title: string) => Promise<CanvasDocxExportResult>;
   toggleComments: () => void;
   selectedTheme: string;
 }
@@ -52,6 +57,7 @@ export interface CollaborativeCanvasEditorRef {
   replaceContent: (blocks: PartialBlock[]) => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
   exportPDF: (title: string) => Promise<CanvasPdfExportResult>;
+  exportDocx: (title: string) => Promise<CanvasDocxExportResult>;
   toggleComments: () => void;
   selectedTheme: string;
 }
