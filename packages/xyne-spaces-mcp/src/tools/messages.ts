@@ -17,25 +17,20 @@ import {
 	toIST,
 } from "../render.js";
 import { MAX_LIMIT, type Message, type MessageType } from "@xyne/spaces-sdk";
+import type { MessageAttachment } from "@xyne/spaces-sdk";
 import type { Related } from "../render.js";
 import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
-interface AttachmentRow {
-	id?: string;
-	fileName?: string;
-	mimeType?: string;
-	fileSize?: number;
-}
-
 /**
- * `conversationMessagesV2` joins attachments; the SDK types columns only.
- * `conversation` was joined by the old Zero-backed sender query and no longer
- * arrives — see `spaces_user_messages`.
+ * The message list joins its attachments; the SDK types columns only, so the
+ * relation is declared here.
+ *
+ * `conversation` is not joined by the sender query — see `spaces_user_messages`.
  */
 type MessageRow = Message & {
-	attachments?: AttachmentRow[] | null;
+	attachments?: Array<Partial<MessageAttachment>> | null;
 	conversation?: Related<{ channelId?: string }>;
 };
 
@@ -66,7 +61,7 @@ function renderMessage(row: MessageRow, index: number): string {
 	if (flags.length > 0) lines.push(`  ${flags.join(" · ")}`);
 
 	for (const attachment of row.attachments ?? []) {
-		const parts = [attachment.fileName, attachment.mimeType, formatBytes(attachment.fileSize)].filter(Boolean);
+		const parts = [attachment.originalFilename, attachment.mimetype, formatBytes(attachment.size)].filter(Boolean);
 		lines.push(`  Attachment: ${parts.join(" · ")}${attachment.id ? ` (id: ${attachment.id})` : ""}`);
 	}
 

@@ -8,7 +8,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
-import { REQUEST_ID_HEADER, type ApiErrorBody } from '@xyne/spaces-contract';
+import { REQUEST_ID_HEADER, type ApiErrorBody } from './errors';
 import { logger } from '@/utils/logger';
 import { SdkApiError, toSdkApiError } from './errors';
 

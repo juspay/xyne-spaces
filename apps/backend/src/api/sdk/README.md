@@ -14,34 +14,42 @@ same function within a few frames of stack.
 
 ## Layout
 
-Eight files, five of which are the whole design:
-
 | File | Owns |
 |---|---|
-| `auth.ts` | Turn an API key into an `AuthData` |
+| `v1/mapper.ts` | SDK operation id → catalog operation or route |
+| `v1/parser.ts` | SDK operation id → the arguments its target expects |
+| `v1/index.ts` | The versioned router |
+| `v1/types.ts` | Shared types for the two above |
+| `auth.ts` | Turn a credential into an `AuthData` |
 | `query.ts` | Run one catalog query |
 | `mutation.ts` | Run one catalog mutator |
 | `direct.ts` | Call the product controllers behind the catalog gaps |
 | `handler.ts` | Request id, and the one error envelope |
-| `errors.ts` | `SdkApiError`, bound to the contract's error catalog |
+| `errors.ts` | The error catalog, and `SdkApiError` |
+| `schemas/search.ts` | The search request schema |
 | `config.ts` | Three environment switches |
 | `index.ts` | Router assembly |
 
-Roughly 1,000 lines. It was 3,802 across 26 files when it ran its own OAuth
-authorization server.
+`v1/` is the half that matters. Everything else is plumbing shared with the
+product.
 
 ---
 
 ## Authentication
 
-A key is minted from the Apps page in the dashboard and presented as a bearer
-token:
+Two credentials are accepted, and the server routes on the prefix:
 
 ```http
-Authorization: Bearer xyne_sk_<base64url>
+Authorization: Bearer xyne_sk_<jwt>     # API key, minted in the dashboard
+Authorization: Bearer xyne_sso_<jwt>    # SSO token, from the device flow
 ```
 
-### What a key is
+Both resolve to the same `AuthData`. They differ in one respect that matters:
+an API key has a row in `sdk_api_keys` and can be revoked mid-life; an SSO token
+has no row, carries a `jti` nothing currently reads, and is therefore valid until
+it expires. Its short lifetime is the containment.
+
+### What an API key is
 
 `xyne_sk_` followed by a JWT, signed with the same `JWT_SECRET` session cookies
 use, carrying the caller's **stable** identity:
@@ -121,33 +129,46 @@ permission system layered over the one that actually guards the rows.
 Both are mounted *before* the auth middleware on purpose, so a probe can tell
 "the API is misconfigured" from "your key is bad".
 
-### Catalog
+### v1
 
 | | | |
 |---|---|---|
-| `POST` | `/api/sdk/catalog/query` | `{ name, args }` → `{ data }` |
-| `POST` | `/api/sdk/catalog/mutate` | `{ name, args }` → `{ success: true }` |
+| `POST` | `/api/sdk/v1/query` | `{ op, args }` → `{ data }` |
+| `POST` | `/api/sdk/v1/mutate` | `{ op, args }` → `{ success: true, generated? }` |
 
-This pair is the bulk of the API: **508 operations** (263 queries, 245 mutators)
-reachable by name. `name` is the Zero operation; `args` is validated by that
-operation's own zod schema.
+This pair is the bulk of the API: **468 operations** reachable by id. `op` is an
+**SDK operation id** — `tickets.listKanban`, `channels.join` — not the name of a
+Zero operation. `v1/mapper.ts` resolves it; `v1/parser.ts` shapes the arguments;
+the target's own zod schema validates the result.
+
+That indirection is the point of versioning the surface. A caller never names a
+catalog operation, so renaming one, or superseding it with a `…V3`, moves a line
+in `mapper.ts` instead of breaking every installed client.
+
+The endpoint must agree with the operation's kind: posting a mutator to `/query`
+is a 400, not a silent read, because reads go to the replica pool and writes open
+a transaction.
+
+`generated` carries any row id the parser minted — Zero's optimistic-write model
+expects the writer to supply primary keys, so v1 mints them server-side and hands
+them back rather than making a caller invent them.
 
 ### Direct
 
-Operations that are not Zero catalog entries — server-side allocation, multipart
-uploads, search, and identity:
+Versioned REST routes for what is not a catalog entry — server-side allocation,
+multipart uploads, search, and identity:
 
 | | |
 |---|---|
-| `GET /api/sdk/me` | Who the key acts as, plus `keyExpiresAt` |
-| `POST /api/sdk/channels` | Create a channel |
-| `POST /api/sdk/channels/check-duplicate` | Name availability |
-| `POST /api/sdk/tickets` | Create a ticket (sequence allocator) |
-| `POST /api/sdk/channels/:channelId/conversations` | Start a thread with attachments |
-| `POST /api/sdk/attachments` | Upload entity attachments |
-| `POST /api/sdk/draft-attachments` | Upload draft attachments |
-| `GET /api/sdk/search` | Vespa search |
-| `GET /api/sdk/search/schema` | Field definitions for a search index |
+| `GET /api/sdk/v1/me` | Who the credential acts as, plus `keyExpiresAt` |
+| `POST /api/sdk/v1/channels` | Create a channel |
+| `POST /api/sdk/v1/channels/check-duplicate` | Name availability |
+| `POST /api/sdk/v1/tickets` | Create a ticket (sequence allocator) |
+| `POST /api/sdk/v1/channels/:channelId/conversations` | Start a thread with attachments |
+| `POST /api/sdk/v1/attachments` | Upload entity attachments |
+| `POST /api/sdk/v1/draft-attachments` | Upload draft attachments |
+| `GET /api/sdk/v1/search` | Vespa search |
+| `GET /api/sdk/v1/search/schema` | Field definitions for a search index |
 
 ### Claw
 
@@ -155,9 +176,9 @@ Remote agents, **relayed through Spaces** rather than reached directly:
 
 | | |
 |---|---|
-| `GET /api/sdk/claw/agents` | Agents this deployment can run |
-| `POST /api/sdk/claw/runs` | Dispatch a run → `{ sessionId }` |
-| `GET /api/sdk/claw/runs/:sessionId` | Poll status and result |
+| `GET /api/sdk/v1/claw/agents` | Agents this deployment can run |
+| `POST /api/sdk/v1/claw/runs` | Dispatch a run → `{ sessionId }` |
+| `GET /api/sdk/v1/claw/runs/:sessionId` | Poll status and result |
 
 Claw is a separate service (`apps/xyne-claw-auth`) with its own credential.
 Rather than making callers hold two, `clawAgentService` relays with the
@@ -175,7 +196,7 @@ One envelope, from `handler.ts`, the only place a status code is written:
 {
   "error": {
     "code": "not_found",
-    "message": "No such endpoint: GET /api/sdk/nope",
+    "message": "No such endpoint: GET /api/sdk/v1/nope",
     "request_id": "req_5f1e3610-a2f7-4d02-bd8b-4718ad9ebe8b",
     "retryable": false
   }
@@ -212,9 +233,10 @@ Three behaviours worth knowing:
   found"), and a caller can act on those. The cost is that an *unexpected*
   error is echoed too, since the mapping cannot tell them apart — give a new
   domain failure a typed error if its message should not be public.
-- **An unknown query or mutator name is a 404**, not a 400. Both sides tag it
-  before dispatch (`CatalogQueryError` with phase `'unknown'`), so it can never
-  be confused with an operation that ran and refused.
+- **An unknown operation id is a 404**, not a 400 — whether it is missing from
+  `v1/mapper.ts` or names a catalog operation that no longer exists. Both are
+  tagged before dispatch, so neither can be confused with an operation that ran
+  and refused.
 
 `X-Request-Id` is echoed on every response, and a caller-supplied one is honoured
 so a retry chain can be correlated.
@@ -291,13 +313,21 @@ spend their own API budget.
 
 ## Extending it
 
-**A new Zero query or mutator** needs nothing here. It is reachable through
-`/catalog/*` the moment it exists in the registry. The SDK's `npm run coverage`
-will fail until it is either exposed as a typed method or excluded with a reason
-— that gate is what makes "complete" verifiable.
+**A new Zero query or mutator** needs one entry in `v1/mapper.ts` to be
+reachable, plus one in `v1/parser.ts` if its arguments need shaping. The SDK's
+`npm run coverage` fails until it is either exposed as a typed method or excluded
+with a written reason — and it checks both directions, so a mapper entry no SDK
+method calls is an error too. That gate is what makes "complete" verifiable.
 
 **A new direct route** is one entry in `ROUTES` in `direct.ts`, backed by either a
 `controller` (writes an Express response, gets captured) or a `service` (returns a
 value). Never both — the type enforces it.
 
-**Changing the error envelope** means `handler.ts` and the contract, together.
+**Changing the error envelope** means `handler.ts` and `errors.ts` together.
+The SDK's `npm run contract-check` reads `errors.ts` and `schemas/search.ts`
+directly, so a code or a search parameter that changes here without the SDK
+following fails that build.
+
+**A breaking change to the surface** is what `v2/` is for. Retargeting an
+existing id onto a different catalog operation is fine and needs no new version;
+changing what an id *means* to a caller is not.

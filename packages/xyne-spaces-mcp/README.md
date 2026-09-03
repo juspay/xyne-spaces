@@ -1,12 +1,12 @@
 # xyne-spaces-mcp
 
 An MCP server that lets a coding agent read and write Xyne Spaces — channels, threads,
-messages, tickets, calls, canvases and search — using the same `xyne_sk_` API key as
-[`@xyne/spaces-sdk`](../xyne-spaces-sdk).
+messages, tickets, calls, canvases and search — through
+[`@xyne/spaces-sdk`](../xyne-spaces-sdk), using the same credential the SDK takes.
 
-33 tools over the Spaces public API. Not 508: the API exposes every operation in the
-Zero catalog, and this exposes the ones an agent actually reaches for, each with an
-exact schema.
+33 tools over the Spaces public API. Not 483: the SDK exposes every operation the
+product itself performs, and this exposes the ones an agent actually reaches for, each
+with an exact schema.
 
 ---
 
@@ -14,7 +14,9 @@ exact schema.
 
 **1. Mint a key.** Spaces dashboard → **Apps** → **API keys** → *Create key*, choosing a
 lifetime of 30, 60, or 90 days. The key is shown once, and you may hold two live keys at
-a time.
+a time. An `xyne_sso_` token from the SDK's device flow works here too — see
+[SSO.md](../xyne-spaces-sdk/SSO.md) — though at its current one-day lifetime a minted
+key is the better fit for a long-running server.
 
 **2. Tell the server about it.** Either an environment variable:
 

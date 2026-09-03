@@ -16,7 +16,7 @@ import {
 	record,
 	toIST,
 } from "../render.js";
-import { MAX_LIMIT, type SearchOptions } from "@xyne/spaces-sdk";
+import { MAX_LIMIT, type SearchOptions, type SearchResult } from "@xyne/spaces-sdk";
 import { put } from "../render.js";
 import type { ToolDef } from "./shared.js";
 
@@ -80,25 +80,7 @@ const whoami: ToolDef = {
 
 // ── spaces_search ───────────────────────────────────────────────────────────
 
-interface SearchRow {
-	id?: string;
-	type?: string;
-	title?: string;
-	subtitle?: string;
-	context?: string;
-	relevanceScore?: number;
-	metadata?: Record<string, unknown>;
-	searchContext?: Record<string, unknown>;
-}
-
-interface SearchPayload {
-	grouped?: boolean;
-	results?: SearchRow[];
-	groups?: Array<{ groupValue?: string; count?: number; results?: SearchRow[] }>;
-	totalCount?: number;
-	offset?: number;
-	limit?: number;
-}
+type SearchRow = SearchResult;
 
 function push(lines: string[], label: string, value: unknown): void {
 	if (value === undefined || value === null || value === "") return;
@@ -114,13 +96,11 @@ function push(lines: string[], label: string, value: unknown): void {
 function renderHit(row: SearchRow, index: number): string {
 	const ctx = row.searchContext ?? {};
 	const meta = row.metadata ?? {};
+	// A transcript and a canvas are not result types of their own — they arrive as
+	// a `call` or `collection` hit narrowed by `subApp`.
 	const subApp = typeof ctx["subApp"] === "string" ? ctx["subApp"].toUpperCase() : undefined;
 	const kind =
-		row.type === "transcript" || subApp === "TRANSCRIPT"
-			? "call"
-			: row.type === "canvas" || subApp === "CANVAS"
-				? "canvas"
-				: (row.type ?? "result");
+		subApp === "TRANSCRIPT" ? "call" : subApp === "CANVAS" ? "canvas" : (row.type ?? "result");
 
 	const title = `[${kind}] ${row.title ?? "(untitled)"}${row.subtitle ? ` — ${row.subtitle}` : ""}`;
 	const lines: string[] = [];
@@ -184,8 +164,8 @@ function renderHit(row: SearchRow, index: number): string {
 	push(lines, "ticketId", ctx["ticketId"]);
 	push(lines, "userId", ctx["userId"]);
 	push(lines, "messageId", ctx["messageId"]);
-	push(lines, "conversationId", ctx["conversationId"] ?? meta["conversationId"]);
-	push(lines, "channelId", ctx["channelId"] ?? meta["channelId"]);
+	push(lines, "conversationId", ctx["conversationId"]);
+	push(lines, "channelId", ctx["channelId"]);
 	push(lines, "callId", ctx["callId"]);
 	push(lines, "canvasId", ctx["docId"]);
 	if (row.id) lines.push(`  Result ID: ${row.id}`);
@@ -318,11 +298,7 @@ const search: ToolDef = {
 		// SDK's query builder preserves "" rather than dropping it as falsy.
 		if (optionalBoolean(args, "group_by_type") !== true) options.groupBy = "";
 
-		// `SearchResponse` declares { results, total, facets? }, which is not
-		// what the endpoint returns — grouping, totalCount and the per-hit
-		// searchContext this tool renders are all absent from it. Cast to the
-		// real shape rather than widening the SDK's public type.
-		const payload = (await sdk.search.query(options)) as unknown as SearchPayload;
+		const payload = await sdk.search.query(options);
 
 		if (payload.grouped && Array.isArray(payload.groups)) {
 			const blocks: string[] = [];

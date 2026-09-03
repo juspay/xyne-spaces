@@ -20,7 +20,6 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { API_VERSION } from '@xyne/spaces-contract';
 import { errorHandler, notFound, requestId } from './handler';
 import { readsAvailable } from './query';
 import { createSdkV1Router } from './v1';
@@ -40,7 +39,7 @@ export function createSdkPublicRouter(): Router {
   router.use(requestId);
 
   router.get('/version', (_req: Request, res: Response) => {
-    res.json({ version: API_VERSION, service: 'xyne-spaces-api' });
+    res.json({ version: 'v1', service: 'xyne-spaces-api' });
   });
 
   router.get('/health', (_req: Request, res: Response) => {

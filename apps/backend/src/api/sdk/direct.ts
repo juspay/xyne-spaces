@@ -16,7 +16,7 @@
 
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
-import { searchQuerySchema, searchSchemaQuerySchema } from '@xyne/spaces-contract';
+import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
 import type { AuthenticatedUser } from '@/types/express';
 import { ChannelController } from '@/controllers/channelController';
 import { ConversationController } from '@/controllers/conversationController';

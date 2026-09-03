@@ -7,7 +7,7 @@
     "prepare": "husky",
     "setup": "pnpm install && pnpm run build:shared",
     "install:all": "pnpm install",
-    "build:shared": "pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/icons --filter agentic-framework --filter @xyne/litellm-client --filter @xyne/spaces-contract --filter @xyne/spaces-sdk run build",
+    "build:shared": "pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/icons --filter agentic-framework --filter @xyne/litellm-client --filter @xyne/spaces-sdk run build",
     "doctor": "node scripts/xyne-doctor.mjs",
     "doctor:demo": "node scripts/xyne-doctor.mjs --demo",
     "doctor:test": "node --test scripts/xyne-doctor.test.mjs",

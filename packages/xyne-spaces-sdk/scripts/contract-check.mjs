@@ -1,29 +1,29 @@
 #!/usr/bin/env node
 /**
- * Contract conformance gate.
+ * Conformance gate: the SDK against the API it is written for.
  *
- * `@xyne/spaces-contract` is the one place the SDK and the backend are supposed to
- * agree. The backend imports it; the SDK cannot, because the SDK ships with zero
- * runtime dependencies and must load in a browser, while the contract depends on
- * zod. That asymmetry is what let three broken search parameters ship: the SDK sent
- * `sortBy`, `sortOrder`, and `channelId`, none of which exist in the contract's
- * `searchQuerySchema`. The server rejects unknown query parameters outright, so
- * every call that set one failed — and nothing caught it, because the SDK never
- * looked at the contract.
+ * `apps/backend/src/api/sdk` is the authority on what the server accepts — the
+ * search request schema, the error catalog, and the direct routes' request
+ * bodies. The SDK cannot import any of it: it ships with zero runtime
+ * dependencies and must load in a browser, while the server's schemas depend on
+ * zod. That asymmetry is what let three broken search parameters ship — the SDK
+ * sent `sortBy`, `sortOrder` and `channelId`, none of which exist, and the
+ * server rejects unknown query parameters outright, so every call that set one
+ * failed.
  *
- * This closes that gap without adding a dependency: the contract is read here, at
- * build time, and compared against what the SDK actually sends.
+ * This closes the gap without adding a dependency: the server's source is read
+ * here, at build time, and compared against what the SDK actually sends.
  *
  * Checks:
  *   1. Every parameter `registry/search.ts` sends exists in `searchQuerySchema`.
- *   2. Every key of the SDK's `SearchOptions` is either a contract parameter or
+ *   2. Every key of the SDK's `SearchOptions` is either a real parameter or
  *      explicitly marked deprecated.
- *   3. Every field a direct-API operation's input type declares is declared by its
- *      route's request body — otherwise the server silently ignores it.
+ *   3. Every field a direct-API operation's input type declares is declared by
+ *      its route's request body — otherwise the server silently ignores it.
  *   4. Every field of an SDK entity interface is a real column on the table it
- *      mirrors. These are hand-written and have been wrong repeatedly; a bad name
- *      is not a type error, it just reads `undefined` forever.
- *   5. Every error code the SDK branches on is a real contract error code.
+ *      mirrors. These are hand-written and have been wrong repeatedly; a bad
+ *      name is not a type error, it just reads `undefined` forever.
+ *   5. Every error code the SDK branches on is a real code.
  *
  * Catalog operations need none of this: their arguments are checked against the
  * Zero zod schemas by `coverage.mjs`. This covers what that cannot see.
@@ -38,14 +38,14 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const sdkRoot = resolve(here, '..');
 const repoRoot = resolve(sdkRoot, '../..');
-const contractSrc = join(repoRoot, 'packages/xyne-spaces-contract/src');
+const apiSrc = join(repoRoot, 'apps/backend/src/api/sdk');
 const REGISTRY_DIR = join(sdkRoot, 'src/registry');
 
 const problems = [];
 
 /** Top-level keys of a zod object literal in the contract source. */
 function contractSchemaKeys(file, schemaName) {
-  const src = readFileSync(join(contractSrc, file), 'utf8');
+  const src = readFileSync(join(apiSrc, file), 'utf8');
   const start = src.indexOf(`export const ${schemaName} = z.object({`);
   if (start === -1) {
     problems.push(`contract: ${schemaName} not found in ${file}`);
@@ -76,13 +76,22 @@ function contractSchemaKeys(file, schemaName) {
   return keys;
 }
 
-/** The literal error-code strings the contract defines. */
-function contractErrorCodes() {
-  const src = readFileSync(join(contractSrc, 'errors.ts'), 'utf8');
-  const codes = new Set();
-  for (const m of src.matchAll(/^\s*'([a-z_]+)'\s*:/gm)) codes.add(m[1]);
-  for (const m of src.matchAll(/^\s*\|?\s*'([a-z_]+)'/gm)) codes.add(m[1]);
-  return codes;
+/**
+ * The error codes the API defines.
+ *
+ * Read from the `ERROR_CODES` array specifically, not by scraping quoted
+ * strings: the file also holds the catalog's descriptions and the error
+ * plumbing, and a looser scan picks those up as codes.
+ */
+function apiErrorCodes() {
+  const src = readFileSync(join(apiSrc, 'errors.ts'), 'utf8');
+  const open = src.indexOf('export const ERROR_CODES = [');
+  if (open === -1) {
+    problems.push('api: ERROR_CODES not found in errors.ts');
+    return new Set();
+  }
+  const end = src.indexOf('] as const;', open);
+  return new Set([...src.slice(open, end).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
 }
 
 // ── 1 & 2: search parameters ────────────────────────────────────────────────
@@ -129,7 +138,7 @@ for (const m of optionsBody.matchAll(/^ {2}([a-zA-Z][a-zA-Z0-9_]*)\??:/gm)) {
 
 /** Values of a `const NAME = [...] as const` array in a contract module. */
 function contractEnum(file, constName) {
-  const src = readFileSync(join(contractSrc, file), 'utf8');
+  const src = readFileSync(join(apiSrc, file), 'utf8');
   const m = new RegExp(`const ${constName}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*as const`).exec(src);
   if (!m) {
     problems.push(`contract: ${constName} not found in ${file}`);
@@ -358,7 +367,7 @@ for (const [iface, table] of Object.entries(ENTITY_TABLES)) {
 
 // ── 4: error codes ──────────────────────────────────────────────────────────
 
-const codes = contractErrorCodes();
+const codes = apiErrorCodes();
 const httpSrc = readFileSync(join(sdkRoot, 'src/core/http.ts'), 'utf8');
 for (const m of httpSrc.matchAll(/serverCode === '([a-z_]+)'/g)) {
   if (!codes.has(m[1])) {
@@ -368,7 +377,7 @@ for (const m of httpSrc.matchAll(/serverCode === '([a-z_]+)'/g)) {
 
 // ── Report ──────────────────────────────────────────────────────────────────
 
-console.log(`contract:  ${accepted.size} search params, ${codes.size} error codes`);
+console.log(`api:       ${accepted.size} search params, ${codes.size} error codes`);
 console.log(`search:    ${sent.size} params sent by registry/search.ts`);
 console.log(`enums:     ${enumsChecked} enumerated search value sets compared`);
 console.log(`entities:  ${entitiesChecked} interfaces checked against Zero tables`);
@@ -378,4 +387,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log('\nOK — the SDK agrees with @xyne/spaces-contract.');
+console.log('\nOK — the SDK agrees with the API it targets.');

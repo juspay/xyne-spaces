@@ -2207,18 +2207,115 @@ export interface Recap {
 
 // ----- Search Types -----
 
+/**
+ * The ids and context a hit carries, so the next call can act on it.
+ *
+ * Populated per result type — a message hit carries `conversationId` and
+ * `messageId`, a ticket hit carries `ticketId` and `xyneId`, an attachment hit
+ * carries `attachmentId` and its file metadata.
+ */
+export interface SearchContext {
+  channelId?: string;
+  channelTitle?: string;
+  scopeType?: string;
+  conversationId?: string;
+  messageId?: string;
+  replyCount?: number;
+  isRootMessage?: boolean;
+  msgType?: string;
+  threadSenders?: string[];
+  attachmentIds?: string[];
+  senderId?: string;
+  senderName?: string;
+  senderEmail?: string;
+  userId?: string;
+  email?: string;
+  status?: string;
+  memberCount?: number;
+  closedBy?: string;
+  closedByName?: string;
+  boardName?: string;
+  projectName?: string;
+  ticketId?: string;
+  ticketStatus?: string;
+  boardId?: string;
+  createdBy?: string;
+  creatorName?: string;
+  assignedTo?: string;
+  assigneeName?: string;
+  attachmentId?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  internalUrl?: string;
+  originalUrl?: string;
+  xyneId?: string;
+  subApp?: string;
+  callType?: string;
+  mailId?: string;
+  recipientCount?: number;
+  formFieldMatches?: Array<{ fieldId: string; fieldName?: string; fieldValue: string }>;
+  priority?: string;
+  stageName?: string;
+  projectId?: string;
+  /** Epoch milliseconds. */
+  createdAtTimestamp?: number;
+  ticketType?: string;
+  userGroupId?: string;
+  tags?: string[];
+  callId?: string;
+  externalId?: string;
+  userIds?: string[];
+  participantResponses?: string[];
+  participantNames?: string[];
+  participantEmails?: string[];
+  title?: string;
+  createdByUserId?: string;
+  roomLink?: string;
+  callOrigin?: string;
+  /** Epoch milliseconds. */
+  startsAt?: number;
+  /** Epoch milliseconds. */
+  endsAt?: number;
+  /** Epoch milliseconds. */
+  startedAt?: number;
+  /** Epoch milliseconds. */
+  endedAt?: number;
+  recurringSeriesId?: string;
+  hasTranscript?: boolean;
+  collectionId?: string;
+  docId?: string;
+  folderId?: string;
+}
+
+/** One search hit. */
 export interface SearchResult {
   id: string;
   /**
-   * What this result is. **Singular**, and a different vocabulary from
-   * {@link SearchType}, which is the request-side filter. Feeding a value from
-   * here straight back into `SearchOptions.type` fails with `validation_failed`
-   * — use the plural form (`'message'` → `'messages'`).
+   * What this hit is. **Singular**, and a different vocabulary from
+   * {@link SearchType}, which is the request-side filter — `conversation` here
+   * corresponds to `messages` there, `attachment` to `files`. Feeding a value
+   * from here straight back into `SearchOptions.type` fails with
+   * `validation_failed`.
    */
-  type: 'message' | 'ticket' | 'file' | 'channel' | 'call' | 'user';
-  score: number;
-  highlight?: Record<string, string[]>;
-  data: unknown;
+  type: 'user' | 'conversation' | 'channel' | 'ticket' | 'attachment' | 'collection' | 'call';
+  /** Channel name for a message hit, document title for everything else. */
+  title: string;
+  subtitle: string;
+  /** The matching text, for display. */
+  context?: string;
+  relevanceScore: number;
+  avatar?: string;
+  metadata: {
+    /** ISO 8601. */
+    timestamp: string;
+    channelName?: string;
+    status?: string;
+    /** Human-readable, e.g. `1.2 MB`. */
+    fileSize?: string;
+  };
+  /** The ids that let a follow-up call act on this hit. */
+  searchContext?: SearchContext;
 }
 
 /**

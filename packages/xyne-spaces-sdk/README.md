@@ -1,6 +1,6 @@
 # @xyne/spaces-sdk
 
-TypeScript SDK for Xyne Spaces. **472 methods across 25 resources** — every read
+TypeScript SDK for Xyne Spaces. **483 methods across 25 resources** — every read
 and write the Spaces product itself performs — plus Xyne Claw remote agents.
 
 Zero runtime dependencies. Runs in Node 18+ and in the browser.
@@ -36,14 +36,14 @@ await sdk.messages.send({ conversationId, content: 'Ship it.' });
 
 Most product SDKs expose a hand-picked subset of an API and grow a backlog of
 "can you add an endpoint for…". This one exposes the **entire operation
-catalog** — the same 508 queries and mutators the Spaces application runs against
+catalog** — the same 523 queries and mutators the Spaces application runs against
 — and proves it on every build:
 
 ```
-catalog:  263 queries, 245 mutators (508 total)
-exposed:  451
-excluded: 57
-accounted for: 508/508
+catalog:  275 queries, 248 mutators (523 total)
+exposed:  461
+excluded: 62
+accounted for: 523/523
 ```
 
 A new backend operation **fails the build** until someone decides to expose it or
@@ -80,7 +80,7 @@ key once; store it in your secret manager and pass it in:
 
 ```typescript
 const sdk = createClient({
-  // The Spaces origin. The SDK adds /api/sdk itself.
+  // The Spaces origin. The SDK adds /api/sdk/v1 itself.
   baseUrl: process.env.XYNE_SPACES_BASE_URL,
   apiKey: process.env.XYNE_SPACES_API_KEY,
 });
@@ -121,10 +121,10 @@ const me = await sdk.users.me();
 //   role, orgRole, keyExpiresAt }
 ```
 
-This is a request, not a local decode: a key's claims don't include `role` or
-`orgRole` — those are read fresh from the database on every server-side
-request, deliberately, so this call is the only way to get a full picture.
-Cache it — the identity behind a key does not change.
+This is a request, not a local decode: `role` and `orgRole` are read from the
+database on every server-side request rather than carried in the credential, so
+this call is the only way to get a full picture. Cache it — the identity behind a
+credential does not change.
 
 `keyExpiresAt` is ISO 8601. Long-running services should check it at startup and
 rotate ahead of time rather than discovering the expiry mid-request:
@@ -147,22 +147,23 @@ await sdk.dashboards.upsert({ name: 'Ops', createdBy: me.id });
 
 | Resource | Methods | | Resource | Methods |
 |---|---|---|---|---|
-| `sdk.tickets` | 45 | | `sdk.userGroups` | 20 |
-| `sdk.channels` | 41 | | `sdk.workspace` | 20 |
-| `sdk.canvases` | 40 | | `sdk.preferences` | 19 |
-| `sdk.messages` | 34 | | `sdk.forms` | 15 |
+| `sdk.tickets` | 46 | | `sdk.userGroups` | 20 |
+| `sdk.channels` | 41 | | `sdk.preferences` | 19 |
+| `sdk.canvases` | 40 | | `sdk.collections` | 15 |
+| `sdk.messages` | 35 | | `sdk.forms` | 15 |
 | `sdk.admin` | 31 | | `sdk.activities` | 14 |
 | `sdk.email` | 26 | | `sdk.automations` | 13 |
 | `sdk.calls` | 25 | | `sdk.projects` | 13 |
-| `sdk.incidents` | 24 | | `sdk.collections` | 11 |
-| `sdk.boards` | 23 | | `sdk.recaps` | 10 |
-| `sdk.conversations` | 21 | | `sdk.dashboards` | 8 |
-| `sdk.supportTickets` | 6 | | `sdk.users` | 5 |
+| `sdk.boards` | 24 | | `sdk.recaps` | 10 |
+| `sdk.incidents` | 24 | | `sdk.dashboards` | 8 |
+| `sdk.workspace` | 24 | | `sdk.supportTickets` | 6 |
+| `sdk.conversations` | 21 | | `sdk.users` | 5 |
 | `sdk.claw` | 4 | | `sdk.search` | 2 |
 | `sdk.attachments` | 2 | | | |
 
-Every method is typed, documented in-editor, and maps to exactly one backend
-operation. Hover any of them in your IDE for the mapping and its caveats.
+Every method carries a description, a documented parameter list, an example, and
+a concrete return type — no method returns `unknown`. Hover any of them in your
+IDE.
 
 ---
 
@@ -355,10 +356,9 @@ try {
 | 404 | `NotFoundError` | `not_found` |
 | 500 | `SdkError`, `code: 'api_error'` | `internal` |
 
-`serverCode` carries the API's own vocabulary from
-[`@xyne/spaces-contract`](../xyne-spaces-contract). It is absent for failures
-that never reached the server, where `code` is `network_error` or `timeout` —
-which is the main thing it is still useful for telling apart.
+`serverCode` carries the API's own vocabulary. It is absent for failures that
+never reached the server, where `code` is `network_error` or `timeout` — which is
+the main thing it is still useful for telling apart.
 
 **400 is the one whose message matters.** A business rule that refuses a write
 ("Ticket not found", "You are not a participant of this channel") arrives as a
@@ -382,18 +382,22 @@ npm run coverage         # every catalog operation is exposed or excluded, with 
 npm run contract-check   # the SDK and the backend agree on names, values, and shapes
 ```
 
-`coverage` verifies, across all 508 operations, that: the operation exists; every
+`coverage` verifies, across all 523 operations, that: the operation exists; every
 required argument is supplied; no undeclared argument is sent; enumerated values
 match exactly; and a query's single-row-vs-list shape matches the declared return
-type. None of that is something TypeScript can check, because the registries
-reference operations by string.
+type. None of that is something TypeScript can check, because operations are
+referenced by string on both sides of the wire.
+
+It checks in both directions: an operation id the SDK calls that the server does
+not define, and a server-side mapping that no SDK method reaches, are each an
+error.
 
 `contract-check` compares search parameters and their enumerated values against
-the contract, entity interfaces against real database columns, and the error codes
-the SDK branches on against the ones the contract defines.
+the server's request schema, all 73 entity interfaces against real database
+columns, and the error codes the SDK branches on against the ones the API defines.
 
-Of the 57 exclusions: 45 are superseded versions (`…V1` where `…V3` is exposed),
-10 are the SDLC subsystem (internal, driven by its own services), and 2 are
+Of the 62 exclusions: 49 are superseded versions (`…V1` where `…V3` is exposed),
+11 are the SDLC subsystem (internal, driven by its own services), and 2 are
 backend-deprecated or scoped entirely to the caller's own id.
 
 Operations outside the catalog — creating channels and tickets, uploading files,
@@ -403,19 +407,19 @@ search — are direct API calls. See [GAPS.md](./GAPS.md).
 
 ## Architecture
 
-Each operation is declared once in `src/registry/` and surfaced by a method in
-`src/resources/`:
+### A client over a versioned API
+
+The SDK targets **`/api/sdk/v1`**, hard-coded and not configurable. A given
+release speaks exactly one version of the server contract; upgrading the API
+means upgrading this package, which is what stops an installed client breaking
+when the server gains a v2.
+
+Each operation is declared once in `src/registry/` as an id and a pair of types,
+and surfaced by a method in `src/resources/`:
 
 ```typescript
-// registry/channels.ts — what it maps to
-join: mutator<{ channelId: string }, void>('channel.joinChannel', {
-  mapArgs: (args) => ({
-    channelId: args.channelId,
-    channelParticipantId: newId(),   // the plumbing callers never see
-    channelUserStatusId: newId(),
-    timestamp: now(),
-  }),
-}),
+// registry/channels.ts — the id and the types
+join: op<{ channelId: string }, void>('channels.join', 'mutator'),
 
 // resources/channels.ts — what you call
 join(channelId: string): Promise<void> {
@@ -423,25 +427,35 @@ join(channelId: string): Promise<void> {
 }
 ```
 
-Operations route to one of two transports, chosen per operation and invisible to
-callers: the **catalog** (`/api/sdk/catalog/{query,mutate}`) for anything backed
-by a Zero operation, and **direct API** calls for everything else — search,
-uploads, server-side allocation, identity, and Claw. Moving an operation between
-transports does not change the method you call.
+What `channels.join` actually runs, and how its arguments are shaped, is decided
+**server-side** — in the backend's `api/sdk/v1/mapper.ts` and `parser.ts`. The
+request carries the SDK's own operation id and nothing about the backend:
 
-### The shared contract
+```
+POST /api/sdk/v1/mutate   { "op": "channels.join", "args": { "channelId": "…" } }
+```
 
-[`@xyne/spaces-contract`](../xyne-spaces-contract) holds what this SDK and the
-backend must agree on: the error catalog and the search request schema.
+That split is what makes the surface versioned rather than coupled. The server
+can retarget an id onto a renamed or re-versioned operation, and every published
+copy of this package keeps working. It also means the plumbing those operations
+require — participant ids, mapping ids, timestamps — is generated on the server,
+so those values come from the server clock rather than the caller's.
 
-The SDK does **not** import it at runtime — the contract depends on zod, and this
-package ships with none. The agreement is enforced at build time instead.
+A handful of operations are versioned REST routes instead — search, uploads,
+server-side allocation, identity, and Claw — reached at `/api/sdk/v1/…`. Which
+transport an operation uses does not change the method you call.
+
+### Keeping the two sides honest
+
+The SDK cannot import the server's schemas: it ships with zero runtime
+dependencies and must load in a browser, while those schemas depend on zod. The
+agreement is enforced at build time instead, by reading the server's source.
 
 That gate exists because its absence cost real bugs. The SDK once sent `sortBy`,
 `sortOrder`, and `channelId`, none of which the server accepts; because unknown
 query parameters are *rejected* rather than ignored, every call that set one
-failed, and sorting looked missing when it had shipped all along. The contract had
-the correct `orderBy` the whole time — nothing was comparing the two.
+failed, and sorting looked missing when it had shipped all along. The correct
+`orderBy` was there the whole time — nothing was comparing the two.
 
 ---
 
@@ -451,7 +465,7 @@ the correct `orderBy` the whole time — nothing was comparing the two.
 npm run build           # compile to dist/
 npm run typecheck       # tsc --noEmit, strict
 npm run coverage        # catalog coverage gate
-npm run contract-check  # conformance with @xyne/spaces-contract
+npm run contract-check  # conformance with the API's own schemas
 npm test                # vitest
 npm run verify          # typecheck + coverage + contract-check
 ```
