@@ -2303,7 +2303,14 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             ref={scrollRef}
             // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
             tabIndex={0}
-            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4'
+            // md:px-10 reserves the prompt rail's column. The rail is 32px wide
+            // and absolutely positioned at the left edge, so with only sm:px-4
+            // the transcript ran right up against the ticks whenever the
+            // available width was tight — which is exactly App Creation mode.
+            // Applied on BOTH sides so the centred column stays centred; at
+            // wide sizes max-w-3xl already leaves far more margin than this, so
+            // the padding only bites when it is actually needed.
+            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4 md:px-10'
             role='log'
             aria-live='polite'
             aria-label='Chat messages'
@@ -2403,7 +2410,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         </div>
 
         {/* Bottom composer — pill sits above it, mirroring xyne-search /ai. */}
-        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6'>
+        {/* md:px-10 matches the transcript's gutter above. Both columns are
+            `mx-auto max-w-3xl`, so they only line up while their padding
+            agrees: once width is tight enough that the cap stops binding — App
+            Creation mode — a narrower gutter here would make the composer
+            wider than the messages it sits under. */}
+        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6 md:px-10'>
           {showJumpPill && (
             <button
               type='button'

@@ -69,6 +69,13 @@ export interface LibraryCardProps {
   meta?: ReactNode | string | undefined;
   statusDot?: ReactNode;
   description?: string | undefined;
+  /**
+   * Replaces the description line when a tab needs more than text there — the
+   * apps tab puts an avatar and the creator's name on it. A slot rather than
+   * widening `description` to ReactNode: the description renders inside a <p>
+   * with truncation, which is wrong markup for an element containing an avatar.
+   */
+  footer?: ReactNode;
   dimmed?: boolean;
 }
 
@@ -80,6 +87,7 @@ export function LibraryCard({
   meta,
   statusDot,
   description,
+  footer,
   dimmed = false,
 }: LibraryCardProps): ReactElement {
   return (
@@ -108,9 +116,11 @@ export function LibraryCard({
           ) : null}
           {statusDot}
         </div>
-        <p className='truncate text-sm leading-5 text-foreground/60'>
-          {description || 'No description added'}
-        </p>
+        {footer ?? (
+          <p className='truncate text-sm leading-5 text-foreground/60'>
+            {description || 'No description added'}
+          </p>
+        )}
       </div>
     </Link>
   );
