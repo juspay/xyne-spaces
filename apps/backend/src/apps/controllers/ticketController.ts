@@ -2472,7 +2472,6 @@ export class TicketController {
       }
 
       const externalThreadId = threadId;
-      // The id the app sent. Never stored bare — see below.
       const appExternalId = bodyExternalId || randomUUID();
       // Source-namespaced, and written to BOTH Email.externalMessageId and
       // ExternalMessage.externalId. Those two columns are the same identifier
@@ -2529,35 +2528,6 @@ export class TicketController {
       // (self-healed by the externalSourceLink write below). Do not remove the fallback.
       const linkedMessage = await externalMessageRepo.findByThreadId(externalSource.id, externalThreadId, ExternalEntityType.EMAIL);
       let threadEmail = linkedMessage?.entityId ? await repositories.emails.findById(linkedMessage.entityId) : null;
-      if (!threadEmail) {
-        const candidate = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
-        if (candidate) {
-          // The candidate matched on (threadId, channelId) alone, which says nothing
-          // about who owns it. On a shared desk another app — or the mailbox — can
-          // already own that thread, and adopting it would file this app's message
-          // into someone else's ticket. Only adopt a thread no other source claims.
-          const conversationEmails = await repositories.emails.findByConversationId(candidate.conversationId);
-          const foreignLink = await externalMessageRepo.findForeignLinkByEmailIds(
-            conversationEmails.map(e => e.id),
-            externalSource.id,
-          );
-          if (foreignLink) {
-            logger.info('[AppDeskInbound] thread id collides with another source on this channel — starting a new ticket', {
-              channelId,
-              threadId: externalThreadId,
-              externalSourceId: externalSource.id,
-              ownedByExternalSourceId: foreignLink.externalSourceId,
-            });
-          } else {
-            threadEmail = candidate;
-            logger.warn('[AppDeskInbound] legacy channel-scoped thread fallback used (ExternalMessage link missing)', {
-              channelId,
-              threadId: externalThreadId,
-              externalSourceId: externalSource.id,
-            });
-          }
-        }
-      }
       if (threadEmail) {
         const { email } = await emailService.addEmailToConversation({
           conversationId: threadEmail.conversationId,
@@ -2565,10 +2535,10 @@ export class TicketController {
           emailBody,
           emailTo: [recipientEmail],
           emailFrom,
+          externalSourceId: externalSource.id,
           externalThreadId,
           externalMessageId,
           emailType: EmailType.DEFAULT,
-          externalSourceLink: { externalSourceId: externalSource.id, externalId: externalMessageId, externalThreadId },
           ...(uploadedFiles.length > 0 && { uploadedFiles }),
           receivedAt: new Date(),
         });
@@ -2643,9 +2613,9 @@ export class TicketController {
         emailBody,
         emailFrom,
         emailTo: [recipientEmail],
+        externalSourceId: externalSource.id,
         externalThreadId,
         externalMessageId,
-        externalSourceLink: { externalSourceId: externalSource.id, externalId: externalMessageId, externalThreadId },
         ...(uploadedFiles.length > 0 && { uploadedFiles }),
         ticketMetadata: {
           deskSource: {

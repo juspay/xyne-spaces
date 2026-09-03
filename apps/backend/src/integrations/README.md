@@ -214,12 +214,20 @@ A desk channel of **any** type (EMAIL, DL, SLACK, CALL, SOCIAL_MEDIA, APP) can c
 
 **Source naming** (`integrations/core/deskSources.ts`):
 
-| Shape | Who uses it |
-| --- | --- |
-| `app-desk-<channelId>` | Legacy rows (pre-multi-app APP channels) — kept for back-compat |
-| `app-desk-<installedAppId>-<channelId>` | All bindings created via the management API |
+| Shape | Who wrote it | `externalIdentifier` |
+| --- | --- | --- |
+| `app-desk-<installedAppId>` | Pre-2026-07-29 rows | **null** — backfilled by migration `20260903090000` |
+| `app-desk-<channelId>` | Pre-multi-app APP-channel creation | set |
+| `app-desk-<installedAppId>-<channelId>` | Every binding written today, both connect paths | set |
 
-`name` is globally unique; `resolveAppDeskInstalledAppId(source)` parses both shapes (preferring `externalIdentifier`).
+`name` is globally unique — which is why the single-segment shapes structurally
+enforced one app per channel, and the two-segment shape is what lifts that.
+
+`resolveAppDeskInstalledAppId(source)` returns `externalIdentifier` when set and
+falls back to parsing the name. Only the first shape above needs the fallback, and
+note the first two are indistinguishable by shape alone (both single-segment, and
+a `channelId` must never be read as an install id) — the column is what separates
+them. Once the backfill has run everywhere, the fallback and this ambiguity can go.
 
 ### Management API (`routes/app-desk.ts`)
 
@@ -231,7 +239,7 @@ Mounted at `/api/integrations/app-desk`. All three require the caller to be the 
 | `POST /channels/:channelId/apps` | Connects an app. Body `{ installedAppId }`. Validates the install is in the caller's workspace and holds `desk:write` (APPROVED or PENDINGDELETE), else `404`/`403`. Active duplicate → `409`; an inactive binding is reactivated in place (`200`), otherwise the source row is created (`201`). |
 | `DELETE /channels/:channelId/apps/:installedAppId` | Soft disconnect: sets `isActive=false`, never deletes the row (preserves `ExternalMessage` history, so threads and reply routing survive a reconnect). No active binding → `404`. |
 
-Both connect paths — this API and the legacy APP-channel creation flow — go through one repository method: `ExternalSourceRepository.connectAppToChannel({ channelId, installedAppId, workspaceId, displayName, legacyName? })` (returns `{ source, outcome: 'created' | 'reactivated' | 'already-connected' }`). The legacy flow passes `legacyName` to keep the old naming.
+Both connect paths — this API and APP-channel creation — go through one repository method: `ExternalSourceRepository.connectAppToChannel({ channelId, installedAppId, workspaceId, displayName })` (returns `{ source, outcome: 'created' | 'reactivated' | 'already-connected' }`). Both now produce the two-segment name; APP-channel creation used to override it with the old `app-desk-<channelId>` shape, which bought nothing (no code reads these rows by name) and kept minting fresh single-segment names that were shape-ambiguous with the pre-2026-07-29 rows.
 
 ### Inbound authorization change
 

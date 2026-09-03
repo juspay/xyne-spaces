@@ -5,7 +5,7 @@
 
 import { DatabaseClient } from '../client';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
-import { buildChannelAppSourceName, resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
+import { buildAppDeskSourceName, resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import type { ExternalSource } from '@prisma/client';
@@ -210,21 +210,6 @@ export class ExternalSourceRepository {
   }
 
   /**
-   * Find external source by channel ID
-   * @deprecated Channels can hold multiple sources of different types, and this
-   * returns the newest active source of ANY type. Use {@link findChannelSource}
-   * with explicit sourceTypes instead. Retained for the appDeskInbound consumer
-   * (ticketController.ts) until PR 1 of app-to-desk-channels migrates it to
-   * {@link findChannelAppSource}.
-   */
-  async findByChannelId(channelId: string) {
-    return await this.db.externalSource.findFirst({
-      where: { channelId },
-      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
-    });
-  }
-
-  /**
    * Find the channel's source restricted to the given sourceTypes.
    * Same ordering as findByChannelId (active first, then newest); pass
    * requireActive to only consider active sources. Returns null when the
@@ -241,6 +226,20 @@ export class ExternalSourceRepository {
         ...(opts.requireActive ? { isActive: true } : {}),
       },
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  /**
+   * List a channel's app-desk sources (oldest first).
+   */
+  async listChannelAppSources(channelId: string, opts?: { activeOnly?: boolean }) {
+    return await this.db.externalSource.findMany({
+      where: {
+        channelId,
+        sourceType: 'app-desk',
+        ...(opts?.activeOnly ? { isActive: true } : {}),
+      },
+      orderBy: { createdAt: 'asc' },
     });
   }
 
@@ -277,34 +276,21 @@ export class ExternalSourceRepository {
   }
 
   /**
-   * List a channel's app-desk sources (oldest first).
-   */
-  async listChannelAppSources(channelId: string, opts?: { activeOnly?: boolean }) {
-    return await this.db.externalSource.findMany({
-      where: {
-        channelId,
-        sourceType: 'app-desk',
-        ...(opts?.activeOnly ? { isActive: true } : {}),
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-  }
-
-  /**
    * Single connect path for an app↔channel app-desk binding (management API and
-   * legacy APP-channel creation). Active binding → 'already-connected' (callers
-   * map to 409); inactive binding → reactivated; otherwise created. legacyName
-   * preserves the pre-multi-app `app-desk-<channelId>` naming for back-compat.
+   * APP-channel creation). Active binding → 'already-connected' (callers map to
+   * 409); inactive binding → reactivated; otherwise created.
+   *
+   * Every row written here sets externalIdentifier, so the name is never parsed
+   * to recover the install id — only pre-2026-07-29 rows need that, and the
+   * 20260903090000 migration backfills them.
    */
   async connectAppToChannel(params: {
     channelId: string;
     installedAppId: string;
     workspaceId: string;
     displayName: string;
-    /** Overrides the generated name (used by the legacy APP-channel creation path). */
-    legacyName?: string;
   }): Promise<{ source: ExternalSource; outcome: 'created' | 'reactivated' | 'already-connected' }> {
-    const { channelId, installedAppId, workspaceId, displayName, legacyName } = params;
+    const { channelId, installedAppId, workspaceId, displayName } = params;
 
     const existing = await this.findChannelAppSource(channelId, installedAppId);
     if (existing) {
@@ -316,7 +302,7 @@ export class ExternalSourceRepository {
     }
 
     const source = await this.create({
-      name: legacyName ?? buildChannelAppSourceName(installedAppId, channelId),
+      name: buildAppDeskSourceName(channelId),
       sourceType: 'app-desk',
       displayName,
       channelId,

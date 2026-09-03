@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
-  buildAppDeskSourceName,
   buildSlackDeskSourceName,
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
@@ -1283,7 +1282,6 @@ export class ChannelController {
             installedAppId,
             workspaceId: req.user!.workspaceId!,
             displayName: name!,
-            legacyName: buildAppDeskSourceName(channel.id),
           });
 
           await this.channelParticipantRepository.addParticipant(

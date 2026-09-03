@@ -124,10 +124,10 @@ export interface CreateConversationWithEmailParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  externalSourceId?: string;
   rfcMessageId?: string | null;
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
-  externalSourceLink?: ExternalSourceLink;
   receivedAt?: Date;
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
@@ -150,6 +150,7 @@ export interface AddEmailToConversationParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  externalSourceId?: string;
   rfcMessageId?: string | null;
   emailType?: EmailType;
   sentByUserId?: string;
@@ -158,7 +159,6 @@ export interface AddEmailToConversationParams {
   clientVersionCode?: string;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
-  externalSourceLink?: ExternalSourceLink;
 }
 
 export interface UpdateExternalInteractionParams {
@@ -1118,10 +1118,10 @@ export class EmailService {
       emailReplyTo = [],
       externalThreadId,
       externalMessageId,
+      externalSourceId,
       rfcMessageId,
       ticketMetadata,
       uploadedFiles = [],
-      externalSourceLink,
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
@@ -1252,8 +1252,8 @@ export class EmailService {
       });
 
       // App-desk source link shares this transaction so it can't be lost to a crash.
-      if (externalSourceLink) {
-        await linkExternalMessageInTx(tx, externalSourceLink, createdEmail.id, channel.workspaceId);
+      if (externalSourceId) {
+        await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, createdEmail.id, channel.workspaceId);
       }
 
       // Generate xyneId and create ticket
@@ -1497,6 +1497,7 @@ export class EmailService {
         emailReplyTo = [],
         externalThreadId,
         externalMessageId,
+        externalSourceId,
         rfcMessageId,
         emailType = EmailType.DEFAULT,
         sentByUserId,
@@ -1505,7 +1506,6 @@ export class EmailService {
         clientVersionCode,
         uploadedFiles = [],
         receivedAt,
-        externalSourceLink,
       } = params;
 
       // Validate conversation exists
@@ -1546,13 +1546,11 @@ export class EmailService {
 
       // When an app-desk source link is requested, the Email upsert and the
       // link write share one transaction so neither can be lost on its own.
-      const email = externalSourceLink
-        ? await this.prisma.$transaction(async (tx) => {
-            const created = await this.emailRepository.create(emailData, tx);
-            await linkExternalMessageInTx(tx, externalSourceLink, created.id, created.workspaceId);
-            return created;
-          })
-        : await this.emailRepository.create(emailData);
+      const email = externalSourceId ? await this.prisma.$transaction(async (tx) => {
+        const created = await this.emailRepository.create(emailData, tx);
+        await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, created.id, created.workspaceId);
+        return created;
+      }) : await this.emailRepository.create(emailData);
       void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
