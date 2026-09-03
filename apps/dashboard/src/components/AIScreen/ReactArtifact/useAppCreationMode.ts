@@ -18,9 +18,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePinnedArtifactApps } from '../../../hooks/usePinnedArtifactApps';
 import {
   getArtifactApp,
   restoreArtifactAppVersion,
+  updateArtifactAppIcon,
+  type ArtifactAppDetail,
   type ArtifactAppRestoreEvent,
   type ArtifactAppVersionSummary,
 } from '../../../services/claw/artifactAppsService';
@@ -44,7 +47,17 @@ export interface AppCreationMode {
    *  these in by time so a rollback stays readable long after it happened. */
   restores: ArtifactAppRestoreEvent[];
   headVersionId: string | null;
+  /** The saved row itself — owner, visibility, timestamps. Carried whole rather
+   *  than unpacked field by field: Settings reads most of it, and every added
+   *  column would otherwise mean another member here. Null until the app loads. */
+  app: ArtifactAppDetail | null;
   title: string | null;
+  /** The app's icon id, or null for the fallback mark. */
+  icon: string | null;
+  /** Whether the viewer may change the icon (and restore). */
+  isOwner: boolean;
+  /** Owner-only. Durable: the session path never overwrites a set icon. */
+  setIcon: (icon: string | null) => void;
   /** View an older build. A VIEW, not a restore — head does not move. */
   viewVersion: (versionId: string | null) => void;
   /** Make a version current: moves HEAD on the server. Unlike `viewVersion`
@@ -180,6 +193,26 @@ export function useAppCreationMode(
     [appId, restore],
   );
 
+  const { updatePinnedApp } = usePinnedArtifactApps();
+  const iconMutation = useMutation({
+    mutationFn: (icon: string | null) => updateArtifactAppIcon(appId as string, icon),
+    onSuccess: (_result, icon) => {
+      void queryClient.invalidateQueries({ queryKey: ['artifact-app', appId] });
+      // The library lists render from their own cache, and the sidebar from a
+      // localStorage snapshot — both must learn the new mark or the pane shows
+      // one icon while the rail shows another.
+      void queryClient.invalidateQueries({ queryKey: ['artifact-apps'] });
+      if (appId) updatePinnedApp(appId, { icon });
+    },
+  });
+  const setIcon = useCallback(
+    (icon: string | null) => {
+      if (!appId) return;
+      iconMutation.mutate(icon);
+    },
+    [appId, iconMutation],
+  );
+
   const open = useCallback(() => {
     wantMode.current = true;
     setMode(true);
@@ -215,7 +248,10 @@ export function useAppCreationMode(
   // Memoized: this object is a prop to the pane and is read by the context
   // provider, so a fresh identity every render re-renders the pane (and through
   // it the Sandpack) for no reason.
+  const app = data?.app ?? null;
   const title = data?.app.title ?? null;
+  const icon = data?.app.icon ?? null;
+  const isOwner = data?.app.isOwner ?? false;
   const hasApp = Boolean(appId);
   const active = hasApp && modeOn;
 
@@ -229,7 +265,11 @@ export function useAppCreationMode(
       versions,
       restores,
       headVersionId,
+      app,
       title,
+      icon,
+      isOwner,
+      setIcon,
       viewVersion,
       restoreVersion,
       restoring: restore.isPending,
@@ -245,7 +285,11 @@ export function useAppCreationMode(
       versions,
       restores,
       headVersionId,
+      app,
       title,
+      icon,
+      isOwner,
+      setIcon,
       viewVersion,
       restoreVersion,
       restore.isPending,
