@@ -17,6 +17,7 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
+  reachableTicketsOnly,
   ShareableEntityType, SummaryTemplateVisibility, UserResponsibility } from '@xyne/shared';
 import { z } from 'zod';
 import {
@@ -1612,7 +1613,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       return base
         .related('referencesIn', ref =>
           ref.where('relationType', TicketReferenceRelation.MERGED_INTO)
-            .related('sourceTicket'),
+            .related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)),
         )
         .related('emailDrafts', q =>
           q.where(({ or, cmp }) =>
@@ -1633,14 +1634,14 @@ export const queries: AnyQueryRegistry = defineQueries({
       channelId: z.string(),
       isMember: z.boolean(),
     }),
-    ({ args: { id, xyneId, workspaceId } }) => {
+    ({ ctx, args: { id, xyneId, workspaceId } }) => {
       const base = id
         ? zql.tickets.where('id', id)
         : zql.tickets.where('xyneId', xyneId ?? '').where('workspaceId', workspaceId);
       return base
         .related('referencesIn', ref =>
           ref.where('relationType', TicketReferenceRelation.MERGED_INTO)
-            .related('sourceTicket'),
+            .related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)),
         )
         .one();
     }
@@ -2115,14 +2116,14 @@ export const queries: AnyQueryRegistry = defineQueries({
   ),
 
   // @deprecated
-  ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+  ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ ctx, args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
       .related('project')
       .related('tags')
       .related('assignments')
-      .related('referencesOut', (ref) => ref.related('targetTicket'))
-      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('referencesOut', (ref) => ref.related('targetTicket', (t) => reachableTicketsOnly(t, ctx)))
+      .related('referencesIn', (ref) => ref.related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)))
       .related('entity')
       .related('conversation')
       .related('stageEtaEntries')
@@ -2132,14 +2133,14 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketRowById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets.where('id', ticketId).one();
   }),
-  ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+  ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ ctx, args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
-      .related('referencesOut', (ref) => ref.related('targetTicket'))
-      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('referencesOut', (ref) => ref.related('targetTicket', (t) => reachableTicketsOnly(t, ctx)))
+      .related('referencesIn', (ref) => ref.related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)))
       .related('entity')
       .related('conversation')
       .related('stageEtaEntries')
@@ -2147,14 +2148,14 @@ export const queries: AnyQueryRegistry = defineQueries({
       .one();
   }),
   // @deprecated
-  ticketDetailsById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+  ticketDetailsById: defineQuery(z.object({ ticketId: z.string() }), ({ ctx, args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
       .related('project')
       .related('tags')
       .related('assignments')
-      .related('referencesOut', (ref) => ref.related('targetTicket'))
-      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('referencesOut', (ref) => ref.related('targetTicket', (t) => reachableTicketsOnly(t, ctx)))
+      .related('referencesIn', (ref) => ref.related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)))
       .related('entity')
       .related('conversation')
       .related('stageEtaEntries')
@@ -2162,14 +2163,14 @@ export const queries: AnyQueryRegistry = defineQueries({
       .related('ticketStageRequests', a => a.related('form'))
       .one();
   }),
-  ticketDetailsByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+  ticketDetailsByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ ctx, args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
-      .related('referencesOut', (ref) => ref.related('targetTicket'))
-      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('referencesOut', (ref) => ref.related('targetTicket', (t) => reachableTicketsOnly(t, ctx)))
+      .related('referencesIn', (ref) => ref.related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)))
       .related('entity')
       .related('conversation')
       .related('stageEtaEntries')
@@ -2178,38 +2179,38 @@ export const queries: AnyQueryRegistry = defineQueries({
       .one();
   }),
   // @deprecated
-  ticketByXyneId: defineQuery(z.object({ xyneId: z.string() }), ({ args: { xyneId } }) => {
+  ticketByXyneId: defineQuery(z.object({ xyneId: z.string() }), ({ ctx, args: { xyneId } }) => {
     return zql.tickets
       .where('xyneId', xyneId)
       .related('project')
       .related('tags')
-      .related('referencesOut', (ref) => ref.related('targetTicket'))
-      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('referencesOut', (ref) => ref.related('targetTicket', (t) => reachableTicketsOnly(t, ctx)))
+      .related('referencesIn', (ref) => ref.related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)))
       .related('entity')
       .related('conversation')
       .one();
   }),
   // @deprecated
-  ticketByXyneIdV2: defineQuery(z.object({ xyneId: z.string(), workspaceId: z.string() }), ({ args: { xyneId, workspaceId } }) => {
+  ticketByXyneIdV2: defineQuery(z.object({ xyneId: z.string(), workspaceId: z.string() }), ({ ctx, args: { xyneId, workspaceId } }) => {
     return zql.tickets
       .where('xyneId', xyneId)
       .where('workspaceId', workspaceId)
       .related('project')
       .related('tags')
-      .related('referencesOut', (ref) => ref.related('targetTicket'))
-      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('referencesOut', (ref) => ref.related('targetTicket', (t) => reachableTicketsOnly(t, ctx)))
+      .related('referencesIn', (ref) => ref.related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)))
       .related('entity')
       .related('conversation')
       .one();
   }),
-  ticketByXyneIdV3: defineQuery(z.object({ xyneId: z.string(), workspaceId: z.string() }), ({ args: { xyneId, workspaceId } }) => {
+  ticketByXyneIdV3: defineQuery(z.object({ xyneId: z.string(), workspaceId: z.string() }), ({ ctx, args: { xyneId, workspaceId } }) => {
     return zql.tickets
       .where('xyneId', xyneId)
       .where('workspaceId', workspaceId)
       .related('project')
       .related('tagMappings')
-      .related('referencesOut', (ref) => ref.related('targetTicket'))
-      .related('referencesIn', (ref) => ref.related('sourceTicket'))
+      .related('referencesOut', (ref) => ref.related('targetTicket', (t) => reachableTicketsOnly(t, ctx)))
+      .related('referencesIn', (ref) => ref.related('sourceTicket', (t) => reachableTicketsOnly(t, ctx)))
       .related('entity')
       .related('conversation')
       .one();
@@ -2245,21 +2246,21 @@ export const queries: AnyQueryRegistry = defineQueries({
       .where('workflowType', 'Automations')
       .one();
   }),
-  subTicketsForTicket: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+  subTicketsForTicket: defineQuery(z.object({ ticketId: z.string() }), ({ ctx, args: { ticketId } }) => {
     return zql.ticket_sub_ticket_mappings
       .where('ticketId', ticketId)
       .related('subTicket', (subTicketQuery) =>
-        subTicketQuery.related('conversation').related('mappedTicket')
+        subTicketQuery.related('conversation').related('mappedTicket', (t) => reachableTicketsOnly(t, ctx))
       )
       .orderBy('id', 'asc');
   }),
   subTicketMappingsForTickets: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
-    ({ args: { ticketIds } }) => {
+    ({ ctx, args: { ticketIds } }) => {
       return zql.ticket_sub_ticket_mappings
         .where(helpers => helpers.cmp('ticketId', 'IN', ticketIds))
         .related('subTicket', (subTicketQuery) =>
-          subTicketQuery.related('conversation').related('mappedTicket')
+          subTicketQuery.related('conversation').related('mappedTicket', (t) => reachableTicketsOnly(t, ctx))
         )
         .orderBy('id', 'asc');
     }

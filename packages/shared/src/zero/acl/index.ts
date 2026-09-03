@@ -1,6 +1,6 @@
 export { defineQuery } from './define-query';
 
-export { BaseQueryACL, QueryACLFactory } from './core';
+export { BaseQueryACL, QueryACLFactory, reachableTicketsOnly } from './core';
 export type {TableName, TableQuery } from './core';
 
 export {

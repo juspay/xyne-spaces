@@ -4,6 +4,7 @@ import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
 import { guestTicketAccessWhere, isGuestContext } from '../core/guest-acl-utils';
+import { reachableTicketsOnly } from '../core/ticket-access-utils';
 
 export class TicketsACL extends BaseQueryACL<'tickets'> {
   constructor(ctx: Context) {
@@ -41,14 +42,7 @@ export class TicketsACL extends BaseQueryACL<'tickets'> {
       );
     }
 
-    return query.whereExists('channel', (ch) =>
-      ch.where(({ or, cmp, exists }) =>
-        or(
-          cmp('visibility', ChannelVisibility.PUBLIC),
-          exists('participants', (p) => p.where('userId', this.ctx.userID))
-        )
-      )
-    );
+    return reachableTicketsOnly(query, this.ctx);
   
   }
 }
