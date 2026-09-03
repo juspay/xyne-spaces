@@ -76,11 +76,9 @@ export interface MetricsDelta {
 }
 
 export interface BotCommitAnalyticsRow {
-  category: 'bot-only' | 'human-only' | 'mixed';
-  totalPRs: number;
+  agentSlug: string;
   mergedPRs: number;
-  rejectedPRs: number;
-  mergeRate: number; // 0-1 decimal for formatPct()
+  totalCommits: number;
 }
 
 export interface BotCommitAnalytics {

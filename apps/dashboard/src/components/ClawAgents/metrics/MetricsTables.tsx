@@ -349,32 +349,6 @@ export const BotCommitAnalyticsTable = ({
 }: {
   analytics: BotCommitAnalytics;
 }): ReactElement => {
-  const getCategoryLabel = (category: string): string => {
-    switch (category) {
-      case 'bot-only':
-        return 'Bot-attributed';
-      case 'human-only':
-        return 'Human-attributed';
-      case 'mixed':
-        return 'Mixed (Bot + Human)';
-      default:
-        return category;
-    }
-  };
-
-  const getCategoryDesc = (category: string): string => {
-    switch (category) {
-      case 'bot-only':
-        return 'PRs with only bot commits';
-      case 'human-only':
-        return 'PRs with only human commits';
-      case 'mixed':
-        return 'PRs with both bot and human commits';
-      default:
-        return '';
-    }
-  };
-
   return (
     <div>
       {/* Show analysis status if any pending/failed */}
@@ -392,37 +366,28 @@ export const BotCommitAnalyticsTable = ({
         <table className='w-full min-w-[640px]'>
           <thead>
             <tr className='text-left'>
-              <th className={th}>Attribution</th>
-              <th className={cn(th, 'text-right')}>Total PRs</th>
-              <th className={cn(th, 'text-right')}>Merged</th>
-              <th className={cn(th, 'text-right')}>Rejected</th>
-              <th className={cn(th, 'text-right')}>Merge Rate</th>
+              <th className={th}>Agent</th>
+              <th className={cn(th, 'text-right')}>Merged PRs</th>
+              <th className={cn(th, 'text-right')}>Total Commits</th>
             </tr>
           </thead>
           <tbody>
             {analytics.rows.length === 0 && (
               <tr>
-                <td colSpan={5} className='py-8 text-center text-sm text-muted-foreground'>
-                  No analyzed PRs in this window.
+                <td colSpan={3} className='py-8 text-center text-sm text-muted-foreground'>
+                  No bot commits in merged PRs for this window.
                 </td>
               </tr>
             )}
             {analytics.rows.map(row => (
-              <tr key={row.category} className='border-t border-border'>
+              <tr key={row.agentSlug} className='border-t border-border'>
                 <td className={td}>
-                  <p className='font-medium'>{getCategoryLabel(row.category)}</p>
-                  <p className='text-xs text-muted-foreground'>{getCategoryDesc(row.category)}</p>
+                  <p className='font-mono text-sm font-medium'>{row.agentSlug}</p>
                 </td>
-                <td className={cn(td, 'text-right tabular-nums')}>{row.totalPRs}</td>
                 <td className={cn(td, 'text-right tabular-nums text-green-600 dark:text-green-400')}>
                   {row.mergedPRs}
                 </td>
-                <td className={cn(td, 'text-right tabular-nums text-destructive')}>
-                  {row.rejectedPRs}
-                </td>
-                <td className={cn(td, 'text-right tabular-nums font-medium')}>
-                  {formatPct(row.mergeRate)}
-                </td>
+                <td className={cn(td, 'text-right tabular-nums')}>{row.totalCommits}</td>
               </tr>
             ))}
           </tbody>

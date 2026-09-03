@@ -18,38 +18,28 @@ export class PrAnalyticsController {
       const windowEnd = new Date();
       const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
 
-      // Categorize and aggregate PRs by bot attribution
-      const categorizedPRs = await db.$queryRaw<
+      // Get per-agent statistics for merged PRs that had bot commits
+      const agentStats = await db.$queryRaw<
         Array<{
-          category: 'bot-only' | 'human-only' | 'mixed';
-          total_prs: bigint;
+          agent_slug: string;
           merged_prs: bigint;
-          rejected_prs: bigint;
+          total_commits: bigint;
         }>
       >`
-        WITH categorized_prs AS (
-          SELECT
-            id,
-            status,
-            CASE
-              WHEN "botCommitCount" > 0 AND "humanCommitCount" = 0 THEN 'bot-only'
-              WHEN "botCommitCount" = 0 AND "humanCommitCount" > 0 THEN 'human-only'
-              WHEN "botCommitCount" > 0 AND "humanCommitCount" > 0 THEN 'mixed'
-            END as category
-          FROM "pull_requests"
-          WHERE "commitAnalysisStatus" = 'COMPLETED'
-            AND "date" >= ${windowStart}
-            AND "date" < ${windowEnd}
-            AND "workspaceId" = ${workspaceId}
-        )
         SELECT
-          category,
-          COUNT(*)::bigint as total_prs,
-          SUM(CASE WHEN status = 'MERGED' THEN 1 ELSE 0 END)::bigint as merged_prs,
-          SUM(CASE WHEN status IN ('DECLINED', 'CLOSED') THEN 1 ELSE 0 END)::bigint as rejected_prs
-        FROM categorized_prs
-        WHERE category IS NOT NULL
-        GROUP BY category
+          c."agentSlug" as agent_slug,
+          COUNT(DISTINCT pr.id)::bigint as merged_prs,
+          COUNT(c.id)::bigint as total_commits
+        FROM commits c
+        INNER JOIN pull_requests pr ON c."pullRequestId" = pr.id
+        WHERE c."agentSlug" IS NOT NULL
+          AND pr.status = 'MERGED'
+          AND pr."commitAnalysisStatus" = 'COMPLETED'
+          AND pr."date" >= ${windowStart}
+          AND pr."date" < ${windowEnd}
+          AND pr."workspaceId" = ${workspaceId}
+        GROUP BY c."agentSlug"
+        ORDER BY merged_prs DESC, total_commits DESC
       `;
 
       // Get PR analysis status counts
@@ -70,17 +60,11 @@ export class PrAnalyticsController {
       `;
 
       // Process results
-      const rows = categorizedPRs.map((r) => {
-        const totalPRs = Number(r.total_prs);
-        const mergedPRs = Number(r.merged_prs);
-        return {
-          category: r.category,
-          totalPRs,
-          mergedPRs,
-          rejectedPRs: Number(r.rejected_prs),
-          mergeRate: totalPRs > 0 ? mergedPRs / totalPRs : 0,
-        };
-      });
+      const rows = agentStats.map((r) => ({
+        agentSlug: r.agent_slug,
+        mergedPRs: Number(r.merged_prs),
+        totalCommits: Number(r.total_commits),
+      }));
 
       const totalAnalyzed = analysisStatus
         .filter((r) => r.commitAnalysisStatus === 'COMPLETED')
@@ -95,9 +79,6 @@ export class PrAnalyticsController {
         .reduce((sum, r) => sum + Number(r.count), 0);
 
       res.json({
-        days,
-        windowStart: windowStart.toISOString(),
-        windowEnd: windowEnd.toISOString(),
         rows,
         totalAnalyzed,
         totalPending,
