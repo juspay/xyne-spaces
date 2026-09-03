@@ -4204,6 +4204,7 @@ model SavedUserConfiguration {
   updatedAt   DateTime
 
   values      SavedUserConfigurationValue[]
+  viewAccess  ViewAccess[]
 
   @@unique([userId, contextId, name])
   @@index([contextType, contextId])
@@ -4226,6 +4227,23 @@ model SavedUserConfigurationValue {
 
   @@index([configId])
   @@map("saved_user_configuration_values")
+  @@schema("public")
+}
+
+model ViewAccess {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String                @id @default(cuid())
+  viewId      String
+  entityType  String
+  entityId    String
+  sharedBy    String
+  createdAt   DateTime
+
+  view        SavedUserConfiguration @relation(fields: [viewId], references: [id], onDelete: Cascade)
+
+  @@index([viewId])
+  @@index([entityType, entityId])
+  @@map("view_access")
   @@schema("public")
 }
 

@@ -76,6 +76,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
+import { getTicketStatusColor } from '../../Tickets/CalendarView/CompactTicketBadge/utils';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
@@ -202,7 +203,6 @@ const toVespaProjectTicket = (result: {
 });
 
 const fetchProjectTicketsPageFromVespa = async (
-  projectId: string,
   query: string,
   offset: number,
 ): Promise<{
@@ -215,7 +215,6 @@ const fetchProjectTicketsPageFromVespa = async (
     query: query || '*',
     type: 'tickets',
     apps: 'ticket',
-    projectId,
     limit: 200,
     offset,
   });
@@ -1105,14 +1104,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     setProjectTicketSearch('');
     setIsAddTicketMenuOpen(false);
     projectTicketsRequestIdRef.current += 1;
-  }, [ticket?.projectId]);
+  }, [ticket?.id]);
 
   const loadProjectTicketsPage = useCallback(
     async (offset: number, replace: boolean): Promise<void> => {
-      if (!ticket?.projectId) {
-        return;
-      }
-
       const normalizedQuery = projectTicketSearch.trim();
       const requestId = ++projectTicketsRequestIdRef.current;
       const isInitialLoad = replace || offset === 0;
@@ -1124,11 +1119,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       try {
-        const response = await fetchProjectTicketsPageFromVespa(
-          ticket.projectId,
-          normalizedQuery,
-          offset,
-        );
+        const response = await fetchProjectTicketsPageFromVespa(normalizedQuery, offset);
 
         if (requestId !== projectTicketsRequestIdRef.current) {
           return;
@@ -1161,7 +1152,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           message: String('[TicketDetails] Failed to load Vespa project tickets'),
           context: [
             {
-              projectId: ticket.projectId,
               offset,
               query: normalizedQuery || '*',
               error,
@@ -1182,11 +1172,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }
       }
     },
-    [projectTicketSearch, ticket?.projectId],
+    [projectTicketSearch],
   );
 
   useEffect(() => {
-    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+    if (!isAddTicketMenuOpen) {
       return;
     }
 
@@ -1196,7 +1186,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (projectTicketSearch.trim()) {
       void loadProjectTicketsPage(0, true);
     }
-  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+  }, [isAddTicketMenuOpen, loadProjectTicketsPage, projectTicketSearch]);
 
   const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
     setIsAddTicketMenuOpen(open);
@@ -3563,7 +3553,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   {stageReadOnly ? (
                     <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <TicketStatusIcon size={14} />
+                      <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       {ticket.stageName || 'Not set'}
                     </span>
                   ) : (
@@ -3572,7 +3562,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       selectedValue={ticket.stageName}
                       onValueChange={handleStageChange}
                       placeholder='Set Status'
-                      icon={<TicketStatusIcon size={14} />}
+                      icon={
+                        <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
+                      }
+                      getItemIcon={item =>
+                        (() => {
+                          const stage = selectorStages.find(s => s.name === item.name);
+                          const itemStatusV2 = stage?.defaultTicketStatusV2 ?? ticket.statusV2;
+                          return (
+                            <TicketStatusIcon
+                              size={14}
+                              color={getTicketStatusColor(itemStatusV2)}
+                            />
+                          );
+                        })()
+                      }
                       noBorder={true}
                       isItemDisabled={item => item.name === ticket.stageName}
                     />
