@@ -64,7 +64,6 @@ import {
   DraftOrigin,
   Schema,
   CollectionRole,
-  VCSProviderType,
   ReleaseTrackingMode,
   MessageArtifactStatus,
 } from './schema.js';
@@ -4552,7 +4551,6 @@ export const mutators = defineMutators({
         projectId: z.string(),
         mainBoardId: z.string(),
         mainBoardName: z.string(),
-        vcsProvider: z.nativeEnum(VCSProviderType),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
         applications: z.array(

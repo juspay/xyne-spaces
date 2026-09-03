@@ -63,7 +63,41 @@ const ScheduledMessageCard = ({
     return `${istHours}:${istMinutes}`;
   };
 
-  const scheduleText = formatDays(scheduledMessage.daysOfWeek);
+  const ordinalLabel: Record<number, string> = {
+    1: '1st',
+    2: '2nd',
+    3: '3rd',
+    4: '4th',
+    5: 'last',
+  };
+  const weekdayNames = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+  ];
+
+  const formatSchedule = (): string => {
+    // Monthly is signalled by daysOfWeek === "-"; monthlyValue is the packed schedule.
+    if (scheduledMessage.daysOfWeek === '-') {
+      const value = scheduledMessage.monthlyValue ?? 0;
+      if (scheduledMessage.monthlyMode === 'DAY_OF_MONTH') {
+        return value === -1 ? 'Monthly on the last day' : `Monthly on day ${value}`;
+      }
+      if (scheduledMessage.monthlyMode === 'NTH_WEEKDAY') {
+        const ordinal = Math.floor(value / 10);
+        const weekday = value % 10;
+        return `Monthly on the ${ordinalLabel[ordinal] ?? ''} ${weekdayNames[weekday] ?? ''}`;
+      }
+      return 'Monthly';
+    }
+    return formatDays(scheduledMessage.daysOfWeek);
+  };
+
+  const scheduleText = formatSchedule();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.key === 'Enter' || e.key === ' ') {

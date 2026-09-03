@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
+  ExternalLink as SquareArrowOutUpRight,
   GitBranch,
   LockClose as Lock,
   LinkBrokenSlant as Unlink,
@@ -4654,6 +4655,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <span className='flex flex-col text-left'>
                   <span className='text-sm font-semibold text-foreground'>{rcaButtonTitle}</span>
                   <span className='text-xs text-muted-foreground'>{rcaButtonSubtitle}</span>
+                </span>
+              </span>
+              <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
+            </button>
+          </div>
+        )}
+
+        {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
+          <div className='mt-4'>
+            <button
+              type='button'
+              onClick={() =>
+                void navigate(`/listProjects/${ticket.projectId}/releases/${ticket.id}`, {
+                  state: { returnToUrl: location.pathname + location.search },
+                })
+              }
+              data-track-category='Tickets'
+              data-track-name='OpenReleaseViewFromTicket'
+              data-testid='open-release-view-button'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+            >
+              <span className='inline-flex items-center gap-3'>
+                <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
+                  <SquareArrowOutUpRight size={18} />
+                </span>
+                <span className='flex flex-col text-left'>
+                  <span className='text-sm font-semibold text-foreground'>Open release view</span>
+                  <span className='text-xs text-muted-foreground'>
+                    Dev tickets, envs, migrations &amp; timeline for this release
+                  </span>
                 </span>
               </span>
               <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />

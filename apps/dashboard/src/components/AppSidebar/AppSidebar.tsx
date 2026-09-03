@@ -200,11 +200,17 @@ const AppSidebar = (): ReactElement => {
     return '/' + (pathname.split('/')[1] || '');
   };
 
-  const activeRoute = getActiveRoute(
+  const relativePath =
     workspaceId && location.pathname.startsWith(`/${workspaceId}`)
       ? location.pathname.slice(`/${workspaceId}`.length) || '/'
-      : location.pathname,
-  );
+      : location.pathname;
+
+  // Release Manager reuses the /listProjects/:id URL family; keep it highlighted there.
+  const inReleaseManager =
+    relativePath.startsWith('/listProjects/') &&
+    (relativePath.includes('/releases/') ||
+      (location.state as { from?: string } | null)?.from === 'releaseManager');
+  const activeRoute = inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
 
   const isSupportHome = SUPPORT_HOME_ROUTES.includes(activeRoute);
   const isSupportReused = SUPPORT_REUSED_ROUTES.includes(activeRoute);

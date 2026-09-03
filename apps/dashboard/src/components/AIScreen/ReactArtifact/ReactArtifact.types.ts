@@ -61,6 +61,9 @@ export interface ReactArtifactViewProps {
   fill?: boolean;
   /** Shows an expand affordance when the artifact can also open full-screen. */
   onExpand?: (artifact: ReactArtifactRef) => void;
+  /** Accessible name for the expand control — it opens the pane for a saved
+   *  app and a dialog for anything else, and the label should say which. */
+  expandLabel?: string;
   /** Shows a close affordance; set when rendered inside the full-screen dialog. */
   onClose?: () => void;
   /**

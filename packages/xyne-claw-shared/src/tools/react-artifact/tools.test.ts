@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildReactArtifact,
   formatReactArtifactResult,
+  mergeArtifactParams,
   createReactArtifactTool,
   type ReactArtifactPayload,
   type ReactArtifactManifest,
@@ -537,5 +538,179 @@ describe("session scoping guidance", () => {
 
   it("warns against dropping earlier work on an update", () => {
     expect(createReactArtifactTool.description).toMatch(/do not drop features you built/i);
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Incremental updates (Step 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function baseApp(overrides: Partial<ReactArtifactPayload> = {}): ReactArtifactPayload {
+  return {
+    version: 1,
+    title: "Ticket dashboard",
+    entry: "/App.tsx",
+    template: "react-ts",
+    files: [
+      { path: "/App.tsx", content: "export default () => <Chart />;" },
+      { path: "/Chart.tsx", content: "export const Chart = () => <div>chart</div>;" },
+      { path: "/theme.css", content: ".a{color:red}" },
+    ],
+    dependencies: { recharts: "latest" },
+    dataRequirements: [],
+    ...overrides,
+  };
+}
+
+describe("mergeArtifactParams", () => {
+  it("replaces only the files sent and inherits the rest", () => {
+    const merged = mergeArtifactParams(baseApp(), {
+      files: [{ path: "/Chart.tsx", content: "export const Chart = () => <div>NEW</div>;" }],
+    });
+
+    const files = merged["files"] as Array<{ path: string; content: string }>;
+    expect(files).toHaveLength(3);
+    expect(files.find((f) => f.path === "/Chart.tsx")?.content).toContain("NEW");
+    expect(files.find((f) => f.path === "/App.tsx")?.content).toContain("<Chart />");
+    expect(merged["title"]).toBe("Ticket dashboard");
+    expect(merged["entry"]).toBe("/App.tsx");
+    expect(merged["dependencies"]).toEqual({ recharts: "latest" });
+  });
+
+  it("adds a file that is not in the base", () => {
+    const merged = mergeArtifactParams(baseApp(), {
+      files: [{ path: "/Legend.tsx", content: "export const Legend = () => null;" }],
+    });
+    expect((merged["files"] as unknown[]).length).toBe(4);
+  });
+
+  it("removes files named in deleteFiles", () => {
+    const merged = mergeArtifactParams(baseApp(), {
+      files: [{ path: "/App.tsx", content: "export default () => null;" }],
+      deleteFiles: ["/Chart.tsx"],
+    });
+    const paths = (merged["files"] as Array<{ path: string }>).map((f) => f.path);
+    expect(paths).toEqual(["/App.tsx", "/theme.css"]);
+  });
+
+  it("rejects deleting a file the app does not have", () => {
+    expect(() =>
+      mergeArtifactParams(baseApp(), { files: [], deleteFiles: ["/nope.tsx"] }),
+    ).toThrow(/has no such file/i);
+  });
+
+  it("rejects deleting every file", () => {
+    expect(() =>
+      mergeArtifactParams(baseApp(), {
+        files: [],
+        deleteFiles: ["/App.tsx", "/Chart.tsx", "/theme.css"],
+      }),
+    ).toThrow(/cannot delete every file/i);
+  });
+
+  it("allows a delete-only turn", () => {
+    const merged = mergeArtifactParams(baseApp(), { deleteFiles: ["/theme.css"] });
+    expect((merged["files"] as Array<{ path: string }>).map((f) => f.path)).toEqual([
+      "/App.tsx",
+      "/Chart.tsx",
+    ]);
+  });
+
+  it("re-sending a deleted path keeps the file — deletions apply first", () => {
+    const merged = mergeArtifactParams(baseApp(), {
+      files: [{ path: "/Chart.tsx", content: "resurrected" }],
+      deleteFiles: ["/Chart.tsx"],
+    });
+    const chart = (merged["files"] as Array<{ path: string; content: string }>).find(
+      (f) => f.path === "/Chart.tsx",
+    );
+    expect(chart?.content).toBe("resurrected");
+  });
+
+  it("inherits dependencies when omitted and replaces them when sent", () => {
+    expect(mergeArtifactParams(baseApp(), { files: [] })["dependencies"]).toEqual({
+      recharts: "latest",
+    });
+    expect(
+      mergeArtifactParams(baseApp(), { files: [], dependencies: { "date-fns": "latest" } })[
+        "dependencies"
+      ],
+    ).toEqual({ "date-fns": "latest" });
+  });
+
+  it("never inherits the summary — it describes this turn", () => {
+    const merged = mergeArtifactParams(baseApp(), { files: [] });
+    expect(merged["summary"]).toBeUndefined();
+  });
+
+  it("blocks a reserved path arriving through deleteFiles", () => {
+    expect(() =>
+      mergeArtifactParams(baseApp(), { files: [], deleteFiles: ["/components/ui/card.tsx"] }),
+    ).toThrow();
+  });
+
+  it("the merged whole is re-validated, so a patch cannot orphan the entry", () => {
+    const merged = mergeArtifactParams(baseApp(), { deleteFiles: ["/App.tsx"] });
+    expect(() => buildReactArtifact(merged)).toThrow(/entry/i);
+  });
+});
+
+describe("createReactArtifactTool update mode", () => {
+  it("rejects an unknown mode", async () => {
+    expect(await run(validParams({ mode: "patch" }))).toMatch(/`mode` must be/);
+  });
+
+  it("still builds normally in the default (create) mode", async () => {
+    expect(await run(validParams())).toContain("REACT_ARTIFACT_START");
+  });
+
+  it("update without a conversation steers back to create rather than rebuilding", async () => {
+    const result = await run(validParams({ mode: "update" }));
+    expect(result).toMatch(/no conversation/i);
+    expect(result).toMatch(/mode: "create"/);
+    expect(result).not.toContain("REACT_ARTIFACT_START");
+  });
+});
+
+describe("readArtifactAppFileTool", () => {
+  it("is registered with a read-only shape", async () => {
+    const { readArtifactAppFileTool } = await import("./readTool.js");
+    expect(readArtifactAppFileTool.slug).toBe("read-app-file");
+    expect(readArtifactAppFileTool.isWriteTool).toBeFalsy();
+    expect(readArtifactAppFileTool.inputSchema.required ?? []).toEqual([]);
+  });
+
+  it("reports plainly when the run has no conversation", async () => {
+    const { readArtifactAppFileTool } = await import("./readTool.js");
+    expect(await readArtifactAppFileTool.execute({})).toMatch(/no conversation/i);
+  });
+});
+
+describe("create-app description teaches incremental updates", () => {
+  it("tells the model to read before changing and to send only changed files", () => {
+    expect(createReactArtifactTool.description).toContain("read-app-file");
+    expect(createReactArtifactTool.description).toMatch(/mode: "update"/);
+    expect(createReactArtifactTool.description).toMatch(/ONLY the files you changed/i);
+  });
+});
+
+describe("S2S config is actually reachable at runtime", () => {
+  // xyne-claw builds tool context with resolveToolConfig(tool.configSchema, …),
+  // so an undeclared key is simply absent — the read-back then goes out with no
+  // x-s2s-key and claw-auth returns 401. That failure is silent: the tool falls
+  // back to advising a full rebuild, which looks like the model choosing badly
+  // rather than a misconfiguration.
+  it("create-app declares the auth URL and S2S key it reads", () => {
+    const keys = Object.keys(createReactArtifactTool.configSchema ?? {});
+    expect(keys).toContain("XYNE_CLAW_AUTH_URL");
+    expect(keys).toContain("XYNE_CLAW_S2S_KEY");
+  });
+
+  it("read-app-file declares them too", async () => {
+    const { readArtifactAppFileTool } = await import("./readTool.js");
+    const keys = Object.keys(readArtifactAppFileTool.configSchema ?? {});
+    expect(keys).toContain("XYNE_CLAW_AUTH_URL");
+    expect(keys).toContain("XYNE_CLAW_S2S_KEY");
   });
 });

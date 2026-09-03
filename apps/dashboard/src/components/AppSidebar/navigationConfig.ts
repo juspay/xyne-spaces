@@ -213,7 +213,7 @@ export const filterNavItemsByPermission = (
     let hasAccess = true;
     if (requiresAccess) {
       if (resourceName === 'SDLC') {
-        // Any tier (READ/WRITE/ADMIN) unlocks the SDLC screen.
+        // Any tier (READ/WRITE/ADMIN) unlocks the screen.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
       } else if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
         hasAccess = permissions.some(

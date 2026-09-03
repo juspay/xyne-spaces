@@ -254,11 +254,14 @@ const RecordingsV2Screen = (): ReactElement => {
       void navigate(`/recordings/${recordingId}`, {
         state: {
           recordingIds: filteredRecordings.map(recording => recording.externalId),
+          // The labels on screen right now double as the detail picker's
+          // suggestions — same rows this screen's label filter is built from.
+          labelSuggestions: availableLabels,
           from: `${location.pathname}${location.search}`,
         },
       });
     },
-    [filteredRecordings, location.pathname, location.search, navigate],
+    [availableLabels, filteredRecordings, location.pathname, location.search, navigate],
   );
 
   const handleOpenLiveRecordingWindow = useCallback(
@@ -266,11 +269,14 @@ const RecordingsV2Screen = (): ReactElement => {
       void navigate(`/recordings/${recordingId}`, {
         state: {
           recordingIds: filteredRecordings.map(recording => recording.externalId),
+          // The labels on screen right now double as the detail picker's
+          // suggestions — same rows this screen's label filter is built from.
+          labelSuggestions: availableLabels,
           from: `${location.pathname}${location.search}`,
         },
       });
     },
-    [filteredRecordings, location.pathname, location.search, navigate],
+    [availableLabels, filteredRecordings, location.pathname, location.search, navigate],
   );
 
   const handleShareRecording = useCallback((recording: RecordingsV2PillRecording): void => {
