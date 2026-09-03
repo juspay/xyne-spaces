@@ -7,6 +7,8 @@ import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import type { InlineSuggestionRow } from '../CollaborativeCanvasEditor/suggestionDecorations';
+
+const NO_SUGGESTIONS: InlineSuggestionRow[] = [];
 import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
 import { CanvasList } from '../CanvasList';
 import { CanvasShareModal } from '../CanvasShareModal';
@@ -215,6 +217,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [openCommentCount, setOpenCommentCount] = useState(0);
   useEffect(() => {
     setOpenCommentCount(0);
+  }, [selectedCanvas?.id]);
+  const [suggestionReviewMode, setSuggestionReviewMode] = useState(false);
+  useEffect(() => {
+    setSuggestionReviewMode(false);
   }, [selectedCanvas?.id]);
   const [isCreating, setIsCreating] = useState(false);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
@@ -908,7 +914,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   // while this canvas has pending suggestions; a missed event degrades to a
   // STALE change at accept time, never a misplaced one.
   const hasPendingSuggestionsRef = useRef(false);
-  hasPendingSuggestionsRef.current = suggestionRows.some(row => row.status === 'PENDING');
+  const hasPendingSuggestions = suggestionRows.some(row => row.status === 'PENDING');
+  hasPendingSuggestionsRef.current = hasPendingSuggestions;
+  useEffect(() => {
+    if (!hasPendingSuggestions) setSuggestionReviewMode(false);
+  }, [hasPendingSuggestions]);
   const prevBlockIdsRef = useRef<string[] | null>(null);
   const deletionEventsRef = useRef<BlockDeletionEvent[]>([]);
   const deletionFlushRef = useRef<number | null>(null);
@@ -1739,6 +1749,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 canEdit={canEdit}
                 editorContainerRef={canvasContentRef}
                 editorRef={editorRef}
+                reviewMode={suggestionReviewMode}
+                onToggleReview={() => setSuggestionReviewMode(v => !v)}
               />
             )}
 
@@ -1793,7 +1805,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas.createdBy}
                   currentUserRole={selectedCanvas.accessLevel ?? null}
-                  suggestions={suggestionRows as unknown as InlineSuggestionRow[]}
+                  suggestions={
+                    suggestionReviewMode
+                      ? (suggestionRows as unknown as InlineSuggestionRow[])
+                      : NO_SUGGESTIONS
+                  }
                 />
               ) : (
                 <CanvasEditor

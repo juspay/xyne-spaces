@@ -12,6 +12,9 @@ import {
   type RefObject,
 } from 'react';
 import { toast } from 'sonner';
+import { Check, Eye, EyeOff, Sparkles, X } from 'lucide-react';
+import { Button } from '../../ui/Button';
+import { Badge } from '../../ui/Badge';
 
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useZero } from '../../../hooks/useZero';
@@ -43,6 +46,8 @@ interface Props {
   editorContainerRef?: RefObject<HTMLElement | null>;
   editorRef?: RefObject<SuggestionEditorHandle | null>;
   className?: string;
+  reviewMode?: boolean;
+  onToggleReview?: () => void;
 }
 
 /** A batch stays visible (rows painted, counted) while it has a PENDING row. */
@@ -67,6 +72,8 @@ export const CanvasSuggestionsPanel = ({
   editorContainerRef,
   editorRef,
   className,
+  reviewMode = false,
+  onToggleReview,
 }: Props): ReactElement | null => {
   const z = useZero();
   const [busy, setBusy] = useState<string | null>(null);
@@ -79,7 +86,7 @@ export const CanvasSuggestionsPanel = ({
     [rows],
   );
   const pending = visible.filter(r => r.status === 'PENDING');
-  const attention = visible.filter(r => r.status !== 'PENDING');
+  const attention = visible.filter(r => r.status === 'STALE');
 
   // Fires one mutator with busy-state + error toast handling.
   const run = useCallback(
@@ -168,33 +175,63 @@ export const CanvasSuggestionsPanel = ({
     return (): void => container.removeEventListener('click', onClick);
   }, [editorContainerRef, canEdit, resolveRow]);
 
+  useEffect(() => {
+    if (!reviewMode) return;
+    const container = editorContainerRef?.current;
+    if (!container) return;
+    const raf = requestAnimationFrame(() => {
+      container
+        .querySelector('[data-suggestion-widget]')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return (): void => cancelAnimationFrame(raf);
+  }, [reviewMode, editorContainerRef]);
+
   if (!batches) return null;
+
+  const count = pending.length;
 
   return (
     <div
       className={cn(
-        'border-b border-border bg-amber-50/50 px-4 py-2 dark:bg-amber-950/20',
+        'flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/50 px-3 py-2 text-sm md:px-4',
         className,
       )}
+      data-testid='canvas-suggestions-bar'
     >
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <span className='flex items-center gap-2 text-sm font-medium text-foreground'>
-          <span aria-hidden>✦</span>
-          Agent proposed {pending.length} change
-          {pending.length === 1 ? '' : 's'} — review them in the document
-          {batches > 1 ? (
-            <span className='text-xs text-muted-foreground'>({batches} proposals)</span>
-          ) : null}
-          {attention.length ? (
-            <span className='rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-900'>
-              {attention.length} need attention
-            </span>
-          ) : null}
+      <div className='flex min-w-0 flex-wrap items-center gap-2'>
+        <Sparkles size={16} className='shrink-0 text-primary' aria-hidden />
+        <span className='truncate'>
+          <span className='font-medium text-foreground'>
+            {count} suggested {count === 1 ? 'change' : 'changes'}
+          </span>
+          <span className='text-muted-foreground'> from the agent</span>
         </span>
-        {canEdit && pending.length > 0 ? (
-          <div className='flex items-center gap-2'>
-            <button
-              type='button'
+        {attention.length ? (
+          <Badge variant='outline' className='text-muted-foreground'>
+            {attention.length} no longer {attention.length === 1 ? 'applies' : 'apply'}
+          </Badge>
+        ) : null}
+      </div>
+      <div className='flex items-center gap-2'>
+        {onToggleReview ? (
+          <Button
+            variant='secondary'
+            size='sm'
+            onClick={onToggleReview}
+            aria-pressed={reviewMode}
+            data-track-category='CANVAS'
+            data-track-name={reviewMode ? 'SUGGESTIONS_HIDE' : 'SUGGESTIONS_REVIEW'}
+          >
+            {reviewMode ? <EyeOff size={14} /> : <Eye size={14} />}
+            {reviewMode ? 'Hide' : 'Review'}
+          </Button>
+        ) : null}
+        {canEdit && count > 0 ? (
+          <>
+            <Button
+              variant='outline'
+              size='sm'
               disabled={busy !== null}
               onClick={() => {
                 void (async (): Promise<void> => {
@@ -212,13 +249,14 @@ export const CanvasSuggestionsPanel = ({
                 })();
               }}
               data-track-category='CANVAS'
-              data-track-name='suggestion_accept_all'
-              className='rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50'
+              data-track-name='SUGGESTIONS_ACCEPT_ALL'
             >
+              <Check size={14} />
               Accept all
-            </button>
-            <button
-              type='button'
+            </Button>
+            <Button
+              variant='outline'
+              size='sm'
               disabled={busy !== null}
               onClick={() => {
                 void run(
@@ -232,12 +270,12 @@ export const CanvasSuggestionsPanel = ({
                 );
               }}
               data-track-category='CANVAS'
-              data-track-name='suggestion_reject_all'
-              className='rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted'
+              data-track-name='SUGGESTIONS_REJECT_ALL'
             >
+              <X size={14} />
               Reject all
-            </button>
-          </div>
+            </Button>
+          </>
         ) : null}
       </div>
     </div>
