@@ -1154,6 +1154,52 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     })();
   }, [currentTitle]);
 
+  // The docx export rasterizes custom blocks and runs the converter on the main
+  // thread, so it can take a few seconds with nothing else on screen. The ref is
+  // the re-entrancy guard (a second click during that window must not start a
+  // second export); the state only drives the menu label.
+  const docxExportInFlightRef = useRef(false);
+  const [isExportingDocx, setIsExportingDocx] = useState(false);
+  const handleExportDocx = useCallback((): void => {
+    if (docxExportInFlightRef.current) return;
+    docxExportInFlightRef.current = true;
+    setIsExportingDocx(true);
+    const toastId = toast.loading('Preparing document…');
+    void (async (): Promise<void> => {
+      try {
+        const result = await editorRef.current?.exportDocx(titleRef.current || currentTitle);
+        // No editor mounted — the click landed while the canvas was still loading.
+        if (!result) throw new Error('The canvas is still loading. Please try again.');
+        // The desktop save path reports a refusal here rather than throwing.
+        if (result.error) throw new Error(result.error);
+        if (result.saved) {
+          if (result.filePath) {
+            toast.success('Document saved successfully', {
+              id: toastId,
+              description: `Saved to ${getDirectoryFromPath(result.filePath)}`,
+            });
+          } else {
+            toast.success('Document download started', { id: toastId });
+          }
+        } else {
+          // The only remaining case: the user cancelled the native save dialog.
+          toast.dismiss(toastId);
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to export canvas as .docx', {
+          id: toastId,
+        });
+        logger.error(Event.CANVAS_EXPORT_FAILED, {
+          message: 'Canvas docx export failed',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        docxExportInFlightRef.current = false;
+        setIsExportingDocx(false);
+      }
+    })();
+  }, [currentTitle]);
+
   // Rows for the canvas-details popover behind the avatar stack. Any row whose
   // underlying data is missing is dropped rather than rendered empty.
   const canvasDetailRows = useMemo((): { label: string; value: ReactNode }[] => {
@@ -1484,6 +1530,22 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                   >
                                     <File02PdfFormat size={16} className='shrink-0' />
                                     <span className='flex-1'>Export as PDF</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    className='gap-2'
+                                    onClick={handleExportDocx}
+                                    disabled={isExportingDocx}
+                                    data-testid='canvas-export-docx'
+                                    data-track-category='CANVAS'
+                                    data-track-name='Export_Docx'
+                                    data-track-metadata={JSON.stringify({
+                                      canvasId: selectedCanvas.id,
+                                    })}
+                                  >
+                                    <FileText size={16} className='shrink-0' />
+                                    <span className='flex-1'>
+                                      {isExportingDocx ? 'Preparing…' : 'Export as Docx'}
+                                    </span>
                                   </DropdownMenuItem>
                                 </DropdownMenuSubContent>
                               </DropdownMenuSub>

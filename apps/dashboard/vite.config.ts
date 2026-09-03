@@ -108,6 +108,9 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       exclude: ['@terrastruct/d2'],
+      // Dynamically imported only from the canvas docx export; pre-bundle it so
+      // the first export click doesn't hit a discover-and-reload failure in dev.
+      include: ['@turbodocx/html-to-docx', 'buffer'],
     },
     server: {
       port: devPort,

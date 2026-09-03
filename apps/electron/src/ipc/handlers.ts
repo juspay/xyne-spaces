@@ -187,6 +187,9 @@ function assertTrustedErrorReportSender(event: IpcMainInvokeEvent): void {
   }
 }
 
+// Upper bound for a canvas export payload handed to the main process to write.
+const MAX_CANVAS_EXPORT_BYTES = 50 * 1024 * 1024;
+
 export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
@@ -386,7 +389,8 @@ export function setupIpcHandlers(): void {
     return { saved: true };
   });
 
-  ipcMain.handle('canvas:export-pdf', async (_event, { fileName, html }: { fileName: string; html: string }) => {
+  ipcMain.handle('canvas:export-pdf', async (event, { fileName, html }: { fileName: string; html: string }) => {
+    if (!isAppWindowSender(event)) return { saved: false };
     const result = await dialog.showSaveDialog({
       defaultPath: fileName,
       filters: [
@@ -424,7 +428,8 @@ export function setupIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('canvas:export-markdown', async (_event, { fileName, content }: { fileName: string; content: string }) => {
+  ipcMain.handle('canvas:export-markdown', async (event, { fileName, content }: { fileName: string; content: string }) => {
+    if (!isAppWindowSender(event)) return { saved: false };
     const result = await dialog.showSaveDialog({
       defaultPath: fileName,
       filters: [
@@ -436,6 +441,34 @@ export function setupIpcHandlers(): void {
     if (result.canceled || !result.filePath) return { saved: false };
 
     await fs.writeFile(result.filePath, content, 'utf8');
+    return { saved: true, filePath: result.filePath };
+  });
+
+  ipcMain.handle('canvas:export-docx', async (event, { fileName, data }: { fileName: string; data: ArrayBuffer }) => {
+    if (!isAppWindowSender(event)) {
+      return { saved: false, error: 'Saving is not available from this window.' };
+    }
+    const payload: unknown = data;
+    const byteLength =
+      payload instanceof ArrayBuffer || ArrayBuffer.isView(payload) ? payload.byteLength : -1;
+    if (byteLength < 0) {
+      return { saved: false, error: 'The document could not be prepared for saving.' };
+    }
+    if (byteLength > MAX_CANVAS_EXPORT_BYTES) {
+      return { saved: false, error: 'Document is too large to save (limit 50 MB).' };
+    }
+
+    const result = await dialog.showSaveDialog({
+      defaultPath: fileName,
+      filters: [
+        { name: 'Word Document', extensions: ['docx'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) return { saved: false };
+
+    await fs.writeFile(result.filePath, Buffer.from(new Uint8Array(data)));
     return { saved: true, filePath: result.filePath };
   });
 
