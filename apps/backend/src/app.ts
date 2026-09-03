@@ -45,7 +45,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsRouter } from '@/workflowsV2/router';
+import { workflowsRouter, workflowsTriggerRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -351,7 +351,11 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
-    // this.app.use('/api/workflows-v2', webhookLimiter, workflowsPublicRouter);
+    // Registers only the app-token trigger route, which must precede the session
+    // middleware: an app JWT is signed with the app's own secret, which
+    // authMiddleware.authenticate cannot verify. Every other /api/workflows-v2 request
+    // falls through to the authenticated mount below.
+    this.app.use('/api/workflows-v2', workflowsTriggerRouter);
 
     // Claw MCP route (user + app auth) — must be before /api/query
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
