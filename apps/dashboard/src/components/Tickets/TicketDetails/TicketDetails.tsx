@@ -3090,11 +3090,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
             );
           } else {
+            const workspaceId = location.pathname.split('/')[1];
             const base = buildChannelRoute(
               `${mappedTicket.channelId}/${mappedTicket.conversationId}/${mappedTicket.id}`,
               { selectedTab: 'thread' },
             );
-            void navigate(`${base}#origin=${mappedTicket.conversationId}`);
+            void navigate(`/${workspaceId}${base}#origin=${mappedTicket.conversationId}`);
           }
         }
         return;
@@ -4731,11 +4732,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
                     );
                   } else {
+                    const workspaceId = location.pathname.split('/')[1];
                     const base = buildChannelRoute(
                       `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
                       { selectedTab: 'thread' },
                     );
-                    void navigate(`${base}#origin=${parentTicket.conversationId}`);
+                    void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`);
                   }
                 };
 

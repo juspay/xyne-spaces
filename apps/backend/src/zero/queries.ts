@@ -1394,9 +1394,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       if (hasSubTickets) {
-        query = query.where(({ exists }) =>
-          exists('subTicketMappings', (m) => m.where('subTicketId', 'IS NOT', null)),
-        );
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       if (userGroups && userGroups.length > 0) {
@@ -1769,9 +1767,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       if (hasSubTickets) {
-        query = query.where(({ exists }) =>
-          exists('subTicketMappings', (m) => m.where('subTicketId', 'IS NOT', null)),
-        );
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       // Mailbox folder server-side filtering. Spam and Starred REQUIRE an overlay row, so they
