@@ -1,4 +1,4 @@
-import { ReactElement, useCallback, useEffect, useRef, useMemo } from 'react';
+import { ReactElement, useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import {
@@ -89,6 +89,7 @@ const ConversationPanelV2 = ({
   showHeader = true,
   hideComposer = false,
   skipMarkAsRead = false,
+  useLocalTabState = false,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -100,6 +101,10 @@ const ConversationPanelV2 = ({
   // Used by read-only surfaces such as the Unreads inbox.
   hideComposer?: boolean;
   skipMarkAsRead?: boolean;
+  // When true (e.g. rendered in the search-results pane, which owns its own `?tab=`
+  // for the doc-type filter), keep the active tab in local state instead of the URL —
+  // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
+  useLocalTabState?: boolean;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -142,7 +147,10 @@ const ConversationPanelV2 = ({
       ? activityNavigationState.linkedCutoffCreatedAt
       : null;
 
-  const tab = searchParams.get('tab') || getDefaultTab();
+  const [localTab, setLocalTab] = useState<string>(getDefaultTab());
+  const urlTab = searchParams.get('tab');
+  const urlTabOrDefault = urlTab && isValidTab(urlTab) ? urlTab : getDefaultTab();
+  const tab = useLocalTabState ? localTab : urlTabOrDefault;
   const ticketId = searchParams.get('ticketId');
   const conversationId = searchParams.get('conversationId');
   const canvasId = searchParams.get('canvasId');
@@ -213,11 +221,14 @@ const ConversationPanelV2 = ({
   // (context consumers) on each panel render.
   const handleTabChange = useCallback(
     (tab: string, e?: React.MouseEvent): void => {
-      if (isValidTab(tab)) {
+      if (!isValidTab(tab)) return;
+      if (useLocalTabState) {
+        setLocalTab(tab);
+      } else {
         standaloneNavigate(navigate, `${baseRoute}/${channelId}?tab=${tab}`, { event: e });
       }
     },
-    [isValidTab, navigate, baseRoute, channelId],
+    [isValidTab, navigate, baseRoute, channelId, useLocalTabState],
   );
 
   const conversationTabContextValue = useMemo(

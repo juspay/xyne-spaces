@@ -5,7 +5,6 @@ import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
   GitCompare,
-  Hash,
   Loader2,
   Mail,
   MessageCircle,
@@ -27,10 +26,8 @@ const utcToIst = (utcString?: string): string => {
     hour12: true,
   });
 };
-import ThreadMessages from '../ThreadPannel';
-import { UserProfile } from '../../ui/UserProfile/UserProfile';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import {
   DEFAULT_SEARCH_FILTERS,
   type SearchResultsFilters,
@@ -47,7 +44,6 @@ import {
   useAllChannels,
   useUserChannelStatuses,
 } from '../../../hooks/useChannels';
-import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
@@ -66,7 +62,8 @@ import {
 } from '../ChatDirectory/ChannelCommandMenu.types';
 import { ChannelCategory } from '../ChatDirectory/ChatDirectory.types';
 import { Channel } from '@xyne/shared';
-import { navigateToSearchResult } from '../../../utils/searchNavigation';
+import { resolveOrCreateDmChannelId } from '../../../utils/searchNavigation';
+import { toast } from 'sonner';
 import Avatar from '../../ui/Avatar/Avatar';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
@@ -86,18 +83,10 @@ import {
 } from '@xyne/shared';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
-
-type SidePanelState =
-  | { kind: 'thread'; thread: SearchResultsThread }
-  | { kind: 'profile'; userId: string }
-  | {
-      kind: 'channel';
-      channelId: string;
-      conversationId: string;
-      conversationCreatedAt?: number;
-      matchedMessageId?: string | null;
-    }
-  | null;
+import type { SidePanelState } from './SidePanel/PanelTypes';
+import { SearchResultsSidePanel } from './SidePanel/SidePanel';
+import { resolveResultClick } from './SidePanel/ResultClickResolver';
+import ChannelIcon from '../ChannelIcon/ChannelIcon';
 
 function parseDocTypeParam(value: string | null): SearchResultsFilters['docType'] | null {
   return value && (VALID_DOC_TYPES as string[]).includes(value)
@@ -620,13 +609,16 @@ const SearchResults = (): ReactElement => {
   ]);
   const searchRequestKey = JSON.stringify([query, filterKey]);
   const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
+  // Latest search key, read by async handlers to drop panels that resolve after a re-search.
+  const fullSearchKeyRef = useRef(fullSearchKey);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [query]);
 
-  // Reset auto-open and close stale panel whenever the search or any filter changes
+  // Close any open panel and refresh the async race key whenever the search or filters change
   useEffect(() => {
+    fullSearchKeyRef.current = fullSearchKey;
     setSelectedPanel(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
@@ -653,6 +645,42 @@ const SearchResults = (): ReactElement => {
       });
     },
     [],
+  );
+  // Open a user's 1:1 DM chat in the right pane, creating the DM if it doesn't exist.
+  // Async; drops the result if the search changed while the DM was being created.
+  const openUserDm = useCallback(
+    (userId: string): void => {
+      const keyAtClick = fullSearchKeyRef.current;
+      void (async (): Promise<void> => {
+        try {
+          const channelId = await resolveOrCreateDmChannelId(userId, allChannelsForNav);
+          if (fullSearchKeyRef.current !== keyAtClick) return;
+          setSelectedPanel({ kind: 'channel', channelId });
+        } catch {
+          toast.error('Failed to open conversation');
+        }
+      })();
+    },
+    [allChannelsForNav],
+  );
+  // Single entry point for a result-card click: resolve what it should do, then do it.
+  const openResult = useCallback(
+    (result: DisplaySearchResult): void => {
+      const action = resolveResultClick(result, allChannelsForNav);
+      if (!action) return;
+      switch (action.kind) {
+        case 'panel':
+          setSelectedPanel(action.panel);
+          return;
+        case 'navigate':
+          void navigate(action.to, action.state ? { state: action.state } : undefined);
+          return;
+        case 'userDm':
+          openUserDm(action.userId);
+          return;
+      }
+    },
+    [allChannelsForNav, navigate, openUserDm],
   );
   const handleClosePanel = (): void => {
     setSelectedPanel(null);
@@ -776,7 +804,7 @@ const SearchResults = (): ReactElement => {
             results={results}
             loadMoreRef={loadMoreRef}
             selectedPanel={selectedPanel}
-            onSelectUser={handleSelectUser}
+            onOpenResult={openResult}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
             compareMode={compareMode}
@@ -879,7 +907,7 @@ interface ResultsBodyProps {
   results: DisplaySearchResult[];
   loadMoreRef: React.RefObject<HTMLDivElement | null>;
   selectedPanel: SidePanelState;
-  onSelectUser: (userId: string) => void;
+  onOpenResult: (result: DisplaySearchResult) => void;
   channelData: ReturnType<typeof useAllChannels>;
   searchableChannels: Array<{
     channel: Channel;
@@ -973,7 +1001,7 @@ function UserResultCard({
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_USER'
     >
-      <Avatar userId={result.id} size='md' showActiveStatus={false} />
+      <Avatar userId={result.id} size='md' showActiveStatus />
       <div className='min-w-0'>
         <div className='flex items-center gap-2 min-w-0'>
           <p
@@ -1023,7 +1051,7 @@ function ResultsBody({
   results,
   loadMoreRef,
   selectedPanel,
-  onSelectUser,
+  onOpenResult,
   channelData,
   searchableChannels,
   compareMode,
@@ -1034,7 +1062,6 @@ function ResultsBody({
   docType,
   filteredLocalChannels,
 }: ResultsBodyProps): ReactElement {
-  const navigate = useNavigate();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const channelLabelsById = useMemo(
     () =>
@@ -1060,9 +1087,9 @@ function ResultsBody({
   const renderCard = (result: DisplaySearchResult): ReactElement | null => {
     const key = `${result.type}-${result.id}`;
 
-    // User card — opens profile panel
+    // User card — opens the user's DM chat in the right pane.
     if (result.type === 'user') {
-      return <UserResultCard key={key} result={result} onSelectUser={onSelectUser} />;
+      return <UserResultCard key={key} result={result} onSelectUser={() => onOpenResult(result)} />;
     }
 
     // Channel card
@@ -1073,19 +1100,13 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() =>
-            void navigate(isDeskChannel ? `/support/${channelId}` : `/chat/dir/${channelId}`)
-          }
+          onClick={() => onOpenResult(result)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name={isDeskChannel ? 'OPEN_DESK_CHANNEL' : 'OPEN_CHANNEL'}
         >
           <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
-            {isDeskChannel ? (
-              <Mail className='size-4 text-muted-foreground' />
-            ) : (
-              <Hash className='size-4 text-muted-foreground' />
-            )}
+            <ChannelIcon channel={channel} glyphClassName='text-muted-foreground' avatarSize='md' />
           </div>
           <div className='min-w-0'>
             <p className='text-sm font-medium text-foreground truncate'>
@@ -1110,7 +1131,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+          onClick={() => onOpenResult(result)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_ATTACHMENT'
@@ -1157,7 +1178,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+          onClick={() => onOpenResult(result)}
           className='w-full flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_MAIL'
@@ -1198,8 +1219,6 @@ function ResultsBody({
     const ctx = result.searchContext;
     if (!ctx?.channelId || !ctx?.conversationId) return null;
     const isTicket = result.type === 'ticket';
-    const isDeskTicket =
-      isTicket && isDeskChannelType(channelData?.find(c => c.id === ctx.channelId)?.type);
 
     // Ticket summary from the search fields — desk tickets render it as a compact
     // card; normal tickets serialize it into ticket_md so the message bubble shows
@@ -1222,16 +1241,18 @@ function ResultsBody({
         }
       : null;
 
-    // Desk tickets: their message-bound widget can't render (bot/AI initial
-    // message, missing ticket_md), so render a compact data-driven ticket card.
-    if (isDeskTicket && ticketSummary) {
+    // Tickets render as a compact data-driven ticket card. Desk tickets navigate to
+    // the support view; board tickets open their details in the right pane. Rendering
+    // both as TicketCardV2 (single onClick) avoids the message-bubble's embedded ticket
+    // widget fighting the card click for board tickets.
+    if (isTicket && ticketSummary) {
       return (
         <div key={key} className='w-full'>
           <TicketCardV2
             ticket={ticketSummary}
             isConversation
             width='max-w-none w-full'
-            onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+            onClick={() => onOpenResult(result)}
           />
         </div>
       );
@@ -1571,18 +1592,30 @@ function MobileLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): R
   );
 }
 
+// Default pane split when a side panel is open. Desk tickets render a 3-column ticket view
+// (email thread + details/AI sidebar), so they open wider than other panes.
+const RESULTS_SIZE_FULL = '100%'; // no panel open
+const RESULTS_SIZE_WITH_PANEL = '55%';
+const RESULTS_MIN_SIZE = '30%';
+const SIDE_PANEL_SIZE = '45%';
+const SIDE_PANEL_MIN_SIZE = '25%';
+
+// Layout persistence key (ResizableGroup autoSaveId → localStorage). One split for every panel type —
+// a single consistent side-panel width avoids the results list reflowing when switching result types.
+const PANE_LAYOUT_ID = 'search-results-panel';
+
 function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): ReactElement {
   return (
     <ResizableGroup
       orientation='horizontal'
       className='h-full'
-      autoSaveId='search-results-thread'
+      autoSaveId={PANE_LAYOUT_ID}
       panelIds={selectedPanel ? ['search-results', 'search-side-panel'] : ['search-results']}
     >
       <Panel
         id='search-results'
-        defaultSize={selectedPanel ? '60%' : '100%'}
-        minSize={selectedPanel ? '30%' : '100%'}
+        defaultSize={selectedPanel ? RESULTS_SIZE_WITH_PANEL : RESULTS_SIZE_FULL}
+        minSize={selectedPanel ? RESULTS_MIN_SIZE : RESULTS_SIZE_FULL}
       >
         <div className='h-full'>{resultsColumn}</div>
       </Panel>
@@ -1591,7 +1624,7 @@ function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): 
           <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
             <div className='w-[1px] h-full bg-border' />
           </Separator>
-          <Panel id='search-side-panel' defaultSize='40%' minSize='25%'>
+          <Panel id='search-side-panel' defaultSize={SIDE_PANEL_SIZE} minSize={SIDE_PANEL_MIN_SIZE}>
             <div className='h-full animate-slide-in-from-right'>
               <SearchResultsSidePanel panel={selectedPanel} onClose={onClose} />
             </div>
@@ -1602,61 +1635,5 @@ function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): 
   );
 }
 
-function SearchResultsSidePanel({
-  panel,
-  onClose,
-}: {
-  panel: NonNullable<SidePanelState>;
-  onClose: () => void;
-}): ReactElement {
-  const { user: currentUser } = useAuth();
-  const navigate = useNavigate();
-
-  return (
-    <div className='h-full flex flex-col min-h-0 bg-background'>
-      {panel.kind === 'channel' ? (
-        <ConversationPanelV2
-          channelId={panel.channelId}
-          previousChannelId={null}
-          linkedConversationIdOverride={panel.conversationId}
-          linkedItemCreatedAtOverride={panel.conversationCreatedAt ?? null}
-          onClose={onClose}
-        />
-      ) : panel.kind === 'thread' ? (
-        <ThreadMessages
-          channelId={panel.thread.channelId}
-          conversationId={panel.thread.conversationId}
-          matchedMessageId={panel.thread.matchedMessageId ?? null}
-          showChannelLink
-          onChannelLinkClick={() =>
-            void navigate(
-              `/chat/dir/${panel.thread.channelId}#origin=${panel.thread.conversationId}`,
-            )
-          }
-          onClose={onClose}
-        />
-      ) : (
-        <>
-          <div className='flex items-center justify-end p-2 border-b border-border shrink-0'>
-            <button
-              onClick={onClose}
-              className='p-2 rounded-md hover:bg-accent'
-              aria-label='Close profile'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='CLOSE_PROFILE_PANEL'
-            >
-              <X size={18} />
-            </button>
-          </div>
-          <div className='flex-1 min-h-0 overflow-y-auto'>
-            <UserProfile
-              userId={panel.userId}
-              isOwnProfile={currentUser?.id === panel.userId}
-              className='border-0 rounded-none shadow-none'
-            />
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// Side-panel rendering, click resolution, and panel types now live in ./SidePanel
+// (SidePanel, ResultClickResolver, PanelTypes).
