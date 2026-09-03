@@ -7,7 +7,10 @@
     "prepare": "husky",
     "setup": "pnpm install && pnpm run build:shared",
     "install:all": "pnpm install",
-    "build:shared": "pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/icons --filter agentic-framework --filter @xyne/litellm-client run build",
+    "sdk:coverage": "node scripts/sdk-gates/coverage.mjs",
+    "sdk:contract-check": "node scripts/sdk-gates/contract-check.mjs",
+    "sdk:verify": "pnpm --filter @xyne/spaces-sdk run typecheck && pnpm --filter @xyne/spaces-sdk run test && pnpm run sdk:coverage && pnpm run sdk:contract-check",
+    "build:shared": "pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/icons --filter agentic-framework --filter @xyne/litellm-client --filter @xyne/spaces-sdk run build",
     "doctor": "node scripts/xyne-doctor.mjs",
     "doctor:demo": "node scripts/xyne-doctor.mjs --demo",
     "doctor:test": "node --test scripts/xyne-doctor.test.mjs",
@@ -217,6 +220,7 @@
       }
     },
     "overrides": {
+      "@xyne/spaces-sdk": "link:./packages/xyne-spaces-sdk",
       "@excalidraw/excalidraw": "0.18.1",
       "@excalidraw/excalidraw>react": "^19.2.1",
       "@excalidraw/excalidraw>react-dom": "^19.2.1",

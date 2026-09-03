@@ -1,5 +1,16 @@
 {
   "mcpServers": {
+    "xyne-spaces": {
+      "command": "node",
+      "args": [
+        "packages/xyne-spaces-mcp/dist/index.js"
+      ],
+      "env": {
+        "XYNE_SPACES_BASE_URL": "https://spaces.xyne.juspay.net",
+        "XYNE_SPACES_API_KEY": "xyne_sk_...",
+        "XYNE_SPACES_READONLY": "1"
+      }
+    },
     "xyne-genius-rca": {
       "type": "http",
       "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/genius/mcp"

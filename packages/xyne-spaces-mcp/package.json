@@ -1,0 +1,31 @@
+{
+  "name": "xyne-spaces-mcp",
+  "license": "Apache-2.0",
+  "version": "0.1.0",
+  "description": "MCP server for Xyne Spaces — channels, threads, messages, tickets, and search over the Spaces public API",
+  "type": "module",
+  "bin": {
+    "xyne-spaces-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepare": "pnpm run clean && pnpm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xyne/spaces-sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}
