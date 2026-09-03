@@ -18,15 +18,18 @@ export const TagChip = ({
   tag: string;
   color?: string | undefined;
   reason?: string | null | undefined;
-}): JSX.Element => (
-  <span
-    title={reason ?? undefined}
-    className='inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold text-white leading-none'
-    style={{ backgroundColor: safeColor(color) }}
-  >
-    {tag}
-  </span>
-);
+}): JSX.Element => {
+  const c = safeColor(color);
+  return (
+    <span
+      title={reason ?? undefined}
+      className='inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium leading-none border'
+      style={{ color: c, backgroundColor: c + '1a', borderColor: c + '4d' }}
+    >
+      {tag}
+    </span>
+  );
+};
 
 export const CategoryLabel = ({
   name,
