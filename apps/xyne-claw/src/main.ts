@@ -18,6 +18,7 @@ import { litellmModelsRouter } from "./routes/litellm-models.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
 import { beginDraining, isDraining } from "./drain.js";
 import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker.js";
+import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("main");
 
@@ -34,6 +35,7 @@ if (!SERVER.s2sKey) {
 }
 
 
+startLoopWatchdog();
 initStore();
 startSessionCleanup();
 const runQueueWorker = startRunQueueWorker();
@@ -117,6 +119,7 @@ async function shutdown(signal: string): Promise<void> {
       log.error("[xyne-claw] run queue worker close failed:", err);
     });
   }
+  stopLoopWatchdog();
   server.close(() => process.exit(0));
 }
 

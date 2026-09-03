@@ -5,8 +5,9 @@ import { gcsDownloadResultMarker } from "./storage.js";
 import {
   claimOwnership,
   createOwnerToken,
+  currentOwnerPod,
   fenceSession,
-  isOwnedByOther,
+  ownerStatus,
   refreshOwnership,
   releaseOwnership,
   registerOwnedSession,
@@ -143,11 +144,17 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         throw new DelayedError();
       }
       const ownerToken = createOwnerToken();
-      if (await isOwnedByOther(sessionId, ownerToken)) {
+      const status = await ownerStatus(sessionId, ownerToken);
+      if (status === "alive-other") {
         metric.count("run_queue_owner_alive", { agent, session: sessionId });
         clog.warn(`[run-queue] previous runner still owns session=${sessionId} — deferring takeover`);
         await job.moveToDelayed(Date.now() + OWNER_DEFER_MS, token);
         throw new DelayedError();
+      }
+      if (status === "dead-other") {
+        const deadPod = await currentOwnerPod(sessionId).catch(() => null);
+        metric.count("run_queue_owner_dead_takeover", { agent, session: sessionId });
+        clog.warn(`[run-queue] owner pod ${deadPod ?? "unknown"} has no alive key — taking over session=${sessionId}`);
       }
       metric.count("run_queue_claimed", { agent, session: sessionId, attempt: job.attemptsMade + 1 });
       await postProgressLabel(job.data, "Working on it...").catch(() => {});
@@ -187,8 +194,8 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
     {
       connection,
       concurrency: 10_000,
-      lockDuration: 120_000,
-      maxStalledCount: 1,
+      lockDuration: 180_000,
+      maxStalledCount: 2,
     },
   );
 
