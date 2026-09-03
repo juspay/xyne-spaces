@@ -16,7 +16,20 @@
  *    readable by any viewer with devtools. `owner` is stamped from the session
  *    and reads filter to ("global", caller), so a user-scoped record is private
  *    no matter what the app does. A user row SHADOWS a global row with the same
- *    key on point reads — "default settings, overridden per user" for free.
+ *    key on POINT reads only — "default settings, overridden per user" for
+ *    free. `list` is deliberately raw: it returns both rows (each carries its
+ *    scope) because offset pagination cannot collapse a pair split across two
+ *    pages without lying about completeness. Clients that want the collapsed
+ *    view filter on scope, or list 'user' and 'global' separately.
+ *
+ *  - **Global rows are shared-WRITE, not just shared-read — deliberately.**
+ *    Any user who can open the app can put/delete scope:"global" records,
+ *    last-write-wins; that is what makes shared app state (a common board
+ *    config, a team counter) possible without a server component. Per-user
+ *    data belongs in scope:"user", which nobody else can touch. If a future
+ *    app needs owner-only shared state, gate it here (resolveApp already
+ *    fetches ownerUserId; compare it against the requester) — do not trust
+ *    app-side checks for it.
  *
  *  - **Every read is bounded.** `limit` is capped, `offset` is capped (a large
  *    OFFSET still walks the index), keys are length-capped, and list order is
@@ -245,6 +258,8 @@ artifactAppStorageRouter.post("/query", async (req: Request, res: Response): Pro
 
   // list. limit+1 answers hasMore without a count; ties across owners break on
   // owner so the order is total and offset paging never skips or repeats.
+  // No shadow-collapse here (see header): under scope "any" a key with both a
+  // user and a global row yields TWO records, distinguished by their scope.
   const rows = await prisma.artifactAppRecord.findMany({
     where: { ...base, ...(q.prefix ? { dynamicKey: { startsWith: q.prefix } } : {}) },
     orderBy: [{ dynamicKey: q.order }, { owner: q.order }],
