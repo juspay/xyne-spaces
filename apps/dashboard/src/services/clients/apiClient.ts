@@ -87,7 +87,6 @@ apiConfig.interceptors.request.use(
       // Skip setting x-workspace-id for non-workspace routes
       const nonWorkspaceRoutes = [
         'auth',
-        'sdk-sso',
         'invite',
         'community',
         'workspaces',

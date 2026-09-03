@@ -161,7 +161,6 @@ export const Event = {
   SLASH_COMMAND_ARTIFACT_INVARIANT_FAILED: "slash_command_artifact_invariant_failed",
   FRONTEND_ERROR: "frontend_error",
   DESK_CLAW_AGENTS_FETCH_FAILED: "desk_claw_agents_fetch_failed",
-  SDK_SSO_AUTH_ERROR: "sdk_sso_auth_error",
 
   // Lotus Mobile Events
   LOTUS_APP_LAUNCH: "lotus_app_launch",
