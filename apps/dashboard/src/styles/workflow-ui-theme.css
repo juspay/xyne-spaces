@@ -1,3 +1,12 @@
+/*
+ * Layered, not plainly imported. The package ships its own unscoped Tailwind build, so its
+ * `.flex-col` and `.border-b` used to land after ours and beat the variants that override
+ * them — `md:flex-row`, `md:border-b-0` — collapsing every two-column layout in the app.
+ * Unlayered CSS always beats layered, so this holds regardless of import order.
+ */
+@layer workflow-ui;
+@import '@xyne/workflow-ui/styles.css' layer(workflow-ui);
+
 /**
  * Theme bridge for @xyne/workflow-ui.
  *

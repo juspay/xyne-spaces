@@ -1200,6 +1200,7 @@ export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
   CALL: 'CALL',
+  WORKFLOW: 'WORKFLOW',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];
