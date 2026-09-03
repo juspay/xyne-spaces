@@ -7,7 +7,6 @@ import { useUploadDocuments, useCleanupAllVespaMemory } from '../../hooks/useMem
 import { useIsMemoryAdmin } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import Dialog from '../ui/Dialog';
-import { Button } from '../ui/Button/Button';
 
 interface MemoryHeaderProps {
   filters: MemoryFilters;
@@ -252,17 +251,15 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             >
               Cancel
             </button>
-            <Button
-              variant='ghost'
+            <button
               onClick={handleUploadSubmit}
               disabled={uploadMutation.isPending || !repoUrl.trim()}
-              className='h-auto px-4 py-2 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              trackId='memory_upload_documents'
+              className='px-4 py-2 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category='Memory'
               data-track-name='ConfirmUploadDocuments'
             >
               {uploadMutation.isPending ? 'Uploading…' : 'Upload'}
-            </Button>
+            </button>
           </div>
         </div>
       </Dialog>
@@ -285,17 +282,15 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             >
               Cancel
             </button>
-            <Button
-              variant='ghost'
+            <button
               onClick={handleCleanupConfirm}
               disabled={cleanupMutation.isPending}
-              className='h-auto px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              trackId='memory_cleanup_all_vespa'
+              className='px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category='Memory'
               data-track-name='ConfirmCleanupVespaMemory'
             >
               {cleanupMutation.isPending ? 'Deleting…' : 'Delete All'}
-            </Button>
+            </button>
           </div>
         </div>
       </Dialog>

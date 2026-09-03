@@ -8,7 +8,6 @@ import { getStageColor } from '../../routes/KanbanBoardScreen/KanbanBoardScreen.
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { cn } from '../../utils/classNames';
 import { StagePicker } from '../Tickets/TicketListView/StagePicker';
-import { Button } from '../ui/Button/Button';
 
 export interface ReleaseStageOption {
   name: string;
@@ -132,9 +131,8 @@ export function ReleaseStagePicker({
           </div>
         ) : (
           stages.map(stage => (
-            <Button
+            <button
               key={stage.name}
-              variant='ghost'
               type='button'
               onClick={e => {
                 e.stopPropagation();
@@ -146,14 +144,13 @@ export function ReleaseStagePicker({
               )}
               data-track-category='Release'
               data-track-name='SelectRowStage'
-              trackId='select_release_stage'
             >
               <span
                 className='inline-block w-1.5 h-1.5 rounded-full'
                 style={{ backgroundColor: getStageColor(stage.name) }}
               />
               <span className='text-foreground'>{stage.name}</span>
-            </Button>
+            </button>
           ))
         )}
       </div>

@@ -79,7 +79,6 @@ import { RecipientPillExtension } from '../../ui/TipTapExtensions';
 import { Popover } from '../../ui/Popover/Popover';
 import { RecipientMentionSelector } from './RecipientMentionSelector';
 import { RecipientField as RecipientFieldRow } from './RecipientField';
-import { Button } from '../../ui/Button/Button';
 
 import {
   buildContactPool,
@@ -2179,15 +2178,13 @@ export const EmailComposer = ({
                   >
                     Back to edit
                   </button>
-                  <Button
+                  <button
                     type='button'
-                    variant='default'
                     onClick={runSendEmail}
                     disabled={isSending}
                     className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
                     data-track-category='Support'
                     data-track-name='ConfirmTwoStepSend'
-                    trackId='send_email_confirm'
                   >
                     {isSending ? (
                       <Loader2 size={14} className='animate-spin' />
@@ -2195,7 +2192,7 @@ export const EmailComposer = ({
                       <Send size={14} />
                     )}
                     {isSending ? 'Sending…' : 'Send email'}
-                  </Button>
+                  </button>
                 </div>
               </div>
             </div>
@@ -2429,9 +2426,8 @@ export const EmailComposer = ({
                         </button>
                       )}
                       {onClose && features.showDiscardButton && (
-                        <Button
+                        <button
                           type='button'
-                          variant='ghost'
                           onMouseDown={() => {
                             if (!isComposeMode) suppressNextReplyAutosaveRef.current = true;
                           }}
@@ -2500,10 +2496,9 @@ export const EmailComposer = ({
                           title='Discard draft'
                           data-track-category='Support'
                           data-track-name='DiscardComposerDraft'
-                          trackId='discard_composer_draft'
                         >
                           <Trash2 size={14} />
-                        </Button>
+                        </button>
                       )}
                       {onClose && features.showMinimizeButton && (
                         <button
@@ -2633,9 +2628,8 @@ export const EmailComposer = ({
                 side='bottom'
                 delayDuration={300}
               >
-                <Button
+                <button
                   type='button'
-                  variant='ghost'
                   onClick={() => {
                     void (async (): Promise<void> => {
                       const suggested = await subjectAI.generate(stripHtml(emailContent));
@@ -2647,14 +2641,13 @@ export const EmailComposer = ({
                   aria-label='Suggest subject with AI'
                   data-track-category='Support'
                   data-track-name='SuggestComposeSubject'
-                  trackId='generate_compose_subject'
                 >
                   {subjectAI.isGenerating ? (
                     <RefreshCw size={14} className='animate-spin' />
                   ) : (
                     <Wand2 size={14} />
                   )}
-                </Button>
+                </button>
               </Tooltip>
             )}
           </div>
@@ -3030,8 +3023,7 @@ export const EmailComposer = ({
                   </button>
                 </Tooltip>
               )}
-              <Button
-                variant='default'
+              <button
                 className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
                 onClick={runSendEmail}
                 disabled={
@@ -3051,14 +3043,13 @@ export const EmailComposer = ({
                   conversationId,
                   attachmentCount: attachments.length,
                 })}
-                trackId='send_email'
               >
                 {isSending ? (
                   <RefreshCw size={16} className='animate-spin' />
                 ) : (
                   <ArrowUp size={16} />
                 )}
-              </Button>
+              </button>
             </div>
           </div>
         )}

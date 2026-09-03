@@ -54,7 +54,6 @@ export const ResetDraftsConfirmOverlay = ({
           </Button>
           <Button
             onClick={onConfirm}
-            trackId='reset_component_drafts'
             data-track-category='COMPONENT_EDITOR'
             data-track-name='CONFIRM_RESET_DRAFTS'
           >

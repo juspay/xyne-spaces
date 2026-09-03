@@ -18,6 +18,11 @@ import { useZero } from '../../../hooks/useZero';
 import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
+import {
+  mixpanelService,
+  EVENTS,
+  EVENT_PROPERTIES,
+} from '../../../services/Analytics/mixpanelService';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
 import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
@@ -95,6 +100,18 @@ const ChatView = (): ReactElement => {
     prevChannelIdRef.current = channelId;
 
     if (!channel || !channelId) return;
+
+    // Track conversation opened (no sensitive data - only conversation type)
+    const conversationType =
+      channel.scopeType === ChannelScopeType.DM
+        ? EVENT_PROPERTIES.CONVERSATION_TYPES.DM
+        : channel.scopeType === ChannelScopeType.GROUP_DM
+          ? EVENT_PROPERTIES.CONVERSATION_TYPES.GROUP_DM
+          : EVENT_PROPERTIES.CONVERSATION_TYPES.CHANNEL;
+
+    mixpanelService.track(EVENTS.CONVERSATION_OPENED, {
+      type: conversationType,
+    });
   }, [channel, channelId, context.userID, zero]);
 
   // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.

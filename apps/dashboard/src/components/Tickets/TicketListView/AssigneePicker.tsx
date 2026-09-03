@@ -11,7 +11,6 @@ import { cn } from '../../../utils/classNames';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
-import { Button } from '../../ui/Button/Button';
 
 interface AssigneePickerProps {
   ticketId: string;
@@ -142,10 +141,8 @@ export function AssigneePicker({
           </div>
         </div>
         <div className='overflow-y-auto flex-1'>
-          <Button
-            variant='ghost'
+          <button
             type='button'
-            trackId='ticket_unassign_row'
             onClick={e => {
               e.stopPropagation();
               assign(null);
@@ -161,13 +158,11 @@ export function AssigneePicker({
               <X className='w-3 h-3 text-muted-foreground' />
             </span>
             <span className='text-foreground'>Unassigned</span>
-          </Button>
+          </button>
           {filteredUsers.map(user => (
-            <Button
+            <button
               key={user.id}
-              variant='ghost'
               type='button'
-              trackId='ticket_assign_row'
               onClick={e => {
                 e.stopPropagation();
                 handleSelectUser(user);
@@ -193,7 +188,7 @@ export function AssigneePicker({
                   Not in channel
                 </span>
               )}
-            </Button>
+            </button>
           ))}
           {filteredUsers.length === 0 && (
             <div className='px-3 py-3 text-xs text-muted-foreground text-center'>

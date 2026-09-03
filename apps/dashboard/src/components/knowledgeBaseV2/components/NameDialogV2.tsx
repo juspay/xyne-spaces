@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Button } from '../../ui/Button/Button';
 
 interface NameDialogV2Props {
   open: boolean;
@@ -103,17 +102,15 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
             >
               Cancel
             </button>
-            <Button
+            <button
               type='submit'
-              variant='ghost'
               disabled={!name.trim() || submitting}
               className='rounded-lg bg-muted-foreground px-4 py-2 text-sm font-medium text-background transition hover:bg-muted-foreground/90 disabled:opacity-50'
               data-track-category='knowledge-base'
               data-track-name='name-dialog-submit'
-              trackId='kb_name_dialog_submit'
             >
               {submitting ? (submittingLabel ?? 'Creating...') : submitLabel}
-            </Button>
+            </button>
           </div>
         </form>
       </div>

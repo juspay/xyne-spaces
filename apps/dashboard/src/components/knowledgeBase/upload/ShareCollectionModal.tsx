@@ -891,18 +891,16 @@ export const ShareCollectionModal = ({
                         <div className='flex items-center gap-1 pr-1'>
                           <span className='text-xs text-muted-foreground'>Viewer</span>
                           {collectionRole === 'OWNER' && (
-                            <Button
-                              variant='ghost'
+                            <button
                               type='button'
                               onClick={() => handleRemoveAccess(row)}
-                              trackId='remove_collection_access'
                               aria-label={`Remove ${row.channel?.name || 'channel'} access`}
                               data-track-category='knowledge-base'
                               data-track-name='access-remove-channel'
                               className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-red-600'
                             >
                               <X size={14} />
-                            </Button>
+                            </button>
                           )}
                         </div>
                       ) : locked ? (
@@ -1100,7 +1098,6 @@ export const ShareCollectionModal = ({
                 onClick={() => {
                   void handleShare();
                 }}
-                trackId='share_collection'
                 data-track-category='knowledge-base'
                 data-track-name='SHARE_COLLECTION'
                 className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'

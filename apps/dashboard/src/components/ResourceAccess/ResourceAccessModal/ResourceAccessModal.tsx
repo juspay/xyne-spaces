@@ -466,7 +466,6 @@ export const ResourceAccessModal = ({
             onClick={() => void handleSave()}
             data-track-category='RESOURCE_ACCESS'
             data-track-name='SAVE_RESOURCE_ACCESS'
-            trackId='save_resource_access'
             disabled={loading}
           >
             {loading ? 'Saving...' : 'Save Changes'}
@@ -499,7 +498,6 @@ export const ResourceAccessModal = ({
                   onClick={() => void handleConfirmAction()}
                   data-track-category='USER_ACTIVATION'
                   data-track-name='CONFIRM_ACTIVATION_ACTION'
-                  trackId={pendingAction === 'activate' ? 'activate_user' : 'deactivate_user'}
                   disabled={activationLoading}
                 >
                   {activationLoading

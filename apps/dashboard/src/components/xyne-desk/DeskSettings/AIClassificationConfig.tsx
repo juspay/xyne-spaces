@@ -8,7 +8,6 @@ import {
   SelectValue,
 } from '../../ui/Select/Select';
 import { TestClassificationForm } from './TestClassificationForm';
-import { Button } from '../../ui/Button/Button';
 import type {
   ClassificationMapping,
   SaveMappingPayload,
@@ -386,18 +385,16 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     </SelectContent>
                   </Select>
                   <div className='flex flex-row items-center justify-center gap-2 pt-1'>
-                    <Button
-                      variant='ghost'
+                    <button
                       type='button'
                       onClick={handleSaveEditRule}
                       disabled={!editCategory.trim() || !editUserGroup}
                       className='text-xs font-medium text-desk-accent disabled:opacity-50 disabled:cursor-not-allowed'
                       data-track-category='DeskSettings'
                       data-track-name='SaveEditRule'
-                      trackId='desk_classification_rule_update'
                     >
                       Save
-                    </Button>
+                    </button>
                     <button
                       type='button'
                       onClick={cancelEditRule}
@@ -437,18 +434,16 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     >
                       Edit
                     </button>
-                    <Button
-                      variant='ghost'
+                    <button
                       type='button'
                       onClick={() => handleDeleteRule(mapping.id)}
                       className='text-red-500 hover:text-red-600 transition-colors'
                       title='Delete rule'
                       data-track-category='DeskSettings'
                       data-track-name='DeleteClassificationRule'
-                      trackId='desk_classification_rule_delete'
                     >
                       <Trash2 size={14} />
-                    </Button>
+                    </button>
                   </div>
                 )}
               </div>
@@ -534,18 +529,16 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
               >
                 Cancel
               </button>
-              <Button
-                variant='ghost'
+              <button
                 type='button'
                 onClick={handleAddRule}
                 disabled={!newCategory.trim() || !newUserGroup}
                 className='rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='DeskSettings'
                 data-track-name='ConfirmAddRule'
-                trackId='desk_classification_rule_create'
               >
                 Add Rule
-              </Button>
+              </button>
             </div>
           </div>
         )}

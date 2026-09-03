@@ -19,7 +19,6 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Dialog } from '../ui/Dialog';
-import { Button } from '../ui/Button/Button';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
@@ -145,8 +144,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
           </button>
 
           {canToggleStar && (
-            <Button
-              variant='ghost'
+            <button
               className={cn(
                 'items-center justify-center p-1 rounded-md shrink-0 hover:bg-sidebar-accent',
                 // Display (not opacity) so a hidden control reserves no width and
@@ -158,7 +156,6 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 onToggleStar?.(canvas);
               }}
               title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
-              trackId='toggle_canvas_star'
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_STAR'
             >
@@ -167,7 +164,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 variant={canvas.isStarred ? 'Solid' : 'Stroke'}
                 {...(canvas.isStarred ? { className: 'text-status-pending' } : {})}
               />
-            </Button>
+            </button>
           )}
 
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>

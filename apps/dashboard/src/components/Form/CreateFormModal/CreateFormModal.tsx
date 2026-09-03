@@ -1075,7 +1075,6 @@ export const CreateFormModal = ({
             <Button
               variant='default'
               type='submit'
-              trackId={isEditMode ? 'update_form' : 'create_form'}
               disabled={
                 (isEditMode && isReadOnly) ||
                 (isEditMode && fields.length === 0) ||

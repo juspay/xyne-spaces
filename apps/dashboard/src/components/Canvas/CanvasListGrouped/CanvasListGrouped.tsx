@@ -6,7 +6,6 @@ import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import Input from '../../ui/Input';
-import { Button } from '../../ui/Button/Button';
 import { Dialog } from '../../ui/Dialog';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { canvasService } from '../../../services/Canvas/canvasService';
@@ -594,39 +593,35 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
             )}
           </div>
 
-          <Button
-            variant='ghost'
+          <button
             className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-foreground hover:bg-accent disabled:opacity-50'
             onClick={() =>
               channelCreateTarget && void handleCreateCanvasInChannel(channelCreateTarget)
             }
             disabled={isCreatingCanvas || !channelCreateTarget || !!channelCreateTarget?.isArchived}
-            trackId='create_canvas_in_channel_root'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_CHANNEL_ROOT'
           >
             <FileText className='w-4 h-4 text-muted-foreground shrink-0' />
             <span className='text-sm'>Create in channel</span>
-          </Button>
+          </button>
 
           <div className='space-y-2'>
             <div className='text-sm font-medium text-foreground'>Folders</div>
             {channelFoldersForTarget.length > 0 ? (
               <div className='space-y-1'>
                 {channelFoldersForTarget.map(folder => (
-                  <Button
+                  <button
                     key={folder.id}
-                    variant='ghost'
                     className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-foreground hover:bg-accent disabled:opacity-50'
                     onClick={() => handleCreateCanvasInChannelFolder(folder)}
                     disabled={isCreatingCanvas}
-                    trackId='create_canvas_in_channel_folder'
                     data-track-category='CANVAS'
                     data-track-name='CREATE_CANVAS_IN_CHANNEL_FOLDER'
                   >
                     <Folder className='w-4 h-4 text-amber-500 shrink-0' />
                     <span className='text-sm truncate'>{folder.name}</span>
-                  </Button>
+                  </button>
                 ))}
               </div>
             ) : (
@@ -649,17 +644,15 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                 placeholder='Folder name'
                 className='h-9 flex-1'
               />
-              <Button
-                variant='ghost'
+              <button
                 className='inline-flex items-center justify-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50'
                 onClick={handleCreateChannelFolder}
                 disabled={!channelCreateTarget || !!channelCreateTarget?.isArchived}
-                trackId='create_channel_canvas_folder'
                 data-track-category='CANVAS'
                 data-track-name='CREATE_CHANNEL_CANVAS_FOLDER'
               >
                 Create
-              </Button>
+              </button>
             </div>
           </div>
         </div>

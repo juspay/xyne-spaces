@@ -1,5 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { TextInput, TextArea, Button, ButtonType } from '@juspay/blend-design-system';
+import { mixpanelService } from '../../../services/Analytics/mixpanelService';
+import { EVENTS, EVENT_PROPERTIES } from '../../../services/Analytics/mixpanel.types';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
 import { usePlatform } from '../../../hooks/usePlatform';
 
@@ -69,6 +71,11 @@ export const ProjectForm = ({
             data.description = description.trim();
           }
           await onSubmit(data);
+
+          // Track project creation (no sensitive data - only metadata)
+          mixpanelService.track(EVENTS.INITIATE_ACTION, {
+            type: EVENT_PROPERTIES.ACTION_TYPES.PROJECT_CREATED,
+          });
         }
       } catch (err) {
         setError(

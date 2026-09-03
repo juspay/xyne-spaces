@@ -267,13 +267,11 @@ const ProfileView = ({
             {isPresenceDropdownOpen && (
               <div className='absolute left-0 top-full mt-1 w-40 p-1 bg-background rounded-md border shadow-md z-10'>
                 <div className='space-y-0.5'>
-                  <Button
-                    variant='ghost'
+                  <button
                     onClick={() => {
                       setLivePresenceStatus('ONLINE');
                       setIsPresenceDropdownOpen(false);
                     }}
-                    trackId='set_presence_online'
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceOnline'
@@ -284,14 +282,12 @@ const ProfileView = ({
                     {livePresenceStatus !== 'AWAY' && (
                       <Check className='size-3 ml-auto text-muted-foreground' />
                     )}
-                  </Button>
-                  <Button
-                    variant='ghost'
+                  </button>
+                  <button
                     onClick={() => {
                       setLivePresenceStatus('AWAY');
                       setIsPresenceDropdownOpen(false);
                     }}
-                    trackId='set_presence_away'
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceAway'
@@ -302,7 +298,7 @@ const ProfileView = ({
                     {livePresenceStatus === 'AWAY' && (
                       <Check className='size-3 ml-auto text-muted-foreground' />
                     )}
-                  </Button>
+                  </button>
                 </div>
               </div>
             )}
@@ -352,7 +348,6 @@ const ProfileView = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
-                trackId='clear_user_status'
                 data-track-category='PROFILE'
                 data-track-name='CLEAR_STATUS'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
@@ -392,7 +387,6 @@ const ProfileView = ({
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 onClick={handleResumeNotifications}
-                trackId='resume_notifications'
                 data-track-category='PROFILE'
                 data-track-name='ResumeNotifications'
               >
@@ -432,22 +426,19 @@ const ProfileView = ({
             {!showCustomDatePicker ? (
               <div className='space-y-0.5'>
                 {pauseOptions.map(option => (
-                  <Button
+                  <button
                     key={option.minutes}
-                    variant='ghost'
                     onClick={e => {
                       e.stopPropagation();
                       handlePauseNotifications(option.minutes);
                     }}
-                    trackId='pause_notifications'
-                    trackProps={{ duration: option.minutes }}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='PauseNotifications'
                     data-track-metadata={JSON.stringify({ duration: option.minutes })}
                   >
                     <span>{option.label}</span>
-                  </Button>
+                  </button>
                 ))}
                 <button
                   onClick={e => {
@@ -511,7 +502,6 @@ const ProfileView = ({
           type='button'
           className='!text-white w-full !bg-destructive rounded-3xl h-[44px] active:scale-[0.97] transition-transform duration-200'
           onClick={handleLogout}
-          trackId='logout'
           data-track-category='PROFILE'
           data-track-name='Logout'
         >

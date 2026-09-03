@@ -27,7 +27,6 @@ import type {
   MemoryFilters,
 } from '../../types/memory';
 import Dialog from '../ui/Dialog';
-import { Button } from '../ui/Button/Button';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -529,8 +528,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               {filters.sessionIdFilter.trim()}
             </span>
           </span>
-          <Button
-            variant='ghost'
+          <button
             onClick={() => {
               const sessionId = filters.sessionIdFilter.trim();
               deleteSessionMutation.mutate([sessionId], {
@@ -541,15 +539,14 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               });
             }}
             disabled={deleteSessionMutation.isPending}
-            className='h-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
             title='Delete all Vespa memory docs for this session'
-            trackId='memory_delete_session'
             data-track-category='Memory'
             data-track-name='DeleteSession'
           >
             <Trash2 size={12} />
             {deleteSessionMutation.isPending ? 'Deleting…' : 'Delete Session'}
-          </Button>
+          </button>
         </div>
       )}
 

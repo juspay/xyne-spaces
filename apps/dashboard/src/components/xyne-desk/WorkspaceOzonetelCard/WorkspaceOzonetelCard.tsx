@@ -18,7 +18,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { cn } from '../../../utils/classNames';
 import { useAllChannels } from '../../../hooks/useChannels';
-import { Button } from '../../ui/Button/Button';
 
 const inputClass =
   'w-full rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent';
@@ -384,7 +383,6 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       disabled={!data?.configured || subscribeMutation.isPending}
                       label={subscribeMutation.isPending ? 'Subscribing…' : 'Reconnect live events'}
                       trackName='SubscribeLiveEvents'
-                      trackId='subscribe_ozonetel_live_events'
                     />
                   </div>
 
@@ -661,18 +659,16 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
             </p>
             <div className='flex flex-wrap items-center gap-3'>
               {mutation.isSuccess ? <span className='text-sm text-green-600'>Saved</span> : null}
-              <Button
+              <button
                 type='button'
-                variant='ghost'
                 onClick={onSave}
                 disabled={!canSave || mutation.isPending}
                 className='rounded-[12px] border border-desk-accent bg-desk-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='workspace-ozonetel'
                 data-track-name='SaveConfig'
-                trackId='save_ozonetel_config'
               >
                 {mutation.isPending ? 'Saving…' : 'Save Ozonetel config'}
-              </Button>
+              </button>
             </div>
           </div>
         </div>
@@ -749,18 +745,15 @@ function ActionButton({
   disabled,
   label,
   trackName,
-  trackId,
 }: {
   onClick: () => void;
   disabled: boolean;
   label: string;
   trackName: string;
-  trackId?: string;
 }): ReactElement {
   return (
-    <Button
+    <button
       type='button'
-      variant='ghost'
       onClick={onClick}
       disabled={disabled}
       className={cn(
@@ -769,10 +762,9 @@ function ActionButton({
       )}
       data-track-category='workspace-ozonetel'
       data-track-name={trackName}
-      {...(trackId ? { trackId } : {})}
     >
       {label}
-    </Button>
+    </button>
   );
 }
 

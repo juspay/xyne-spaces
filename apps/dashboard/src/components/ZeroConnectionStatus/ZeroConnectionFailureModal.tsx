@@ -1,6 +1,5 @@
 import { ReactElement } from 'react';
 import { RefreshCw, X } from 'lucide-react';
-import { Button } from '../ui/Button/Button';
 import { isElectronApp } from '../../utils/electronApp';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
 import { useAuth } from '@/hooks/useAuth';
@@ -79,17 +78,15 @@ export const ZeroConnectionFailureModal = ({
         </p>
 
         {/* Refresh Button — behaviour differs between Electron and web */}
-        <Button
-          variant='ghost'
+        <button
           onClick={handleRefresh}
-          trackId='reload_app_on_connection_failure'
           className='w-full py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-all duration-200 bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg'
           data-track-category='ZERO_CONNECTION'
           data-track-name='RELOAD_APP_ON_CONNECTION_FAILURE'
         >
           <RefreshCw className='w-5 h-5' strokeWidth={2.5} />
           <span>{isElectron ? 'Reload App' : 'Refresh Connection'}</span>
-        </Button>
+        </button>
       </div>
     </div>
   );

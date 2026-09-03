@@ -8,7 +8,6 @@ import type {
   PrApprovalOutcome,
 } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
-import { Button } from '../../ui/Button/Button';
 
 /**
  * PR approval artifact — an interactive human-in-the-loop (HITL) gate.
@@ -175,9 +174,8 @@ const Actions: React.FC = () => {
 
   return (
     <div className='flex items-center gap-1.5'>
-      <Button
+      <button
         type='button'
-        variant='ghost'
         disabled={state.submitting}
         onClick={() => void run('approved', APPROVE_ACTION_ID)}
         className={cn(
@@ -187,14 +185,12 @@ const Actions: React.FC = () => {
         )}
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='CLICK_APPROVE'
-        trackId='pr_approval_approve'
       >
         {inFlight === 'approved' && <Spinner size={14} className='animate-spin' />}
         Approve
-      </Button>
-      <Button
+      </button>
+      <button
         type='button'
-        variant='ghost'
         disabled={state.submitting}
         onClick={() => void run('denied', DENY_ACTION_ID)}
         className={cn(
@@ -204,11 +200,10 @@ const Actions: React.FC = () => {
         )}
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='CLICK_DENY'
-        trackId='pr_approval_deny'
       >
         {inFlight === 'denied' && <Spinner size={14} className='animate-spin' />}
         Deny
-      </Button>
+      </button>
     </div>
   );
 };

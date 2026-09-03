@@ -3,6 +3,11 @@ import { Button, ButtonType, ButtonSize } from '@juspay/blend-design-system';
 import { UserPlus } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import {
+  mixpanelService,
+  EVENTS,
+  EVENT_PROPERTIES,
+} from '../../../services/Analytics/mixpanelService';
 import { v4 as uuidv4 } from 'uuid';
 
 interface JoinChannelProps {
@@ -27,6 +32,9 @@ const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElemen
         timestamp: Date.now(),
       }),
     );
+    mixpanelService.track(EVENTS.INITIATE_ACTION, {
+      type: EVENT_PROPERTIES.ACTION_TYPES.JOIN_CHANNEL,
+    });
   };
 
   return (

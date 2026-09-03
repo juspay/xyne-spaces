@@ -78,11 +78,9 @@ export const DeskConnectionCard = ({
           </button>
         ) : (
           onReconnect && (
-            <Button
+            <button
               type='button'
-              variant='ghost'
-              trackId='desk_reconnect_integration'
-              trackAction={handleReconnect}
+              onClick={() => void handleReconnect()}
               disabled={isReconnecting}
               className={cn(
                 'inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium',
@@ -94,7 +92,7 @@ export const DeskConnectionCard = ({
             >
               <Plug size={14} className='shrink-0' />
               {isReconnecting ? 'Reconnecting…' : 'Reconnect'}
-            </Button>
+            </button>
           )
         )}
       </div>
@@ -130,8 +128,7 @@ export const DeskConnectionCard = ({
             <Button
               variant='destructive'
               size='sm'
-              trackId='desk_disconnect_integration'
-              trackAction={handleDisconnect}
+              onClick={() => void handleDisconnect()}
               disabled={isDisconnecting}
               data-track-category={trackCategory}
               data-track-name='confirm-disconnect'

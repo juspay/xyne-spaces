@@ -4,7 +4,6 @@ import { useSelector } from '@xstate/react';
 import { shortcutsActor } from '../machines/shortcutsMachine';
 import { getUseKeyForShortcut, resolveShortcut } from '../shortcuts/shortcutsRegistry';
 import { usePlatform } from '../hooks/usePlatform';
-import { posthogService } from '../services/Analytics/posthogService';
 
 const APP_SCOPE = 'app';
 
@@ -51,17 +50,6 @@ const HotkeyBinding = ({
       if (entry.preventDefault) {
         event.preventDefault();
       }
-
-      // Keyboard-driven actions are invisible to autocapture (which only sees
-      // clicks). Record the resolved command so shortcut usage — custom and
-      // built-in — is measurable. Only the stable command id/keys are sent, never
-      // typed text, so no message content leaks.
-      posthogService.capture('shortcut_triggered', {
-        shortcutId: entry.id,
-        keys: entry.keys.join('+'),
-        scope: entry.scope,
-      });
-
       entry.handler(event);
     },
     [keys, isMac],

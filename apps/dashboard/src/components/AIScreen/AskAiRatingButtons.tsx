@@ -1,7 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { useEffect, useState, type ReactElement } from 'react';
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
-import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
 import { rateV2Message } from '../../services/XyneAI/XyneAISessionsV2Service';
 
@@ -82,9 +81,7 @@ export function AskAiRatingButtons({
 
   return (
     <span className={cn('inline-flex items-center gap-0.5', className)}>
-      <Button
-        variant='ghost'
-        trackId='ask_ai_rate_up'
+      <button
         type='button'
         onClick={(): void => {
           setShowComment(false);
@@ -100,16 +97,14 @@ export function AskAiRatingButtons({
         data-track-name='LIKE_MESSAGE'
       >
         <ThumbsUp
-          className='size-3.5'
+          className='h-3.5 w-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isUp ? 'currentColor' : 'none'}
           fillOpacity={isUp ? 0.3 : 1}
         />
-      </Button>
-      <Button
-        variant='ghost'
-        trackId='ask_ai_rate_down'
+      </button>
+      <button
         type='button'
         onClick={(): void => {
           setShowComment(true);
@@ -125,13 +120,13 @@ export function AskAiRatingButtons({
         data-track-name='DISLIKE_MESSAGE'
       >
         <ThumbsDown
-          className='size-3.5'
+          className='h-3.5 w-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isDown ? 'currentColor' : 'none'}
           fillOpacity={isDown ? 0.3 : 1}
         />
-      </Button>
+      </button>
       {showComment && isDown && (
         <span className='ml-1 inline-flex items-center gap-1'>
           <input
@@ -151,10 +146,7 @@ export function AskAiRatingButtons({
               if (e.key === 'Escape') setShowComment(false);
             }}
           />
-          <Button
-            variant='ghost'
-            size='inline'
-            trackId='ask_ai_rate_comment_save'
+          <button
             type='button'
             onClick={(): void => {
               void submit('down', commentText);
@@ -166,7 +158,7 @@ export function AskAiRatingButtons({
             className='rounded-md bg-secondary px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted'
           >
             Save
-          </Button>
+          </button>
         </span>
       )}
     </span>

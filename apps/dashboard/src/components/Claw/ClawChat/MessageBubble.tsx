@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ActivityBlock } from '../../Chat/XyneAISidebar/components/ActivityBlock';
@@ -51,17 +50,15 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
               <span className='font-medium'>{message.errorInfo.title}</span>
               <span className='text-destructive/90'>{message.errorInfo.message}</span>
               {onRetry && message.errorInfo.retryable !== false && (
-                <Button
-                  variant='ghost'
+                <button
                   type='button'
                   onClick={onRetry}
-                  trackId='claw_retry_message'
                   data-track-category='CLAW_CHAT'
                   data-track-name='RETRY_MESSAGE'
                   className='self-start text-xs font-medium underline underline-offset-2 hover:opacity-80'
                 >
                   Try again
-                </Button>
+                </button>
               )}
             </div>
           </div>

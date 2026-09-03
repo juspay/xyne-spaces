@@ -158,7 +158,6 @@ export const DeleteButton = memo<DeleteButtonProps>(
                 }}
                 data-track-category='MESSAGE_ATTACHMENT'
                 data-track-name='CONFIRM_DELETE_ATTACHMENT'
-                trackId='delete_attachment'
                 disabled={isDeleting}
                 variant='destructive'
               >

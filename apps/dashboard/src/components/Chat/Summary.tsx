@@ -907,7 +907,6 @@ export const Summary = (props: SummaryProps): ReactElement => {
             <Button
               variant='secondary'
               onClick={handleRefresh}
-              trackId='retry_summary'
               data-track-category='CHAT_SUMMARY'
               data-track-name='Retry_Summary'
             >

@@ -100,8 +100,7 @@ export const DeskIntegrationCard = ({
           </button>
         )}
         {canManage && !isConnected && (
-          <Button
-            variant='ghost'
+          <button
             type='button'
             onClick={() => void handleReconnect()}
             disabled={isReconnecting || isDisconnecting}
@@ -112,11 +111,10 @@ export const DeskIntegrationCard = ({
             )}
             data-track-category='desk-integration'
             data-track-name='connect'
-            trackId='desk_integration_reconnect'
           >
             <Plug size={14} className='shrink-0' />
             {isReconnecting ? 'Redirecting…' : 'Connect'}
-          </Button>
+          </button>
         )}
       </div>
 

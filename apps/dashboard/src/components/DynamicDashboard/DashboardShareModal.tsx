@@ -221,7 +221,6 @@ export const DashboardShareModal = ({
                   disabled={isAddingUser}
                   size='sm'
                   variant='secondary'
-                  trackId='add_dashboard_participant_viewer'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Add_Participant_Viewer'
                 >
@@ -235,7 +234,6 @@ export const DashboardShareModal = ({
                   disabled={isAddingUser}
                   size='sm'
                   variant='secondary'
-                  trackId='add_dashboard_participant_editor'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Add_Participant_Editor'
                 >
@@ -250,7 +248,6 @@ export const DashboardShareModal = ({
                     disabled={isAddingUser}
                     size='sm'
                     variant='secondary'
-                    trackId='add_dashboard_participant_owner'
                     data-track-category='DYNAMIC_DASHBOARD'
                     data-track-name='Add_Participant_Owner'
                   >
@@ -385,7 +382,6 @@ export const DashboardShareModal = ({
                 onClick={() => {
                   void confirmRemoveParticipant();
                 }}
-                trackId='remove_dashboard_participant'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Confirm_Remove_Participant'
               >

@@ -299,7 +299,6 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     }}
                     data-track-category='Support'
                     data-track-name='DL_SYNC_SELECT_MICROSOFT'
-                    trackId='dl_member_sync_microsoft'
                     disabled={isRedirecting}
                   >
                     {isRedirecting ? (
@@ -319,7 +318,6 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     }}
                     data-track-category='Support'
                     data-track-name='DL_SYNC_SELECT_GOOGLE'
-                    trackId='dl_member_sync_google'
                     disabled={isRedirecting}
                   >
                     {isRedirecting ? (

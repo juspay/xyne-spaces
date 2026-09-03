@@ -12,7 +12,6 @@ import {
 import { formatTimeAmPm } from '../../../utils/dateUtils';
 import type { FlowComponent, CallScheduleProps, CallSlot, DurationMinutes } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
-import { Button } from '../../ui/Button/Button';
 
 /**
  * Call-schedule artifact — an interactive scheduling proposal.
@@ -164,9 +163,8 @@ const ProposedCall: React.FC<{
       </div>
 
       <div className='flex items-center gap-2 border-t border-border bg-foreground/[0.03] px-4 py-3'>
-        <Button
+        <button
           type='button'
-          variant='ghost'
           disabled={state.submitting}
           onClick={() => void approve()}
           className={cn(
@@ -176,11 +174,10 @@ const ProposedCall: React.FC<{
           )}
           data-track-category='CALL_SCHEDULE_ARTIFACT'
           data-track-name='CLICK_APPROVE'
-          trackId='call_schedule_approve'
         >
           {inFlight && <Spinner size={14} className='animate-spin' />}
           Approve
-        </Button>
+        </button>
         {/* v1: inert placeholder — no backend manual-scheduler yet. */}
         <button
           type='button'

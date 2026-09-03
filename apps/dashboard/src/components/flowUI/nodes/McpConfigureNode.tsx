@@ -5,7 +5,6 @@ import { McpServerIcon } from '../../ClawAgents/McpServerIcon';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
 import { cn } from '../../../utils/classNames';
 import { useFlow } from '../FlowContext';
-import { Button } from '../../ui/Button/Button';
 
 interface McpConfigureNodeProps {
   node: FlowComponent;
@@ -147,9 +146,8 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
       </div>
 
       <div className='mt-3 flex justify-end'>
-        <Button
+        <button
           type='button'
-          variant='ghost'
           onClick={() => {
             void onSubmit();
           }}
@@ -160,11 +158,10 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
           )}
           data-track-category='MCP_CONFIGURE_ARTIFACT'
           data-track-name='MCP_CONFIGURE_SUBMIT'
-          trackId='mcp_configure_submit'
         >
           <KeyRound size={14} strokeWidth={2} />
           {isSubmitting ? 'Configuring' : 'Configure'}
-        </Button>
+        </button>
       </div>
     </div>
   );

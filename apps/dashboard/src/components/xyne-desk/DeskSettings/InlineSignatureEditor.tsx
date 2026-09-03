@@ -8,7 +8,6 @@ import Underline from '@tiptap/extension-underline';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { EditorToolbar } from '../../ui/EditorToolbar/EditorToolbar';
-import { Button } from '../../ui/Button/Button';
 import SignatureIcon from '../../icons/SignatureIcon';
 
 const ALLOWED_PASTE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -126,18 +125,16 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
         >
           Cancel
         </button>
-        <Button
+        <button
           type='button'
-          variant='ghost'
-          trackId='save_signature'
-          trackAction={handleSave}
+          onClick={() => void handleSave()}
           disabled={isSaving || name.trim() === ''}
-          className='h-auto rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
+          className='rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category='DeskSettings'
           data-track-name='SaveSignature'
         >
           {isSaving ? 'Saving…' : initial?.id ? 'Save' : 'Add Signature'}
-        </Button>
+        </button>
       </div>
     </div>
   );

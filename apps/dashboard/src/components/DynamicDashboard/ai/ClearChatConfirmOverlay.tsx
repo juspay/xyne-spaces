@@ -45,7 +45,6 @@ export const ClearChatConfirmOverlay = ({
         <Button
           variant='destructive'
           onClick={onConfirm}
-          trackId='clear_ai_chat_history'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CONFIRM_CLEAR_AI_CHAT'
         >

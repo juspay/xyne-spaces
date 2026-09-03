@@ -4,7 +4,6 @@ import { Check, Plus } from 'lucide-react';
 import type { QueryVisualizationType } from '@xyne/shared';
 import { previewQueryPlan } from '../../../services/DynamicDashboard/previewService';
 import { getRendererForType } from '../ComponentGrid/renderers';
-import { Button } from '../../ui/Button/Button';
 
 export interface DrillResultBubbleProps {
   title: string;
@@ -48,11 +47,9 @@ export const DrillResultBubble = ({
       {query.data && !Renderer && (
         <div className='text-xs text-muted-foreground'>No preview available for {visualType}.</div>
       )}
-      <Button
-        variant='ghost'
+      <button
         type='button'
         disabled={added || adding}
-        trackId='add_drill_to_dashboard'
         onClick={() => {
           setAdding(true);
           void onAdd({ title, visualType, queryPlan })
@@ -66,7 +63,7 @@ export const DrillResultBubble = ({
       >
         {added ? <Check size={12} /> : <Plus size={12} />}
         {added ? 'Added to dashboard' : adding ? 'Adding…' : 'Add to dashboard'}
-      </Button>
+      </button>
     </div>
   );
 };

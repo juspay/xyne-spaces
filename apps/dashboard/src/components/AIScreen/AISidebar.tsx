@@ -310,7 +310,6 @@ function SessionHistory({
               </Button>
               <Button
                 variant='destructive'
-                trackId='ai_delete_session'
                 loading={isDeleting}
                 onClick={() => void confirmDelete()}
                 data-track-category='XyneAI'

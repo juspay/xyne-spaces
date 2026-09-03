@@ -923,7 +923,6 @@ export function AutomationBuilder({
                 onClick={handleSaveNow}
                 loading={saveMutation.isPending}
                 disabled={saveMutation.isPending || !!nameError}
-                trackId='save_automation'
                 data-track-category='automation-builder'
                 data-track-name='header-save'
                 className='font-semibold'
@@ -994,7 +993,6 @@ export function AutomationBuilder({
                     size='sm'
                     onClick={handleActivate}
                     disabled={activateMutation.isPending}
-                    trackId='activate_automation'
                     data-track-category='automation-builder'
                     data-track-name='header-activate'
                   >
@@ -1011,7 +1009,6 @@ export function AutomationBuilder({
                   size='sm'
                   onClick={handleArchive}
                   disabled={archiveMutation.isPending}
-                  trackId='archive_automation'
                   data-track-category='automation-builder'
                   data-track-name='header-archive'
                 >
@@ -1025,7 +1022,6 @@ export function AutomationBuilder({
                   onClick={() => submitForApprovalMutation.mutate(savedId)}
                   loading={submitForApprovalMutation.isPending}
                   disabled={submitForApprovalMutation.isPending}
-                  trackId='submit_automation_for_approval'
                   data-track-category='automation-builder'
                   data-track-name='header-submit-for-approval'
                   className='font-semibold'
@@ -1044,7 +1040,6 @@ export function AutomationBuilder({
                   size='sm'
                   onClick={() => revokeMutation.mutate(savedId)}
                   disabled={revokeMutation.isPending}
-                  trackId='revoke_automation_proposal'
                   data-track-category='automation-builder'
                   data-track-name='header-revoke'
                 >
@@ -1096,7 +1091,6 @@ export function AutomationBuilder({
                     onClick={() => approveMutation.mutate(savedId)}
                     loading={approveMutation.isPending}
                     disabled={rejectMutation.isPending || approveMutation.isPending}
-                    trackId='approve_automation_proposal'
                     data-track-category='automation-builder'
                     data-track-name='header-approve'
                     className='font-semibold'
@@ -1484,7 +1478,6 @@ export function AutomationBuilder({
                   rejectMutation.mutate({ id: savedId, note: rejectNote.trim() });
                 }
               }}
-              trackId='reject_automation_proposal'
               data-track-category='automation-builder'
               data-track-name='reject-confirm'
             >
@@ -1523,7 +1516,6 @@ export function AutomationBuilder({
                 if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: false });
                 setDisableDialogOpen(false);
               }}
-              trackId='disable_automation_keep_queued'
               data-track-category='automation-builder'
               data-track-name='disable-keep-queued'
             >
@@ -1538,7 +1530,6 @@ export function AutomationBuilder({
                 if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: true });
                 setDisableDialogOpen(false);
               }}
-              trackId='disable_automation_cancel_queued'
               data-track-category='automation-builder'
               data-track-name='disable-cancel-queued'
             >

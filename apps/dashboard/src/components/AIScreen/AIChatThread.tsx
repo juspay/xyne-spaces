@@ -68,7 +68,6 @@ import {
   resolveCitationIconUrl,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
-import { Button } from '../ui/Button/Button';
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts } from './ReactArtifact';
 import { TOP_BAR_HEIGHT_CLASS } from '../AppNavigator/topBarHeight';
@@ -1102,9 +1101,7 @@ function ChatMessageBubble({
                     >
                       Cancel
                     </button>
-                    <Button
-                      variant='ghost'
-                      trackId='ai_chat_edit_submit'
+                    <button
                       type='button'
                       onClick={() => {
                         if (editText.trim()) {
@@ -1118,7 +1115,7 @@ function ChatMessageBubble({
                       data-track-name='EDIT_SUBMIT'
                     >
                       Send
-                    </Button>
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -1309,9 +1306,7 @@ function ChatMessageBubble({
               {/* Regenerate — re-runs the last user query as a new bot sibling.
                   Only wired on the latest bot message. */}
               {onRegenerate && (
-                <Button
-                  variant='ghost'
-                  trackId='ai_chat_regenerate'
+                <button
                   type='button'
                   onClick={onRegenerate}
                   title='Regenerate response'
@@ -1320,7 +1315,7 @@ function ChatMessageBubble({
                   data-track-name='REGENERATE_MESSAGE'
                 >
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                </Button>
+                </button>
               )}
               {/* Branch switcher for bot-response versions (created via regenerate). */}
               {branchInfo && onBranchNavigate && (
