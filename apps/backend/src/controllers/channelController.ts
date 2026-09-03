@@ -995,6 +995,17 @@ export class ChannelController {
         }
       }
 
+      // The DM target is caller-supplied; scope it to the caller's workspace (from
+      // the session, not the request) so a member cannot DM a user in another
+      // workspace by id substitution. Rejected before the channel is created.
+      if (scopeType === 'DM' && scopeId) {
+        const dmTarget = await this.userRepository.findByIdInWorkspace(scopeId, req.user!.workspaceId);
+        if (!dmTarget || dmTarget.status !== 'ACTIVE') {
+          res.status(404).json({ error: 'Participant not found or inactive' });
+          return;
+        }
+      }
+
       // For DM channels, auto-generate name from user IDs
       let channelName: string;
       if (scopeType === 'DM' && scopeId) {
@@ -1025,17 +1036,8 @@ export class ChannelController {
       );
 
       // For DM channels, add the other user as participant.
-      // Observability only: record when the DM target resolves to a different
-      // workspace than the caller so this can be measured for this path.
+      // DM target was validated in-workspace above.
       if (scopeType === 'DM' && scopeId) {
-        const dmTarget = await this.userRepository.findById(scopeId);
-        if (dmTarget && dmTarget.workspaceId !== req.user!.workspaceId) {
-          logger.warn('[workspace-scope] createChannel DM target in another workspace', {
-            callerWorkspaceId: req.user!.workspaceId,
-            targetUserId: scopeId,
-            targetWorkspaceId: dmTarget.workspaceId,
-          });
-        }
         await this.channelParticipantRepository.addParticipant(
           channel.id,
           scopeId,
@@ -1054,16 +1056,9 @@ export class ChannelController {
 
         for (const participantId of validParticipants) {
           try {
-            // Check if user exists before adding
-            const user = await this.userRepository.findById(participantId);
-            // Observability only: record a participant that resolves to another workspace.
-            if (user && user.workspaceId !== req.user!.workspaceId) {
-              logger.warn('[workspace-scope] createChannel participant in another workspace', {
-                callerWorkspaceId: req.user!.workspaceId,
-                participantUserId: participantId,
-                participantWorkspaceId: user.workspaceId,
-              });
-            }
+            // Scope the caller-supplied id to the session workspace: a participant
+            // in another workspace resolves to null and is refused, not added.
+            const user = await this.userRepository.findByIdInWorkspace(participantId, req.user!.workspaceId);
             if (user && user.status === 'ACTIVE') {
               await this.channelParticipantRepository.addParticipant(
                 channel.id,
