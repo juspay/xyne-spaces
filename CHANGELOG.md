@@ -1,3 +1,26 @@
+## [1.265.2](https://github.com/juspay/xyne-spaces/compare/v1.265.1...v1.265.2) (2026-09-02)
+
+## [1.265.1](https://github.com/juspay/xyne-spaces/compare/v1.265.0...v1.265.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* show all tickets of the board in channel ([#1444](https://github.com/juspay/xyne-spaces/issues/1444)) ([d17a400](https://github.com/juspay/xyne-spaces/commit/d17a400913894c40c8f8f30c145363923c17b1d2))
+
+## [1.265.0](https://github.com/juspay/xyne-spaces/compare/v1.264.2...v1.265.0) (2026-09-02)
+
+
+### Features
+
+* Add labels for calls ([#1188](https://github.com/juspay/xyne-spaces/issues/1188)) ([f684e38](https://github.com/juspay/xyne-spaces/commit/f684e3852cba43a3bbb8c74ceb0d71ab527fb54e))
+
+## [1.264.2](https://github.com/juspay/xyne-spaces/compare/v1.264.1...v1.264.2) (2026-09-02)
+
+
+### Performance Improvements
+
+* cut recording start latency and remove pill flicker ([#1394](https://github.com/juspay/xyne-spaces/issues/1394)) ([dba4721](https://github.com/juspay/xyne-spaces/commit/dba4721e8d06b1e4515b0c76b4687ac9510550bd))
+
 ## [1.264.1](https://github.com/juspay/xyne-spaces/compare/v1.264.0...v1.264.1) (2026-09-02)
 
 
