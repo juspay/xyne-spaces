@@ -1,3 +1,10 @@
+## [1.268.0](https://github.com/juspay/xyne-spaces/compare/v1.267.0...v1.268.0) (2026-09-03)
+
+
+### Features
+
+* add sidebar call hover card ([#1262](https://github.com/juspay/xyne-spaces/issues/1262)) ([ad203f3](https://github.com/juspay/xyne-spaces/commit/ad203f3a90ddf289b45ed1d5ff56496dc1efdc97))
+
 ## [1.267.0](https://github.com/juspay/xyne-spaces/compare/v1.266.1...v1.267.0) (2026-09-03)
 
 
