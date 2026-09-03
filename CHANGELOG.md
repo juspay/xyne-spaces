@@ -1,3 +1,10 @@
+## [1.269.1](https://github.com/juspay/xyne-spaces/compare/v1.269.0...v1.269.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* -Fix-scheduled-call-start-time-not-updating ([#1467](https://github.com/juspay/xyne-spaces/issues/1467)) ([856bd49](https://github.com/juspay/xyne-spaces/commit/856bd4995867a212933e966eab621f1944c51cfa))
+
 ## [1.269.0](https://github.com/juspay/xyne-spaces/compare/v1.268.1...v1.269.0) (2026-09-03)
 
 
