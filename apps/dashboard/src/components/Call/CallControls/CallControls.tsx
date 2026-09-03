@@ -1131,8 +1131,12 @@ export function CallControls({
         {/* Disconnect Button */}
         <Button
           variant='ghost'
+          size='inline'
           onClick={onDisconnect}
-          className={cn(buttonClasses, 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40')}
+          className={cn(
+            buttonClasses,
+            'justify-center bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
+          )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Leave call'
           data-testid='end-call-button'
@@ -1142,7 +1146,7 @@ export function CallControls({
           data-track-metadata={JSON.stringify({ callId })}
         >
           <PhoneOff
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+            className={hasCustomSizing ? '' : 'size-5 sm:size-6'}
             style={
               hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
             }
