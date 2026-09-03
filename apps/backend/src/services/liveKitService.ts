@@ -330,6 +330,17 @@ export class LiveKitService {
     const claimed = await this.isDispatchClaimed(roomName, dispatchId);
     if (claimed) return;
 
+    if (claimed === null) {
+      // The claim check itself failed — this says nothing about whether a worker
+      // actually claimed the job (it may well have). Dispatching a second, differently-
+      // named fallback agent on this guess risks two live agents in the same room, so
+      // don't fast-fallback here: defer to the presence-checked redispatch path, which
+      // will see the original agent is already there and no-op if so.
+      logger.warn(`[${roomName}] dispatch_claim_check_indeterminate | dispatch_id=${dispatchId}, agent=${agentName}`);
+      await this.ensureTranscriptionAgent(roomName, agentName, { reason: 'dispatch_claim_check_indeterminate' });
+      return;
+    }
+
     logger.error(`[${roomName}] transcription_agent_dispatch_unclaimed | dispatch_id=${dispatchId}, agent=${agentName}, allow_fallback=${allowFallback}`);
 
     const fallbackAgentName = allowFallback ? await this.resolveFallbackAgentName(agentName) : null;
@@ -378,14 +389,15 @@ export class LiveKitService {
     this.scheduleClaimCheck(roomName, dispatch.id, fallbackAgentName, { allowFallback: false });
   }
 
-  private async isDispatchClaimed(roomName: string, dispatchId: string): Promise<boolean> {
+  /** Null means the check itself failed — genuinely unknown, not "confirmed unclaimed". */
+  private async isDispatchClaimed(roomName: string, dispatchId: string): Promise<boolean | null> {
     try {
       const dispatch = await this.agentDispatch.getDispatch(dispatchId, roomName);
       const job = dispatch?.state?.jobs?.[0];
       return Boolean(job?.state?.workerId);
     } catch (error) {
       logger.warn(`[${roomName}] dispatch_claim_check_call_failed | dispatch_id=${dispatchId}, error=${error}`);
-      return false;
+      return null;
     }
   }
 
@@ -408,7 +420,10 @@ export class LiveKitService {
       // Best-effort cleanup — an unclaimed verification room just expires on its own.
     });
 
-    return claimed;
+    // A failed check (null) is treated as "not verified" here, unlike the per-call
+    // fallback path above — rejecting an ambiguous rollout is the safe default,
+    // whereas an in-progress call needs the opposite bias (don't assume the worst).
+    return claimed === true;
   }
 
   /**
@@ -582,9 +597,12 @@ export class LiveKitService {
    */
   async withCallCreationLock<T>(callId: string, fn: () => Promise<T>): Promise<{ acquired: boolean; result?: T }> {
     const lockKey = `livekit:call-creation:lock:${callId}`;
+    // Unique per acquisition — lets release verify it still owns the lock before
+    // deleting it (see the `finally` block below).
+    const lockToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let acquired: boolean;
     try {
-      acquired = await redisService.set(lockKey, String(Date.now()), 10, true);
+      acquired = await redisService.set(lockKey, lockToken, 10, true);
     } catch (error) {
       logger.warn(`[${callId}] call_creation_lock_unavailable | proceeding_without_guard, error=${error}`);
       acquired = true;
@@ -596,7 +614,10 @@ export class LiveKitService {
       const result = await fn();
       return { acquired: true, result };
     } finally {
-      await redisService.del(lockKey).catch((error) => {
+      // Compare-and-delete: if `fn()` outlived the 10s TTL, this key may already
+      // belong to a different caller who acquired it after ours expired — a bare
+      // DEL here would delete THEIR lock and let a third caller in.
+      await redisService.deleteIfMatch(lockKey, lockToken).catch((error) => {
         logger.warn(`[${callId}] call_creation_lock_release_failed | error=${error}`);
       });
     }
