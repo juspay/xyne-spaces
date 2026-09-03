@@ -67,6 +67,10 @@ import { SupportRail } from './SupportRail';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 import WorkspaceInviteDialog from './WorkspaceInviteDialog';
+import {
+  CallsRailHoverCard,
+  useRailActiveCalls,
+} from '../Call/CallsRailHoverCard/CallsRailHoverCard';
 
 const mobileNavigationItems = [
   {
@@ -174,6 +178,7 @@ const AppSidebar = (): ReactElement => {
   const { toolbarPaths } = useToolbarItems();
   const { pinnedApps } = usePinnedArtifactApps();
   const missedCallCount = useMissedCallCount();
+  const hasOngoingCall = useRailActiveCalls().length > 0;
   const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
@@ -400,6 +405,8 @@ const AppSidebar = (): ReactElement => {
                     railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
                   const isActive = activeRoute === item.path;
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
+                  const showOngoingCallDot =
+                    item.path === '/calls' && hasOngoingCall && !showMissedCallBadge;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
                   const showActivityBadge =
                     item.path === '/chat/activity' && unreadActivityCount > 0;
@@ -418,71 +425,80 @@ const AppSidebar = (): ReactElement => {
 
                   const QuickMenu = quickMenuFor(item.path);
 
+                  const navLink = (
+                    <Link
+                      to={prefixWs(item.path)}
+                      onClick={event => {
+                        const openedInNewWindow =
+                          !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                        handleNavigationClick(item.label, openedInNewWindow);
+                        if (openedInNewWindow) {
+                          event.preventDefault();
+                        }
+                      }}
+                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      data-testid={testId}
+                      data-track-category='App_Sidebar'
+                      data-track-name='Sidebar_Nav_Item'
+                      data-track-metadata={JSON.stringify({
+                        path: item.path,
+                        label: item.label,
+                      })}
+                      className={cn(
+                        'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                        isActive
+                          ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                          : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                      )}
+                    >
+                      <Icon size={item.iconSize ?? 16} variant={isActive ? 'Solid' : 'Stroke'} />
+                      {showPendingDmDot && (
+                        <span
+                          aria-hidden='true'
+                          className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
+                        />
+                      )}
+                      {showMissedCallBadge && (
+                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
+                          {missedCallCount > 99 ? '99+' : missedCallCount}
+                        </span>
+                      )}
+                      {showActivityBadge && (
+                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
+                          {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
+                        </span>
+                      )}
+                      {showOngoingCallDot && (
+                        <span
+                          aria-hidden='true'
+                          className='absolute -top-1 -right-1 size-[9px] rounded-full bg-status-success border border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] animate-live-pulse motion-reduce:animate-none'
+                        />
+                      )}
+                    </Link>
+                  );
+
                   return (
                     <li key={item.path} className='relative'>
-                      <RailQuickNavEntry
-                        tooltip={tooltipContent}
-                        showQuickMenu={!!QuickMenu && !isActive}
-                        open={openQuickMenu === item.path}
-                        onOpenChange={next => setOpenQuickMenu(next ? item.path : null)}
-                        menu={
-                          QuickMenu ? (
-                            <QuickMenu
-                              prefixWs={prefixWs}
-                              onNavigate={handleNavigationClick}
-                              onDismiss={() => setOpenQuickMenu(null)}
-                            />
-                          ) : null
-                        }
-                        trigger={
-                          <Link
-                            to={prefixWs(item.path)}
-                            onClick={event => {
-                              const openedInNewWindow =
-                                !!item.popout && openInAppWindow(prefixWs(item.path), event);
-                              handleNavigationClick(item.label, openedInNewWindow);
-                              if (openedInNewWindow) {
-                                event.preventDefault();
-                              }
-                            }}
-                            aria-label={showPendingDmDot ? 'DMs unread' : item.label}
-                            data-testid={testId}
-                            data-track-category='App_Sidebar'
-                            data-track-name='Sidebar_Nav_Item'
-                            data-track-metadata={JSON.stringify({
-                              path: item.path,
-                              label: item.label,
-                            })}
-                            className={cn(
-                              'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
-                              isActive
-                                ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                                : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                            )}
-                          >
-                            <Icon
-                              size={item.iconSize ?? 16}
-                              variant={isActive ? 'Solid' : 'Stroke'}
-                            />
-                            {showPendingDmDot && (
-                              <span
-                                aria-hidden='true'
-                                className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
+                      {item.path === '/calls' ? (
+                        <CallsRailHoverCard tooltip={tooltipContent}>{navLink}</CallsRailHoverCard>
+                      ) : (
+                        <RailQuickNavEntry
+                          tooltip={tooltipContent}
+                          showQuickMenu={!!QuickMenu && !isActive}
+                          open={openQuickMenu === item.path}
+                          onOpenChange={next => setOpenQuickMenu(next ? item.path : null)}
+                          menu={
+                            QuickMenu ? (
+                              <QuickMenu
+                                prefixWs={prefixWs}
+                                onNavigate={handleNavigationClick}
+                                onDismiss={() => setOpenQuickMenu(null)}
                               />
-                            )}
-                            {showMissedCallBadge && (
-                              <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
-                                {missedCallCount > 99 ? '99+' : missedCallCount}
-                              </span>
-                            )}
-                            {showActivityBadge && (
-                              <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
-                                {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
-                              </span>
-                            )}
-                          </Link>
-                        }
-                      />
+                            ) : null
+                          }
+                          trigger={navLink}
+                        />
+                      )}
                     </li>
                   );
                 })}
