@@ -118,7 +118,16 @@ const SlideContent: React.FC<{
   initialTime?: number | undefined;
   autoPlay?: boolean;
   onInteractionStateChange?: (state: ZoomState) => void;
-}> = ({ file, isActive, disableGestures, initialTime, autoPlay, onInteractionStateChange }) => {
+  onExpand?: () => void;
+}> = ({
+  file,
+  isActive,
+  disableGestures,
+  initialTime,
+  autoPlay,
+  onInteractionStateChange,
+  onExpand,
+}) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -180,6 +189,7 @@ const SlideContent: React.FC<{
             fileName={file.fileName}
             attachmentId={file.attachmentId}
             autoPlay={Boolean(autoPlay)}
+            {...(onExpand && { onExpand })}
             {...(initialTime !== undefined && { initialTime })}
             {...(isCarouselMode && { disableGestures: true })}
             {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
@@ -617,6 +627,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={onClose}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 {...(index === currentFileIndex && {
                   onInteractionStateChange: (state: ZoomState) => {
@@ -1372,6 +1383,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={() => attachmentViewerActor.send({ type: 'CLOSE' })}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 // Pass initialTime to active video
                 initialTime={initialTime}

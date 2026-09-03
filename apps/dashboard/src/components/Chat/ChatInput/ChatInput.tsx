@@ -72,12 +72,7 @@ import { useThreadBroadcastMentions } from '../../../hooks/useThreadBroadcastMen
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
-import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
-import { useChannelCommands, useChannelShortcuts } from '../../../hooks/useChannelCommands';
-
-// Stable empty reference so `globalShortcuts` keeps identity while the query is
-// pending/empty, avoiding needless downstream re-renders.
-const EMPTY_SHORTCUTS: AppShortcutWithApp[] = [];
+import { useChannelCommands, useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
@@ -234,17 +229,16 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
 
     // Slash commands for this channel — filtered by context (thread vs chat).
-    // Cached per (channelId, accessibility) via React Query so opening many
-    // threads in the same channel, or mounting several ChatInput instances,
-    // does not re-fire GET /apps/channel/:id/commands on every mount.
-    const commandAccessibility = conversation?.conversationId
-      ? CommandAccessibility.THREAD
-      : CommandAccessibility.CHAT;
-    const { data: rawChannelCommands } = useChannelCommands(channelId, commandAccessibility);
+    // Global shortcuts are not filtered by thread/chat.
+    const appCommands = useChannelCommands(
+      channelId,
+      conversation?.conversationId ? CommandAccessibility.THREAD : CommandAccessibility.CHAT,
+    );
+    const globalShortcuts = useChannelShortcuts(channelId, 'GLOBAL');
     const channelCommands = useMemo<CommandItem[]>(
       () => [
         ...SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
-        ...(rawChannelCommands ?? [])
+        ...appCommands
           .filter(
             c =>
               !SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS.some(
@@ -258,12 +252,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             kind: 'app' as const,
           })),
       ],
-      [rawChannelCommands],
+      [appCommands],
     );
-
-    // Global shortcuts for this channel (not filtered by thread/chat).
-    const { data: globalShortcutsData } = useChannelShortcuts(channelId, 'GLOBAL');
-    const globalShortcuts = globalShortcutsData ?? EMPTY_SHORTCUTS;
 
     // Hide, don't just reject: an artifact the user cannot post here should not
     // be offered. The send guards below still fire, because the command can also

@@ -96,10 +96,7 @@ import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUt
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
-import { useChannelShortcuts } from '../../../hooks/useChannelCommands';
-
-// Stable empty reference for the pending/empty MESSAGE-shortcuts state.
-const EMPTY_MESSAGE_SHORTCUTS: AppShortcutWithApp[] = [];
+import { useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
@@ -199,14 +196,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
 
-  // Message shortcuts — per channel, used by HoverActionsToolbar. One ChatBubble
-  // mounts per message, so this must be cached: a raw per-bubble fetch fired
-  // GET /apps/channel/:id/commands on every bubble that scrolled into view.
-  // useChannelShortcuts is keyed on (channelId, 'MESSAGE') so all bubbles share
-  // one cached result instead of each hitting the API.
+  // Message shortcuts — fetched per channel, used by HoverActionsToolbar
+  const messageShortcuts = useChannelShortcuts(channelId, 'MESSAGE');
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  const { data: messageShortcutsData } = useChannelShortcuts(channelId, 'MESSAGE');
-  const messageShortcuts = messageShortcutsData ?? EMPTY_MESSAGE_SHORTCUTS;
 
   const messageConversationId = message.conversationId;
 

@@ -1,3 +1,37 @@
+## [1.271.0](https://github.com/juspay/xyne-spaces/compare/v1.270.0...v1.271.0) (2026-09-03)
+
+
+### Features
+
+* allow Xyne Apps to push tickets into any desk channel ([#1248](https://github.com/juspay/xyne-spaces/issues/1248)) ([6e3ab1c](https://github.com/juspay/xyne-spaces/commit/6e3ab1c08ee7b0c02c48dee2ff2c39ac802a76a8))
+
+
+### Bug Fixes
+
+* close sidebar quick-nav hover card on navigation ([#1487](https://github.com/juspay/xyne-spaces/issues/1487)) ([56fda61](https://github.com/juspay/xyne-spaces/commit/56fda61939491c83e842351000045c32106dfe42))
+* deskchannel in cmdK result ([#1400](https://github.com/juspay/xyne-spaces/issues/1400)) ([c483f50](https://github.com/juspay/xyne-spaces/commit/c483f502bf340eeb65e3447bc03c190e09364cb5))
+* shortcut api call fix ([#1490](https://github.com/juspay/xyne-spaces/issues/1490)) ([23afe4a](https://github.com/juspay/xyne-spaces/commit/23afe4a15dd774d61e3fa5c0fecab86d134ad9ae))
+
+## [1.270.0](https://github.com/juspay/xyne-spaces/compare/v1.269.3...v1.270.0) (2026-09-03)
+
+
+### Features
+
+* ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([#1471](https://github.com/juspay/xyne-spaces/issues/1471)) ([#1479](https://github.com/juspay/xyne-spaces/issues/1479)) ([73d18f7](https://github.com/juspay/xyne-spaces/commit/73d18f78a63bced57cd4f280465ea391b0295327)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
+
+
+### Bug Fixes
+
+* open links in external browser by default ([#1470](https://github.com/juspay/xyne-spaces/issues/1470)) ([5599371](https://github.com/juspay/xyne-spaces/commit/559937155f3e1a628cdae8e479a3a6377f377f8c))
+* wire onExpand into carousel SlideContent so video minimize/maximize works in thread viewer ([#1369](https://github.com/juspay/xyne-spaces/issues/1369)) ([4cd80cd](https://github.com/juspay/xyne-spaces/commit/4cd80cde0b1b0b8092facbb168b3878d9953f847))
+
+## [1.269.3](https://github.com/juspay/xyne-spaces/compare/v1.269.2...v1.269.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* message deep-links land on wrong message for older messages ([#1393](https://github.com/juspay/xyne-spaces/issues/1393)) ([e34ac5c](https://github.com/juspay/xyne-spaces/commit/e34ac5c1388b0a7057230429798fb1b7f04cb9f7))
+
 ## [1.269.2](https://github.com/juspay/xyne-spaces/compare/v1.269.1...v1.269.2) (2026-09-03)
 
 
