@@ -16,6 +16,7 @@ import { MetricsCharts } from '@/components/ClawAgents/metrics/MetricsCharts';
 import { MetricsOverview } from '@/components/ClawAgents/metrics/MetricsOverview';
 import {
   AgentLeaderboard,
+  BotCommitAnalyticsTable,
   ProviderLatencyTable,
   SlowSessionsTable,
   ToolLatencyTable,
@@ -148,6 +149,12 @@ const ClawMetricsScreen = (): ReactElement => {
                 description='Agents ranked by run count. Select a row to drill into its metrics.'
               >
                 <AgentLeaderboard rows={global.data.topAgents} onAgentClick={setSelectedAgent} />
+              </MetricsCard>
+              <MetricsCard
+                title='Bot commit analytics'
+                description='Pull request outcomes by bot attribution type. Shows merge rates for bot-attributed vs human-attributed PRs.'
+              >
+                <BotCommitAnalyticsTable analytics={global.data.botCommitAnalytics} />
               </MetricsCard>
             </>
           )}

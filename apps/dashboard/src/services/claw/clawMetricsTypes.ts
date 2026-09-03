@@ -75,6 +75,21 @@ export interface MetricsDelta {
   errorRate: number;
 }
 
+export interface BotCommitAnalyticsRow {
+  category: 'bot-only' | 'human-only' | 'mixed';
+  totalPRs: number;
+  mergedPRs: number;
+  rejectedPRs: number;
+  mergeRate: number; // 0-1 decimal for formatPct()
+}
+
+export interface BotCommitAnalytics {
+  rows: BotCommitAnalyticsRow[];
+  totalAnalyzed: number;
+  totalPending: number;
+  totalFailed: number;
+}
+
 export interface GlobalMetrics {
   days: number;
   windowStart: string;
@@ -85,6 +100,7 @@ export interface GlobalMetrics {
   topAgents: GlobalMetricsAgentRow[];
   byProvider: GlobalMetricsProviderRow[];
   slowSessions: SlowSession[];
+  botCommitAnalytics: BotCommitAnalytics;
 }
 
 export interface SentimentComment {

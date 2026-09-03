@@ -1,6 +1,7 @@
 import { Fragment, ReactElement, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type {
+  BotCommitAnalytics,
   GlobalMetricsAgentRow,
   GlobalMetricsProviderRow,
   SlowSession,
@@ -339,6 +340,94 @@ export const SlowSessionsTable = ({
           })}
         </tbody>
       </table>
+    </div>
+  );
+};
+
+export const BotCommitAnalyticsTable = ({
+  analytics,
+}: {
+  analytics: BotCommitAnalytics;
+}): ReactElement => {
+  const getCategoryLabel = (category: string): string => {
+    switch (category) {
+      case 'bot-only':
+        return 'Bot-attributed';
+      case 'human-only':
+        return 'Human-attributed';
+      case 'mixed':
+        return 'Mixed (Bot + Human)';
+      default:
+        return category;
+    }
+  };
+
+  const getCategoryDesc = (category: string): string => {
+    switch (category) {
+      case 'bot-only':
+        return 'PRs with only bot commits';
+      case 'human-only':
+        return 'PRs with only human commits';
+      case 'mixed':
+        return 'PRs with both bot and human commits';
+      default:
+        return '';
+    }
+  };
+
+  return (
+    <div>
+      {/* Show analysis status if any pending/failed */}
+      {(analytics.totalPending > 0 || analytics.totalFailed > 0) && (
+        <div className='mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs'>
+          <p className='text-amber-900 dark:text-amber-100'>
+            Analysis status: {analytics.totalAnalyzed} completed
+            {analytics.totalPending > 0 && `, ${analytics.totalPending} pending`}
+            {analytics.totalFailed > 0 && `, ${analytics.totalFailed} failed`}
+          </p>
+        </div>
+      )}
+
+      <div className='overflow-x-auto'>
+        <table className='w-full min-w-[640px]'>
+          <thead>
+            <tr className='text-left'>
+              <th className={th}>Attribution</th>
+              <th className={cn(th, 'text-right')}>Total PRs</th>
+              <th className={cn(th, 'text-right')}>Merged</th>
+              <th className={cn(th, 'text-right')}>Rejected</th>
+              <th className={cn(th, 'text-right')}>Merge Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {analytics.rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className='py-8 text-center text-sm text-muted-foreground'>
+                  No analyzed PRs in this window.
+                </td>
+              </tr>
+            )}
+            {analytics.rows.map(row => (
+              <tr key={row.category} className='border-t border-border'>
+                <td className={td}>
+                  <p className='font-medium'>{getCategoryLabel(row.category)}</p>
+                  <p className='text-xs text-muted-foreground'>{getCategoryDesc(row.category)}</p>
+                </td>
+                <td className={cn(td, 'text-right tabular-nums')}>{row.totalPRs}</td>
+                <td className={cn(td, 'text-right tabular-nums text-green-600 dark:text-green-400')}>
+                  {row.mergedPRs}
+                </td>
+                <td className={cn(td, 'text-right tabular-nums text-destructive')}>
+                  {row.rejectedPRs}
+                </td>
+                <td className={cn(td, 'text-right tabular-nums font-medium')}>
+                  {formatPct(row.mergeRate)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
