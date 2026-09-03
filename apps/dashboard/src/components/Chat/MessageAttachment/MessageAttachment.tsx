@@ -48,7 +48,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
-import { Button } from '../../ui/Button/Button';
+
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
 import axios from 'axios';
@@ -643,14 +643,13 @@ const InlineTextFile: React.FC<{
             <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
             <span className='ml-1 text-xs text-muted-foreground'>(click to view)</span>
           </button>
-          <Button
-            variant='ghost'
+          <button
             type='button'
             onClick={e => {
               e.stopPropagation();
               void downloadAttachment(attachmentId, fileName);
             }}
-            trackId='download_text_file'
+            data-ph-capture-attribute-track-id='download_text_file'
             className='p-2 hover:bg-accent rounded-lg transition-colors'
             title='Download file'
             data-track-category='MESSAGE'
@@ -658,7 +657,7 @@ const InlineTextFile: React.FC<{
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
           >
             <Download className='h-4 w-4 text-muted-foreground' />
-          </Button>
+          </button>
           {extraActions}
         </div>
       </div>
@@ -683,14 +682,13 @@ const InlineTextFile: React.FC<{
             {isExpanded ? '[Hide]' : '[View]'}
           </span>
         </button>
-        <Button
-          variant='ghost'
+        <button
           type='button'
           onClick={e => {
             e.stopPropagation();
             void downloadAttachment(attachmentId, fileName);
           }}
-          trackId='download_text_file_inline'
+          data-ph-capture-attribute-track-id='download_text_file_inline'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
           data-track-category='MESSAGE'
@@ -698,7 +696,7 @@ const InlineTextFile: React.FC<{
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <Download className='h-4 w-4 text-muted-foreground' />
-        </Button>
+        </button>
         {extraActions}
       </div>
 
@@ -809,14 +807,13 @@ const InlineCodeFile: React.FC<{
           <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
           <span className='ml-1 text-xs text-muted-foreground'>[View]</span>
         </button>
-        <Button
-          variant='ghost'
+        <button
           type='button'
           onClick={e => {
             e.stopPropagation();
             void downloadAttachment(attachmentId, fileName);
           }}
-          trackId='download_code_file'
+          data-ph-capture-attribute-track-id='download_code_file'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
           data-track-category='MESSAGE'
@@ -824,7 +821,7 @@ const InlineCodeFile: React.FC<{
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <Download className='h-4 w-4 text-muted-foreground' />
-        </Button>
+        </button>
       </div>
     </div>
   );
