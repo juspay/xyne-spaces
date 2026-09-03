@@ -1,3 +1,17 @@
+## [1.269.2](https://github.com/juspay/xyne-spaces/compare/v1.269.1...v1.269.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* Modifying the script to skip ci check for workspaceId in certain tables ([#1468](https://github.com/juspay/xyne-spaces/issues/1468)) ([9ec3c34](https://github.com/juspay/xyne-spaces/commit/9ec3c34e648c77ccb2469103985f2c86dddd47a8))
+
+## [1.269.1](https://github.com/juspay/xyne-spaces/compare/v1.269.0...v1.269.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* -Fix-scheduled-call-start-time-not-updating ([#1467](https://github.com/juspay/xyne-spaces/issues/1467)) ([856bd49](https://github.com/juspay/xyne-spaces/commit/856bd4995867a212933e966eab621f1944c51cfa))
+
 ## [1.269.0](https://github.com/juspay/xyne-spaces/compare/v1.268.1...v1.269.0) (2026-09-03)
 
 

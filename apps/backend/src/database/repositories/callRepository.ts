@@ -1341,12 +1341,17 @@ export class CallRepository {
           },
         });
       } else {
-        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE
+        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE.
+        // Preserve startedAt from the first session so it reflects the actual start of the call;
+        // endedAt is refreshed on every leave/room_finished, so the pair spans first join → last leave.
+        // `startedAt` is NOT NULL with a DB default of creation time, so it cannot be used to detect
+        // "never joined". `endedAt` is only ever written when a session ends, so a non-null endedAt is
+        // the reliable signal that a prior session exists and startedAt must be kept.
         await tx.call.update({
           where: { id: call.id },
           data: {
             status: CallStatus.ACTIVE,
-            startedAt: now,
+            startedAt: call.endedAt ? call.startedAt : now,
             lastActivityAt: now,
             updatedAt: now,
           },

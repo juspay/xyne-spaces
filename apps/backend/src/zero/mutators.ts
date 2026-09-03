@@ -4729,11 +4729,15 @@ export function createMutators(
                 },
               });
             } else {
-              // Just update status, keep existing metadata
+              // Just update status, keep existing metadata.
+              // Preserve startedAt across sessions of the same scheduled call: `endedAt` is only
+              // written when a prior session ended, so its presence means this is a rejoin and
+              // startedAt must keep the original first-join time. (startedAt itself is NOT NULL
+              // with a DB default of creation time, so it can't be used to detect "never joined".)
               await tx.mutate.calls.update({
                 id: call.id,
                 status: CallStatus.ACTIVE,
-                startedAt: now,
+                startedAt: call.endedAt ? call.startedAt : now,
                 lastActivityAt: now,
                 updatedAt: now,
               });
