@@ -8,8 +8,7 @@
  * An RCA hangs off a ticket. Impacts and CoE items hang off the RCA.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 
 /** Page cursor for the RCA listing. */
 export interface RcaCursor {
@@ -22,91 +21,60 @@ export const incidentsOperations = {
 
   /**
    * Every RCA, most recent first.
-   * Maps to: Zero query 'allRCAsPaginated'
    */
-  listRcas: query<{ limit?: number; start?: RcaCursor }, unknown[]>('allRCAsPaginated', {
-    mapArgs: (args) => ({ limit: args?.limit ?? 50, start: args?.start ?? null }),
-  }),
+  listRcas: op<{ limit?: number; start?: RcaCursor }, unknown[]>('incidents.listRcas', 'query'),
 
   /**
    * One RCA.
-   * Maps to: Zero query 'rcaById'
    */
-  getRca: query<{ rcaId: string }, unknown>('rcaById'),
+  getRca: op<{ rcaId: string }, unknown>('incidents.getRca', 'query'),
 
   /**
    * Impacts recorded against an RCA.
-   * Maps to: Zero query 'attachmentsByImpact'
    */
-  listImpactAttachments: query<{ impactId: string }, unknown[]>('attachmentsByImpact'),
+  listImpactAttachments: op<{ impactId: string }, unknown[]>('incidents.listImpactAttachments', 'query'),
 
   /**
    * Attachments across several impacts.
-   * Maps to: Zero query 'attachmentsByImpactIds'
    */
-  listAttachmentsForImpacts: query<{ impactIds: string[] }, unknown[]>(
-    'attachmentsByImpactIds'
-  ),
+  listAttachmentsForImpacts: op<{ impactIds: string[] }, unknown[]>('incidents.listAttachmentsForImpacts', 'query'),
 
   /**
    * Release tickets.
-   * Maps to: Zero query 'releaseTickets'
    */
-  listReleaseTickets: query<void, unknown[]>('releaseTickets'),
+  listReleaseTickets: op<void, unknown[]>('incidents.listReleaseTickets', 'query'),
 
   /**
    * Search release tickets.
-   * Maps to: Zero query 'releaseTicketsSearch'
    */
-  searchReleaseTickets: query<{ search?: string; limit?: number }, unknown[]>(
-    'releaseTicketsSearch'
-  ),
+  searchReleaseTickets: op<{ search?: string; limit?: number }, unknown[]>('incidents.searchReleaseTickets', 'query'),
 
   /**
    * Application release tickets for a release.
-   * Maps to: Zero query 'applicationReleaseTicketsByReleaseId'
    */
-  listApplicationReleaseTickets: query<
-    { releaseId: string; limit?: number },
-    unknown[]
-  >('applicationReleaseTicketsByReleaseId', {
-    // releaseId is required; the old `void` signature sent nothing at all.
-    mapArgs: (args) => ({
-      releaseId: args.releaseId,
-      ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    }),
-  }),
+  listApplicationReleaseTickets: op<{ releaseId: string; limit?: number }, unknown[]>('incidents.listApplicationReleaseTickets', 'query'),
 
   /**
    * Changes bundled into a release.
-   * Maps to: Zero query 'releaseChangesByReleaseId'
    */
-  listReleaseChanges: query<{ releaseId: string }, unknown[]>('releaseChangesByReleaseId'),
+  listReleaseChanges: op<{ releaseId: string }, unknown[]>('incidents.listReleaseChanges', 'query'),
 
   /**
    * Form values captured against a release's changes.
-   * Maps to: Zero query 'releaseChangeFormValuesByReleaseId'
    */
-  listReleaseChangeFormValues: query<{ releaseId: string }, unknown[]>(
-    'releaseChangeFormValuesByReleaseId'
-  ),
+  listReleaseChangeFormValues: op<{ releaseId: string }, unknown[]>('incidents.listReleaseChangeFormValues', 'query'),
 
   /**
    * Change-log entries for a release.
-   * Maps to: Zero query 'releaseChangeLogValuesByReleaseId'
    */
-  listReleaseChangeLog: query<{ releaseId: string }, unknown[]>(
-    'releaseChangeLogValuesByReleaseId'
-  ),
+  listReleaseChangeLog: op<{ releaseId: string }, unknown[]>('incidents.listReleaseChangeLog', 'query'),
 
   // ----- RCA -----
 
   /**
    * Open an RCA against a ticket.
-   * Maps to: Zero mutator 'rca.create'
    */
-  createRca: mutator<
-    {
+  createRca: op<{
       id: string;
       ticketId: string;
       title: string;
@@ -119,18 +87,12 @@ export const incidentsOperations = {
       rootCause?: string;
       issueCategoryId?: string;
       issueStartAt?: number;
-    },
-    void
-  >('rca.create', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('incidents.createRca', 'mutator'),
 
   /**
    * Update an RCA.
-   * Maps to: Zero mutator 'rca.update'
    */
-  updateRca: mutator<
-    {
+  updateRca: op<{
       id: string;
       ticketId?: string;
       title?: string;
@@ -142,47 +104,31 @@ export const incidentsOperations = {
       issueCategoryId?: string;
       issueStartAt?: number;
       status?: string;
-    },
-    void
-  >('rca.update', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('incidents.updateRca', 'mutator'),
 
   // ----- Impacts -----
 
   /**
    * Record an impact against an RCA.
-   * Maps to: Zero mutator 'impact.create'
    */
-  createImpact: mutator<
-    { id: string; ticketId: string; rcaId: string; impactTypeId: string; impact: string },
-    void
-  >('impact.create', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  createImpact: op<{ id: string; ticketId: string; rcaId: string; impactTypeId: string; impact: string }, void>('incidents.createImpact', 'mutator'),
 
   /**
    * Update a recorded impact.
-   * Maps to: Zero mutator 'impact.update'
    */
-  updateImpact: mutator<{ id: string; impactTypeId?: string; impact?: string }, void>(
-    'impact.update'
-  ),
+  updateImpact: op<{ id: string; impactTypeId?: string; impact?: string }, void>('incidents.updateImpact', 'mutator'),
 
   /**
    * Remove a recorded impact.
-   * Maps to: Zero mutator 'impact.delete'
    */
-  deleteImpact: mutator<{ id: string }, void>('impact.delete'),
+  deleteImpact: op<{ id: string }, void>('incidents.deleteImpact', 'mutator'),
 
   // ----- Corrective actions -----
 
   /**
    * Add a corrective action to an RCA.
-   * Maps to: Zero mutator 'coe.create'
    */
-  createAction: mutator<
-    {
+  createAction: op<{
       id: string;
       rcaId: string;
       ownerId: string;
@@ -190,18 +136,12 @@ export const incidentsOperations = {
       action: string;
       status: string;
       dueDate?: number;
-    },
-    void
-  >('coe.create', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('incidents.createAction', 'mutator'),
 
   /**
    * Update a corrective action.
-   * Maps to: Zero mutator 'coe.update'
    */
-  updateAction: mutator<
-    {
+  updateAction: op<{
       id: string;
       ownerId?: string;
       actionTypeId?: string;
@@ -209,97 +149,61 @@ export const incidentsOperations = {
       status?: string;
       dueDate?: number;
       completedAt?: number;
-    },
-    void
-  >('coe.update'),
+    }, void>('incidents.updateAction', 'mutator'),
 
   /**
    * Remove a corrective action.
-   * Maps to: Zero mutator 'coe.delete'
    */
-  deleteAction: mutator<{ id: string }, void>('coe.delete'),
+  deleteAction: op<{ id: string }, void>('incidents.deleteAction', 'mutator'),
 
   // ----- Release attribution -----
 
   /**
    * Attribute a ticket to a release.
-   * Maps to: Zero mutator 'releaseAttribution.create'
    */
-  createAttribution: mutator<
-    {
+  createAttribution: op<{
       id: string;
       ticketId: string;
       releaseId: string;
       confidence: number;
       releaseApplicationId?: string;
       rootCauseTicketId?: string;
-    },
-    void
-  >('releaseAttribution.create', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('incidents.createAttribution', 'mutator'),
 
   /**
    * Update an attribution.
-   * Maps to: Zero mutator 'releaseAttribution.update'
    */
-  updateAttribution: mutator<
-    {
+  updateAttribution: op<{
       id: string;
       releaseId?: string;
       releaseApplicationId?: string;
       rootCauseTicketId?: string;
       confidence?: number;
-    },
-    void
-  >('releaseAttribution.update'),
+    }, void>('incidents.updateAttribution', 'mutator'),
 
   /**
    * Remove an attribution.
-   * Maps to: Zero mutator 'releaseAttribution.delete'
    */
-  deleteAttribution: mutator<{ id: string }, void>('releaseAttribution.delete'),
+  deleteAttribution: op<{ id: string }, void>('incidents.deleteAttribution', 'mutator'),
 
   /**
    * Move an application release ticket to another stage.
-   * Maps to: Zero mutator 'applicationReleaseTicket.updateStatus'
    */
-  updateReleaseTicketStatus: mutator<
-    {
+  updateReleaseTicketStatus: op<{
       id: string;
       stageName?: string;
       defaultTicketStatusV2?: string;
       failureReason?: string;
-    },
-    void
-  >('applicationReleaseTicket.updateStatus', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('incidents.updateReleaseTicketStatus', 'mutator'),
 
   /**
    * Record who tested a release ticket.
-   * Maps to: Zero mutator 'applicationReleaseTicket.setTestedBy'
    */
-  setReleaseTicketTestedBy: mutator<{ id: string; userId: string }, void>(
-    'applicationReleaseTicket.setTestedBy',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  setReleaseTicketTestedBy: op<{ id: string; userId: string }, void>('incidents.setReleaseTicketTestedBy', 'mutator'),
 
   /**
    * A release's event log, newest first. `FORM_SAVED` events are filtered out
    * server-side as noise.
-   * Maps to: Zero query 'releaseEventsByReleaseId'
    */
-  listReleaseEvents: query<{ releaseId: string; limit?: number }, unknown[]>(
-    'releaseEventsByReleaseId',
-    {
-      // limit is required and capped at 100 server-side.
-      mapArgs: (args) => ({
-        releaseId: args.releaseId,
-        limit: Math.min(args.limit ?? 50, 100),
-      }),
-    }
-  ),
+  listReleaseEvents: op<{ releaseId: string; limit?: number }, unknown[]>('incidents.listReleaseEvents', 'query'),
 } as const;

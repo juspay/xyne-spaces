@@ -23,9 +23,8 @@ function csv(value: string | string[] | undefined): string | undefined {
 export const searchOperations = {
   /**
    * Search across messages, tickets, files, channels, calls, and users.
-   * Maps to: GET /api/sdk/search
    */
-  query: api<SearchOptions, SearchResponse>('GET', '/api/sdk/search', {
+  query: api<SearchOptions, SearchResponse>('GET', '/api/sdk/v1/search', {
     // Every key here must exist in the server's searchQuerySchema: unknown query
     // parameters are rejected, not ignored. `undefined` values are dropped by the
     // HTTP layer, so listing them all is safe.
@@ -76,7 +75,6 @@ export const searchOperations = {
 
   /**
    * Get search schema for building advanced queries.
-   * Maps to: GET /api/sdk/search/schema
    */
-  getSchema: api<{ type: string }, unknown>('GET', '/api/sdk/search/schema'),
+  getSchema: api<{ type: string }, unknown>('GET', '/api/sdk/v1/search/schema'),
 } as const;

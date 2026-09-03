@@ -26,7 +26,7 @@ export const attachmentsOperations = {
   /** Maps to: POST /api/sdk/attachments */
   upload: api<UploadAttachmentsInput, AttachmentUploadResponse>(
     'POST',
-    '/api/sdk/attachments',
+    '/api/sdk/v1/attachments',
     {
       mapArgs: (args) => {
         const form = new FormData();
@@ -41,7 +41,7 @@ export const attachmentsOperations = {
   /** Maps to: POST /api/sdk/draft-attachments */
   uploadDraft: api<UploadDraftAttachmentsInput, DraftAttachmentUploadResponse>(
     'POST',
-    '/api/sdk/draft-attachments',
+    '/api/sdk/v1/draft-attachments',
     {
       mapArgs: (args) => {
         const form = new FormData();

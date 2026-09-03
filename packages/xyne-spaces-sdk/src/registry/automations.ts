@@ -9,8 +9,7 @@
  * transitions stay auditable.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 
 /** Page cursor for the workflow listing. */
 export interface WorkflowCursor {
@@ -23,132 +22,86 @@ export const automationsOperations = {
 
   /**
    * Every automation.
-   * Maps to: Zero query 'automationsList'
    */
-  list: query<void, unknown[]>('automationsList'),
+  list: op<void, unknown[]>('automations.list', 'query'),
 
   /**
    * One automation.
-   * Maps to: Zero query 'automationById'
    */
-  get: query<{ id: string }, unknown>('automationById'),
+  get: op<{ id: string }, unknown>('automations.get', 'query'),
 
   /**
    * Workflows, paginated. Automations are one workflow type among several.
-   * Maps to: Zero query 'workflowsPaginated'
    */
-  listWorkflows: query<{ limit?: number; start?: WorkflowCursor }, unknown[]>(
-    'workflowsPaginated',
-    {
-      mapArgs: (args) => ({ limit: args?.limit ?? 50, start: args?.start ?? null }),
-    }
-  ),
+  listWorkflows: op<{ limit?: number; start?: WorkflowCursor }, unknown[]>('automations.listWorkflows', 'query'),
 
   // ----- Authoring -----
 
   /**
    * Propose a new automation. It starts as a draft and must be submitted and
    * approved before it can run.
-   * Maps to: Zero mutator 'automations.createProposal'
    */
-  createProposal: mutator<
-    {
+  createProposal: op<{
       id: string;
       name: string;
       configJson: unknown;
       metadataJson: unknown;
       eventType: string;
       automationSeriesId?: string;
-    },
-    void
-  >('automations.createProposal', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('automations.createProposal', 'mutator'),
 
   /**
    * Edit an automation.
-   * Maps to: Zero mutator 'automations.update'
    */
-  update: mutator<
-    {
+  update: op<{
       id: string;
       name?: string;
       configJson?: unknown;
       metadataJson?: unknown;
       eventType?: string;
-    },
-    void
-  >('automations.update', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('automations.update', 'mutator'),
 
   /**
    * Delete an automation.
-   * Maps to: Zero mutator 'automations.delete'
    */
-  delete: mutator<{ id: string }, void>('automations.delete'),
+  delete: op<{ id: string }, void>('automations.delete', 'mutator'),
 
   // ----- Approval lifecycle -----
 
   /**
    * Send a draft for approval.
-   * Maps to: Zero mutator 'automations.submitForApproval'
    */
-  submitForApproval: mutator<{ id: string }, void>('automations.submitForApproval', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  submitForApproval: op<{ id: string }, void>('automations.submitForApproval', 'mutator'),
 
   /**
    * Withdraw a submission before it is decided.
-   * Maps to: Zero mutator 'automations.revoke'
    */
-  revoke: mutator<{ id: string }, void>('automations.revoke', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  revoke: op<{ id: string }, void>('automations.revoke', 'mutator'),
 
   /**
    * Approve a submitted automation.
-   * Maps to: Zero mutator 'automations.approve'
    */
-  approve: mutator<{ id: string; note?: string }, void>('automations.approve', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  approve: op<{ id: string; note?: string }, void>('automations.approve', 'mutator'),
 
   /**
    * Reject a submitted automation. A note explaining why is required.
-   * Maps to: Zero mutator 'automations.reject'
    */
-  reject: mutator<{ id: string; note: string }, void>('automations.reject', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  reject: op<{ id: string; note: string }, void>('automations.reject', 'mutator'),
 
   // ----- Run state -----
 
   /**
    * Start running an approved automation.
-   * Maps to: Zero mutator 'automations.activate'
    */
-  activate: mutator<{ id: string }, void>('automations.activate', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  activate: op<{ id: string }, void>('automations.activate', 'mutator'),
 
   /**
    * Stop running an automation without deleting it.
-   * Maps to: Zero mutator 'automations.disable'
    */
-  disable: mutator<{ id: string; cancelQueued?: boolean }, void>('automations.disable', {
-    mapArgs: (args) => ({
-      id: args.id,
-      timestamp: now(),
-      ...(args.cancelQueued !== undefined ? { cancelQueued: args.cancelQueued } : {}),
-    }),
-  }),
+  disable: op<{ id: string; cancelQueued?: boolean }, void>('automations.disable', 'mutator'),
 
   /**
    * Retire an automation.
-   * Maps to: Zero mutator 'automations.archive'
    */
-  archive: mutator<{ id: string }, void>('automations.archive', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  archive: op<{ id: string }, void>('automations.archive', 'mutator'),
 } as const;

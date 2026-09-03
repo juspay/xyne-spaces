@@ -11,8 +11,7 @@
  * `sdk.activities`, since that is where a user encounters them.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 import type { Recap } from '../types/index.js';
 
 export const recapsOperations = {
@@ -20,41 +19,28 @@ export const recapsOperations = {
 
   /**
    * Recaps for several channels on one day.
-   * Maps to: Zero query 'channelRecaps'
    */
-  listForChannels: query<{ channelIds: string[]; recapDate: number }, Recap[]>(
-    'channelRecaps'
-  ),
+  listForChannels: op<{ channelIds: string[]; recapDate: number }, Recap[]>('recaps.listForChannels', 'query'),
 
   /**
    * Daily recap rows for several channels, including per-user variants.
-   * Maps to: Zero query 'channelDailyRecaps'
    */
-  listDaily: query<{ channelIds: string[]; recapDate: number }, Recap[]>(
-    'channelDailyRecaps'
-  ),
+  listDaily: op<{ channelIds: string[]; recapDate: number }, Recap[]>('recaps.listDaily', 'query'),
 
   /**
    * Project recaps for a day.
-   * Maps to: Zero query 'projectRecaps'
    */
-  listForProjects: query<{ recapDate: number }, Recap[]>('projectRecaps'),
+  listForProjects: op<{ recapDate: number }, Recap[]>('recaps.listForProjects', 'query'),
 
   /**
    * Nudges attached to an entity such as a ticket.
-   * Maps to: Zero query 'entityNudges'
    */
-  listEntityNudges: query<{ sourceId: string; states?: string[] }, unknown[]>(
-    'entityNudges'
-  ),
+  listEntityNudges: op<{ sourceId: string; states?: string[] }, unknown[]>('recaps.listEntityNudges', 'query'),
 
   /**
    * Nudges behind aggregate counts, resolved by count-row id.
-   * Maps to: Zero query 'surfaceNudgesByCountRowIds'
    */
-  listNudgesByCountRows: query<{ countRowIds: string[] }, unknown[]>(
-    'surfaceNudgesByCountRowIds'
-  ),
+  listNudgesByCountRows: op<{ countRowIds: string[] }, unknown[]>('recaps.listNudgesByCountRows', 'query'),
 
   // ----- Writes -----
 
@@ -63,50 +49,26 @@ export const recapsOperations = {
    *
    * This is the whole subscription list, not an addition — send every channel
    * you want subscribed.
-   * Maps to: Zero mutator 'recap.saveSubscriptions'
    */
-  saveSubscriptions: mutator<{ channelIds: string[] }, void>('recap.saveSubscriptions', {
-    mapArgs: (args) => ({ channelIds: args.channelIds, timestamp: now() }),
-  }),
+  saveSubscriptions: op<{ channelIds: string[] }, void>('recaps.saveSubscriptions', 'mutator'),
 
   /**
    * Set a custom prompt shaping how a channel's recap is written.
-   * Maps to: Zero mutator 'recap.setCustomRecapPrompt'
    */
-  setCustomPrompt: mutator<{ channelId: string; prompt: string }, void>(
-    'recap.setCustomRecapPrompt',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  setCustomPrompt: op<{ channelId: string; prompt: string }, void>('recaps.setCustomPrompt', 'mutator'),
 
   /**
    * Mark a whole day's recaps seen.
-   * Maps to: Zero mutator 'recap.markSeen'
    */
-  markSeen: mutator<{ recapDate: number }, void>('recap.markSeen', {
-    mapArgs: (args) => ({ recapDate: args.recapDate, timestamp: now() }),
-  }),
+  markSeen: op<{ recapDate: number }, void>('recaps.markSeen', 'mutator'),
 
   /**
    * Mark one channel's recap read.
-   * Maps to: Zero mutator 'recap.markChannelRecapAsRead'
    */
-  markChannelRead: mutator<{ channelId: string; recapDate: number }, void>(
-    'recap.markChannelRecapAsRead',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  markChannelRead: op<{ channelId: string; recapDate: number }, void>('recaps.markChannelRead', 'mutator'),
 
   /**
    * Mark one channel's recap unread again.
-   * Maps to: Zero mutator 'recap.markChannelRecapAsUnread'
    */
-  markChannelUnread: mutator<{ channelId: string }, void>(
-    'recap.markChannelRecapAsUnread',
-    {
-      mapArgs: (args) => ({ channelId: args.channelId, timestamp: now() }),
-    }
-  ),
+  markChannelUnread: op<{ channelId: string }, void>('recaps.markChannelUnread', 'mutator'),
 } as const;

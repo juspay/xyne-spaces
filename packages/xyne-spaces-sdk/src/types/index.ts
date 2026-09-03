@@ -851,6 +851,63 @@ export interface ConversationLabel {
 // ----- Recap Types -----
 
 /** A generated summary of a channel's activity for one day. */
+/** Which kind of business entity a ticket field definition classifies. */
+export type TicketFieldEntityType = 'MERCHANT' | 'GATEWAY';
+
+/** A free-form tag defined on a project and applied to its tickets. */
+export interface ProjectTag {
+  id: string;
+  workspaceId: string;
+  /** The project that owns the tag. Tags are not shared across projects. */
+  projectId: string;
+  name: string;
+  /** Epoch milliseconds. */
+  createdAt: number;
+}
+
+/**
+ * A custom-field definition available to a project's tickets.
+ *
+ * `entityType` says what kind of thing the field names, and `entityName` is the
+ * value itself — a merchant or gateway a ticket is attributed to.
+ */
+export interface TicketFieldDefinition {
+  id: string;
+  workspaceId: string;
+  ticketId: string;
+  entityType: TicketFieldEntityType;
+  entityName: string;
+}
+
+/**
+ * A deployable application registered against a project, for release tracking.
+ *
+ * `regex` matches the version tags this application publishes; `envPaths` and
+ * `migrationPaths` are repository paths the release tooling watches.
+ */
+export interface Application {
+  id: string;
+  workspaceId: string;
+  name: string;
+  projectId: string;
+  boardId: string;
+  mainReleaseBoardId?: string;
+  channelId?: string;
+  regex: string;
+  repoUrl: string;
+  deployedCommit?: string;
+  deployedVersion?: string;
+  /** Epoch milliseconds. */
+  lastDeployedAt?: number;
+  ownerTeam: string;
+  envPaths: string[];
+  migrationPaths: string[];
+  /** Epoch milliseconds. */
+  createdAt: number;
+  /** Epoch milliseconds. */
+  updatedAt?: number;
+}
+
 export interface Recap {
   id: string;
   channelId: string;

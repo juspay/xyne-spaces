@@ -9,8 +9,7 @@
  * reused after, so the resource methods accept it optionally.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 import type { UserProfile } from '../types/index.js';
 
 export const preferencesOperations = {
@@ -18,154 +17,92 @@ export const preferencesOperations = {
 
   /**
    * The current user's preference row.
-   * Maps to: Zero query 'getCurrentUserPreference'
    */
-  get: query<void, unknown>('getCurrentUserPreference', {
-    // Declared as an empty object rather than no arguments.
-    mapArgs: () => ({}),
-  }),
+  get: op<void, unknown>('preferences.get', 'query'),
 
   /**
    * The current user's bookmarks.
-   * Maps to: Zero query 'userBookmarks'
    */
-  listBookmarks: query<void, unknown[]>('userBookmarks'),
+  listBookmarks: op<void, unknown[]>('preferences.listBookmarks', 'query'),
 
   /**
    * Saved filter views a user created.
-   * Maps to: Zero query 'savedConfigsByUser'
    *
    * Takes an explicit `userId` — despite the old `void` signature suggesting it was
    * caller-scoped, the query has no `ctx` fallback, so it required an argument the
    * SDK never sent. Pass `me.id` from `sdk.users.me()` for your own views.
    */
-  listSavedViews: query<{ userId: string }, unknown[]>('savedConfigsByUser'),
+  listSavedViews: op<{ userId: string }, unknown[]>('preferences.listSavedViews', 'query'),
 
   // ----- Notification settings -----
 
   /**
    * Set global notification levels.
-   * Maps to: Zero mutator 'userPreference.setGlobalNotificationSettings'
    */
-  setNotificationSettings: mutator<
-    {
+  setNotificationSettings: op<{
       id: string;
       globalDesktopNotificationLevel?: string;
       globalMobileNotificationLevel?: string;
       threadReplyNotificationsEnabled?: boolean;
       channelWideMentionsEnabled?: boolean;
-    },
-    void
-  >('userPreference.setGlobalNotificationSettings', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('preferences.setNotificationSettings', 'mutator'),
 
   /**
    * Set the words that trigger a notification when mentioned.
-   * Maps to: Zero mutator 'userPreference.setNotificationKeywords'
    */
-  setNotificationKeywords: mutator<{ id: string; keywords: string[] }, void>(
-    'userPreference.setNotificationKeywords',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  setNotificationKeywords: op<{ id: string; keywords: string[] }, void>('preferences.setNotificationKeywords', 'mutator'),
 
   /**
    * Override notification behaviour for one channel.
-   * Maps to: Zero mutator 'notificationSettings.setChannelNotificationLevel'
    */
-  setChannelNotifications: mutator<
-    {
+  setChannelNotifications: op<{
       channelId: string;
       desktopNotificationLevel?: string | null;
       mobileNotificationLevel?: string | null;
       threadReplyNotificationsEnabled?: boolean | null;
       channelWideMentionsEnabled?: boolean | null;
-    },
-    void
-  >('notificationSettings.setChannelNotificationLevel', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('preferences.setChannelNotifications', 'mutator'),
 
   // ----- Interface preferences -----
 
   /**
    * Set how channels are ordered in the sidebar.
-   * Maps to: Zero mutator 'userPreference.setChannelSortOrder'
    */
-  setChannelSortOrder: mutator<{ id: string; channelSortOrder: string }, void>(
-    'userPreference.setChannelSortOrder',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  setChannelSortOrder: op<{ id: string; channelSortOrder: string }, void>('preferences.setChannelSortOrder', 'mutator'),
 
   /**
    * Set the filter and sort applied to one sidebar group.
-   * Maps to: Zero mutator 'userPreference.setSidebarGroupPreference'
    *
    * `filterMode` is ACTIVE | UNREADS | MENTIONS | ALL.
    */
-  setSidebarGroup: mutator<
-    {
+  setSidebarGroup: op<{
       id: string;
       group: 'starred' | 'channels' | 'dms';
       filterMode?: string;
       sortOrder?: string;
-    },
-    void
-  >('userPreference.setSidebarGroupPreference', {
-    mapArgs: (args) => ({
-      id: args.id,
-      group: args.group,
-      ...(args.filterMode ? { filterMode: args.filterMode } : {}),
-      ...(args.sortOrder ? { sortOrder: args.sortOrder } : {}),
-      timestamp: now(),
-    }),
-  }),
+    }, void>('preferences.setSidebarGroup', 'mutator'),
 
   /**
    * Choose whether Enter sends a message or inserts a newline.
-   * Maps to: Zero mutator 'userPreference.setEnterSendsMessage'
    */
-  setEnterSendsMessage: mutator<{ id: string; enterSendsMessage: boolean }, void>(
-    'userPreference.setEnterSendsMessage',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  setEnterSendsMessage: op<{ id: string; enterSendsMessage: boolean }, void>('preferences.setEnterSendsMessage', 'mutator'),
 
   /**
    * Show or hide thread tags.
-   * Maps to: Zero mutator 'userPreference.setShowThreadTags'
    */
-  setShowThreadTags: mutator<{ id: string; showThreadTags: boolean }, void>(
-    'userPreference.setShowThreadTags',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  setShowThreadTags: op<{ id: string; showThreadTags: boolean }, void>('preferences.setShowThreadTags', 'mutator'),
 
   /**
    * Allow or block broadcast mentions inside threads.
-   * Maps to: Zero mutator 'userPreference.setAllowThreadBroadcastMentions'
    */
-  setAllowThreadBroadcastMentions: mutator<
-    { id: string; allowThreadBroadcastMentions: boolean },
-    void
-  >('userPreference.setAllowThreadBroadcastMentions', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  setAllowThreadBroadcastMentions: op<{ id: string; allowThreadBroadcastMentions: boolean }, void>('preferences.setAllowThreadBroadcastMentions', 'mutator'),
 
   // ----- Profile and presence -----
 
   /**
    * Update the current user's profile card.
-   * Maps to: Zero mutator 'userProfile.upsert'
    */
-  updateProfile: mutator<
-    {
+  updateProfile: op<{
       profileId: string;
       displayName?: string;
       pronunciation?: string;
@@ -173,71 +110,43 @@ export const preferencesOperations = {
       phoneNumber?: string;
       dob?: number;
       manager?: string;
-    },
-    void
-  >('userProfile.upsert', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('preferences.updateProfile', 'mutator'),
 
   /**
    * Set a status emoji, message, or availability window.
-   * Maps to: Zero mutator 'userPresence.upsert'
    */
-  updatePresence: mutator<
-    {
+  updatePresence: op<{
       presenceId: string;
       statusEmoji?: string;
       statusContent?: string;
       statusExpiryAt?: number;
       assignmentUnavailableUntil?: number;
       notificationsPausedUntil?: number;
-    },
-    void
-  >('userPresence.upsert', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('preferences.updatePresence', 'mutator'),
 
   // ----- Bookmarks -----
 
   /**
    * Bookmark something.
-   * Maps to: Zero mutator 'bookmark.add'
    */
-  addBookmark: mutator<
-    { bookmarkId: string; entityId: string; entityType: string; metadata?: unknown },
-    void
-  >('bookmark.add', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  addBookmark: op<{ bookmarkId: string; entityId: string; entityType: string; metadata?: unknown }, void>('preferences.addBookmark', 'mutator'),
 
   /**
    * Remove a bookmark, or mark it done.
-   * Maps to: Zero mutator 'bookmark.remove'
    */
-  removeBookmark: mutator<
-    { entityId: string; entityType: string; markAsDone?: boolean },
-    void
-  >('bookmark.remove', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  removeBookmark: op<{ entityId: string; entityType: string; markAsDone?: boolean }, void>('preferences.removeBookmark', 'mutator'),
 
   /**
    * Change a bookmark's metadata, such as a reminder time.
-   * Maps to: Zero mutator 'bookmark.updateMetadata'
    */
-  updateBookmark: mutator<
-    { entityId: string; entityType: string; metadata: unknown },
-    void
-  >('bookmark.updateMetadata'),
+  updateBookmark: op<{ entityId: string; entityType: string; metadata: unknown }, void>('preferences.updateBookmark', 'mutator'),
 
   // ----- Saved views -----
 
   /**
    * Save a filter configuration for reuse.
-   * Maps to: Zero mutator 'savedUserConfiguration.create'
    */
-  createSavedView: mutator<
-    {
+  createSavedView: op<{
       id: string;
       name: string;
       contextType: string;
@@ -245,34 +154,23 @@ export const preferencesOperations = {
       channelId: string;
       visibility: string;
       values: unknown;
-    },
-    void
-  >('savedUserConfiguration.create', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('preferences.createSavedView', 'mutator'),
 
   /**
    * Update a saved view.
-   * Maps to: Zero mutator 'savedUserConfiguration.update'
    */
-  updateSavedView: mutator<
-    {
+  updateSavedView: op<{
       configId: string;
       values: unknown;
       name?: string;
       visibility?: string;
       isStarred?: boolean;
-    },
-    void
-  >('savedUserConfiguration.update', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('preferences.updateSavedView', 'mutator'),
 
   /**
    * Delete a saved view.
-   * Maps to: Zero mutator 'savedUserConfiguration.delete'
    */
-  deleteSavedView: mutator<{ configId: string }, void>('savedUserConfiguration.delete'),
+  deleteSavedView: op<{ configId: string }, void>('preferences.deleteSavedView', 'mutator'),
 } as const;
 
 export type { UserProfile };

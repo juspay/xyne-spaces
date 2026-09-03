@@ -8,8 +8,7 @@
  * replies into an existing one.
  */
 
-import { query, mutator, api } from './types.js';
-import { newId, now } from '../core/ids.js';
+import { op, api } from './types.js';
 import type { Message, MessageType } from '../types/index.js';
 
 /** Page cursor for the user's sent-message history. */
@@ -23,46 +22,32 @@ export const messagesOperations = {
 
   /**
    * All messages in a thread, oldest first.
-   * Maps to: Zero query 'conversationMessagesV2'
    */
-  listByConversation: query<{ conversationId: string }, Message[]>('conversationMessagesV2'),
+  listByConversation: op<{ conversationId: string }, Message[]>('messages.listByConversation', 'query'),
 
   /**
    * Messages by id.
-   * Maps to: Zero query 'messagesByIds'
    */
-  getMany: query<{ messageIds: string[] }, Message[]>('messagesByIds'),
+  getMany: op<{ messageIds: string[] }, Message[]>('messages.getMany', 'query'),
 
   /**
    * One message with the context an activity entry needs to render.
-   * Maps to: Zero query 'getMessageForActivityV2'
    */
-  get: query<{ messageId: string }, Message | null>('getMessageForActivityV2'),
+  get: op<{ messageId: string }, Message | null>('messages.get', 'query'),
 
   /**
    * Top-level channel messages together with thread replies promoted into the
    * channel via "also send to channel".
-   * Maps to: Zero query 'channelAndThreadMessagesV2'
    */
-  listByChannel: query<{ channelId: string }, Message[]>('channelAndThreadMessagesV2'),
+  listByChannel: op<{ channelId: string }, Message[]>('messages.listByChannel', 'query'),
 
   /**
    * The current user's own sent messages, newest first.
-   * Maps to: Zero query 'userSentMessagesPaginated'
    */
-  listMine: query<{ limit?: number; start?: MessageCursor }, Message[]>(
-    'userSentMessagesPaginated',
-    {
-      mapArgs: (args) => ({
-        limit: args.limit ?? 50,
-        start: args.start ?? null,
-      }),
-    }
-  ),
+  listMine: op<{ limit?: number; start?: MessageCursor }, Message[]>('messages.listMine', 'query'),
 
   /**
    * Messages authored by a given user, newest first (via Vespa search).
-   * Maps to: GET /api/sdk/search with from=userId, type=messages
    *
    * Uses Vespa search under the hood, similar to cmd+k's `from:@xyz` filter.
    * Results are ordered by newest first. Uses offset-based pagination.
@@ -78,7 +63,7 @@ export const messagesOperations = {
       before?: number;
     },
     Message[]
-  >('GET', '/api/sdk/search', {
+  >('GET', '/api/sdk/v1/search', {
     mapArgs: (args) => ({
       q: '', // Empty query for filter-only search
       from: args.userId,
@@ -133,15 +118,13 @@ export const messagesOperations = {
 
   /**
    * The latest message in a channel.
-   * Maps to: Zero query 'channelLatestMessageV2'
    */
-  getLatestInChannel: query<{ channelId: string }, Message | null>('channelLatestMessageV2'),
+  getLatestInChannel: op<{ channelId: string }, Message | null>('messages.getLatestInChannel', 'query'),
 
   /**
    * Nudges attached to a message.
-   * Maps to: Zero query 'messageNudges'
    */
-  listNudges: query<{ messageId: string; states?: string[] }, unknown[]>('messageNudges'),
+  listNudges: op<{ messageId: string; states?: string[] }, unknown[]>('messages.listNudges', 'query'),
 
   // ----- Writes -----
 
@@ -150,234 +133,131 @@ export const messagesOperations = {
    *
    * `showInChannel` also surfaces the reply in the parent channel; when set, the
    * mutator needs a child conversation id, which is generated here.
-   * Maps to: Zero mutator 'messages.send'
    */
-  send: mutator<
-    {
+  send: op<{
       messageId: string;
       conversationId: string;
       content: string;
       type?: MessageType;
       showInChannel?: boolean;
       attachmentIds?: string[];
-    },
-    void
-  >('messages.send', {
-    mapArgs: (args) => ({
-      conversationId: args.conversationId,
-      content: args.content,
-      type: args.type ?? 'USER',
-      messageId: args.messageId,
-      timestamp: now(),
-      ...(args.showInChannel !== undefined
-        ? { showInChannel: args.showInChannel, childConversationId: newId() }
-        : {}),
-      ...(args.attachmentIds ? { attachmentIds: args.attachmentIds } : {}),
-    }),
-  }),
+    }, void>('messages.send', 'mutator'),
 
   /**
    * Edit a message's content.
-   * Maps to: Zero mutator 'messages.update'
    */
-  update: mutator<{ messageId: string; content: string }, void>('messages.update'),
+  update: op<{ messageId: string; content: string }, void>('messages.update', 'mutator'),
 
   /**
    * Delete a message.
-   * Maps to: Zero mutator 'messages.delete'
    */
-  delete: mutator<{ messageId: string }, void>('messages.delete'),
+  delete: op<{ messageId: string }, void>('messages.delete', 'mutator'),
 
   /**
    * Add or remove an emoji reaction.
-   * Maps to: Zero mutator 'messages.react'
    */
-  react: mutator<
-    { messageId: string; emojiName: string; action: 'add' | 'remove' },
-    void
-  >('messages.react', {
-    mapArgs: (args) => ({
-      messageId: args.messageId,
-      emojiName: args.emojiName,
-      action: args.action,
-      timestamp: now(),
-      // Only meaningful when adding; harmless on remove, where the server
-      // resolves the existing rows by (message, user, emoji).
-      reactionId: newId(),
-      countId: newId(),
-    }),
-  }),
+  react: op<{ messageId: string; emojiName: string; action: 'add' | 'remove' }, void>('messages.react', 'mutator'),
 
   /**
    * Show or hide a thread reply in its parent channel.
-   * Maps to: Zero mutator 'messages.updateShowInChannel'
    */
-  setShowInChannel: mutator<{ messageId: string; showInChannel: boolean }, void>(
-    'messages.updateShowInChannel',
-    {
-      mapArgs: (args) => ({
-        messageId: args.messageId,
-        showInChannel: args.showInChannel,
-        childConversationId: newId(),
-        timestamp: now(),
-      }),
-    }
-  ),
+  setShowInChannel: op<{ messageId: string; showInChannel: boolean }, void>('messages.setShowInChannel', 'mutator'),
 
   /**
    * Close the incident artifact attached to a slash-command message.
-   * Maps to: Zero mutator 'messages.closeSlashCommandArtifact'
    *
    * Only the message's author may close it, and only while the artifact is
    * still ACTIVE — a second call is refused. `timestamp` is stamped here and
    * is what the closed artifact records as its close time.
    */
-  closeSlashCommandArtifact: mutator<{ messageId: string }, void>(
-    'messages.closeSlashCommandArtifact',
-    { mapArgs: (args) => ({ ...args, timestamp: now() }) }
-  ),
+  closeSlashCommandArtifact: op<{ messageId: string }, void>('messages.closeSlashCommandArtifact', 'mutator'),
 
   /**
    * Remove an attachment from a message.
-   * Maps to: Zero mutator 'messageAttachment.delete'
    */
-  deleteAttachment: mutator<{ attachmentId: string }, void>('messageAttachment.delete'),
+  deleteAttachment: op<{ attachmentId: string }, void>('messages.deleteAttachment', 'mutator'),
 
   /**
    * Remove several attachments at once.
-   * Maps to: Zero mutator 'messageAttachment.deleteMany'
    */
-  deleteAttachments: mutator<{ attachmentIds: string[] }, void>(
-    'messageAttachment.deleteMany'
-  ),
+  deleteAttachments: op<{ attachmentIds: string[] }, void>('messages.deleteAttachments', 'mutator'),
 
   // ----- Drafts -----
 
   /**
    * The current user's saved drafts.
-   * Maps to: Zero query 'userDrafts'
    */
-  listDrafts: query<{ limit?: number }, unknown[]>('userDrafts', {
-    mapArgs: (args) => ({ limit: args?.limit ?? 50 }),
-  }),
+  listDrafts: op<{ limit?: number }, unknown[]>('messages.listDrafts', 'query'),
 
   /**
    * Edit a draft's content.
-   * Maps to: Zero mutator 'draftMessages.edit'
    */
-  editDraft: mutator<{ id: string; content: string }, void>('draftMessages.edit', {
-    mapArgs: (args) => ({ id: args.id, content: args.content, timestamp: now() }),
-  }),
+  editDraft: op<{ id: string; content: string }, void>('messages.editDraft', 'mutator'),
 
   /**
    * Send a saved draft now.
-   * Maps to: Zero mutator 'draftMessages.send'
    */
-  sendDraft: mutator<{ id: string }, void>('draftMessages.send', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  sendDraft: op<{ id: string }, void>('messages.sendDraft', 'mutator'),
 
   /**
    * Discard a draft.
-   * Maps to: Zero mutator 'draftMessages.delete'
    */
-  deleteDraft: mutator<{ id: string }, void>('draftMessages.delete'),
+  deleteDraft: op<{ id: string }, void>('messages.deleteDraft', 'mutator'),
 
   // ----- Delayed (scheduled) messages -----
 
   /**
    * The current user's scheduled messages.
-   * Maps to: Zero query 'userDelayedMessages'
    */
-  listScheduled: query<void, unknown[]>('userDelayedMessages'),
+  listScheduled: op<void, unknown[]>('messages.listScheduled', 'query'),
 
   /**
    * Schedule a message for a future time.
-   * Maps to: Zero mutator 'delayedMessages.create'
    */
-  schedule: mutator<
-    {
+  schedule: op<{
       id: string;
       channelId: string;
       content: string;
       scheduledFor: number;
       conversationId?: string;
-    },
-    void
-  >('delayedMessages.create', {
-    mapArgs: (args) => ({
-      id: args.id,
-      channelId: args.channelId,
-      content: args.content,
-      scheduledFor: args.scheduledFor,
-      ...(args.conversationId ? { conversationId: args.conversationId } : {}),
-      timestamp: now(),
-    }),
-  }),
+    }, void>('messages.schedule', 'mutator'),
 
   /**
    * Cancel a scheduled message.
-   * Maps to: Zero mutator 'delayedMessages.cancel'
    */
-  cancelScheduled: mutator<{ id: string }, void>('delayedMessages.cancel', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  cancelScheduled: op<{ id: string }, void>('messages.cancelScheduled', 'mutator'),
 
   /**
    * Change when a scheduled message will send.
-   * Maps to: Zero mutator 'delayedMessages.reschedule'
    */
-  reschedule: mutator<{ id: string; scheduledFor: number }, void>(
-    'delayedMessages.reschedule',
-    {
-      mapArgs: (args) => ({
-        id: args.id,
-        scheduledFor: args.scheduledFor,
-        timestamp: now(),
-      }),
-    }
-  ),
+  reschedule: op<{ id: string; scheduledFor: number }, void>('messages.reschedule', 'mutator'),
 
   /**
    * Edit a scheduled message's content.
-   * Maps to: Zero mutator 'delayedMessages.edit'
    */
-  editScheduled: mutator<{ id: string; content: string }, void>('delayedMessages.edit', {
-    mapArgs: (args) => ({ id: args.id, content: args.content, updatedAt: now() }),
-  }),
+  editScheduled: op<{ id: string; content: string }, void>('messages.editScheduled', 'mutator'),
 
   /**
    * Send a scheduled message immediately.
-   * Maps to: Zero mutator 'delayedMessages.sendNow'
    */
-  sendScheduledNow: mutator<{ id: string }, void>('delayedMessages.sendNow', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  sendScheduledNow: op<{ id: string }, void>('messages.sendScheduledNow', 'mutator'),
 
   /**
    * Turn a scheduled message back into an editable draft.
-   * Maps to: Zero mutator 'delayedMessages.convertToDraft'
    */
-  scheduledToDraft: mutator<{ id: string }, void>('delayedMessages.convertToDraft', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  scheduledToDraft: op<{ id: string }, void>('messages.scheduledToDraft', 'mutator'),
   /**
    * Attachments by id.
-   * Maps to: Zero query 'attachmentsByIds'
    */
-  getAttachments: query<{ attachmentIds: string[] }, unknown[]>('attachmentsByIds'),
+  getAttachments: op<{ attachmentIds: string[] }, unknown[]>('messages.getAttachments', 'query'),
 
   /**
    * Attachments on the message that started a thread.
-   * Maps to: Zero query 'attachmentsByInitialMessage'
    */
-  listAttachmentsForThread: query<{ initialMessageId: string }, unknown[]>(
-    'attachmentsByInitialMessage'
-  ),
+  listAttachmentsForThread: op<{ initialMessageId: string }, unknown[]>('messages.listAttachmentsForThread', 'query'),
 
   /**
    * Every attachment shared in a channel, newest first.
-   * Maps to: Zero query 'getConversationAttachementsV2'
    *
    * V2 takes identical arguments; it moves channel-visibility gating out of the
    * query body and onto the table ACL, so this is a drop-in swap.
@@ -386,44 +266,22 @@ export const messagesOperations = {
    * every call fail validation — the coverage gate only checks mutator arguments,
    * so nothing caught it.
    */
-  listChannelAttachments: query<
-    {
+  listChannelAttachments: op<{
       channelId: string;
       limit?: number;
       start?: { attachementId: string; createdAt: number };
       direction?: 'forward' | 'backward';
-    },
-    unknown[]
-  >('getConversationAttachementsV2', {
-    mapArgs: (args) => ({
-      channelId: args.channelId,
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-      direction: args.direction ?? 'forward',
-    }),
-  }),
+    }, unknown[]>('messages.listChannelAttachments', 'query'),
 
   /**
    * Scheduled messages, a page at a time, optionally filtered by status.
-   * Maps to: Zero query 'userDelayedMessagesPaginated'
    */
-  listScheduledPaginated: query<
-    { limit?: number; statuses?: string[]; start?: { id: string; scheduledFor: number } },
-    unknown[]
-  >('userDelayedMessagesPaginated', {
-    mapArgs: (args) => ({
-      limit: args.limit ?? 50,
-      ...(args.statuses ? { statuses: args.statuses } : {}),
-      start: args.start ?? null,
-    }),
-  }),
+  listScheduledPaginated: op<{ limit?: number; statuses?: string[]; start?: { id: string; scheduledFor: number } }, unknown[]>('messages.listScheduledPaginated', 'query'),
 
   /**
    * Attach files to a draft.
-   * Maps to: Zero mutator 'draft.createAttachments'
    */
-  addDraftAttachments: mutator<
-    {
+  addDraftAttachments: op<{
       draftMessageId: string;
       channelId: string;
       attachments: Array<{
@@ -435,36 +293,21 @@ export const messagesOperations = {
         height?: number;
       }>;
       conversationId?: string;
-    },
-    void
-  >('draft.createAttachments', {
-    // timestamp is required and was never sent.
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('messages.addDraftAttachments', 'mutator'),
 
   /**
    * Clear a channel or thread draft's content.
-   * Maps to: Zero mutator 'draft.clearContent'
    */
-  clearDraft: mutator<{ channelId: string; conversationId?: string }, void>(
-    'draft.clearContent',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  clearDraft: op<{ channelId: string; conversationId?: string }, void>('messages.clearDraft', 'mutator'),
 
   /**
    * Resolve a mention of someone who is not in the channel: add them, add
    * everyone mentioned, or ignore.
-   * Maps to: Zero mutator 'messages.handleNonParticipantAction'
    */
-  handleNonParticipants: mutator<
-    {
+  handleNonParticipants: op<{
       messageId: string;
       channelId: string;
       userIds: string[];
       action: 'add' | 'add_all' | 'ignore' | 'ignore_all';
-    },
-    void
-  >('messages.handleNonParticipantAction'),
+    }, void>('messages.handleNonParticipants', 'mutator'),
 } as const;

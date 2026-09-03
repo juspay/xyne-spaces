@@ -31,6 +31,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const sdkRoot = resolve(here, '..');
 
 const REGISTRY_DIR = join(sdkRoot, 'src/registry');
+const repoRootDir = resolve(sdkRoot, '../..');
+const V1_MAPPER_FILE = join(repoRootDir, 'apps/backend/src/api/sdk/v1/mapper.ts');
+const V1_PARSER_FILE = join(repoRootDir, 'apps/backend/src/api/sdk/v1/parser.ts');
 const EXCLUSIONS = join(sdkRoot, 'src/exclusions.json');
 
 /** The SDK's shared type aliases, where most literal unions are declared. */
@@ -73,6 +76,7 @@ function readRegistryUsage() {
  * contract and its declared property names are what gets sent.
  */
 function suppliedArgs(info) {
+  if (info._v1) return info._supplied;
   if (info.argsEnd === -1) return null;
   const tail = info.src.slice(info.argsStart, info.argsEnd);
 
@@ -127,6 +131,7 @@ function genericText(info) {
 
 /** The first generic parameter of a registry entry — its SDK-facing input type. */
 function inputTypeText(info) {
+  if (info._v1) return info._input;
   const text = genericText(info);
   if (!text) return null;
   let depth = 0;
@@ -200,12 +205,14 @@ function topLevelKeys(body) {
 
 /** Whether an entry reshapes its result, within its own call bounds. */
 function hasMapResult(info) {
+  if (info._v1) return info._hasMapResult;
   if (info.argsEnd === -1) return false;
   return /\bmapResult\s*:/.test(info.src.slice(info.argsStart, info.argsEnd));
 }
 
 /** The declared result type — the generic's second parameter. */
 function resultType(info) {
+  if (info._v1) return info._result;
   const text = genericText(info);
   if (!text) return null;
   // Split on the top-level comma only; result types contain their own commas.
@@ -243,6 +250,135 @@ const excluded = new Map(
 );
 
 const problems = [];
+
+/**
+ * Operations reached through the versioned API.
+ *
+ * These are split across two repos-worth of source on purpose: the backend owns
+ * *which* catalog operation an id runs and *how* its arguments are shaped, and
+ * the SDK owns the types either side of the call. Neither half alone says
+ * whether a call is correct, so this joins them before the checks run.
+ *
+ * Yielded in the same shape as a legacy registry entry, with the parts the
+ * legacy path recomputes from source supplied directly, so every check below
+ * works on both without knowing which it has.
+ */
+function readV1Usage() {
+  const out = new Map();
+  const mapperSrc = readFileSync(V1_MAPPER_FILE, 'utf8');
+  const parserSrc = readFileSync(V1_PARSER_FILE, 'utf8');
+
+  // opId -> { kind, name }
+  const targets = new Map();
+  for (const m of mapperSrc.matchAll(
+    /'([^']+)':\s*\{\s*kind:\s*'(query|mutator)',\s*name:\s*'([^']+)'/g
+  )) {
+    targets.set(m[1], { kind: m[2], name: m[3] });
+  }
+
+  // opId -> Set of argument names the parser sends, or null when it forwards.
+  const parsed = new Map();
+  for (const m of parserSrc.matchAll(/'([^']+)':\s*\(args[^)]*\)[^=]*=>\s*\(\{/g)) {
+    const open = parserSrc.indexOf('{', m.index + m[0].length - 1);
+    const end = matchBracket(parserSrc, open);
+    if (end === -1) continue;
+    const body = parserSrc.slice(open + 1, end);
+    const argsMatch = /args:\s*\{/.exec(body);
+    if (!argsMatch) { parsed.set(m[1], null); continue; }
+    const aOpen = body.indexOf('{', argsMatch.index + argsMatch[0].length - 1);
+    const aEnd = matchBracket(body, aOpen);
+    const inner = body.slice(aOpen + 1, aEnd);
+    parsed.set(m[1], /\.\.\.\s*args\b/.test(inner) ? null : topLevelKeys(inner));
+  }
+
+  // opId -> SDK-declared input/result types
+  for (const file of readdirSync(REGISTRY_DIR).filter((f) => f.endsWith('.ts'))) {
+    if (file === 'types.ts') continue;
+    const src = readFileSync(join(REGISTRY_DIR, file), 'utf8');
+    // Angle-bracket matched, not lazily regexed: `Record<string, string>` inside a
+    // generic ends the lazy match early, and the enum check that reads this text
+    // then silently skips the entry rather than failing.
+    for (const m of src.matchAll(/\bop</g)) {
+      const lt = m.index + m[0].length - 1;
+      let d = 0, gEnd = -1;
+      for (let i = lt; i < src.length; i++) {
+        if (src[i] === '<') d++;
+        else if (src[i] === '>') { d--; if (d === 0) { gEnd = i; break; } }
+      }
+      if (gEnd === -1) continue;
+      const call = /^\(\s*\n?\s*'([^']+)',\s*'(query|mutator|direct)'/.exec(src.slice(gEnd + 1));
+      if (!call) continue;
+      const opId = call[1];
+      const target = targets.get(opId);
+      if (!target) {
+        problems.push(`v1 operation "${opId}" (registry/${file}) has no entry in api/sdk/v1/mapper.ts`);
+        continue;
+      }
+      const generics = src.slice(lt + 1, gEnd);
+      let depth = 0, input = generics, result = null;
+      for (let i = 0; i < generics.length; i++) {
+        const ch = generics[i];
+        if ('<{[('.includes(ch)) depth++;
+        else if ('>}])'.includes(ch)) depth--;
+        else if (ch === ',' && depth === 0) {
+          input = generics.slice(0, i);
+          result = generics.slice(i + 1).trim();
+          break;
+        }
+      }
+      const declared = new Set();
+      for (const k of input.matchAll(/([a-zA-Z][a-zA-Z0-9_]*)\s*\??\s*:/g)) declared.add(k[1]);
+      const supplied = parsed.has(opId) ? parsed.get(opId) : declared;
+
+      out.set(target.name, {
+        file: `${file} -> v1:${opId}`,
+        kind: target.kind,
+        // The registry source, so a named literal union (`type: TicketPriority`)
+        // can still be resolved back to its values. Omitting it made every such
+        // enum check return null and vanish rather than fail.
+        src,
+        _v1: true,
+        _supplied: supplied,
+        _input: input.trim(),
+        _result: result,
+        // Bounded to this entry's own call. A fixed-size window reaches into the
+        // next entry, and a neighbour's mapResult then silently disables this
+        // entry's result-shape check — the same "name appears anywhere" trap
+        // this file's header warns about.
+        _hasMapResult: (() => {
+          const callOpen = src.indexOf('(', gEnd);
+          if (callOpen === -1) return false;
+          const callEnd = matchBracket(src, callOpen);
+          if (callEnd === -1) return false;
+          return /\bmapResult\s*:/.test(src.slice(callOpen, callEnd));
+        })(),
+      });
+    }
+  }
+
+  // A mapper entry nothing in the SDK calls is dead weight, and usually a rename
+  // that was half-applied.
+  const referenced = new Set();
+  for (const file of readdirSync(REGISTRY_DIR).filter((f) => f.endsWith('.ts'))) {
+    if (file === 'types.ts') continue;
+    const src = readFileSync(join(REGISTRY_DIR, file), 'utf8');
+    for (const m of src.matchAll(/'([a-zA-Z][a-zA-Z0-9_.]*)',\s*'(query|mutator|direct)'/g)) {
+      referenced.add(m[1]);
+    }
+  }
+  for (const opId of targets.keys()) {
+    if (!referenced.has(opId)) {
+      problems.push(`v1 mapper defines "${opId}" but no SDK registry calls it`);
+    }
+  }
+
+  return out;
+}
+
+
+// v1 operations join the same checks: the backend owns their mapping, the SDK
+// their types, and neither half alone proves a call correct.
+for (const [name, info] of readV1Usage()) used.set(name, info);
 
 // 1. Referenced operations must exist.
 for (const [name, info] of used) {

@@ -6,8 +6,7 @@
  * the classification mappings that route categorised mail to a team.
  */
 
-import { query, mutator } from './types.js';
-import { newId, now } from '../core/ids.js';
+import { op } from './types.js';
 import type { SdlcTrackStatus } from '../types/index.js';
 
 export const workspaceOperations = {
@@ -15,10 +14,8 @@ export const workspaceOperations = {
 
   /**
    * Create a shared link in a channel.
-   * Maps to: Zero mutator 'links.create'
    */
-  createLink: mutator<
-    {
+  createLink: op<{
       id: string;
       url: string;
       title: string;
@@ -26,95 +23,65 @@ export const workspaceOperations = {
       visibility: string;
       description?: string;
       favicon?: string;
-    },
-    void
-  >('links.create', {
-    mapArgs: (args) => ({ ...args, createdAt: now(), updatedAt: now() }),
-  }),
+    }, void>('workspace.createLink', 'mutator'),
 
   /**
    * Update a shared link.
-   * Maps to: Zero mutator 'links.update'
    */
-  updateLink: mutator<
-    {
+  updateLink: op<{
       id: string;
       title?: string;
       description?: string;
       favicon?: string;
       visibility?: string;
-    },
-    void
-  >('links.update', {
-    mapArgs: (args) => ({ ...args, updatedAt: now() }),
-  }),
+    }, void>('workspace.updateLink', 'mutator'),
 
   /**
    * Delete a shared link.
-   * Maps to: Zero mutator 'links.delete'
    */
-  deleteLink: mutator<{ id: string }, void>('links.delete'),
+  deleteLink: op<{ id: string }, void>('workspace.deleteLink', 'mutator'),
 
   /**
    * Share a link with specific users.
-   * Maps to: Zero mutator 'links.shareWith'
    */
-  shareLink: mutator<{ linkId: string; userIds: string[]; accessIds: string[] }, void>(
-    'links.shareWith',
-    {
-      mapArgs: (args) => ({ ...args, createdAt: now() }),
-    }
-  ),
+  shareLink: op<{ linkId: string; userIds: string[]; accessIds: string[] }, void>('workspace.shareLink', 'mutator'),
 
   /**
    * Stop sharing a link with someone.
-   * Maps to: Zero mutator 'links.unshare'
    */
-  unshareLink: mutator<{ linkId: string; userId: string }, void>('links.unshare'),
+  unshareLink: op<{ linkId: string; userId: string }, void>('workspace.unshareLink', 'mutator'),
 
   // ----- Repositories -----
 
   /**
    * Connected repositories.
-   * Maps to: Zero query 'getAllRepos'
    */
-  listRepos: query<void, unknown[]>('getAllRepos'),
+  listRepos: op<void, unknown[]>('workspace.listRepos', 'query'),
 
   /**
    * Connect a repository.
-   * Maps to: Zero mutator 'repo.create'
    */
-  createRepo: mutator<
-    { id: string; name: string; url: string; baseBranch: string[]; prefix: string },
-    void
-  >('repo.create'),
+  createRepo: op<{ id: string; name: string; url: string; baseBranch: string[]; prefix: string }, void>('workspace.createRepo', 'mutator'),
 
   /**
    * Update a repository's details.
-   * Maps to: Zero mutator 'repo.update'
    */
-  updateRepo: mutator<
-    { id: string; name?: string; url?: string; baseBranch?: string[]; prefix?: string },
-    void
-  >('repo.update'),
+  updateRepo: op<{ id: string; name?: string; url?: string; baseBranch?: string[]; prefix?: string }, void>('workspace.updateRepo', 'mutator'),
 
   /**
    * Disconnect a repository.
-   * Maps to: Zero mutator 'repo.delete'
    */
-  deleteRepo: mutator<{ id: string }, void>('repo.delete'),
+  deleteRepo: op<{ id: string }, void>('workspace.deleteRepo', 'mutator'),
 
   /**
    * Track another branch on a repository.
-   * Maps to: Zero mutator 'repo.addBranch'
    */
-  addRepoBranch: mutator<{ id: string; branchName: string }, void>('repo.addBranch'),
+  addRepoBranch: op<{ id: string; branchName: string }, void>('workspace.addRepoBranch', 'mutator'),
 
   // ----- SDLC -----
 
   /**
    * One SDLC channel by id, with its participants, stats and canvas folders.
-   * Maps to: Zero query 'getSdlcChannelById'
    *
    * Ends in `.one()`, so at most one row; a channel that is not an SDLC hub
    * resolves to null rather than an empty list.
@@ -123,132 +90,97 @@ export const workspaceOperations = {
    * repositories to channels, and `getSdlcRepoByChannelId` no longer exists —
    * the SDLC hub *is* a channel now, so there is no separate repo row to fetch.
    */
-  getSdlcChannel: query<{ channelId: string }, unknown | null>('getSdlcChannelById'),
+  getSdlcChannel: op<{ channelId: string }, unknown | null>('workspace.getSdlcChannel', 'query'),
 
   /**
    * Tracks belonging to an SDLC channel, oldest first.
-   * Maps to: Zero query 'getSdlcTracks'
    *
    * Keyed by `channelId` since the same re-keying; it took `repoId` before.
    */
-  listSdlcTracks: query<{ channelId: string }, unknown[]>('getSdlcTracks'),
+  listSdlcTracks: op<{ channelId: string }, unknown[]>('workspace.listSdlcTracks', 'query'),
 
   /**
    * Start a track on an SDLC repository.
-   * Maps to: Zero mutator 'sdlc.createTrack'
    *
    * The caller only names the repository and the track; the id and timestamp
    * are generated here, and the id is returned so the new track can be acted
    * on without a re-read. Permission comes from channel participation in the
    * repository's channel.
    */
-  createSdlcTrack: mutator<
-    { repoId: string; name: string; description?: string },
-    void
-  >('sdlc.createTrack', {
-    mapArgs: (args) => ({ id: newId(), timestamp: now(), ...args }),
-  }),
+  createSdlcTrack: op<{ repoId: string; name: string; description?: string }, void>('workspace.createSdlcTrack', 'mutator'),
 
   /**
    * Change a track's name, description, or status.
-   * Maps to: Zero mutator 'sdlc.updateTrack'
    *
    * Only the fields passed are changed. `description` accepts null to clear it.
    */
-  updateSdlcTrack: mutator<
-    {
+  updateSdlcTrack: op<{
       trackId: string;
       name?: string;
       description?: string | null;
       status?: SdlcTrackStatus;
-    },
-    void
-  >('sdlc.updateTrack', {
-    mapArgs: (args) => ({ timestamp: now(), ...args }),
-  }),
+    }, void>('workspace.updateSdlcTrack', 'mutator'),
 
   // ----- Custom emoji -----
 
   /**
    * Custom emoji in the workspace.
-   * Maps to: Zero query 'getAllCustomEmojis'
    */
-  listEmojis: query<void, unknown[]>('getAllCustomEmojis'),
+  listEmojis: op<void, unknown[]>('workspace.listEmojis', 'query'),
 
   /**
    * One custom emoji by id.
-   * Maps to: Zero query 'getCustomEmojiById'
    */
-  getEmoji: query<{ emojiId: string }, unknown>('getCustomEmojiById'),
+  getEmoji: op<{ emojiId: string }, unknown>('workspace.getEmoji', 'query'),
 
   /**
    * One custom emoji by name.
-   * Maps to: Zero query 'getCustomEmojiByName'
    */
-  getEmojiByName: query<{ name: string }, unknown>('getCustomEmojiByName'),
+  getEmojiByName: op<{ name: string }, unknown>('workspace.getEmojiByName', 'query'),
 
   // ----- Reference data -----
 
   /**
    * Lookup values of a given type — the enumerations used across forms and
    * incident records.
-   * Maps to: Zero query 'lookupValuesByType'
    */
-  listLookupValues: query<{ type: string }, unknown[]>('lookupValuesByType'),
+  listLookupValues: op<{ type: string }, unknown[]>('workspace.listLookupValues', 'query'),
 
   /**
    * Merchants known to the workspace.
-   * Maps to: Zero query 'getAllMerchants'
    */
-  listMerchants: query<void, unknown[]>('getAllMerchants'),
+  listMerchants: op<void, unknown[]>('workspace.listMerchants', 'query'),
 
   /**
    * Tags defined across projects.
-   * Maps to: Zero query 'getAllTicketTags'
    */
-  listTicketTags: query<{ projectId: string }, unknown[]>('getAllTicketTags'),
+  listTicketTags: op<{ projectId: string }, unknown[]>('workspace.listTicketTags', 'query'),
 
   // ----- Classification routing -----
 
   /**
    * Rules mapping a mail category to the team that handles it, for one channel.
-   * Maps to: Zero query 'getClassificationMappings'
    */
-  listClassificationMappings: query<{ channelId: string }, unknown[]>(
-    'getClassificationMappings'
-  ),
+  listClassificationMappings: op<{ channelId: string }, unknown[]>('workspace.listClassificationMappings', 'query'),
 
   /**
    * Route a category to a team.
-   * Maps to: Zero mutator 'classificationMapping.create'
    */
-  createClassificationMapping: mutator<
-    {
+  createClassificationMapping: op<{
       id: string;
       channelId: string;
       category: string;
       userGroupId: string;
       subCategory?: string;
-    },
-    void
-  >('classificationMapping.create', {
-    mapArgs: (args) => ({ ...args, createdAt: now() }),
-  }),
+    }, void>('workspace.createClassificationMapping', 'mutator'),
 
   /**
    * Change a routing rule.
-   * Maps to: Zero mutator 'classificationMapping.update'
    */
-  updateClassificationMapping: mutator<
-    { id: string; category?: string; subCategory?: string; userGroupId?: string },
-    void
-  >('classificationMapping.update'),
+  updateClassificationMapping: op<{ id: string; category?: string; subCategory?: string; userGroupId?: string }, void>('workspace.updateClassificationMapping', 'mutator'),
 
   /**
    * Remove a routing rule.
-   * Maps to: Zero mutator 'classificationMapping.delete'
    */
-  deleteClassificationMapping: mutator<{ id: string }, void>(
-    'classificationMapping.delete'
-  ),
+  deleteClassificationMapping: op<{ id: string }, void>('workspace.deleteClassificationMapping', 'mutator'),
 } as const;

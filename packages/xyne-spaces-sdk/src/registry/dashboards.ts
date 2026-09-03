@@ -7,23 +7,20 @@
  * placement, which is what reordering and removal operate on.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 
 export const dashboardsOperations = {
   // ----- Reads -----
 
   /**
    * Every dashboard.
-   * Maps to: Zero query 'getAllDashboards'
    */
-  list: query<void, unknown[]>('getAllDashboards'),
+  list: op<void, unknown[]>('dashboards.list', 'query'),
 
   /**
    * One dashboard with its components.
-   * Maps to: Zero query 'getDashboardById'
    */
-  get: query<{ dashboardId: string }, unknown>('getDashboardById'),
+  get: op<{ dashboardId: string }, unknown>('dashboards.get', 'query'),
 
   // ----- Writes -----
 
@@ -32,40 +29,25 @@ export const dashboardsOperations = {
    *
    * `createdBy` is taken as an argument rather than from the session — pass the
    * acting user's id, available from `sdk.users.me()`.
-   * Maps to: Zero mutator 'dashboard.upsert'
    */
-  upsert: mutator<
-    { id: string; name: string; createdBy: string; description?: string },
-    void
-  >('dashboard.upsert', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  upsert: op<{ id: string; name: string; createdBy: string; description?: string }, void>('dashboards.upsert', 'mutator'),
 
   /**
    * Delete a dashboard.
-   * Maps to: Zero mutator 'dashboard.delete'
    */
-  delete: mutator<{ id: string }, void>('dashboard.delete'),
+  delete: op<{ id: string }, void>('dashboards.delete', 'mutator'),
 
   /**
    * Move tiles around a dashboard.
-   * Maps to: Zero mutator 'dashboardComponent.updatePositions'
    */
-  updateLayout: mutator<{ updates: unknown[] }, void>(
-    'dashboardComponent.updatePositions',
-    {
-      mapArgs: (args) => ({ updates: args.updates, timestamp: now() }),
-    }
-  ),
+  updateLayout: op<{ updates: unknown[] }, void>('dashboards.updateLayout', 'mutator'),
 
   // ----- Saved queries -----
 
   /**
    * Create or update a saved query, optionally placing it on a dashboard.
-   * Maps to: Zero mutator 'query.upsert'
    */
-  upsertQuery: mutator<
-    {
+  upsertQuery: op<{
       id: string;
       title: string;
       queryJson: unknown;
@@ -75,23 +57,15 @@ export const dashboardsOperations = {
       entityType?: string;
       targetEntity?: string;
       visualType?: string;
-    },
-    void
-  >('query.upsert', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('dashboards.upsertQuery', 'mutator'),
 
   /**
    * Delete a saved query.
-   * Maps to: Zero mutator 'query.delete'
    */
-  deleteQuery: mutator<{ id: string }, void>('query.delete'),
+  deleteQuery: op<{ id: string }, void>('dashboards.deleteQuery', 'mutator'),
 
   /**
    * Reorder a dashboard's tiles, by placement id.
-   * Maps to: Zero mutator 'query.reorder'
    */
-  reorderQueries: mutator<{ orderedMappingIds: string[] }, void>('query.reorder', {
-    mapArgs: (args) => ({ orderedMappingIds: args.orderedMappingIds, timestamp: now() }),
-  }),
+  reorderQueries: op<{ orderedMappingIds: string[] }, void>('dashboards.reorderQueries', 'mutator'),
 } as const;

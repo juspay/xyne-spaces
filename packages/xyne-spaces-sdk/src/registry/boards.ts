@@ -7,8 +7,7 @@
  * are meaningful operations rather than cosmetic ones.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 import type { Board, FlowPlan, Stage, TicketPriority, TicketStatusV2 } from '../types/index.js';
 
 /** A stage as accepted by `board.update`, which replaces the whole stage list. */
@@ -30,123 +29,97 @@ export const boardsOperations = {
 
   /**
    * Every board in the workspace.
-   * Maps to: Zero query 'getAllBoards'
    */
-  list: query<void, Board[]>('getAllBoards'),
+  list: op<void, Board[]>('boards.list', 'query'),
 
   /**
    * Boards in a project.
-   * Maps to: Zero query 'boardsByProject'
    */
-  listByProject: query<{ projectId: string }, Board[]>('boardsByProject'),
+  listByProject: op<{ projectId: string }, Board[]>('boards.listByProject', 'query'),
 
   /**
    * Boards in a project, id and name only — for pickers.
-   * Maps to: Zero query 'boardsListByProject'
    */
-  listByProjectLite: query<{ projectId: string }, Board[]>('boardsListByProject'),
+  listByProjectLite: op<{ projectId: string }, Board[]>('boards.listByProjectLite', 'query'),
 
   /**
    * Boards by id.
-   * Maps to: Zero query 'boardsByIds'
    */
-  getMany: query<{ boardIds: string[] }, Board[]>('boardsByIds'),
+  getMany: op<{ boardIds: string[] }, Board[]>('boards.getMany', 'query'),
 
   /**
    * One board.
-   * Maps to: Zero query 'getBoardById'
    */
-  get: query<{ boardId: string }, Board | null>('getBoardById'),
+  get: op<{ boardId: string }, Board | null>('boards.get', 'query'),
 
   /**
    * One board with its stages.
-   * Maps to: Zero query 'boardDetailById'
    */
-  getDetail: query<{ boardId: string }, Board | null>('boardDetailById'),
+  getDetail: op<{ boardId: string }, Board | null>('boards.getDetail', 'query'),
 
   /**
    * One board with stages, transitions, and approvers resolved.
-   * Maps to: Zero query 'boardFullDetailById'
    */
-  getFullDetail: query<{ boardId: string }, Board | null>('boardFullDetailById'),
+  getFullDetail: op<{ boardId: string }, Board | null>('boards.getFullDetail', 'query'),
 
   /**
    * Stages of a board, in sequence order.
-   * Maps to: Zero query 'stagesByBoard'
    */
-  listStages: query<{ boardId: string }, Stage[]>('stagesByBoard'),
+  listStages: op<{ boardId: string }, Stage[]>('boards.listStages', 'query'),
 
   /**
    * Stages across several boards.
-   * Maps to: Zero query 'getStagesByBoardIds'
    */
-  listStagesForBoards: query<{ boardIds: string[] }, Stage[]>('getStagesByBoardIds'),
+  listStagesForBoards: op<{ boardIds: string[] }, Stage[]>('boards.listStagesForBoards', 'query'),
 
   /**
    * Stages for every board in a project, optionally of one board type.
-   * Maps to: Zero query 'stagesByBoards'
    */
-  listStagesByProject: query<{ projectId: string; boardType?: string }, Stage[]>(
-    'stagesByBoards'
-  ),
+  listStagesByProject: op<{ projectId: string; boardType?: string }, Stage[]>('boards.listStagesByProject', 'query'),
 
   /**
    * The boards mapped to a channel, with each board joined in.
-   * Maps to: Zero query 'boardsByChannel'
    *
    * Reads `channel_board_mappings`, not `boards`, so a row is the mapping and
    * the board hangs off its `board` relation. A channel can surface more than
    * one board; ordering is by when the mapping was made.
    */
-  listByChannel: query<{ channelId: string }, unknown[]>('boardsByChannel'),
+  listByChannel: op<{ channelId: string }, unknown[]>('boards.listByChannel', 'query'),
 
   /**
    * Allowed stage transitions on a non-linear board.
-   * Maps to: Zero query 'getStageTransitionsByBoardId'
    */
-  listTransitions: query<{ boardId: string }, unknown[]>('getStageTransitionsByBoardId'),
+  listTransitions: op<{ boardId: string }, unknown[]>('boards.listTransitions', 'query'),
 
   /**
    * Stage transitions across several boards.
-   * Maps to: Zero query 'getStageTransitionsByBoardIds'
    */
-  listTransitionsForBoards: query<{ boardIds: string[] }, unknown[]>(
-    'getStageTransitionsByBoardIds'
-  ),
+  listTransitionsForBoards: op<{ boardIds: string[] }, unknown[]>('boards.listTransitionsForBoards', 'query'),
 
   /**
    * SLA policies on a board, one per priority.
-   * Maps to: Zero query 'getBoardSlaPolicies'
    */
-  listSlaPolicies: query<{ boardId: string }, unknown[]>('getBoardSlaPolicies'),
+  listSlaPolicies: op<{ boardId: string }, unknown[]>('boards.listSlaPolicies', 'query'),
 
   /**
    * SLA policies across several boards.
-   * Maps to: Zero query 'getBoardSlaPoliciesByBoardIds'
    */
-  listSlaPoliciesForBoards: query<{ boardIds: string[] }, unknown[]>(
-    'getBoardSlaPoliciesByBoardIds'
-  ),
+  listSlaPoliciesForBoards: op<{ boardIds: string[] }, unknown[]>('boards.listSlaPoliciesForBoards', 'query'),
 
   /**
    * Complexity scores a user group has assigned to boards.
-   * Maps to: Zero query 'getBoardComplexityScores'
    */
-  listComplexityScores: query<{ userGroupId: string }, unknown[]>(
-    'getBoardComplexityScores'
-  ),
+  listComplexityScores: op<{ userGroupId: string }, unknown[]>('boards.listComplexityScores', 'query'),
 
   /**
    * Saved filter views on a board.
-   * Maps to: Zero query 'savedConfigsByBoard'
    */
-  listSavedViews: query<{ boardId: string }, unknown[]>('savedConfigsByBoard'),
+  listSavedViews: op<{ boardId: string }, unknown[]>('boards.listSavedViews', 'query'),
 
   /**
    * Form mappings for several boards.
-   * Maps to: Zero query 'getFormMappingsByBoardIds'
    */
-  listFormMappings: query<{ boardIds: string[] }, unknown[]>('getFormMappingsByBoardIds'),
+  listFormMappings: op<{ boardIds: string[] }, unknown[]>('boards.listFormMappings', 'query'),
 
   // ----- Writes -----
 
@@ -156,10 +129,8 @@ export const boardsOperations = {
    * When `stages` is supplied it replaces the board's stage list wholesale, so
    * send the complete set — including stages you are not changing, with their
    * existing ids — or they will be removed.
-   * Maps to: Zero mutator 'board.update'
    */
-  update: mutator<
-    {
+  update: op<{
       boardId: string;
       name?: string;
       description?: string;
@@ -167,24 +138,17 @@ export const boardsOperations = {
       boardType?: string;
       metadata?: unknown;
       stages?: StageInput[];
-    },
-    void
-  >('board.update', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('boards.update', 'mutator'),
 
   /**
    * Delete a board.
-   * Maps to: Zero mutator 'board.delete'
    */
-  delete: mutator<{ boardId: string }, void>('board.delete'),
+  delete: op<{ boardId: string }, void>('boards.delete', 'mutator'),
 
   /**
    * Create or update a board's SLA policy for one priority.
-   * Maps to: Zero mutator 'boardSlaPolicy.upsert'
    */
-  upsertSlaPolicy: mutator<
-    {
+  upsertSlaPolicy: op<{
       id: string;
       boardId: string;
       priority: TicketPriority;
@@ -195,48 +159,23 @@ export const boardsOperations = {
       workdayStart: string;
       workdayEnd: string;
       isActive: boolean;
-    },
-    void
-  >('boardSlaPolicy.upsert'),
+    }, void>('boards.upsertSlaPolicy', 'mutator'),
 
   /**
    * Remove an SLA policy.
-   * Maps to: Zero mutator 'boardSlaPolicy.delete'
    */
-  deleteSlaPolicy: mutator<{ id: string }, void>('boardSlaPolicy.delete'),
+  deleteSlaPolicy: op<{ id: string }, void>('boards.deleteSlaPolicy', 'mutator'),
 
   /**
    * Replace a non-linear board's transition graph.
-   * Maps to: Zero mutator 'nonLinear.syncTransitions'
    */
-  syncTransitions: mutator<
-    { boardId: string; transitions: unknown[] },
-    void
-  >('nonLinear.syncTransitions', {
-    // This mutator names its clock argument `now`, unlike the `timestamp` used
-    // elsewhere in the catalog.
-    mapArgs: (args) => ({
-      boardId: args.boardId,
-      transitions: args.transitions,
-      now: now(),
-    }),
-  }),
+  syncTransitions: op<{ boardId: string; transitions: unknown[] }, void>('boards.syncTransitions', 'mutator'),
 
   /**
    * Replace a flow board's plan — its nodes, groups, and decision routing.
-   * Maps to: Zero mutator 'board.updateFlowPlan'
    *
    * A whole-plan replace, not a patch: anything absent from `plan.nodes` is
    * removed. Read the current plan first and edit it.
    */
-  updateFlowPlan: mutator<{ boardId: string; plan: FlowPlan }, void>(
-    'board.updateFlowPlan',
-    {
-      mapArgs: (args) => ({
-        boardId: args.boardId,
-        plan: args.plan,
-        timestamp: now(),
-      }),
-    }
-  ),
+  updateFlowPlan: op<{ boardId: string; plan: FlowPlan }, void>('boards.updateFlowPlan', 'mutator'),
 } as const;

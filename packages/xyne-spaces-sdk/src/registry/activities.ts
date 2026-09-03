@@ -8,8 +8,7 @@
  * underlying query — there is no user id parameter to pass, and none to spoof.
  */
 
-import { query, mutator } from './types.js';
-import { newId, now } from '../core/ids.js';
+import { op } from './types.js';
 import type { Activity } from '../types/index.js';
 
 /** Page cursor for the paginated activity feed. */
@@ -23,128 +22,73 @@ export const activitiesOperations = {
 
   /**
    * The full activity feed.
-   * Maps to: Zero query 'userActivitiesV2'
    */
-  list: query<void, Activity[]>('userActivitiesV2'),
+  list: op<void, Activity[]>('activities.list', 'query'),
 
   /**
    * The activity feed, paginated.
-   * Maps to: Zero query 'userActivitiesPaginatedV2'
    */
-  listPaginated: query<
-    { limit?: number; start?: ActivityCursor; types?: string[] },
-    Activity[]
-  >('userActivitiesPaginatedV2', {
-    // `types` is required server-side and was never sent, so this paged read always
-    // failed validation. Empty means "no type filter".
-    mapArgs: (args) => ({
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-      types: args.types ?? [],
-    }),
-  }),
+  listPaginated: op<{ limit?: number; start?: ActivityCursor; types?: string[] }, Activity[]>('activities.listPaginated', 'query'),
 
   /**
    * Unread activities only.
-   * Maps to: Zero query 'userUnreadActivities'
    */
-  listUnread: query<void, Activity[]>('userUnreadActivities'),
+  listUnread: op<void, Activity[]>('activities.listUnread', 'query'),
 
   /**
    * Unread activities from subscribed threads.
-   * Maps to: Zero query 'userUnreadThreadActivities'
    */
-  listUnreadThreads: query<void, Activity[]>('userUnreadThreadActivities'),
+  listUnreadThreads: op<void, Activity[]>('activities.listUnreadThreads', 'query'),
 
   /**
    * Missed calls.
-   * Maps to: Zero query 'userMissedCalls'
    */
-  listMissedCalls: query<void, Activity[]>('userMissedCalls'),
+  listMissedCalls: op<void, Activity[]>('activities.listMissedCalls', 'query'),
 
   /**
    * The current user's bookmarks.
-   * Maps to: Zero query 'userBookmarks'
    */
-  listBookmarks: query<void, unknown[]>('userBookmarks'),
+  listBookmarks: op<void, unknown[]>('activities.listBookmarks', 'query'),
 
   // ----- Writes -----
 
   /**
    * Mark one activity read.
-   * Maps to: Zero mutator 'activities.markAsRead'
    */
-  markAsRead: mutator<{ activityId: string }, void>('activities.markAsRead'),
+  markAsRead: op<{ activityId: string }, void>('activities.markAsRead', 'mutator'),
 
   /**
    * Mark one activity unread again.
-   * Maps to: Zero mutator 'activities.markAsUnread'
    */
-  markAsUnread: mutator<{ activityId: string }, void>('activities.markAsUnread', {
-    mapArgs: (args) => ({ activityId: args.activityId, timestamp: now() }),
-  }),
+  markAsUnread: op<{ activityId: string }, void>('activities.markAsUnread', 'mutator'),
 
   /**
    * Mark every activity in a thread read, optionally preserving a draft.
-   * Maps to: Zero mutator 'activities.markThreadActivitiesAsReadV2'
    */
-  markThreadAsRead: mutator<{ conversationId: string; draftMessage?: string }, void>(
-    'activities.markThreadActivitiesAsReadV2',
-    {
-      mapArgs: (args) => ({
-        conversationId: args.conversationId,
-        draftMessage: args.draftMessage ?? '',
-        draftMessageId: newId(),
-        timestamp: now(),
-        participantId: newId(),
-      }),
-    }
-  ),
+  markThreadAsRead: op<{ conversationId: string; draftMessage?: string }, void>('activities.markThreadAsRead', 'mutator'),
 
   /**
    * Clear the missed-call badge.
-   * Maps to: Zero mutator 'activities.markMissedCallsAsRead'
    */
-  markMissedCallsAsRead: mutator<void, void>('activities.markMissedCallsAsRead', {
-    mapArgs: () => ({}),
-  }),
+  markMissedCallsAsRead: op<void, void>('activities.markMissedCallsAsRead', 'mutator'),
 
   /**
    * Mark activities seen up to a given message.
-   * Maps to: Zero mutator 'activities.markActivitiesSeenByMessageId'
    */
-  markSeenByMessage: mutator<{ messageId: string }, void>(
-    'activities.markActivitiesSeenByMessageId'
-  ),
+  markSeenByMessage: op<{ messageId: string }, void>('activities.markSeenByMessage', 'mutator'),
 
   /**
    * Dismiss a nudge.
-   * Maps to: Zero mutator 'nudges.dismiss'
    */
-  dismissNudge: mutator<{ nudgeId: string }, void>('nudges.dismiss', {
-    mapArgs: (args) => ({ nudgeId: args.nudgeId, timestamp: now() }),
-  }),
+  dismissNudge: op<{ nudgeId: string }, void>('activities.dismissNudge', 'mutator'),
 
   /**
    * Act on a nudge.
-   * Maps to: Zero mutator 'nudges.act'
    */
-  actOnNudge: mutator<{ nudgeId: string; actionResult?: unknown }, void>('nudges.act', {
-    mapArgs: (args) => ({
-      nudgeId: args.nudgeId,
-      ...(args.actionResult !== undefined ? { actionResult: args.actionResult } : {}),
-      timestamp: now(),
-    }),
-  }),
+  actOnNudge: op<{ nudgeId: string; actionResult?: unknown }, void>('activities.actOnNudge', 'mutator'),
   /**
    * Mark every activity matching a filter as read — for example all reactions,
    * or everything of one classification.
-   * Maps to: Zero mutator 'activities.markAsReadByFilter'
    */
-  markAsReadByFilter: mutator<
-    { actorAction?: string; classification?: string },
-    void
-  >('activities.markAsReadByFilter', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  markAsReadByFilter: op<{ actorAction?: string; classification?: string }, void>('activities.markAsReadByFilter', 'mutator'),
 } as const;

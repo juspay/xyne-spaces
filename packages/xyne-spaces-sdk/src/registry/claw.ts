@@ -28,25 +28,22 @@ export const TERMINAL_RUN_STATUSES: readonly string[] = [
 export const clawOperations = {
   /**
    * Agents this deployment can run.
-   * Maps to: GET /api/sdk/claw/agents
    */
-  listAgents: api<void, ClawAgent[]>('GET', '/api/sdk/claw/agents', {
+  listAgents: api<void, ClawAgent[]>('GET', '/api/sdk/v1/claw/agents', {
     mapResult: (raw) => (Array.isArray(raw) ? (raw as ClawAgent[]) : []),
   }),
 
   /**
    * Dispatch a run. Returns as soon as the agent is queued.
-   * Maps to: POST /api/sdk/claw/runs
    */
-  run: api<ClawRunInput, { sessionId: string }>('POST', '/api/sdk/claw/runs'),
+  run: api<ClawRunInput, { sessionId: string }>('POST', '/api/sdk/v1/claw/runs'),
 
   /**
    * The current state of a run, including its result once finished.
-   * Maps to: GET /api/sdk/claw/runs/:sessionId
    */
   getRun: api<{ sessionId: string }, ClawRun>(
     'GET',
-    (args) => `/api/sdk/claw/runs/${encodeURIComponent(args.sessionId)}`,
+    (args) => `/api/sdk/v1/claw/runs/${encodeURIComponent(args.sessionId)}`,
     {
       // A GET forwards its args as query parameters. The session id is already in
       // the path, so returning nothing here keeps it from being repeated there.

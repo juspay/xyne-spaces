@@ -5,6 +5,7 @@
  * exactly five concerns:
  *
  *   auth.ts      the API-key format and how one is minted
+ *   v1/          the versioned surface: operation map, argument parsers, routes
  *   query.ts     run one catalog query
  *   mutation.ts  run one catalog mutator
  *   direct.ts    call the product controllers behind the catalog gaps
@@ -19,40 +20,10 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { z } from 'zod';
 import { API_VERSION } from '@xyne/spaces-contract';
-import { errorHandler, handle, notFound, requestId } from './handler';
-import { callQuery, readsAvailable } from './query';
-import { callMutator } from './mutation';
-import { createDirectRouter } from './direct';
-import { SdkApiError } from './errors';
-
-/**
- * Body of a catalog call. What a caller may actually reach is decided by Zero's
- * per-table ACL, which is folded into every query AST and wrapped transaction —
- * an API key acts as its user and gets exactly that user's reach.
- */
-const catalogRequest = z.object({
-  name: z.string().min(1),
-  args: z.unknown().optional(),
-});
-
-function catalogHandler(kind: 'query' | 'mutator') {
-  return handle(async (req: Request, res: Response) => {
-    const auth = req.sdkAuth;
-    if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
-
-    const { name, args } = catalogRequest.parse(req.body);
-
-    if (kind === 'query') {
-      res.status(200).json({ data: await callQuery(name, args, auth.ctx) });
-      return;
-    }
-
-    await callMutator(name, args, auth.authData);
-    res.status(200).json({ success: true });
-  });
-}
+import { errorHandler, notFound, requestId } from './handler';
+import { readsAvailable } from './query';
+import { createSdkV1Router } from './v1';
 
 /**
  * Unauthenticated service endpoints, mounted before the authenticated router
@@ -97,9 +68,8 @@ export function createSdkPublicRouter(): Router {
 export function createSdkRouter(): Router {
   const router = Router();
 
-  router.post('/catalog/query', catalogHandler('query'));
-  router.post('/catalog/mutate', catalogHandler('mutator'));
-  router.use(createDirectRouter());
+  router.use('/v1', createSdkV1Router());
+
 
   router.use(notFound);
   router.use(errorHandler);

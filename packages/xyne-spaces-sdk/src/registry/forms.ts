@@ -9,8 +9,7 @@
  * edits, and it replaces the whole field list each time.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 import type { Form, FormEntityValue, FormField } from '../types/index.js';
 
 /** A field as accepted by `form.update`, which replaces the whole field list. */
@@ -32,78 +31,58 @@ export const formsOperations = {
 
   /**
    * One form by id, without its fields.
-   * Maps to: Zero query 'getFormById'
    *
    * Fields come separately via `listFields` — this returns the form row alone.
    */
-  get: query<{ formId: string }, Form | null>('getFormById'),
+  get: op<{ formId: string }, Form | null>('forms.get', 'query'),
 
   /**
    * Every form, with its fields and context mappings resolved.
-   * Maps to: Zero query 'getAllForms'
    */
-  list: query<void, Form[]>('getAllForms'),
+  list: op<void, Form[]>('forms.list', 'query'),
 
   /**
    * Forms without their relations — for pickers.
-   * Maps to: Zero query 'getAllFormsList'
    */
-  listLite: query<void, Form[]>('getAllFormsList'),
+  listLite: op<void, Form[]>('forms.listLite', 'query'),
 
   /**
    * Forms bound to a kind of context (board, stage, channel).
-   * Maps to: Zero query 'getFormsByContextType'
    */
-  listByContextType: query<{ contextType: string }, Form[]>('getFormsByContextType'),
+  listByContextType: op<{ contextType: string }, Form[]>('forms.listByContextType', 'query'),
 
   /**
    * Form-to-context mappings for several contexts at once, with their fields.
-   * Maps to: Zero query 'getFormMappingsByContextIds'
    *
    * `contextType` is BOARD | RELEASE_CHANGE | STAGE; `entityType` is
    * TICKET | SUB_TICKET | RELEASE_MIGRATION_FORM | RELEASE_ENV_FORM.
    */
-  listMappingsByContextIds: query<
-    { contextIds: string[]; contextType: string; entityType: string },
-    unknown[]
-  >('getFormMappingsByContextIds'),
+  listMappingsByContextIds: op<{ contextIds: string[]; contextType: string; entityType: string }, unknown[]>('forms.listMappingsByContextIds', 'query'),
 
   /**
    * A form's fields, in sequence order.
-   * Maps to: Zero query 'getFormFieldsByFormId'
    */
-  listFields: query<{ formId: string }, FormField[]>('getFormFieldsByFormId'),
+  listFields: op<{ formId: string }, FormField[]>('forms.listFields', 'query'),
 
   /**
    * Which form applies in a particular context.
-   * Maps to: Zero query 'getFormMappingByContextId'
    */
-  getMapping: query<
-    { contextId: string; contextType: string; entityType: string },
-    unknown
-  >('getFormMappingByContextId'),
+  getMapping: op<{ contextId: string; contextType: string; entityType: string }, unknown>('forms.getMapping', 'query'),
 
   /**
    * Form mappings across several boards.
-   * Maps to: Zero query 'getFormMappingsByBoardIds'
    */
-  listMappingsForBoards: query<{ boardIds: string[] }, unknown[]>(
-    'getFormMappingsByBoardIds'
-  ),
+  listMappingsForBoards: op<{ boardIds: string[] }, unknown[]>('forms.listMappingsForBoards', 'query'),
 
   /**
    * The values submitted for one entity, e.g. a ticket.
-   * Maps to: Zero query 'getFormEntityValuesByEntityId'
    */
-  listValues: query<{ entityId: string }, FormEntityValue[]>(
-    'getFormEntityValuesByEntityId'
-  ),
+  listValues: op<{ entityId: string }, FormEntityValue[]>('forms.listValues', 'query'),
 
   /**
    * Every ticket form value in the workspace.
-   * Maps to: Zero query 'getAllFormEntityValues'
    */
-  listAllTicketValues: query<void, FormEntityValue[]>('getAllFormEntityValues'),
+  listAllTicketValues: op<void, FormEntityValue[]>('forms.listAllTicketValues', 'query'),
 
   // ----- Writes -----
 
@@ -112,50 +91,34 @@ export const formsOperations = {
    *
    * `fields` replaces the entire field list: send every field you want to keep,
    * each with its existing `id`, or it will be dropped.
-   * Maps to: Zero mutator 'form.update'
    */
-  update: mutator<
-    {
+  update: op<{
       formId: string;
       fields: FormFieldInput[];
       projectId?: string;
       formDescription?: string;
-    },
-    void
-  >('form.update', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('forms.update', 'mutator'),
 
   /**
    * Bind a form to a context.
-   * Maps to: Zero mutator 'formContextMapping.upsert'
    */
-  setMapping: mutator<
-    {
+  setMapping: op<{
       mappingId: string;
       contextId: string;
       contextType: string;
       entityType: string;
       formId: string;
-    },
-    void
-  >('formContextMapping.upsert'),
+    }, void>('forms.setMapping', 'mutator'),
 
   /**
    * Unbind a form from a context.
-   * Maps to: Zero mutator 'formContextMapping.delete'
    */
-  deleteMapping: mutator<
-    { contextId: string; contextType: string; entityType: string },
-    void
-  >('formContextMapping.delete'),
+  deleteMapping: op<{ contextId: string; contextType: string; entityType: string }, void>('forms.deleteMapping', 'mutator'),
 
   /**
    * Record a value for a form field on an entity.
-   * Maps to: Zero mutator 'formEntityValue.createV2'
    */
-  createValue: mutator<
-    {
+  createValue: op<{
       id: string;
       entityId: string;
       entityType: string;
@@ -164,11 +127,7 @@ export const formsOperations = {
       newValue: unknown;
       contextId?: string;
       version?: number;
-    },
-    void
-  >('formEntityValue.createV2', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('forms.createValue', 'mutator'),
 
   /**
    * Change a recorded value.
@@ -176,12 +135,6 @@ export const formsOperations = {
    * `expectedValueUpdatedAt` is an optimistic-concurrency check: pass the
    * `updatedAt` you last read and the write is rejected if someone else has
    * changed the value since.
-   * Maps to: Zero mutator 'formEntityValue.update'
    */
-  updateValue: mutator<
-    { formEntityValueId: string; newValue: unknown; expectedValueUpdatedAt?: number },
-    void
-  >('formEntityValue.update', {
-    mapArgs: (args) => ({ ...args, updatedAt: now() }),
-  }),
+  updateValue: op<{ formEntityValueId: string; newValue: unknown; expectedValueUpdatedAt?: number }, void>('forms.updateValue', 'mutator'),
 } as const;

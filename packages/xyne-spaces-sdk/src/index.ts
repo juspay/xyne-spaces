@@ -49,7 +49,6 @@ export {
   AuthError,
   NotFoundError,
   RateLimitError,
-  ZeroOperationError,
 } from './core/errors.js';
 export type { SdkErrorCode } from './core/errors.js';
 
@@ -183,13 +182,3 @@ export type {
   UploadDraftAttachmentsInput,
 } from './registry/attachments.js';
 
-// ----- Registry Types (for advanced usage) -----
-export type {
-  Operation,
-  QueryOperation,
-  MutatorOperation,
-  ApiOperation,
-  OperationType,
-  HttpMethod,
-} from './registry/types.js';
-export { query, mutator, api } from './registry/types.js';

@@ -9,8 +9,7 @@
  * caller to supply an already-provisioned room — see its note.
  */
 
-import { query, mutator } from './types.js';
-import { newId, newIdMap, now } from '../core/ids.js';
+import { op } from './types.js';
 import type { Call, CallParticipant } from '../types/index.js';
 
 /** Page cursor for the call and recording listings, ordered by start time. */
@@ -24,120 +23,70 @@ export const callsOperations = {
 
   /**
    * Calls currently in progress and visible to the user.
-   * Maps to: Zero query 'userActiveCalls'
    */
-  listActive: query<void, Call[]>('userActiveCalls'),
+  listActive: op<void, Call[]>('calls.listActive', 'query'),
 
   /**
    * Calls currently in progress in one channel.
-   * Maps to: Zero query 'activeCallsInChannel'
    */
-  listActiveInChannel: query<{ channelId: string }, Call[]>('activeCallsInChannel'),
+  listActiveInChannel: op<{ channelId: string }, Call[]>('calls.listActiveInChannel', 'query'),
 
   /**
    * Upcoming scheduled calls the user is invited to.
-   * Maps to: Zero query 'userScheduledCallsV2'
    */
-  listScheduled: query<void, Call[]>('userScheduledCallsV2'),
+  listScheduled: op<void, Call[]>('calls.listScheduled', 'query'),
 
   /**
    * Past calls, most recent first.
-   * Maps to: Zero query 'userCallHistoryV2'
    */
-  listHistory: query<{ limit?: number; start?: CallCursor }, Call[]>(
-    'userCallHistoryV2',
-    {
-      mapArgs: (args) => ({ limit: args.limit ?? 50, start: args.start ?? null }),
-    }
-  ),
+  listHistory: op<{ limit?: number; start?: CallCursor }, Call[]>('calls.listHistory', 'query'),
 
   /**
    * Participants of a call.
-   * Maps to: Zero query 'callParticipantsByCallId'
    */
-  listParticipants: query<{ callId: string }, CallParticipant[]>(
-    'callParticipantsByCallId'
-  ),
+  listParticipants: op<{ callId: string }, CallParticipant[]>('calls.listParticipants', 'query'),
 
   /**
    * A recurring call series.
-   * Maps to: Zero query 'recurringSeriesById'
    */
-  getRecurringSeries: query<{ seriesId: string }, unknown>('recurringSeriesById'),
+  getRecurringSeries: op<{ seriesId: string }, unknown>('calls.getRecurringSeries', 'query'),
 
   /**
    * Summary templates available for call notes.
-   * Maps to: Zero query 'summaryTemplates'
    */
   /**
    * One call-summary template by id.
-   * Maps to: Zero query 'summaryTemplateById'
    */
-  getSummaryTemplate: query<{ templateId: string }, unknown | null>('summaryTemplateById'),
+  getSummaryTemplate: op<{ templateId: string }, unknown | null>('calls.getSummaryTemplate', 'query'),
 
-  listSummaryTemplates: query<void, unknown[]>('summaryTemplates', {
-    // The query declares an empty object rather than no arguments at all.
-    mapArgs: () => ({}),
-  }),
+  listSummaryTemplates: op<void, unknown[]>('calls.listSummaryTemplates', 'query'),
 
   // ----- Recordings -----
 
   /**
    * Recordings from the user's own calls.
-   * Maps to: Zero query 'userRecordings'
    */
-  listRecordings: query<{ limit?: number; start?: CallCursor }, Call[]>(
-    'userRecordings',
-    {
-      mapArgs: (args) => ({ limit: args.limit ?? 50, start: args.start ?? null }),
-    }
-  ),
+  listRecordings: op<{ limit?: number; start?: CallCursor }, Call[]>('calls.listRecordings', 'query'),
 
   /**
    * Standalone recordings the user created.
-   * Maps to: Zero query 'createdOatsRecordings'
    */
-  listCreatedRecordings: query<
-    { limit?: number; start?: CallCursor; participantId?: string },
-    Call[]
-  >('createdOatsRecordings', {
-    mapArgs: (args) => ({
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-      // Required key, nullable value: the schema says `.nullable()`, not
-      // `.optional()`, so it must be sent even when filtering by nobody.
-      participantId: args.participantId ?? null,
-    }),
-  }),
+  listCreatedRecordings: op<{ limit?: number; start?: CallCursor; participantId?: string }, Call[]>('calls.listCreatedRecordings', 'query'),
 
   /**
    * Standalone recordings shared with the user.
-   * Maps to: Zero query 'sharedOatsRecordings'
    */
-  listSharedRecordings: query<
-    { limit?: number; start?: CallCursor; participantId?: string },
-    Call[]
-  >('sharedOatsRecordings', {
-    mapArgs: (args) => ({
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-      // Required key, nullable value: the schema says `.nullable()`, not
-      // `.optional()`, so it must be sent even when filtering by nobody.
-      participantId: args.participantId ?? null,
-    }),
-  }),
+  listSharedRecordings: op<{ limit?: number; start?: CallCursor; participantId?: string }, Call[]>('calls.listSharedRecordings', 'query'),
 
   /**
    * One recording by its room id.
-   * Maps to: Zero query 'oatsRecordingByExternalId'
    */
-  getRecording: query<{ callId: string }, Call | null>('oatsRecordingByExternalId'),
+  getRecording: op<{ callId: string }, Call | null>('calls.getRecording', 'query'),
 
   /**
    * The thread attached to a call.
-   * Maps to: Zero query 'getConversationByCallId'
    */
-  getConversation: query<{ callId: string }, unknown>('getConversationByCallId'),
+  getConversation: op<{ callId: string }, unknown>('calls.getConversation', 'query'),
 
   // ----- Writes -----
 
@@ -147,139 +96,72 @@ export const callsOperations = {
    * `externalId` and `roomLink` must refer to a room that already exists on the
    * realtime server — this operation records the call, it does not provision
    * media. Without a real room the call row will exist but nobody can join.
-   * Maps to: Zero mutator 'calls.initiate'
    */
-  initiate: mutator<
-    {
+  initiate: op<{
       callId: string;
       channelId: string;
       callType: string;
       externalId: string;
       roomLink: string;
       targetUserIds?: string[];
-    },
-    void
-  >('calls.initiate', {
-    mapArgs: (args) => ({
-      callId: args.callId,
-      channelId: args.channelId,
-      callType: args.callType,
-      externalId: args.externalId,
-      roomLink: args.roomLink,
-      timestamp: now(),
-      creatorParticipantId: newId(),
-      ...(args.targetUserIds
-        ? {
-            targetUserIds: args.targetUserIds,
-            targetParticipantIds: newIdMap(args.targetUserIds),
-          }
-        : {}),
-    }),
-  }),
+    }, void>('calls.initiate', 'mutator'),
 
   /**
    * Join a call.
-   * Maps to: Zero mutator 'calls.join'
    */
-  join: mutator<{ callId: string }, void>('calls.join', {
-    mapArgs: (args) => ({
-      callId: args.callId,
-      timestamp: now(),
-      participantId: newId(),
-    }),
-  }),
+  join: op<{ callId: string }, void>('calls.join', 'mutator'),
 
   /**
    * Leave a call.
-   * Maps to: Zero mutator 'calls.leave'
    */
-  leave: mutator<{ callId: string }, void>('calls.leave', {
-    mapArgs: (args) => ({ callId: args.callId, timestamp: now() }),
-  }),
+  leave: op<{ callId: string }, void>('calls.leave', 'mutator'),
 
   /**
    * Decline an incoming call.
-   * Maps to: Zero mutator 'calls.reject'
    */
-  reject: mutator<{ callId: string }, void>('calls.reject', {
-    mapArgs: (args) => ({ callId: args.callId, timestamp: now() }),
-  }),
+  reject: op<{ callId: string }, void>('calls.reject', 'mutator'),
 
   /**
    * Cancel a call, optionally the whole recurring series.
-   * Maps to: Zero mutator 'calls.cancel'
    */
-  cancel: mutator<{ callId: string; cancelEntireSeries?: boolean }, void>('calls.cancel', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  cancel: op<{ callId: string; cancelEntireSeries?: boolean }, void>('calls.cancel', 'mutator'),
 
   /**
    * Invite more people to a call in progress.
-   * Maps to: Zero mutator 'calls.invite'
    */
-  invite: mutator<{ callId: string; userIds: string[] }, void>('calls.invite', {
-    mapArgs: (args) => ({
-      callId: args.callId,
-      userIds: args.userIds,
-      timestamp: now(),
-      participantIds: newIdMap(args.userIds),
-    }),
-  }),
+  invite: op<{ callId: string; userIds: string[] }, void>('calls.invite', 'mutator'),
 
   /**
    * Attach a canvas to a call for shared notes.
-   * Maps to: Zero mutator 'calls.linkNotesCanvas'
    */
-  linkNotesCanvas: mutator<{ callId: string; notesCanvasId: string }, void>(
-    'calls.linkNotesCanvas'
-  ),
+  linkNotesCanvas: op<{ callId: string; notesCanvasId: string }, void>('calls.linkNotesCanvas', 'mutator'),
 
   /**
    * Bookmark a moment in a call, for the recording timeline.
    *
    * `timestampSeconds` is an offset from the start of the call, not a clock time.
-   * Maps to: Zero mutator 'calls.markMoment'
    */
-  markMoment: mutator<
-    { callId: string; type: string; timestampSeconds: number; text: string },
-    void
-  >('calls.markMoment'),
+  markMoment: op<{ callId: string; type: string; timestampSeconds: number; text: string }, void>('calls.markMoment', 'mutator'),
 
   // ----- Lobby -----
 
   /**
    * Ask to be let into a call you were not invited to.
-   * Maps to: Zero mutator 'calls.requestToJoin'
    */
-  requestToJoin: mutator<{ callId: string }, void>('calls.requestToJoin', {
-    mapArgs: (args) => ({
-      callId: args.callId,
-      participantId: newId(),
-      timestamp: now(),
-    }),
-  }),
+  requestToJoin: op<{ callId: string }, void>('calls.requestToJoin', 'mutator'),
 
   /**
    * Withdraw a pending join request.
-   * Maps to: Zero mutator 'calls.cancelJoinRequest'
    */
-  cancelJoinRequest: mutator<{ callId: string }, void>('calls.cancelJoinRequest', {
-    mapArgs: (args) => ({ callId: args.callId, timestamp: now() }),
-  }),
+  cancelJoinRequest: op<{ callId: string }, void>('calls.cancelJoinRequest', 'mutator'),
 
   /**
    * Admit someone waiting in the lobby.
-   * Maps to: Zero mutator 'calls.approveLobbyRequest'
    */
-  approveLobbyRequest: mutator<{ callId: string; participantId: string }, void>(
-    'calls.approveLobbyRequest'
-  ),
+  approveLobbyRequest: op<{ callId: string; participantId: string }, void>('calls.approveLobbyRequest', 'mutator'),
 
   /**
    * Turn away someone waiting in the lobby.
-   * Maps to: Zero mutator 'calls.rejectLobbyRequest'
    */
-  rejectLobbyRequest: mutator<{ callId: string; participantId: string }, void>(
-    'calls.rejectLobbyRequest'
-  ),
+  rejectLobbyRequest: op<{ callId: string; participantId: string }, void>('calls.rejectLobbyRequest', 'mutator'),
 } as const;

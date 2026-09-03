@@ -7,8 +7,7 @@
  * same table and live in `registry/support-tickets.ts`.
  */
 
-import { api, query, mutator } from './types.js';
-import { newId, now } from '../core/ids.js';
+import { op, api } from './types.js';
 import { appendArray, appendFiles, appendOptional } from '../core/form-data.js';
 import type {
   CreateTicketInput,
@@ -78,9 +77,8 @@ export const ticketsOperations = {
 
   /**
    * Create a ticket through the server-side sequence allocator and workflow.
-   * Maps to: POST /api/sdk/tickets
    */
-  create: api<CreateTicketInput, CreateTicketResponse>('POST', '/api/sdk/tickets', {
+  create: api<CreateTicketInput, CreateTicketResponse>('POST', '/api/sdk/v1/tickets', {
     mapArgs: (args) => {
       const { files, ...fields } = args;
       if (!files || files.length === 0) return fields;
@@ -110,23 +108,18 @@ export const ticketsOperations = {
   /**
    * Tickets for a view. `viewMode` selects the scope and decides which of
    * `projectId` / `boardId` / `userId` / `groupId` is used.
-   * Maps to: Zero query 'ticketsQueryV2'
    */
-  list: query<
-    {
+  list: op<{
       viewMode: TicketViewMode;
       projectId?: string;
       boardId?: string;
       userId?: string;
       groupId?: string;
       formEntityValueFieldIds?: string[];
-    },
-    Ticket[]
-  >('ticketsQueryV2'),
+    }, Ticket[]>('tickets.list', 'query'),
 
   /**
    * A page of tickets for the kanban board, with the board's filter set.
-   * Maps to: Zero query 'kanbanTicketsPageV3'
    *
    * V3 takes exactly the same arguments as V2 — the schema is literally
    * `kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageV2ArgsSchema`. What changed
@@ -144,8 +137,7 @@ export const ticketsOperations = {
    * `workflowTypeFilter`, which belong to the unrelated `workflowsPaginated`
    * query — zod stripped them silently, so those filters never did anything.
    */
-  listKanban: query<
-    {
+  listKanban: op<{
       viewMode: TicketViewMode;
       stageName?: string;
       columnType?: KanbanColumnType;
@@ -161,39 +153,10 @@ export const ticketsOperations = {
       showOverdueOnly?: boolean;
       overdueReferenceTime?: number;
       excludeFlowSteps?: boolean;
-    },
-    Ticket[]
-  >('kanbanTicketsPageV3', {
-    mapArgs: (args) => ({
-      viewMode: args.viewMode,
-      stageName: args.stageName ?? '',
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-      ...(args.columnType ? { columnType: args.columnType } : {}),
-      ...(args.dir ? { dir: args.dir } : {}),
-      ...(args.projectId ? { projectId: args.projectId } : {}),
-      ...(args.boardId ? { boardId: args.boardId } : {}),
-      ...(args.userId ? { userId: args.userId } : {}),
-      ...(args.groupId ? { groupId: args.groupId } : {}),
-      ...(args.filters ? { filters: args.filters } : {}),
-      ...(args.formEntityValueFieldIds
-        ? { formEntityValueFieldIds: args.formEntityValueFieldIds }
-        : {}),
-      ...(args.showOverdueOnly !== undefined
-        ? { showOverdueOnly: args.showOverdueOnly }
-        : {}),
-      ...(args.overdueReferenceTime !== undefined
-        ? { overdueReferenceTime: args.overdueReferenceTime }
-        : {}),
-      ...(args.excludeFlowSteps !== undefined
-        ? { excludeFlowSteps: args.excludeFlowSteps }
-        : {}),
-    }),
-  }),
+    }, Ticket[]>('tickets.listKanban', 'query'),
 
   /**
    * Tickets created in a channel inside a time window, newest first.
-   * Maps to: Zero query 'topicsExplorerTickets'
    *
    * Drives the desk support screen's topic explorer. The window is inclusive at
    * both ends and the server rejects `createdAtStart > createdAtEnd`.
@@ -201,219 +164,149 @@ export const ticketsOperations = {
    * `isMember` is required by the schema but unread by the query body — it is an
    * ACL hint, and is supplied here so a caller does not have to know that.
    */
-  listByChannelInWindow: query<
-    {
+  listByChannelInWindow: op<{
       channelId: string;
       createdAtStart: number;
       createdAtEnd: number;
       isMember?: boolean;
-    },
-    Ticket[]
-  >('topicsExplorerTickets', {
-    mapArgs: (args) => ({
-      channelId: args.channelId,
-      createdAtStart: args.createdAtStart,
-      createdAtEnd: args.createdAtEnd,
-      isMember: args.isMember ?? true,
-    }),
-  }),
+    }, Ticket[]>('tickets.listByChannelInWindow', 'query'),
 
   /**
    * One ticket.
-   * Maps to: Zero query 'ticketByIdV2'
    */
-  get: query<{ ticketId: string }, Ticket | null>('ticketByIdV2'),
+  get: op<{ ticketId: string }, Ticket | null>('tickets.get', 'query'),
 
   /**
    * One ticket with its relations resolved for a detail view.
-   * Maps to: Zero query 'ticketDetailsByIdV2'
    */
-  getDetails: query<{ ticketId: string }, Ticket | null>('ticketDetailsByIdV2'),
+  getDetails: op<{ ticketId: string }, Ticket | null>('tickets.getDetails', 'query'),
 
   /**
    * Look a ticket up by its human-readable key (e.g. `PLAT-1234`).
-   * Maps to: Zero query 'ticketByXyneIdV3'
    */
-  getByKey: query<{ xyneId: string; workspaceId: string }, Ticket | null>(
-    'ticketByXyneIdV3'
-  ),
+  getByKey: op<{ xyneId: string; workspaceId: string }, Ticket | null>('tickets.getByKey', 'query'),
 
   /**
    * Several tickets by id.
-   * Maps to: Zero query 'ticketsByIds'
    */
-  getMany: query<{ ticketIds: string[] }, Ticket[]>('ticketsByIds'),
+  getMany: op<{ ticketIds: string[] }, Ticket[]>('tickets.getMany', 'query'),
 
   /**
    * The bare ticket row, with no relations resolved.
-   * Maps to: Zero query 'ticketRowById'
    *
    * Cheaper than `get` when only the ticket's own columns are needed — `get`
    * additionally pulls project, tags, assignments, references, and stage data.
    */
-  getRow: query<{ ticketId: string }, Ticket | null>('ticketRowById'),
+  getRow: op<{ ticketId: string }, Ticket | null>('tickets.getRow', 'query'),
 
   /**
    * Free-text ticket search by title.
-   * Maps to: Zero query 'ticketsSearch'
    */
-  search: query<{ search?: string; limit?: number }, Ticket[]>('ticketsSearch'),
+  search: op<{ search?: string; limit?: number }, Ticket[]>('tickets.search', 'query'),
 
   /**
    * Tickets in a project.
-   * Maps to: Zero query 'ticketsByProjectV2'
    */
-  listByProject: query<{ projectId: string }, Ticket[]>('ticketsByProjectV2'),
+  listByProject: op<{ projectId: string }, Ticket[]>('tickets.listByProject', 'query'),
 
   /**
    * A ticket's activity timeline.
-   * Maps to: Zero query 'ticketActivities'
    */
   /**
    * The current user's ticket exports, newest first (server caps at 100).
-   * Maps to: Zero query 'ticketExportsForCurrentUser'
    */
-  listExports: query<void, unknown[]>('ticketExportsForCurrentUser'),
+  listExports: op<void, unknown[]>('tickets.listExports', 'query'),
 
-  listActivities: query<{ ticketId: string }, unknown[]>('ticketActivities'),
+  listActivities: op<{ ticketId: string }, unknown[]>('tickets.listActivities', 'query'),
 
   /**
    * Activities across several tickets at once, newest first, paginated.
-   * Maps to: Zero query 'ticketActivitiesForTickets'
    *
    * The batch counterpart to `listActivities`. `start` is nullable rather than
    * optional server-side, so it is always sent — as null on the first page.
    */
-  listActivitiesForTickets: query<
-    { ticketIds: string[]; limit?: number; start?: TicketActivityCursor },
-    unknown[]
-  >('ticketActivitiesForTickets', {
-    mapArgs: (args) => ({
-      ticketIds: args.ticketIds,
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-    }),
-  }),
+  listActivitiesForTickets: op<{ ticketIds: string[]; limit?: number; start?: TicketActivityCursor }, unknown[]>('tickets.listActivitiesForTickets', 'query'),
 
   /**
    * Assignment history for a ticket.
-   * Maps to: Zero query 'ticketAssignmentsByTicketId'
    */
-  listAssignments: query<{ ticketId: string }, unknown[]>('ticketAssignmentsByTicketId'),
+  listAssignments: op<{ ticketId: string }, unknown[]>('tickets.listAssignments', 'query'),
 
   /**
    * The workflow attached to a ticket, if any.
-   * Maps to: Zero query 'getWorkflowForTicket'
    */
-  getWorkflow: query<{ ticketId: string }, unknown>('getWorkflowForTicket'),
+  getWorkflow: op<{ ticketId: string }, unknown>('tickets.getWorkflow', 'query'),
 
   /**
    * Files attached to a ticket.
-   * Maps to: Zero query 'attachmentsByTicket'
    */
-  listAttachments: query<{ ticketId: string }, unknown[]>('attachmentsByTicket'),
+  listAttachments: op<{ ticketId: string }, unknown[]>('tickets.listAttachments', 'query'),
 
   /**
    * Emails on a ticket's conversation (desk tickets).
-   * Maps to: Zero query 'getEmailsForTicket'
    */
-  listEmails: query<{ conversationId: string }, unknown[]>('getEmailsForTicket'),
+  listEmails: op<{ conversationId: string }, unknown[]>('tickets.listEmails', 'query'),
 
   /**
    * The current user's mailbox state for a ticket (inbox / archived, starred).
-   * Maps to: Zero query 'myTicketMailboxV2'
    *
    * The V2 query takes the ticket's `channelId` too, as a hint to Zero's ACL
    * layer, so callers must now pass it. `isMember` is supplied here.
    */
-  getMailbox: query<{ ticketId: string; channelId: string }, unknown>('myTicketMailboxV2', {
-    mapArgs: (args) => ({ isMember: true, ...args }),
-  }),
+  getMailbox: op<{ ticketId: string; channelId: string }, unknown>('tickets.getMailbox', 'query'),
 
   /**
    * The RCA linked to a ticket.
-   * Maps to: Zero query 'rcaByTicketId'
    */
-  getRca: query<{ ticketId: string }, unknown>('rcaByTicketId'),
+  getRca: op<{ ticketId: string }, unknown>('tickets.getRca', 'query'),
 
   /**
    * Release attributions for a ticket.
-   * Maps to: Zero query 'releaseAttributionsByTicketId'
    */
-  listReleaseAttributions: query<{ ticketId: string }, unknown[]>(
-    'releaseAttributionsByTicketId'
-  ),
+  listReleaseAttributions: op<{ ticketId: string }, unknown[]>('tickets.listReleaseAttributions', 'query'),
 
   /**
    * Custom-field values set on a ticket.
-   * Maps to: Zero query 'getTicketEntityMappingsByTicketId'
    */
-  listFieldValues: query<{ ticketId: string }, unknown[]>(
-    'getTicketEntityMappingsByTicketId'
-  ),
+  listFieldValues: op<{ ticketId: string }, unknown[]>('tickets.listFieldValues', 'query'),
 
   // ----- Sub-tickets -----
 
   /**
    * Sub-tickets of a ticket.
-   * Maps to: Zero query 'subTicketsForTicket'
    */
-  listSubTickets: query<{ ticketId: string }, SubTicket[]>('subTicketsForTicket'),
+  listSubTickets: op<{ ticketId: string }, SubTicket[]>('tickets.listSubTickets', 'query'),
 
   /**
    * Sub-tickets by id.
-   * Maps to: Zero query 'subTicketsByIds'
    */
-  getSubTickets: query<{ subTicketIds: string[] }, SubTicket[]>('subTicketsByIds'),
+  getSubTickets: op<{ subTicketIds: string[] }, SubTicket[]>('tickets.getSubTickets', 'query'),
 
   /**
    * Sub-ticket mappings for several parent tickets at once.
-   * Maps to: Zero query 'subTicketMappingsForTickets'
    *
    * Returns the mapping rows (each carrying its sub-ticket), not bare sub-tickets,
    * so a caller batching many parents can tell which parent each one belongs to.
    */
-  listSubTicketMappings: query<{ ticketIds: string[] }, unknown[]>(
-    'subTicketMappingsForTickets'
-  ),
+  listSubTicketMappings: op<{ ticketIds: string[] }, unknown[]>('tickets.listSubTicketMappings', 'query'),
 
   /**
    * Create a sub-ticket. The row id and its mapping id are supplied by the
    * caller so the resource can return them.
-   * Maps to: Zero mutator 'subTicket.create'
    */
-  createSubTicket: mutator<
-    {
+  createSubTicket: op<{
       subTicketId: string;
       mappingId: string;
       ticketId: string;
       title: string;
       description?: string;
       conversationId?: string;
-    },
-    void
-  >('subTicket.create', {
-    mapArgs: (args) => ({
-      subTicketId: args.subTicketId,
-      mappingId: args.mappingId,
-      ticketId: args.ticketId,
-      title: args.title,
-      ...(args.description ? { description: args.description } : {}),
-      ...(args.conversationId ? { conversationId: args.conversationId } : {}),
-      timestamp: now(),
-    }),
-  }),
+    }, void>('tickets.createSubTicket', 'mutator'),
 
   /**
    * Update a sub-ticket.
-   * Maps to: Zero mutator 'subTicket.update'
    */
-  updateSubTicket: mutator<
-    { subTicketId: string; assignedTo?: string; mappedTicketId?: string },
-    void
-  >('subTicket.update', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  updateSubTicket: op<{ subTicketId: string; assignedTo?: string; mappedTicketId?: string }, void>('tickets.updateSubTicket', 'mutator'),
 
   // ----- Writes -----
 
@@ -422,10 +315,8 @@ export const ticketsOperations = {
    *
    * This is the single broad update path — title, description, status, priority,
    * stage, assignee, ETA, and archive state all go through it.
-   * Maps to: Zero mutator 'ticket.update'
    */
-  update: mutator<
-    {
+  update: op<{
       id: string;
       title?: string;
       description?: string;
@@ -440,143 +331,78 @@ export const ticketsOperations = {
       isArchived?: boolean;
       kanbanPosition?: string;
       metadata?: unknown;
-    },
-    void
-  >('ticket.update', {
-    mapArgs: (args) => ({ ...args, updatedAt: now() }),
-  }),
+    }, void>('tickets.update', 'mutator'),
 
   /**
    * Reassign a ticket.
-   * Maps to: Zero mutator 'ticket.updateAssignment'
    */
-  assign: mutator<{ ticketId: string; assignedTo: string }, void>(
-    'ticket.updateAssignment',
-    {
-      mapArgs: (args) => ({
-        ticketId: args.ticketId,
-        assignedTo: args.assignedTo,
-        timestamp: now(),
-      }),
-    }
-  ),
+  assign: op<{ ticketId: string; assignedTo: string }, void>('tickets.assign', 'mutator'),
 
   /**
    * Archive a desk ticket.
-   * Maps to: Zero mutator 'ticket.archiveDeskTicket'
    */
-  archive: mutator<{ id: string }, void>('ticket.archiveDeskTicket', {
-    mapArgs: (args) => ({ id: args.id, updatedAt: now() }),
-  }),
+  archive: op<{ id: string }, void>('tickets.archive', 'mutator'),
 
   /**
    * Set the ETA for a ticket's current stage.
-   * Maps to: Zero mutator 'ticketStageEta.update'
    */
-  setStageEta: mutator<
-    { id: string; stageEta: number; ticketId?: string; stageId?: string },
-    void
-  >('ticketStageEta.update', {
-    mapArgs: (args) => ({ ...args, updatedAt: now() }),
-  }),
+  setStageEta: op<{ id: string; stageEta: number; ticketId?: string; stageId?: string }, void>('tickets.setStageEta', 'mutator'),
 
   // ----- Tags -----
 
   /**
    * Tags defined on a project, available to its tickets.
-   * Maps to: Zero query 'projectTagsByProjectId'
    */
-  listProjectTags: query<{ projectId: string }, unknown[]>('projectTagsByProjectId'),
+  listProjectTags: op<{ projectId: string }, unknown[]>('tickets.listProjectTags', 'query'),
 
   /**
    * Apply a tag to a ticket. The tag, project-tag, and mapping row ids are all
    * generated here.
-   * Maps to: Zero mutator 'ticketTagV2.create'
    */
-  addTag: mutator<{ ticketId: string; projectId: string; tagName: string }, void>(
-    'ticketTagV2.create',
-    {
-      mapArgs: (args) => ({
-        ticketId: args.ticketId,
-        projectId: args.projectId,
-        tagName: args.tagName,
-        tagId: newId(),
-        projectTagId: newId(),
-        mappingId: newId(),
-      }),
-    }
-  ),
+  addTag: op<{ ticketId: string; projectId: string; tagName: string }, void>('tickets.addTag', 'mutator'),
 
   /**
    * Remove a tag from a ticket.
-   * Maps to: Zero mutator 'ticketTagV2.delete'
    */
   // Both ids are required: the tag itself and the row linking it to the ticket.
-  removeTag: mutator<{ tagId: string; mappingId: string }, void>('ticketTagV2.delete'),
+  removeTag: op<{ tagId: string; mappingId: string }, void>('tickets.removeTag', 'mutator'),
 
   // ----- References between tickets -----
 
   /**
    * Link two tickets (blocks, relates-to, and so on).
-   * Maps to: Zero mutator 'ticketReference.create'
    */
-  addReference: mutator<
-    { sourceTicketId: string; targetTicketId: string; relationType: string },
-    void
-  >('ticketReference.create', {
-    mapArgs: (args) => ({
-      sourceTicketId: args.sourceTicketId,
-      targetTicketId: args.targetTicketId,
-      relationType: args.relationType,
-      referenceId: newId(),
-      timestamp: now(),
-    }),
-  }),
+  addReference: op<{ sourceTicketId: string; targetTicketId: string; relationType: string }, void>('tickets.addReference', 'mutator'),
 
   /**
    * Change how two linked tickets relate.
-   * Maps to: Zero mutator 'ticketReference.updateRelationType'
    */
-  updateReference: mutator<{ id: string; relationType: string }, void>(
-    'ticketReference.updateRelationType',
-    {
-      mapArgs: (args) => ({ id: args.id, relationType: args.relationType, timestamp: now() }),
-    }
-  ),
+  updateReference: op<{ id: string; relationType: string }, void>('tickets.updateReference', 'mutator'),
 
   /**
    * Unlink two tickets.
-   * Maps to: Zero mutator 'ticketReference.delete'
    */
-  removeReference: mutator<{ id: string }, void>('ticketReference.delete'),
+  removeReference: op<{ id: string }, void>('tickets.removeReference', 'mutator'),
 
   // ----- Stage approval requests -----
 
   /**
    * Approval requests raised for a ticket's stage moves.
-   * Maps to: Zero query 'getTicketStageRequests'
    */
-  listStageRequests: query<{ ticketId: string }, TicketStageRequest[]>(
-    'getTicketStageRequests'
-  ),
+  listStageRequests: op<{ ticketId: string }, TicketStageRequest[]>('tickets.listStageRequests', 'query'),
 
   /**
    * Open approval requests sitting on a stage.
-   * Maps to: Zero query 'getOpenTicketStageRequestsByStageId'
    */
-  listOpenStageRequests: query<{ stageId: string }, TicketStageRequest[]>(
-    'getOpenTicketStageRequestsByStageId'
-  ),
+  listOpenStageRequests: op<{ stageId: string }, TicketStageRequest[]>('tickets.listOpenStageRequests', 'query'),
 
   /**
    * Raise or decide a stage-approval request.
    *
    * `updatedBy` has to be supplied by the caller: the mutator records it as an
    * argument rather than deriving it from the session.
-   * Maps to: Zero mutator 'ticketStageRequest.upsert'
    */
-  upsertStageRequest: mutator<
-    {
+  upsertStageRequest: op<{
       id: string;
       ticketId: string;
       stageId: string;
@@ -585,73 +411,37 @@ export const ticketsOperations = {
       formId?: string;
       reviewedBy?: string;
       comment?: string;
-    },
-    void
-  >('ticketStageRequest.upsert', {
-    mapArgs: (args) => ({ ...args, updatedAt: now() }),
-  }),
+    }, void>('tickets.upsertStageRequest', 'mutator'),
 
   /**
    * Clear a ticket's stage requests.
-   * Maps to: Zero mutator 'ticketStageRequest.deleteByTicketId'
    */
-  deleteStageRequests: mutator<{ ticketId: string }, void>(
-    'ticketStageRequest.deleteByTicketId'
-  ),
+  deleteStageRequests: op<{ ticketId: string }, void>('tickets.deleteStageRequests', 'mutator'),
 
   /**
    * Move a ticket to another stage on a non-linear board, running the board's
    * transition rules.
-   * Maps to: Zero mutator 'nonLinear.transition'
    */
-  transitionStage: mutator<
-    { ticketId: string; toStageName: string; formValuesJson?: string },
-    void
-  >('nonLinear.transition', {
-    mapArgs: (args) => ({
-      ticketId: args.ticketId,
-      toStageName: args.toStageName,
-      ...(args.formValuesJson ? { formValuesJson: args.formValuesJson } : {}),
-      now: now(),
-    }),
-  }),
+  transitionStage: op<{ ticketId: string; toStageName: string; formValuesJson?: string }, void>('tickets.transitionStage', 'mutator'),
 
   // ----- Mailbox -----
 
   /**
    * Move a ticket between inbox and archive for the current user.
-   * Maps to: Zero mutator 'ticketMailbox.setState'
    */
-  setMailboxState: mutator<
-    { id: string; ticketId: string; channelId: string; state: string },
-    void
-  >('ticketMailbox.setState', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  setMailboxState: op<{ id: string; ticketId: string; channelId: string; state: string }, void>('tickets.setMailboxState', 'mutator'),
 
   /**
    * Star or unstar a ticket for the current user.
-   * Maps to: Zero mutator 'ticketMailbox.setStarred'
    */
-  setMailboxStarred: mutator<
-    { id: string; ticketId: string; channelId: string; starred: boolean },
-    void
-  >('ticketMailbox.setStarred', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  setMailboxStarred: op<{ id: string; ticketId: string; channelId: string; starred: boolean }, void>('tickets.setMailboxStarred', 'mutator'),
   /**
    * Sub-tickets linked to a mapped ticket.
-   * Maps to: Zero query 'subTicketsByMappedTicketId'
    */
-  listSubTicketsByMapped: query<{ mappedTicketId: string }, SubTicket[]>(
-    'subTicketsByMappedTicketId'
-  ),
+  listSubTicketsByMapped: op<{ mappedTicketId: string }, SubTicket[]>('tickets.listSubTicketsByMapped', 'query'),
 
   /**
    * The single sub-ticket linked to a mapped ticket.
-   * Maps to: Zero query 'subTicketByMappedTicketId'
    */
-  getSubTicketByMapped: query<{ mappedTicketId: string }, SubTicket | null>(
-    'subTicketByMappedTicketId'
-  ),
+  getSubTicketByMapped: op<{ mappedTicketId: string }, SubTicket | null>('tickets.getSubTicketByMapped', 'query'),
 } as const;

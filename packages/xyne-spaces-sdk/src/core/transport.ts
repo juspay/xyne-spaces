@@ -1,18 +1,18 @@
 /**
  * Transport Layer
  *
- * Routes SDK operations to the appropriate backend:
- * - Zero queries via the /api/sdk/catalog/query adapter
- * - Zero mutators via the /api/sdk/catalog/mutate adapter
- * - Direct API calls via /api/sdk/*
+ * Routes SDK operations to the versioned API:
+ * - Operation ids via /api/sdk/v1/query and /api/sdk/v1/mutate
+ * - Versioned REST routes via /api/sdk/v1/*
  */
 
 import type { Operation } from '../registry/types.js';
 import type { HttpClient } from './http.js';
 
-interface CatalogQueryResponse {
-  data: unknown;
-}
+/**
+ * The API version this build of the SDK speaks.
+ */
+const V1 = '/api/sdk/v1';
 
 export class Transport {
   constructor(private http: HttpClient) {}
@@ -35,16 +35,13 @@ export class Transport {
     args: TArgs
   ): Promise<TResult> {
     // Transform args if mapper provided
-    const mappedArgs = operation.mapArgs ? operation.mapArgs(args) : args;
+    const mappedArgs = 'mapArgs' in operation && operation.mapArgs ? operation.mapArgs(args) : args;
 
     let rawResult: unknown;
 
     switch (operation.type) {
-      case 'query':
-        rawResult = await this.executeQuery(operation.name, mappedArgs);
-        break;
-      case 'mutator':
-        rawResult = await this.executeMutator(operation.name, mappedArgs);
+      case 'sdk':
+        rawResult = await this.executeV1(operation.op, operation.kind, mappedArgs);
         break;
       case 'api':
         rawResult = await this.executeApi(
@@ -62,24 +59,30 @@ export class Transport {
   }
 
   /**
-   * Execute a catalog query through the public API.
+   * Execute an operation on the versioned API.
+   *
+   * The request carries the SDK's own operation id and nothing else about the
+   * backend: `{ op: 'projects.update', args }`. Resolving that to a catalog
+   * operation is the server's job, which is what lets the catalog move without
+   * breaking a published client.
+   *
+   * A write echoes back any id the server minted for it, so a caller that
+   * created a row learns its id without having had to invent one.
    */
-  private async executeQuery(name: string, args: unknown): Promise<unknown> {
-    const response = await this.http.post<CatalogQueryResponse>('/api/sdk/catalog/query', {
-      name,
-      args,
-    });
-    return response.data;
-  }
-
-  /**
-   * Execute a catalog mutator through the public API.
-   */
-  private async executeMutator(name: string, args: unknown): Promise<unknown> {
-    return this.http.post('/api/sdk/catalog/mutate', {
-      name,
-      args,
-    });
+  private async executeV1(
+    op: string,
+    kind: 'query' | 'mutator' | 'direct',
+    args: unknown
+  ): Promise<unknown> {
+    if (kind === 'query') {
+      const response = await this.http.post<{ data: unknown }>(`${V1}/query`, { op, args });
+      return response.data;
+    }
+    const response = await this.http.post<{ success: boolean; generated?: Record<string, string> }>(
+      `${V1}/mutate`,
+      { op, args }
+    );
+    return response.generated ?? response;
   }
 
   /**

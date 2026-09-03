@@ -5,102 +5,75 @@
  * member gets the next ticket — on-call state, board weights, and expertise.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 
 export const userGroupsOperations = {
   // ----- Reads -----
 
   /**
    * Every user group.
-   * Maps to: Zero query 'getAllUserGroups'
    */
-  list: query<void, unknown[]>('getAllUserGroups'),
+  list: op<void, unknown[]>('userGroups.list', 'query'),
 
   /**
    * Groups by id.
-   * Maps to: Zero query 'getUserGroupsByIds'
    */
-  getMany: query<{ groupIds: string[] }, unknown[]>('getUserGroupsByIds'),
+  getMany: op<{ groupIds: string[] }, unknown[]>('userGroups.getMany', 'query'),
 
   /**
    * One group.
-   * Maps to: Zero query 'getUserGroupById'
    */
-  get: query<{ userGroupId: string }, unknown>('getUserGroupById'),
+  get: op<{ userGroupId: string }, unknown>('userGroups.get', 'query'),
 
   /**
    * Search groups by name.
    *
    * `limit` is required by the query and accepts null for no cap.
-   * Maps to: Zero query 'searchUserGroups'
    */
-  search: query<{ query: string; limit?: number }, unknown[]>('searchUserGroups', {
-    mapArgs: (args) => ({ query: args.query, limit: args.limit ?? null }),
-  }),
+  search: op<{ query: string; limit?: number }, unknown[]>('userGroups.search', 'query'),
 
   /**
    * Members of a group.
-   * Maps to: Zero query 'getUserGroupMembers'
    */
-  listMembers: query<{ userGroupId: string }, unknown[]>('getUserGroupMembers'),
+  listMembers: op<{ userGroupId: string }, unknown[]>('userGroups.listMembers', 'query'),
 
   /**
    * Members across several groups.
-   * Maps to: Zero query 'getUserGroupMembersByGroupIds'
    */
-  listMembersForGroups: query<{ userGroupIds: string[] }, unknown[]>(
-    'getUserGroupMembersByGroupIds'
-  ),
+  listMembersForGroups: op<{ userGroupIds: string[] }, unknown[]>('userGroups.listMembersForGroups', 'query'),
 
   /**
    * The current user's group memberships.
-   * Maps to: Zero query 'getUserGroupMappingsByUserId'
    */
-  listMine: query<void, unknown[]>('getUserGroupMappingsByUserId'),
+  listMine: op<void, unknown[]>('userGroups.listMine', 'query'),
 
   /**
    * On-call and availability state for a group's members.
-   * Maps to: Zero query 'getUserAssignmentStates'
    */
-  listAssignmentStates: query<{ userGroupId: string }, unknown[]>(
-    'getUserAssignmentStates'
-  ),
+  listAssignmentStates: op<{ userGroupId: string }, unknown[]>('userGroups.listAssignmentStates', 'query'),
 
   /**
    * Assignment states for several groups at once.
-   * Maps to: Zero query 'getUserAssignmentStatesByGroupIds'
    */
-  listAssignmentStatesForGroups: query<{ userGroupIds: string[] }, unknown[]>(
-    'getUserAssignmentStatesByGroupIds'
-  ),
+  listAssignmentStatesForGroups: op<{ userGroupIds: string[] }, unknown[]>('userGroups.listAssignmentStatesForGroups', 'query'),
 
   /**
    * Per-member workload weightings for a group.
-   * Maps to: Zero query 'getUserWorkloadMappings'
    *
    * Feeds the same assignment routing as `listAssignmentStates`: availability says
    * who *can* take work, this says how much each of them is carrying.
    */
-  listWorkloadMappings: query<{ userGroupId: string }, unknown[]>(
-    'getUserWorkloadMappings'
-  ),
+  listWorkloadMappings: op<{ userGroupId: string }, unknown[]>('userGroups.listWorkloadMappings', 'query'),
 
   /**
    * One user's assignment state across their groups.
-   * Maps to: Zero query 'getUserAssignmentStatesByUserId'
    */
-  getAssignmentStateForUser: query<{ userId: string }, unknown[]>(
-    'getUserAssignmentStatesByUserId'
-  ),
+  getAssignmentStateForUser: op<{ userId: string }, unknown[]>('userGroups.getAssignmentStateForUser', 'query'),
 
   /**
    * Which members of a group have expertise on a board.
-   * Maps to: Zero query 'getUserExpertiseMappings'
    */
-  listExpertise: query<{ userGroupId: string; boardId: string }, unknown[]>(
-    'getUserExpertiseMappings'
-  ),
+  listExpertise: op<{ userGroupId: string; boardId: string }, unknown[]>('userGroups.listExpertise', 'query'),
 
   // ----- Writes -----
 
@@ -108,62 +81,40 @@ export const userGroupsOperations = {
    * Rename a group, or change members' roles and responsibilities.
    *
    * `userRoleUpdates` and `userResponsibilityUpdates` are maps keyed by user id.
-   * Maps to: Zero mutator 'userGroup.update'
    */
-  update: mutator<
-    {
+  update: op<{
       userGroupId: string;
       name?: string;
       alias?: string;
       description?: string;
       userRoleUpdates?: Record<string, string>;
       userResponsibilityUpdates?: Record<string, string>;
-    },
-    void
-  >('userGroup.update', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('userGroups.update', 'mutator'),
 
   /**
    * Delete a group.
-   * Maps to: Zero mutator 'userGroup.delete'
    */
-  delete: mutator<{ userGroupId: string }, void>('userGroup.delete'),
+  delete: op<{ userGroupId: string }, void>('userGroups.delete', 'mutator'),
 
   /**
    * Deactivate a group without deleting it — it stops receiving assignments.
-   * Maps to: Zero mutator 'userGroup.deactivate'
    */
-  deactivate: mutator<{ userGroupId: string }, void>('userGroup.deactivate', {
-    mapArgs: (args) => ({ userGroupId: args.userGroupId, timestamp: now() }),
-  }),
+  deactivate: op<{ userGroupId: string }, void>('userGroups.deactivate', 'mutator'),
 
   /**
    * Reactivate a group.
-   * Maps to: Zero mutator 'userGroup.reactivate'
    */
-  reactivate: mutator<{ userGroupId: string }, void>('userGroup.reactivate', {
-    mapArgs: (args) => ({ userGroupId: args.userGroupId, timestamp: now() }),
-  }),
+  reactivate: op<{ userGroupId: string }, void>('userGroups.reactivate', 'mutator'),
 
   /**
    * Add users to a group.
-   * Maps to: Zero mutator 'userGroup.addUsers'
    */
-  addUsers: mutator<
-    { userGroupId: string; userIds: string[]; mappingIds: Record<string, string>; roleIds?: string[] },
-    void
-  >('userGroup.addUsers', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  addUsers: op<{ userGroupId: string; userIds: string[]; mappingIds: Record<string, string>; roleIds?: string[] }, void>('userGroups.addUsers', 'mutator'),
 
   /**
    * Remove users from a group.
-   * Maps to: Zero mutator 'userGroup.removeUsers'
    */
-  removeUsers: mutator<{ userGroupId: string; userIds: string[] }, void>(
-    'userGroup.removeUsers'
-  ),
+  removeUsers: op<{ userGroupId: string; userIds: string[] }, void>('userGroups.removeUsers', 'mutator'),
 
   // ----- Assignment configuration -----
 
@@ -173,10 +124,8 @@ export const userGroupsOperations = {
    * The shapes here are nested and interdependent, so they are passed through
    * rather than modelled: read the current configuration first and send it back
    * modified.
-   * Maps to: Zero mutator 'assignmentConfig.batchUpdate'
    */
-  updateAssignmentConfig: mutator<
-    {
+  updateAssignmentConfig: op<{
       userGroupId: string;
       userStates: unknown;
       userMappings: unknown;
@@ -185,25 +134,15 @@ export const userGroupsOperations = {
       stateIds?: unknown;
       complexityScoreId?: string;
       mappingIds?: unknown;
-    },
-    void
-  >('assignmentConfig.batchUpdate', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('userGroups.updateAssignmentConfig', 'mutator'),
 
   /**
    * Turn automatic on-call rotation on or off for a group.
-   * Maps to: Zero mutator 'assignmentConfig.toggleGroupAutoRotation'
    */
-  toggleAutoRotation: mutator<
-    {
+  toggleAutoRotation: op<{
       userGroupId: string;
       autoRotationEnabled: boolean;
       rotationInterval?: number;
       rotationStartDate?: number;
-    },
-    void
-  >('assignmentConfig.toggleGroupAutoRotation', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('userGroups.toggleAutoRotation', 'mutator'),
 } as const;

@@ -11,8 +11,7 @@
  * still applies and you get nothing back), so it defaults to `true`.
  */
 
-import { api, query, mutator } from './types.js';
-import { newId, now } from '../core/ids.js';
+import { op, api } from './types.js';
 import { appendFiles, appendOptional } from '../core/form-data.js';
 import type {
   Conversation,
@@ -33,14 +32,13 @@ export const conversationsOperations = {
 
   /**
    * Start a thread while uploading file bytes in the same request.
-   * Maps to: POST /api/sdk/channels/:channelId/conversations
    */
   createWithAttachments: api<
     CreateConversationWithAttachmentsInput,
     { conversationId: string; messageId: string }
   >(
     'POST',
-    (args) => `/api/sdk/channels/${encodeURIComponent(args.channelId)}/conversations`,
+    (args) => `/api/sdk/v1/channels/${encodeURIComponent(args.channelId)}/conversations`,
     {
       mapArgs: (args) => {
         const form = new FormData();
@@ -70,149 +68,77 @@ export const conversationsOperations = {
 
   /**
    * Threads in a channel, newest activity first, paginated.
-   * Maps to: Zero query 'channelConversationsPaginatedV3'
    */
-  listByChannel: query<
-    {
+  listByChannel: op<{
       channelId: string;
       limit?: number;
       start?: ConversationCursor;
       isMember?: boolean;
       /** Page direction relative to `start`. Required server-side. */
       direction?: 'forward' | 'backward';
-    },
-    Conversation[]
-  >('channelConversationsPaginatedV3', {
-    mapArgs: (args) => ({
-      channelId: args.channelId,
-      isMember: args.isMember ?? true,
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-      direction: args.direction ?? 'forward',
-    }),
-  }),
+    }, Conversation[]>('conversations.listByChannel', 'query'),
 
   /**
    * The most recent threads in a channel, without paging.
-   * Maps to: Zero query 'channelLatestMultipleConversationsV3'
    */
-  listLatestByChannel: query<
-    { channelId: string; limit?: number; isMember?: boolean },
-    Conversation[]
-  >('channelLatestMultipleConversationsV3', {
-    mapArgs: (args) => ({
-      channelId: args.channelId,
-      isMember: args.isMember ?? true,
-      limit: args.limit ?? 20,
-    }),
-  }),
+  listLatestByChannel: op<{ channelId: string; limit?: number; isMember?: boolean }, Conversation[]>('conversations.listLatestByChannel', 'query'),
 
   /**
    * One thread by id.
-   * Maps to: Zero query 'getConversationById'
    */
-  get: query<{ conversationId: string }, Conversation | null>('getConversationById'),
+  get: op<{ conversationId: string }, Conversation | null>('conversations.get', 'query'),
 
   /**
    * A thread plus its channel, for rendering a thread view cold.
-   * Maps to: Zero query 'getConversationByIdWithChannel'
    */
-  getWithChannel: query<
-    { conversationId: string; channelId: string; isMember?: boolean },
-    Conversation | null
-  >('getConversationByIdWithChannel', {
-    mapArgs: (args) => ({
-      conversationId: args.conversationId,
-      channelId: args.channelId,
-      isMember: args.isMember ?? true,
-    }),
-  }),
+  getWithChannel: op<{ conversationId: string; channelId: string; isMember?: boolean }, Conversation | null>('conversations.getWithChannel', 'query'),
 
   /**
    * A thread with its replies resolved.
-   * Maps to: Zero query 'threadConversationV2'
    */
-  getThread: query<
-    { conversationId: string; channelId?: string; isMember?: boolean },
-    Conversation | null
-  >('threadConversationV2', {
-    mapArgs: (args) => ({
-      conversationId: args.conversationId,
-      ...(args.channelId ? { channelId: args.channelId } : {}),
-      isMember: args.isMember ?? true,
-    }),
-  }),
+  getThread: op<{ conversationId: string; channelId?: string; isMember?: boolean }, Conversation | null>('conversations.getThread', 'query'),
 
   /**
    * The thread attached to a call.
-   * Maps to: Zero query 'getConversationByCallId'
    */
-  getByCallId: query<{ callId: string }, Conversation | null>('getConversationByCallId'),
+  getByCallId: op<{ callId: string }, Conversation | null>('conversations.getByCallId', 'query'),
 
   /**
    * The **caller's own** participation in a thread, including subscription state.
-   * Maps to: Zero query 'conversationParticipantByConversationId'
    *
    * Despite the query's name, this is one row, not a list: it filters on
    * `ctx.userID` and ends in `.one()`. The catalog has no query that returns every
    * participant of a thread. This was declared `ConversationParticipant[]`, so a
    * caller iterating the result got a `TypeError` on a plain object.
    */
-  getMyParticipation: query<{ conversationId: string }, ConversationParticipant | null>(
-    'conversationParticipantByConversationId'
-  ),
+  getMyParticipation: op<{ conversationId: string }, ConversationParticipant | null>('conversations.getMyParticipation', 'query'),
 
   /**
    * Pinned threads in a channel.
-   * Maps to: Zero query 'getPinnedMessegesV2'
    */
-  listPinned: query<{ channelId: string; isMember?: boolean }, Conversation[]>(
-    'getPinnedMessegesV2',
-    {
-      mapArgs: (args) => ({
-        channelId: args.channelId,
-        isMember: args.isMember ?? true,
-      }),
-    }
-  ),
+  listPinned: op<{ channelId: string; isMember?: boolean }, Conversation[]>('conversations.listPinned', 'query'),
 
   /**
    * The single most recent thread in a channel.
-   * Maps to: Zero query 'channelLatestConversation'
    */
-  getLatest: query<{ channelId: string; isMember?: boolean }, Conversation | null>(
-    'channelLatestConversation',
-    {
-      mapArgs: (args) => ({
-        channelId: args.channelId,
-        isMember: args.isMember ?? true,
-      }),
-    }
-  ),
+  getLatest: op<{ channelId: string; isMember?: boolean }, Conversation | null>('conversations.getLatest', 'query'),
 
   /**
    * Labels defined for a channel.
-   * Maps to: Zero query 'conversationLabelsByChannelIdV2'
    *
    * `isMember` is required by the schema but unread by the query body — it is
    * a hint to Zero's ACL layer, and is supplied here so a caller does not have
    * to know that.
    */
-  listLabels: query<{ channelId: string }, unknown[]>('conversationLabelsByChannelIdV2', {
-    mapArgs: (args) => ({ isMember: true, ...args }),
-  }),
+  listLabels: op<{ channelId: string }, unknown[]>('conversations.listLabels', 'query'),
 
   /**
    * Labels applied to a thread.
-   * Maps to: Zero query 'conversationLabelMappingsByConversationIdV2'
    *
    * The V2 query takes the owning `channelId` as well, for the same ACL reason
    * as {@link listLabels}, so callers must now pass it.
    */
-  listAppliedLabels: query<{ conversationId: string; channelId: string }, unknown[]>(
-    'conversationLabelMappingsByConversationIdV2',
-    { mapArgs: (args) => ({ isMember: true, ...args }) }
-  ),
+  listAppliedLabels: op<{ conversationId: string; channelId: string }, unknown[]>('conversations.listAppliedLabels', 'query'),
 
   // ----- Writes -----
 
@@ -221,145 +147,61 @@ export const conversationsOperations = {
    *
    * Both the thread id and the message id are supplied by the caller so the
    * resource method can return them.
-   * Maps to: Zero mutator 'conversations.send'
    */
-  create: mutator<
-    {
+  create: op<{
       conversationId: string;
       messageId: string;
       channelId: string;
       content: string;
       type?: MessageType;
       attachmentIds?: string[];
-    },
-    void
-  >('conversations.send', {
-    mapArgs: (args) => ({
-      channelId: args.channelId,
-      content: args.content,
-      type: args.type ?? 'USER',
-      conversationId: args.conversationId,
-      messageId: args.messageId,
-      timestamp: now(),
-      ...(args.attachmentIds ? { attachmentIds: args.attachmentIds } : {}),
-    }),
-  }),
+    }, void>('conversations.create', 'mutator'),
 
   /**
    * Pin or unpin a thread. Toggles; there is no explicit target state.
-   * Maps to: Zero mutator 'conversations.togglePin'
    */
-  togglePin: mutator<{ conversationId: string }, void>('conversations.togglePin'),
+  togglePin: op<{ conversationId: string }, void>('conversations.togglePin', 'mutator'),
 
   /**
    * Forward a message into another channel as a new thread.
-   * Maps to: Zero mutator 'conversations.forwardMessage'
    */
-  forwardMessage: mutator<
-    {
+  forwardMessage: op<{
       conversationId: string;
       messageId: string;
       targetChannelId: string;
       originalMessageId: string;
       optionalMessage?: string;
-    },
-    void
-  >('conversations.forwardMessage', {
-    mapArgs: (args) => ({
-      targetChannelId: args.targetChannelId,
-      originalMessageId: args.originalMessageId,
-      ...(args.optionalMessage ? { optionalMessage: args.optionalMessage } : {}),
-      conversationId: args.conversationId,
-      messageId: args.messageId,
-      timestamp: now(),
-      conversationParticipantId: newId(),
-    }),
-  }),
+    }, void>('conversations.forwardMessage', 'mutator'),
 
   /**
    * Subscribe to a thread's replies.
-   * Maps to: Zero mutator 'conversations.subscribeToConversation'
    */
-  subscribe: mutator<{ conversationId: string }, void>(
-    'conversations.subscribeToConversation',
-    {
-      mapArgs: (args) => ({
-        conversationId: args.conversationId,
-        timestamp: now(),
-        participantId: newId(),
-      }),
-    }
-  ),
+  subscribe: op<{ conversationId: string }, void>('conversations.subscribe', 'mutator'),
 
   /**
    * Unsubscribe from a thread.
-   * Maps to: Zero mutator 'conversations.unsubscribeFromConversation'
    */
-  unsubscribe: mutator<{ conversationId: string }, void>(
-    'conversations.unsubscribeFromConversation'
-  ),
+  unsubscribe: op<{ conversationId: string }, void>('conversations.unsubscribe', 'mutator'),
 
   /**
    * Mark a thread unread starting at a given message.
-   * Maps to: Zero mutator 'conversation.markThreadUnreadFrom'
    */
-  markUnreadFrom: mutator<{ conversationId: string; messageId: string }, void>(
-    'conversation.markThreadUnreadFrom',
-    {
-      mapArgs: (args) => ({
-        conversationId: args.conversationId,
-        messageId: args.messageId,
-        participantId: newId(),
-        timestamp: now(),
-      }),
-    }
-  ),
+  markUnreadFrom: op<{ conversationId: string; messageId: string }, void>('conversations.markUnreadFrom', 'mutator'),
   /**
    * The thread nearest a point in time — used to jump to a date in a channel.
-   * Maps to: Zero query 'getConversationByTimestamp'
    */
-  getByTimestamp: query<
-    { channelId: string; timestamp: number; isMember?: boolean },
-    Conversation | null
-  >('getConversationByTimestamp', {
-    mapArgs: (args) => ({
-      channelId: args.channelId,
-      timestamp: args.timestamp,
-      isMember: args.isMember ?? true,
-    }),
-  }),
+  getByTimestamp: op<{ channelId: string; timestamp: number; isMember?: boolean }, Conversation | null>('conversations.getByTimestamp', 'query'),
 
   /**
    * Threads a user takes part in across every channel, most recent reply first.
-   * Maps to: Zero query 'userConversationsPaginatedV2'
    */
-  listForUser: query<
-    { userId: string; limit?: number; start?: { lastReplyAt: number; id: string } },
-    Conversation[]
-  >('userConversationsPaginatedV2', {
-    mapArgs: (args) => ({
-      userId: args.userId,
-      limit: args.limit ?? 50,
-      start: args.start ?? null,
-    }),
-  }),
+  listForUser: op<{ userId: string; limit?: number; start?: { lastReplyAt: number; id: string } }, Conversation[]>('conversations.listForUser', 'query'),
 
   /**
    * Set the tag types on a thread. Free-form: projects define their own beyond
    * the built-in vocabulary.
-   * Maps to: Zero mutator 'threadTag.setTypes'
    */
-  setTagTypes: mutator<
-    { conversationId: string; types: string[]; note?: string },
-    void
-  >('threadTag.setTypes', {
-    mapArgs: (args) => ({
-      conversationId: args.conversationId,
-      types: args.types,
-      ...(args.note !== undefined ? { note: args.note } : {}),
-      timestamp: now(),
-    }),
-  }),
+  setTagTypes: op<{ conversationId: string; types: string[]; note?: string }, void>('conversations.setTagTypes', 'mutator'),
 } as const;
 
 export type { Message };

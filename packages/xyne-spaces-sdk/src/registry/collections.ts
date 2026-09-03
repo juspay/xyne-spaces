@@ -10,8 +10,7 @@
  * structure and permissions around files that already exist.
  */
 
-import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { op } from './types.js';
 import type { Collection, CollectionItem } from '../types/index.js';
 
 export const collectionsOperations = {
@@ -19,82 +18,59 @@ export const collectionsOperations = {
 
   /**
    * Root collections, optionally narrowed to one scope.
-   * Maps to: Zero query 'scopedCollections'
    */
-  list: query<{ scopeType?: string; scopeId?: string } | undefined, Collection[]>(
-    'scopedCollections',
-    {
-      mapArgs: (args) => ({ ...(args ?? {}) }),
-    }
-  ),
+  list: op<{ scopeType?: string; scopeId?: string } | undefined, Collection[]>('collections.list', 'query'),
 
   /**
    * Sub-collections beneath a root.
-   * Maps to: Zero query 'collectionSubfolders'
    */
-  listSubfolders: query<{ rootCollectionId: string }, Collection[]>(
-    'collectionSubfolders'
-  ),
+  listSubfolders: op<{ rootCollectionId: string }, Collection[]>('collections.listSubfolders', 'query'),
 
   /**
    * Who a collection is shared with — the user, group and channel grants on it.
-   * Maps to: Zero query 'collectionPermissions'
    */
-  listPermissions: query<{ collectionId: string }, unknown[]>('collectionPermissions'),
+  listPermissions: op<{ collectionId: string }, unknown[]>('collections.listPermissions', 'query'),
 
   /**
    * Files in a collection — latest versions only.
-   * Maps to: Zero query 'collectionItems'
    */
-  listItems: query<{ collectionId: string }, CollectionItem[]>('collectionItems'),
+  listItems: op<{ collectionId: string }, CollectionItem[]>('collections.listItems', 'query'),
 
   /**
    * One collection by id, or nothing if it has been soft-deleted.
-   * Maps to: Zero query 'collectionById'
    *
    * The query filters on the primary key but does **not** end in `.one()`, so
    * the wire shape is a list. Unwrapped here so the declared return type is
    * honest about there being at most one.
    */
-  get: query<{ id: string }, Collection | null>('collectionById', {
+  get: op<{ id: string }, Collection | null>('collections.get', 'query', {
     mapResult: (rows) => (rows as Collection[])[0] ?? null,
   }),
 
   /**
    * Every latest-version file beneath a root collection, across its subfolders,
    * with each file's attachment joined in.
-   * Maps to: Zero query 'collectionFilesByRoot'
    *
    * Differs from {@link listItems}, which is one collection's own files:
    * this walks the whole tree under a root.
    */
-  listFilesByRoot: query<{ rootCollectionId: string }, CollectionItem[]>(
-    'collectionFilesByRoot'
-  ),
+  listFilesByRoot: op<{ rootCollectionId: string }, CollectionItem[]>('collections.listFilesByRoot', 'query'),
 
   /**
    * Root collections with their files already joined.
-   * Maps to: Zero query 'scopedCollectionsWithItems'
    *
    * Same scoping as {@link list} — omit both arguments for everything the
    * caller can reach — but one round trip instead of a list-then-fetch per
    * collection.
    */
-  listWithItems: query<{ scopeType?: string; scopeId?: string } | undefined, Collection[]>(
-    'scopedCollectionsWithItems',
-    {
-      mapArgs: (args) => ({ ...(args ?? {}) }),
-    }
-  ),
+  listWithItems: op<{ scopeType?: string; scopeId?: string } | undefined, Collection[]>('collections.listWithItems', 'query'),
 
   // ----- Writes -----
 
   /**
    * Create a root collection. The creator's permission row is created with it.
-   * Maps to: Zero mutator 'collection.createCollection'
    */
-  create: mutator<
-    {
+  create: op<{
       id: string;
       permissionId: string;
       name: string;
@@ -102,90 +78,50 @@ export const collectionsOperations = {
       scopeId: string;
       description?: string;
       isPrivate?: boolean;
-    },
-    void
-  >('collection.createCollection', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('collections.create', 'mutator'),
 
   /**
    * Rename a collection or change its description or privacy.
-   * Maps to: Zero mutator 'collection.updateCollection'
    */
-  update: mutator<
-    { id: string; name?: string; description?: string; isPrivate?: boolean },
-    void
-  >('collection.updateCollection', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+  update: op<{ id: string; name?: string; description?: string; isPrivate?: boolean }, void>('collections.update', 'mutator'),
 
   /**
    * Delete a collection.
-   * Maps to: Zero mutator 'collection.deleteCollection'
    */
-  delete: mutator<{ id: string }, void>('collection.deleteCollection', {
-    mapArgs: (args) => ({ id: args.id, timestamp: now() }),
-  }),
+  delete: op<{ id: string }, void>('collections.delete', 'mutator'),
 
   /**
    * Create a sub-collection under a parent.
-   * Maps to: Zero mutator 'collection.createFolder'
    */
-  createFolder: mutator<{ id: string; parentId: string; name: string }, void>(
-    'collection.createFolder',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  createFolder: op<{ id: string; parentId: string; name: string }, void>('collections.createFolder', 'mutator'),
 
   /**
    * Rename a file or sub-collection.
-   * Maps to: Zero mutator 'collection.renameItem'
    */
-  renameItem: mutator<{ id: string; collectionId: string; name: string }, void>(
-    'collection.renameItem',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  renameItem: op<{ id: string; collectionId: string; name: string }, void>('collections.renameItem', 'mutator'),
 
   /**
    * Remove a file or sub-collection.
-   * Maps to: Zero mutator 'collection.deleteItem'
    */
-  deleteItem: mutator<{ id: string; collectionId: string }, void>(
-    'collection.deleteItem',
-    {
-      mapArgs: (args) => ({ ...args, timestamp: now() }),
-    }
-  ),
+  deleteItem: op<{ id: string; collectionId: string }, void>('collections.deleteItem', 'mutator'),
 
   /**
    * Grant a user or group access to a collection.
    *
    * Exactly one of `userId` or `userGroupId` should be set. Granting access also
    * re-indexes the collection's files so search reflects the new permissions.
-   * Maps to: Zero mutator 'collection.grantPermission'
    */
-  grantPermission: mutator<
-    {
+  grantPermission: op<{
       id: string;
       collectionId: string;
       role: string;
       canShare: boolean;
       userId?: string;
       userGroupId?: string;
-    },
-    void
-  >('collection.grantPermission', {
-    mapArgs: (args) => ({ ...args, timestamp: now() }),
-  }),
+    }, void>('collections.grantPermission', 'mutator'),
 
   /**
    * Revoke a permission grant.
-   * Maps to: Zero mutator 'collection.revokePermission'
    */
-  revokePermission: mutator<{ id: string; collectionId: string }, void>(
-    'collection.revokePermission'
-  ),
+  revokePermission: op<{ id: string; collectionId: string }, void>('collections.revokePermission', 'mutator'),
 } as const;

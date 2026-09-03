@@ -4,7 +4,7 @@
  * Maps SDK user methods to backend operations.
  */
 
-import { api, query } from './types.js';
+import { op, api } from './types.js';
 import type { CurrentUser, User, UserProfile } from '../types/index.js';
 
 /**
@@ -16,31 +16,26 @@ import type { CurrentUser, User, UserProfile } from '../types/index.js';
 export const usersOperations = {
   /**
    * Identify the user this client acts as.
-   * Maps to: GET /api/sdk/me
    */
-  me: api<void, CurrentUser>('GET', '/api/sdk/me'),
+  me: api<void, CurrentUser>('GET', '/api/sdk/v1/me'),
 
   /**
    * Get all users in workspace.
-   * Maps to: Zero query 'getUsers'
    */
-  list: query<{ updatedAt?: number } | undefined, User[]>('getUsers'),
+  list: op<{ updatedAt?: number } | undefined, User[]>('users.list', 'query'),
 
   /**
    * Get users with only basic fields (no presence).
-   * Maps to: Zero query 'getUsersV2'
    */
-  listBasic: query<{ updatedAt?: number } | undefined, User[]>('getUsersV2'),
+  listBasic: op<{ updatedAt?: number } | undefined, User[]>('users.listBasic', 'query'),
 
   /**
    * Get user profiles by user IDs.
-   * Maps to: Zero query 'getUserProfilesByIds'
    */
-  getProfiles: query<{ userIds: string[] }, UserProfile[]>('getUserProfilesByIds'),
+  getProfiles: op<{ userIds: string[] }, UserProfile[]>('users.getProfiles', 'query'),
 
   /**
    * Get a single user profile.
-   * Maps to: Zero query 'getUserProfile'
    */
-  getProfile: query<{ userId: string }, UserProfile | null>('getUserProfile'),
+  getProfile: op<{ userId: string }, UserProfile | null>('users.getProfile', 'query'),
 } as const;
