@@ -58,7 +58,8 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
       const target = await tx.run(zql.users.where('id', args.userId).one());
       if (target?.role === 'GUEST') {
         const hasAccess = await hasGuestChannelAccessForUser(this.ctx, tx, args.userId, args.channelId);
-        if (!hasAccess) {
+        const requesterIsWorkspaceAdmin = this.ctx.role === 'ADMIN' || this.ctx.role === 'OWNER';
+        if (!hasAccess && !requesterIsWorkspaceAdmin) {
           throw new MutationACLError(
             'Channel participant insert failed: guest cannot be added outside their entity',
             'channel_participants',

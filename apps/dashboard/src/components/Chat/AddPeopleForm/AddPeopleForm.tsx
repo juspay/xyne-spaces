@@ -135,6 +135,14 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
         includeHistory,
       });
     } else {
+      const hasGuest = selectedUsers.some(user => user.role === 'GUEST');
+      if (hasGuest) {
+        toast.error('Guests can only be added to channels they were invited to.', {
+          description: 'Please ask your workspace admin to add them.',
+          duration: 5000,
+        });
+        return;
+      }
       setIsSubmitting(true);
       try {
         const participantIds = userIds.reduce(

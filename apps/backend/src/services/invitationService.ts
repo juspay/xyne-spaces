@@ -86,6 +86,7 @@ export class InvitationService {
     const email = params.email.toLowerCase();
 
     let orgId: string;
+    let inviteeOrgMemberRole: string | null = null;
 
     if (explicitOrgId) {
       // orgId supplied directly — skip inviter-org derivation and invitee-in-org check
@@ -109,7 +110,7 @@ export class InvitationService {
       orgId = derivedOrgId;
 
       // Ensure the invitee exists in the org_members table (any org)
-      if (role !== WorkspaceRole.GUEST && role !== WorkspaceRole.COMMUNITY_MEMBER) {
+      if (role !== WorkspaceRole.COMMUNITY_MEMBER) {
         // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
         // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
         // outside would execute the query after withWorkspaceScope has exited — back in the
@@ -125,6 +126,7 @@ export class InvitationService {
             `${email} is not part of any organisation. They must be added to an organisation before being invited to a workspace.`
           );
         }
+        inviteeOrgMemberRole = inviteeInOrg.role;
       }
     }
 
@@ -151,6 +153,14 @@ export class InvitationService {
           WorkspaceRole.COMMUNITY_MEMBER,
         ];
     const invitationRole = role && validRoles.includes(role) ? role : WorkspaceRole.MEMBER;
+
+    // An org GUEST can only be invited with the GUEST workspace role;
+    // non-guest org members may be invited with any role (including guest)
+    if (inviteeOrgMemberRole === OrgRole.GUEST && invitationRole !== WorkspaceRole.GUEST) {
+      throw new Error(
+        `${email} is registered as an organisation guest and can only be invited with the GUEST role.`
+      );
+    }
 
     if (invitationRole === WorkspaceRole.COMMUNITY_MEMBER) {
       const workspace = await this.prisma.workspace.findUnique({
@@ -580,8 +590,9 @@ export class InvitationService {
   }
 
   /**
-   * Handle guest invitation acceptance: creates orgMember with GUEST role,
-   * workspace user, GuestAccess, and entity-specific participant.
+   * Handle guest invitation acceptance: requires a pre-existing orgMember
+   * (created by an org admin before invitation), creates the workspace user,
+   * GuestAccess, and entity-specific participant.
    * Returns the created user and a frontend redirect path for the invited entity.
    */
   private async handleGuestAcceptance(
@@ -599,20 +610,12 @@ export class InvitationService {
       where: { email: userData.email.toLowerCase() },
     });
 
-    if (orgMember && orgMember.leftAt) {
-      throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
+    if (!orgMember) {
+      throw new Error(`orgMember not found for ${userData.email}. User must be added to the organization first.`);
     }
 
-    const activeOrgMember = orgMember ?? await tx.orgMember.create({
-      data: {
-        orgId: invitation.orgId!,
-        email: userData.email.toLowerCase(),
-        role: OrgRole.GUEST,
-      },
-    });
-
-    if (!orgMember) {
-      logger.info(`[DEBUG] [handleGuestAcceptance] Created new orgMember with GUEST role id=${activeOrgMember.memberId}`);
+    if (orgMember.leftAt) {
+      throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
     }
 
     const newWorkspaceUser = await tx.user.create({
@@ -624,7 +627,7 @@ export class InvitationService {
         workspaceId: invitation.workspaceId!,
         role: invitation.role,
         status: UserStatus.ACTIVE,
-        orgMemberId: activeOrgMember.memberId,
+        orgMemberId: orgMember.memberId,
       },
     });
     logger.info(`[DEBUG] [handleGuestAcceptance] Created new workspace GUEST user id=${newWorkspaceUser.id}`);
