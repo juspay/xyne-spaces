@@ -84,17 +84,7 @@ apiConfig.interceptors.request.use(
             ? localStorage.getItem(`lastActiveWorkspaceId_${userEmail}`) || undefined
             : undefined);
       }
-      // Skip setting x-workspace-id for non-workspace routes
-      const nonWorkspaceRoutes = [
-        'auth',
-        'invite',
-        'community',
-        'workspaces',
-        'no-access',
-        'launch',
-        'system',
-      ];
-      if (workspaceId && !nonWorkspaceRoutes.includes(workspaceId)) {
+      if (workspaceId && workspaceId !== 'auth') {
         config.headers['x-workspace-id'] = workspaceId;
       }
 

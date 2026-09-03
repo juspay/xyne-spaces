@@ -377,18 +377,16 @@ const AppsScreen = (): ReactElement => {
                 Manage your xyne-apps and their configurations
               </p>
             </div>
-            <div className='flex items-center gap-2'>
-              {canCreateApp && (
-                <Button
-                  onClick={() => setIsCreateModalOpen(true)}
-                  data-track-category='Apps'
-                  data-track-name='OpenCreateAppModal'
-                >
-                  <Plus size={16} className='mr-1' />
-                  Create App
-                </Button>
-              )}
-            </div>
+            {canCreateApp && (
+              <Button
+                onClick={() => setIsCreateModalOpen(true)}
+                data-track-category='Apps'
+                data-track-name='OpenCreateAppModal'
+              >
+                <Plus size={16} className='mr-1' />
+                Create App
+              </Button>
+            )}
           </div>
 
           <Dialog
