@@ -576,6 +576,7 @@ const envSchema = Joi.object({
   // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
   // are unaffected either way (always strict).
   WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
+  SDK_API_ENABLED: Joi.boolean().default(false),
 
 }).unknown();
 
@@ -642,6 +643,18 @@ export const config = {
   database: {
     url: envVars.DATABASE_URL,
     readReplicaPoolUrl: envVars.DATABASE_READ_REPLICA_POOL_URL,
+  },
+  sdk: {
+    /** Master switch. The router is not mounted at all when false. */
+    enabled: envVars.SDK_API_ENABLED,
+    /**
+     * Development escape hatch: run reads against the primary pool when no read
+     * replica is configured. Tied to `NODE_ENV` rather than its own flag — the
+     * replica exists to keep SDK read traffic off the write path, and that
+     * matters precisely in production, so there is nothing a separate switch
+     * would let a deployment opt out of that `NODE_ENV` does not already decide.
+     */
+    allowPrimaryForReads: envVars.NODE_ENV !== 'production',
   },
   commonDatabase: {
     url: envVars.COMMON_DATABASE_URL,

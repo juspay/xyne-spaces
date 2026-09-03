@@ -9,6 +9,7 @@ import { PrismaClient } from '@prisma/client';
      User,
      Channel,
      importedTicketFields,
+     importedMailFields,
      VespaFileDocument,
      VespaMailDocument,
      VespaCallDocument
@@ -416,7 +417,12 @@ import { PrismaClient } from '@prisma/client';
          break;
 
        case 'mail':
-         result = transformMail(hit, doc as VespaMailDocument, mailMap, formFieldNameMap);
+         result = transformMail(
+           hit,
+           doc as VespaMailDocument & importedMailFields,
+           mailMap,
+           formFieldNameMap,
+         );
          break;
 
        case 'call':
@@ -871,7 +877,7 @@ function transformCollection(
     */
    function transformMail(
      hit: VespaSearchHit,
-     doc: VespaMailDocument,
+     doc: VespaMailDocument & importedMailFields,
      mailMap: MailMap,
      formFieldNameMap: Record<string, string>,
    ): TransformedSearchResult {
@@ -924,7 +930,7 @@ function transformCollection(
        relevanceScore: hit.relevance,
        metadata: {
          timestamp: formatTimestamp(sentAt),
-         channelName: 'Desk',
+         channelName: doc.channelName,
        },
        searchContext: {
          messageId: doc.docId,
@@ -932,8 +938,8 @@ function transformCollection(
          conversationId: link?.conversationId,
          ticketId: link?.ticketId,
          xyneId: xyneIdPlain,
-         channelId: link?.channelId,
-         channelTitle: 'Desk',
+         channelId: doc.channelId,
+         channelTitle: doc.channelName,
          senderName,
          senderEmail,
          recipientCount,

@@ -24,7 +24,8 @@
  */
 
 import type { ReactElement } from 'react';
-import { DiamondComponent, RotateLeft } from '@xyne/icons';
+import { RotateLeft } from '@xyne/icons';
+import { AppIcon } from '../../AppIcon/AppIcon';
 import type { ReactArtifactRef } from './ReactArtifact.types';
 import { useAppCreationModeSignal } from './appCreationModeContext';
 
@@ -33,7 +34,7 @@ export const ArtifactPaneReference = ({
 }: {
   artifact: ReactArtifactRef;
 }): ReactElement => {
-  const { viewingVersionId, headVersionId, viewVersion, restoreVersion, restoring } =
+  const { viewingVersionId, headVersionId, icon, viewVersion, restoreVersion, restoring } =
     useAppCreationModeSignal();
   const version = artifact.manifest.versionNumber;
   const isViewing = Boolean(artifact.versionId) && artifact.versionId === viewingVersionId;
@@ -62,7 +63,8 @@ export const ArtifactPaneReference = ({
         data-track-category='AskAI'
         data-track-name='ArtifactPaneReferenceSelect'
       >
-        <DiamondComponent
+        <AppIcon
+          name={icon}
           size={17}
           className={`shrink-0 ${isViewing ? 'text-primary' : 'text-muted-foreground'}`}
           aria-hidden='true'

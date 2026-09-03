@@ -1,6 +1,6 @@
 import { ReactElement, useState } from 'react';
-import { AlertTriangle, Plug, Unplug } from 'lucide-react';
-import { Dialog } from '../../ui/Dialog';
+import { Plug, Unplug } from 'lucide-react';
+import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
 import Button from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
 
@@ -99,48 +99,16 @@ export const DeskConnectionCard = ({
         )}
       </div>
 
-      <Dialog
+      <DisconnectConfirmDialog
         open={showDisconnectConfirm}
         onOpenChange={open => !open && setShowDisconnectConfirm(false)}
         title={disconnectTitle}
-      >
-        <div className='p-5 flex flex-col gap-3'>
-          <div className='flex gap-3'>
-            <AlertTriangle size={18} className='flex-shrink-0 text-amber-500 mt-0.5' />
-            <div className='flex flex-col gap-2 text-sm'>
-              <p className='text-foreground'>{disconnectPrompt}</p>
-              <ul className='text-muted-foreground list-disc pl-4 space-y-1 text-xs'>
-                {disconnectBullets.map(bullet => (
-                  <li key={bullet}>{bullet}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-          <div className='flex justify-end gap-2 pt-2'>
-            <Button
-              variant='secondary'
-              size='sm'
-              onClick={() => setShowDisconnectConfirm(false)}
-              data-track-category='desk-integration'
-              data-track-name='CANCEL_DISCONNECT'
-              disabled={isDisconnecting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant='destructive'
-              size='sm'
-              trackId='desk_disconnect_integration'
-              trackAction={handleDisconnect}
-              disabled={isDisconnecting}
-              data-track-category={trackCategory}
-              data-track-name='confirm-disconnect'
-            >
-              {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
-            </Button>
-          </div>
-        </div>
-      </Dialog>
+        prompt={disconnectPrompt}
+        bullets={disconnectBullets}
+        isPending={isDisconnecting}
+        onConfirm={() => void handleDisconnect()}
+        trackCategory={trackCategory}
+      />
     </div>
   );
 };

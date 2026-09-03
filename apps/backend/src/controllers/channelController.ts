@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
-  buildAppDeskSourceName,
   buildSlackDeskSourceName,
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
@@ -45,6 +44,7 @@ import { websocketService } from '../services/websocketService';
 import { createChannelCreatedActivity } from '../utils/channelActivityUtils';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
@@ -70,6 +70,7 @@ export class ChannelController {
   private channelUserStatusRepository: ChannelUserStatusRepository;
   private projectRepository: ProjectRepository;
   private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
+  private externalSourceRepository: ExternalSourceRepository;
   private channelEmailAliasService: ChannelEmailAliasService;
 
   constructor() {
@@ -83,6 +84,7 @@ export class ChannelController {
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
     this.projectRepository = new ProjectRepository();
     this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
+    this.externalSourceRepository = new ExternalSourceRepository();
     this.channelEmailAliasService = new ChannelEmailAliasService();
   }
 
@@ -1288,17 +1290,11 @@ export class ChannelController {
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
 
-          await db.externalSource.create({
-            data: {
-              name: buildAppDeskSourceName(channel.id),
-              sourceType: 'app-desk',
-              displayName: name!,
-              channelId: channel.id,
-              externalIdentifier: installedAppId,
-              credentials: encrypt(JSON.stringify({ installedAppId })),
-              isActive: true,
-              workspaceId: req.user!.workspaceId!,
-            },
+          await this.externalSourceRepository.connectAppToChannel({
+            channelId: channel.id,
+            installedAppId,
+            workspaceId: req.user!.workspaceId!,
+            displayName: name!,
           });
 
           await this.channelParticipantRepository.addParticipant(

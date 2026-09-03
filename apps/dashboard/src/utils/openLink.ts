@@ -18,7 +18,7 @@ export const subscribeLinkOpenPref = (listener: () => void): (() => void) => {
 };
 
 export const getLinkOpenExternalDefault = (): boolean =>
-  localStorage.getItem(LINK_OPEN_EXTERNAL_KEY) === 'true';
+  localStorage.getItem(LINK_OPEN_EXTERNAL_KEY) !== 'false';
 
 const syncLinkOpenPrefToMain = (value: boolean): void => {
   if (!isElectronApp()) return;

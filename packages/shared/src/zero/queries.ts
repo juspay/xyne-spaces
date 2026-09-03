@@ -47,6 +47,7 @@ import {
   RecapEntityType,
   UserResponsibility,
   UserType,
+  ViewAccessEntityType,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -909,6 +910,7 @@ export const queries = defineQueries({
       channelId: z.string().optional(),
       projectId: z.string().optional(),
       boardId: z.string().optional(),
+      boardIds: z.array(z.string()).optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
       ...flowStepVisibilitySchemaShape,
@@ -921,6 +923,7 @@ export const queries = defineQueries({
         channelId,
         projectId,
         boardId,
+        boardIds,
         userId,
         groupId,
         excludeFlowSteps,
@@ -937,6 +940,11 @@ export const queries = defineQueries({
       // boardId implicitly scopes to project, so no need for separate projectId filter
       if (boardId && viewMode !== 'my-tickets') {
         query = query.where('boardId', boardId);
+      }
+      // Scope by selected boards server-side (mirrors kanbanTicketsPageV3) so a
+      // saved view spanning several boards stays bounded without a projectId.
+      if (!boardId && viewMode !== 'my-tickets' && boardIds?.length) {
+        query = query.where('boardId', 'IN', boardIds);
       }
       // Apply projectId filter ONLY if:
       // 1. No boardId exists (boardId is more specific and implies project)
@@ -1174,6 +1182,7 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
@@ -1186,7 +1195,7 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1222,6 +1231,10 @@ export const queries = defineQueries({
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
         );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       if (userGroups && userGroups.length > 0) {
@@ -1391,6 +1404,7 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
@@ -1406,7 +1420,7 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1438,6 +1452,10 @@ export const queries = defineQueries({
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
         );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       // Mailbox folder server-side filtering. Spam and Starred REQUIRE an overlay row, so they
@@ -4403,6 +4421,17 @@ export const queries = defineQueries({
       .related('values')
       .orderBy('createdAt', 'desc');
   }),
+
+  savedConfigsSharedWithUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.view_access
+        .where('entityType', ViewAccessEntityType.USER)
+        .where('entityId', userId)
+        .related('view', view => view.related('values'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   getWorkspaceById: defineQuery(
     z.object({ workspaceId: z.string() }),
