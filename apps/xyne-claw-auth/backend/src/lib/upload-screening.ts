@@ -3,7 +3,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("upload-screening");
 
 /**
- * Server-side screening for uploaded chat attachments (PY-JP-011).
+ * Server-side screening for uploaded chat attachments.
  *
  * Attachments are stored and later handed to other people, so an executable
  * uploaded here becomes a malware-distribution vector. The upload path had no
