@@ -210,6 +210,14 @@ validate_workspace_id() {
         return 0
     fi
 
+    # Reminder (not enforced here): a new Zero table also needs a read-scope entry.
+    echo ""
+    log_warning "New table(s) detected — also classify each new Zero table in"
+    log_warning "  apps/backend/src/zero/tenant-scope.ts:"
+    log_warning "    • a table with a workspaceId column is auto-scoped (no change needed);"
+    log_warning "    • otherwise add it to CUSTOM_SCOPES or GLOBAL_REFERENCE_TABLES,"
+    log_warning "      or a Zero query against it is refused at runtime (zero_query_unscoped_table)."
+
     if [ "$has_errors" = true ]; then
         echo ""
         echo "New tables must carry a non-nullable tenant key:"
