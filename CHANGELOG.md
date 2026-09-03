@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.9](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.8...v1.251.0-release-20260901.9) (2026-09-03)
+
+
+### Bug Fixes
+
+* show all tickets of the board in channel ([#1457](https://github.com/juspay/xyne-spaces/issues/1457)) ([3d752f4](https://github.com/juspay/xyne-spaces/commit/3d752f481d4cb1a539f52c906be46edd4ffbe2cb))
+
 ## [1.251.0-release-20260901.8](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.7...v1.251.0-release-20260901.8) (2026-09-02)
 
 
