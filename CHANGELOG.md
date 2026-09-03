@@ -1,3 +1,11 @@
+## [1.251.0-release-20260901.12](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.11...v1.251.0-release-20260901.12) (2026-09-03)
+
+
+### Bug Fixes
+
+* revert native-button conversions to raw <button> ([#1489](https://github.com/juspay/xyne-spaces/issues/1489)) ([f807453](https://github.com/juspay/xyne-spaces/commit/f807453c362ab43d96f04ec51b8d15184318a448))
+* shortcut api call fix ([#1486](https://github.com/juspay/xyne-spaces/issues/1486)) ([2f8dbe2](https://github.com/juspay/xyne-spaces/commit/2f8dbe20eded844b91dd33e8c3f3679c1dc33c36))
+
 ## [1.251.0-release-20260901.11](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.10...v1.251.0-release-20260901.11) (2026-09-03)
 
 
