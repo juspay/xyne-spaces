@@ -67,7 +67,7 @@ import { useThreadBroadcastMentions } from '../../../hooks/useThreadBroadcastMen
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { appsService } from '../../../services/Apps/appsService';
-import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { useChannelCommands, useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import type { CommandItem } from '../../ui/Selectors/Selectors.types';
@@ -219,49 +219,36 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       [conversationId, openArtifacts],
     );
 
-    // Slash commands for this channel — filtered by context (thread vs chat)
-    const [channelCommands, setChannelCommands] = useState<CommandItem[]>(
-      SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
-    );
     // Registry command id of the artifact currently being drafted, if any.
     const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
-    // Global shortcuts for this channel
-    const [globalShortcuts, setGlobalShortcuts] = useState<AppShortcutWithApp[]>([]);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-    useEffect(() => {
-      const isThread = !!conversation?.conversationId;
-      const filter: { commandAccessibility?: CommandAccessibility } = isThread
-        ? { commandAccessibility: CommandAccessibility.THREAD }
-        : { commandAccessibility: CommandAccessibility.CHAT };
-      appsService
-        .getChannelCommands(channelId, filter)
-        .then(cmds =>
-          setChannelCommands([
-            ...SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
-            ...cmds
-              .filter(
-                c =>
-                  !SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS.some(
-                    artifact => artifact.name === c.commandName.toLowerCase(),
-                  ),
-              )
-              .map(c => ({
-                id: c.id,
-                name: c.commandName,
-                description: c.description,
-                kind: 'app' as const,
-              })),
-          ]),
-        )
-        .catch(() => {
-          setChannelCommands(SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS);
-        });
-      // Fetch global shortcuts (not filtered by thread/chat)
-      appsService
-        .getChannelShortcuts(channelId, { type: 'GLOBAL' })
-        .then(setGlobalShortcuts)
-        .catch(() => undefined);
-    }, [channelId, conversation?.conversationId]);
+
+    // Slash commands for this channel — filtered by context (thread vs chat).
+    // Global shortcuts are not filtered by thread/chat.
+    const appCommands = useChannelCommands(
+      channelId,
+      conversation?.conversationId ? CommandAccessibility.THREAD : CommandAccessibility.CHAT,
+    );
+    const globalShortcuts = useChannelShortcuts(channelId, 'GLOBAL');
+    const channelCommands = useMemo<CommandItem[]>(
+      () => [
+        ...SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
+        ...appCommands
+          .filter(
+            c =>
+              !SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS.some(
+                artifact => artifact.name === c.commandName.toLowerCase(),
+              ),
+          )
+          .map(c => ({
+            id: c.id,
+            name: c.commandName,
+            description: c.description,
+            kind: 'app' as const,
+          })),
+      ],
+      [appCommands],
+    );
 
     // Hide, don't just reject: an artifact the user cannot post here should not
     // be offered. The send guards below still fire, because the command can also
