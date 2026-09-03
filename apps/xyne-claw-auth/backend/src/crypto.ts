@@ -60,20 +60,60 @@ export function decrypt(ciphertext: string, iv: string, authTag: string, key: Bu
 }
 
 // Spaces encrypts DB-stored secrets (e.g. installed_apps.signingSecret) with
-// AES-256-CBC, format `${ivHex}:${ciphertextHex}` — see xyne-spaces
-// backend/src/services/encryptionService.ts. This decrypts that format using
-// SPACES_ENCRYPTION_KEY (Spaces' key, distinct from claw-auth's own). Throws
-// on malformed input; callers treat a throw as "skip this row".
+// AES-256-CBC — see xyne-spaces backend/src/services/encryptionService.ts. It
+// writes two formats, and this reader must understand both for as long as any
+// row is on the older one:
+//
+//   `${ivHex}:${ctHex}`                  legacy, decrypted under keyId "legacy"
+//   `v2:${keyId}:${ivHex}:${ctHex}`      versioned, decrypted under that keyId
+//
+// The key ids must agree with Spaces because the id travels in the ciphertext;
+// the constants below are the same two values that service uses. CBC carries no
+// authentication tag, so a wrong key does not reliably fail — that is precisely
+// why the id is read rather than guessed, and why an unknown id throws instead
+// of falling back to another key.
+//
+// Throws on malformed input; callers treat a throw as "skip this row".
 const SPACES_CBC_ALGO = "aes-256-cbc";
+const SPACES_VERSION_TAG = "v2";
+const SPACES_LEGACY_KEY_ID = "legacy";
 
-export function decryptSpacesCbc(blob: string, key: Buffer): string {
-  const sep = blob.indexOf(":");
-  if (sep < 0) throw new Error("decryptSpacesCbc: blob missing IV separator");
-  const ivHex = blob.slice(0, sep);
-  const ctHex = blob.slice(sep + 1);
+export type SpacesKeyRing = ReadonlyMap<string, Buffer>;
+
+export function decryptSpacesCbc(blob: string, keys: SpacesKeyRing): string {
+  const parts = blob.split(":");
+
+  let keyId: string;
+  let ivHex: string;
+  let ctHex: string;
+
+  if (parts.length === 4 && parts[0] === SPACES_VERSION_TAG) {
+    [, keyId, ivHex, ctHex] = parts as [string, string, string, string];
+  } else if (parts.length === 2) {
+    keyId = SPACES_LEGACY_KEY_ID;
+    [ivHex, ctHex] = parts as [string, string];
+  } else {
+    throw new Error(
+      'decryptSpacesCbc: expected "iv:ct" or "v2:keyId:iv:ct"',
+    );
+  }
+
   if (ivHex.length === 0 || ctHex.length === 0) {
     throw new Error("decryptSpacesCbc: empty IV or ciphertext");
   }
+
+  const key = keys.get(keyId);
+  if (!key) {
+    // Either the ring is unconfigured, or Spaces has moved to a key this
+    // service was never given. Both are operator errors and both are worth
+    // naming, because the caller's "skip this row" turns a silent miss into a
+    // backfill that reports success while migrating nothing.
+    throw new Error(
+      `decryptSpacesCbc: no Spaces key registered for keyId "${keyId}" — ` +
+        "set SPACES_ENCRYPTION_KEY, or add the id to SPACES_ENCRYPTION_KEYS",
+    );
+  }
+
   const decipher = createDecipheriv(SPACES_CBC_ALGO, key, Buffer.from(ivHex, "hex"));
   const decrypted = Buffer.concat([
     decipher.update(Buffer.from(ctHex, "hex")),
