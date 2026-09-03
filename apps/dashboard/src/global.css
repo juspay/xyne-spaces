@@ -4786,16 +4786,9 @@ img.inline-emoji,
   z-index: 10;
 }
 
-/* --------------------------------------------------------------------------
- * Text-input fill in the midnight (dark) theme.
- *
- * The shared <Input> and <Textarea> carry `dark:bg-input/30`, but this app
- * themes exclusively via [data-theme] and NEVER sets a `.dark` class
- * (tailwind darkMode: 'class'). So that `dark:` variant is inert and the
- * fields render with no fill — they sink into the dialog surface in dark mode
- * (e.g. the New Project modal). Scope the intended /30 fill to the theme so it
- * actually applies. Light themes are unaffected.
- * ------------------------------------------------------------------------ */
+/* Midnight theme: apply the intended input fill via [data-theme]. The shared
+   Input/Textarea use `dark:bg-input/30`, but this app never sets a `.dark`
+   class, so that variant is inert. Light themes are unaffected. */
 [data-theme='midnight'] input[data-slot='input'],
 [data-theme='midnight'] textarea[data-slot='textarea'] {
   background-color: hsl(var(--input) / 0.3);
