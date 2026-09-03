@@ -1128,7 +1128,18 @@ export function CallControls({
           </button>
         )}
 
-        {/* Disconnect Button */}
+        {/*
+          Disconnect Button — INTENTIONAL sizing deviations from the sibling controls. Do NOT
+          "normalize" these to match the other icons/classes without re-reading this note; #1213
+          regressed this exact button by moving it onto the shared <Button> whose default size
+          variant hard-codes h-9 (breaking pixel parity in both FullCallView and MiniCallView).
+          - size='inline'  -> h-auto (no fixed height), so the button grows/shrinks with its
+            padding + icon exactly like the raw-<button> siblings. It also injects justify-start,
+            which is why we re-add 'justify-center' in className below to keep the icon centered.
+          - icon uses size-5 sm:size-6 (NOT w-5 h-5 sm:w-6 sm:h-6 like every sibling): the <Button>
+            base class carries [&_svg:not([class*="size-"])]:size-4, which force-shrinks any
+            w-* or h-* classed svg to 16px. A size-* class escapes that override. Keep it size-*.
+        */}
         <Button
           variant='ghost'
           size='inline'
