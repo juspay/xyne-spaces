@@ -17,7 +17,7 @@ import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { isFencedSession } from "./run-ownership.js";
-import { compactionExtension } from "./compaction-extension.js";
+import { compactionExtension, setCompactionSubmitTool } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
@@ -141,6 +141,25 @@ function piAssistantText(m: PiMsg): string {
     .join("")
     .trim();
 }
+const CHECKPOINT_HEADINGS = [
+  "## Progress",
+  "### Done",
+  "### In Progress",
+  "## Key Decisions",
+  "## Next Steps",
+  "## Critical Context",
+];
+
+export function looksLikeCompactionCheckpoint(text: string | undefined | null): boolean {
+  if (!text) return false;
+  let hits = 0;
+  for (const heading of CHECKPOINT_HEADINGS) {
+    if (new RegExp(`^${heading.replace(/[#*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m").test(text)) hits++;
+    if (hits >= 2) return true;
+  }
+  return false;
+}
+
 export function extractFinalAnswerText(session: unknown, maxTurns?: number): string | undefined {
   const s = session as { messages?: unknown; getLastAssistantText?: () => string | undefined };
   const fallback = (): string | undefined =>
@@ -2538,6 +2557,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // `requireToolsBeforeSubmit` config can block an empty/short-circuited
   // structured delivery until the mandated data-gathering tools have run.
   if (structuredOutputRef) structuredOutputRef.toolsUsed = () => toolsUsed;
+  setCompactionSubmitTool(
+    structuredOutputRef ? "submit-result" : verifyResponsesRef ? "submit-response" : requiredTool?.name,
+  );
   let sandboxPreviewEmitted = false;
   const toolInvocations: ToolInvocation[] = [];
   const tokenUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -2552,6 +2574,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // "successful" empty completion — otherwise it dead-ends on this provider
   // instead of advancing to the configured fallback. See ProviderTerminalError.
   let lastTurnErrorDetail: string | null = null;
+  let compactedThisRun = false;
   const debugEvents: DebugEventRecord[] = [];
   let debugSeq = 0;
   // Set once the success-path debug write (near the end of the agent loop) has
@@ -3172,6 +3195,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     //   auto_compaction_end   → compaction_end
     // Other than the name, payload shape is unchanged for the fields we log.
     if (event.type === "compaction_start") {
+      compactedThisRun = true;
       log.info(`[agent] Auto-compaction started: reason=${(event as { reason?: string }).reason}`);
       pushDebugEvent("compaction_start", {
         reason: (event as { reason?: string }).reason,
@@ -3750,7 +3774,41 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // For type "markdown" the captured value is already a string; for type
   // "json" it's the payload (run.ts may re-render it through a template before
   // posting to Spaces — this is the safe default / fallback).
-  const text = structuredOutputRef?.value !== undefined
+  // Post-compaction checkpoint guard. On a 128k-window model a fresh-start
+  // compaction can make the next turn rewrite its own summary as prose and stop
+  // — a checkpoint posted to the user as the final answer, with "Next Steps"
+  // listing work it never did. Detected by checkpoint headings + a final turn
+  // that called no tools; one nudge to continue, then suppressed so the
+  // existing empty-response path handles it instead of posting the checkpoint.
+  let checkpointSuppressed = false;
+  if (compactedThisRun && structuredOutputRef?.value === undefined) {
+    const endedWithoutTools = (): boolean => {
+      const msgs = (session as unknown as { messages?: Array<Record<string, unknown>> }).messages;
+      const last = msgs ? [...msgs].reverse().find((m) => m["role"] === "assistant") : undefined;
+      return !!last && last["stopReason"] !== "tool_use";
+    };
+    const isCheckpointAnswer = (): boolean =>
+      looksLikeCompactionCheckpoint(extractFinalAnswerText(session, opts.finalAnswerMaxTurns)) && endedWithoutTools();
+    if (isCheckpointAnswer()) {
+      metric.count("agent_summary_as_answer", { provider: provider ?? "spaces" });
+      log.warn("[agent] Final text looks like a compaction checkpoint, not an answer — nudging once to continue the task");
+      if (!abortSignal?.aborted) {
+        await promptWithAbort(() => session.prompt(
+          "<system>Your previous message was a checkpoint, not an answer. Continue the task now and deliver the final result.</system>",
+        ));
+        const cq = session as unknown as { _agentEventQueue?: Promise<void> };
+        if (cq._agentEventQueue) await withAbort(cq._agentEventQueue);
+      }
+      if (isCheckpointAnswer()) {
+        checkpointSuppressed = true;
+        log.warn("[agent] Compaction checkpoint persisted after the nudge — suppressing it as the final answer");
+      }
+    }
+  }
+
+  const text = checkpointSuppressed && structuredOutputRef?.value === undefined
+    ? ""
+    : structuredOutputRef?.value !== undefined
     ? (typeof structuredOutputRef.value === "string"
         ? structuredOutputRef.value
         : JSON.stringify(structuredOutputRef.value, null, 2))

@@ -90,8 +90,11 @@ test("NON-EMPTY summary → commits the fresh-start compaction ({ compaction })"
   const handler = registerHandler();
   const result = await handler(freshStartEvent(), ctx);
 
-  // A real summary is still committed exactly as before (no behavior change on the happy path).
-  expect(result).toEqual({ compaction: good });
+  // A real summary is still committed, now with the resume anchor appended.
+  const committed = (result as { compaction: { summary: string; firstKeptEntryId: string } }).compaction;
+  expect(committed.firstKeptEntryId).toBe(good.firstKeptEntryId);
+  expect(committed.summary.startsWith(good.summary)).toBe(true);
+  expect(committed.summary).toContain("resuming after context compaction");
 });
 
 test("compact() throwing still degrades to pi-native (returns undefined, never throws)", async () => {
