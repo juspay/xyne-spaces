@@ -141,12 +141,14 @@ CREATE TABLE dpip.party_identifiers (
 );
 
 CREATE TABLE dpip.entities_by_customer (
+  party_id TEXT NOT NULL,
   customer_type TEXT NOT NULL
     CHECK (customer_type IN ('INDIVIDUAL', 'MERCHANT', 'ALL')),
   entity_count BIGINT NOT NULL
     CHECK (entity_count >= 0),
   last_updated_date DATE NOT NULL,
   CONSTRAINT entities_by_customer_unique_key UNIQUE (
+    party_id,
     customer_type,
     last_updated_date
   )
@@ -191,7 +193,10 @@ COMMENT ON COLUMN dpip.external_entity_identifiers.party_id IS
   'Lowercase party ID, or the literal text value ''null'' when unavailable.';
 
 COMMENT ON TABLE dpip.entities_by_customer IS
-  'Distinct flagged external entities split by the customer segment they were reported under. INDIVIDUAL + MERCHANT can exceed ALL: an entity reported under both counts once in each.';
+  'Distinct flagged external entities split by owning party and by the customer segment they were reported under. INDIVIDUAL + MERCHANT can exceed ALL: an entity reported under both counts once in each.';
+
+COMMENT ON COLUMN dpip.entities_by_customer.party_id IS
+  'Lowercase party ID of the entity owner, or the literal text value ''all'' for the registry-wide row.';
 
 COMMIT;
 ```

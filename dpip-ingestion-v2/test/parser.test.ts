@@ -87,8 +87,9 @@ function validPayload(): unknown[] {
     {
       table: 'entities_by_customer',
       data: [
-        ['customer_type', 'entity_count', 'last_updated_date'],
-        ['ALL', 25, '2026-07-22'],
+        ['party_id', 'customer_type', 'entity_count', 'last_updated_date'],
+        ['ALL', 'ALL', 25, '2026-07-22'],
+        ['HDFC', 'MERCHANT', 10, '2026-07-22'],
       ],
     },
   ];
@@ -253,6 +254,17 @@ describe('parseDpipPayload', () => {
     assert.equal(
       result.tables.party_identifiers[0]?.num_identifiers,
       80n,
+    );
+    assert.deepEqual(
+      result.tables.entities_by_customer.map((row) => [
+        row.party_id,
+        row.customer_type,
+        row.entity_count,
+      ]),
+      [
+        ['all', 'ALL', 25n],
+        ['hdfc', 'MERCHANT', 10n],
+      ],
     );
   });
 

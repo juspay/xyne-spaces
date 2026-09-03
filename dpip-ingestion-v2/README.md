@@ -14,7 +14,8 @@ Differences from v1:
 - `reports` carries `customer_type` (`INDIVIDUAL` / `MERCHANT` / `ALL`).
 - `screenings` carries `event_type`.
 - A seventh table, `entities_by_customer`, splits distinct flagged external
-  entities by the segment they were reported under.
+  entities by owning party (`party_id`, `all` for the registry-wide row) and
+  by the segment they were reported under.
 - Snapshot-table unique keys exclude their count columns.
 
 Each successful invocation:

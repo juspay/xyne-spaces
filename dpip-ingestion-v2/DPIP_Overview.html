@@ -375,12 +375,13 @@ const CLUSTER_SNAPSHOTS = dedupeByBucket(
     r => numOf(r.cluster_count))
   .map(r => ({ date: String(r.last_updated_date), clusters: numOf(r.cluster_count) }))
   .filter(r => CUTOFF_ISO !== null && r.date <= CUTOFF_ISO);
+const entityBankOf = r => r.party_id === undefined || isAllVal(r.party_id) ? 'ALL' : String(r.party_id);
 const ENTITY_SUBJECT_SNAPSHOTS = dedupeByBucket(
     rowsFor('entities_by_customer'),
-    r => r.last_updated_date + '|' + norm(r.customer_type),
+    r => r.last_updated_date + '|' + entityBankOf(r) + '|' + norm(r.customer_type),
     r => numOf(r.entity_count))
-  .map(r => ({ date: String(r.last_updated_date), customerType: norm(r.customer_type),
-               entities: numOf(r.entity_count) }))
+  .map(r => ({ date: String(r.last_updated_date), bank: entityBankOf(r),
+               customerType: norm(r.customer_type), entities: numOf(r.entity_count) }))
   .filter(r => CUTOFF_ISO !== null && r.date <= CUTOFF_ISO);
 
 /* Rows of the latest snapshot taken on or before `to` (bank-filtered when the table carries party_id) */
@@ -653,20 +654,18 @@ function renderAll(){
     </div>`;
   const registryNote = state.subject === 'ALL' ? ''
     : '<span class="snap-note">Registry total, not split by subject</span>';
-  const entSubjSnap = latestSnapshot(ENTITY_SUBJECT_SNAPSHOTS, scopeTo);
+  const entSubjSnap = latestSnapshot(ENTITY_SUBJECT_SNAPSHOTS.filter(r => r.bank === state.selectedBank), scopeTo);
   const entitiesOfSubject = ct => entSubjSnap.rows.filter(r => r.customerType === ct).reduce((a, r) => a + r.entities, 0);
   const haveEntitySubject = state.subject !== 'ALL' && entSubjSnap.rows.length > 0;
   const entityValue = haveEntitySubject ? entitiesOfSubject(norm(state.subject)) : totalExternalEntities;
   const entitySnapDate = haveEntitySubject ? entSubjSnap.date : extSnap.date;
-  const entityNote = haveEntitySubject
-    ? (state.selectedBank === 'ALL' ? '' : '<span class="snap-note">Registry-wide — the subject split is not available per bank</span>')
-    : registryNote;
+  const entityNote = haveEntitySubject ? '' : registryNote;
 
   const snapCard = document.createElement('div');
   snapCard.className = 'dwm-card snapshot-combined';
   snapCard.innerHTML = '<div class="snap-grid">'
     + snapCell('External Entities',
-        'Distinct external entities known to the registry, from the latest entity snapshot taken on or before the end of the period shown. Under All this is the registry total and respects the bank filter; under Individuals or Merchants it counts the entities named in reports of that subject, registry-wide.' + ENTITY_OVERLAP_TIP,
+        'Distinct external entities known to the registry, from the latest entity snapshot taken on or before the end of the period shown. Under All this is the registry total and respects the bank filter; under Individuals or Merchants it counts the entities named in reports of that subject, owned by the selected bank.' + ENTITY_OVERLAP_TIP,
         entityValue, (entitySnapDate ? 'Latest snapshot: ' + fmtDateIN(entitySnapDate) : 'No snapshot on file for this period') + entityNote)
     + snapCell('Clusters',
         'Clusters known to the registry, from the latest cluster snapshot taken on or before the end of the period shown. Clusters are mixed by nature and carry no subject split.',

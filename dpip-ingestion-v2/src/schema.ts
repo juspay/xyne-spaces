@@ -74,10 +74,11 @@ export const DPIP_TABLE_SPECS: Readonly<Record<DpipTableName, DpipTableSpec>> = 
   },
   entities_by_customer: {
     fields: {
+      party_id: 'text',
       customer_type: 'text',
       entity_count: 'bigint',
       last_updated_date: 'date',
     },
-    key: ['customer_type', 'last_updated_date'],
+    key: ['party_id', 'customer_type', 'last_updated_date'],
   },
 };

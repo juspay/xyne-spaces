@@ -54,8 +54,9 @@ curl -sS -i --max-time 60 -X POST \
   {
     "table": "entities_by_customer",
     "data": [
-      ["customer_type", "entity_count", "last_updated_date"],
-      ["ALL", 9000000004, "2026-07-23"]
+      ["party_id", "customer_type", "entity_count", "last_updated_date"],
+      ["ALL", "ALL", 9000000004, "2026-07-23"],
+      ["dpip-test-20260723", "MERCHANT", 9000000005, "2026-07-23"]
     ]
   }
 ]
