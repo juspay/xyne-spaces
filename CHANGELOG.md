@@ -1,3 +1,16 @@
+## [1.267.0](https://github.com/juspay/xyne-spaces/compare/v1.266.1...v1.267.0) (2026-09-03)
+
+
+### Features
+
+* schedule call fixes ([#1396](https://github.com/juspay/xyne-spaces/issues/1396)) ([6c671f2](https://github.com/juspay/xyne-spaces/commit/6c671f2220b760f6b707715c07d3d6f1ba4551bd))
+
+
+### Bug Fixes
+
+* title substring fix ([#1408](https://github.com/juspay/xyne-spaces/issues/1408)) ([1e2456d](https://github.com/juspay/xyne-spaces/commit/1e2456d12031dbf90b824d90de7a843ea081c1cc))
+* video recording stream ([#1407](https://github.com/juspay/xyne-spaces/issues/1407)) ([087523f](https://github.com/juspay/xyne-spaces/commit/087523f95931c28e7d656c2b066be89d23af7f0a))
+
 ## [1.266.1](https://github.com/juspay/xyne-spaces/compare/v1.266.0...v1.266.1) (2026-09-03)
 
 
