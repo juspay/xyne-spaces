@@ -126,6 +126,7 @@ import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentation
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildSuggestConnectorsTool, type SuggestConnectorsRef } from "../suggest-connectors.js";
+import { filterScheduledRunTools } from "../scheduled-run-tool-policy.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -2988,22 +2989,20 @@ export async function processTask(
       log("suggestGoal enabled — injected suggest-goal tool");
     }
 
-    // A scheduled run must NEVER see the schedule-task tool. Without this,
-    // agents whose task text implies recurrence ("hourly PR report") re-arm
-    // themselves every run — a chain of once-jobs that user deletion can't
-    // kill because the in-flight run respawns the next link (prod 2026-06-11:
-    // doctor-agent re-created its job 90s after a mass-delete). Agents also
-    // abused delayMs=0 "scheduled" jobs as a post-to-channel hack, spawning
-    // 1-3 extra jobs + full agent runs per report. Recurrence belongs to the
-    // ONE originating cron/once job; only interactive runs may create jobs.
+    // Scheduled runs are unattended. They must not see tools whose contract
+    // requires a live Spaces thread or a user click:
+    //   • schedule-task can recursively re-arm the job;
+    //   • propose-agent-call posts an approval card to the current thread.
+    // Keep direct A2A tools (`call-agent` / `ask_<slug>`) so an authorised
+    // Orchestrator can execute a callee and receive its result in the same run.
     const isScheduledRun =
       eventType === "scheduled_job" ||
       (conversationId?.startsWith("scheduled_") ?? false);
     if (isScheduledRun) {
       const before = allTools.length;
-      allTools = allTools.filter((t) => t.name !== "schedule-task");
+      allTools = filterScheduledRunTools(allTools);
       if (allTools.length !== before) {
-        log("Scheduled run — schedule-task tool removed (self-scheduling ban)");
+        log(`Scheduled run — removed ${before - allTools.length} interactive-only tool(s)`);
       }
     }
 
