@@ -467,6 +467,7 @@ export interface VespaMailDocument extends VespaDocument {
   xyneId?: string;
   /** Project.code of the linked ticket — the "<code>" half of xyneId. */
   projectCode?: string;
+  assignedTo?: string;
   ticketFormFields?: TicketFormFields;
   ticketFormFieldValues?: string[]; // Indexed copy used for Desk/All lexical search.
   subject: string;

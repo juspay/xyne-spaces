@@ -51,6 +51,12 @@ schema mail {
       index: enable-bm25
     }
 
+    # Assignee of the linked ticket, denormalised. Mirrors ticket.sd's assignedTo.
+    field assignedTo type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
     field channelRef type reference<chat_container> {
       indexing: attribute
     }
@@ -251,7 +257,7 @@ schema mail {
   }
 
   fieldset default {
-    fields: subject, app, entity, chunks, attachmentFilenames, from, to, cc, bcc, labels, entityPeople, entityProducts, entityMerchants, xyneId, ticketFormFieldValues
+    fields: subject, app, entity, chunks, attachmentFilenames, from, to, cc, bcc, labels, entityPeople, entityProducts, entityMerchants, xyneId, ticketFormFieldValues, assignedTo
   }
 
   fieldset autocomplete {
@@ -337,6 +343,7 @@ schema mail {
     summary entity {}
     summary permissions {}
     summary mailId {}
+    summary assignedTo {}
   }
 
 
