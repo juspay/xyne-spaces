@@ -4,16 +4,14 @@
  * A thin authenticated surface over machinery that already exists. It owns
  * exactly five concerns:
  *
- *   auth.ts      the API-key format and how one is minted
  *   v1/          the versioned surface: operation map, argument parsers, routes
  *   query.ts     run one catalog query
  *   mutation.ts  run one catalog mutator
  *   direct.ts    call the product controllers behind the catalog gaps
  *   handler.ts   request id and one error envelope
  *
- * Authenticating a *request* against a key is `middleware/sdkApiKeyAuth.ts`,
- * passed in explicitly where this router is mounted — see `app.ts` — rather
- * than applied invisibly inside it.
+ * Authentication is handled by `authMiddleware.authenticate` (same as dashboard),
+ * passed in where this router is mounted — see `app.ts`.
  *
  * Everything else — ACL, Vespa indexing, side effects, sequence allocation — is
  * reached through code the app itself uses, never reimplemented here.

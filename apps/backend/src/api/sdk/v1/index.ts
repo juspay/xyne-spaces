@@ -16,9 +16,7 @@
  * interchangeable server-side — reads go to the replica pool and writes open a
  * transaction.
  *
- * Authentication options:
- * - ACTIVE: Cookie-based auth via authMiddleware (same as dashboard) - uses req.user
- * - COMMENTED OUT: API key auth via sdkApiKeyAuth middleware - uses req.sdkAuth
+ * Authentication: Cookie-based auth via authMiddleware (same as dashboard).
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -95,12 +93,7 @@ async function buildAuthContext(req: Request): Promise<{ ctx: Context; authData:
 
 function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
   return handle(async (req: Request, res: Response) => {
-    // COOKIE-BASED AUTH (ACTIVE) - uses req.user from authMiddleware
     const { ctx, authData } = await buildAuthContext(req);
-
-    // API KEY AUTH (COMMENTED OUT) - uses req.sdkAuth from sdkApiKeyAuth
-    // const auth = req.sdkAuth;
-    // if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
 
     const { op, args } = v1Request.parse(req.body);
 

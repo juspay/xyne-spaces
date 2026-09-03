@@ -203,12 +203,6 @@ import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { sdkConfig } from '@/api/sdk/config';
-// SDK auth routes - COMMENTED OUT, using cookie-based auth instead
-// API key auth, SDK key management, and SSO routes are not needed when
-// the SDK reuses the existing Spaces session (same as dashboard).
-// import { apiKeyAuth } from '@/middleware/sdkApiKeyAuth';
-// import sdkKeyRoutes from '@/routes/sdk-keys';
-// import sdkSsoRoutes from '@/routes/sdk-sso';
 
 
 export class App {
@@ -370,26 +364,9 @@ export class App {
     // everything else. The trailing `sdkErrorHandler` gives auth failures the
     // SDK's own error envelope.
     if (sdkConfig.enabled) {
-      // SDK SSO device flow routes - COMMENTED OUT
-      // Uncomment below to enable SSO device flow for external CLI tools
-      // this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
-      // logger.info('SDK SSO routes mounted at /api/sdk/auth/sso');
-
       this.app.use('/api/sdk', createSdkPublicRouter());
-
-      // OPTION 1: Cookie-based auth (same as dashboard) - ACTIVE
-      // Uses existing Spaces session cookies for authentication
       this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
-
-      // OPTION 2: API key auth - COMMENTED OUT
-      // Uncomment below and comment out OPTION 1 to use API key authentication
-      // this.app.use('/api/sdk', apiKeyAuth, createSdkRouter(), sdkErrorHandler);
-
       logger.info('Public SDK API mounted at /api/sdk');
-
-      // SDK key management routes - COMMENTED OUT
-      // Not needed when using cookie-based auth (Spaces session)
-      // this.app.use('/api/sdk-keys', authMiddleware.authenticate, sdkKeyRoutes);
     }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);

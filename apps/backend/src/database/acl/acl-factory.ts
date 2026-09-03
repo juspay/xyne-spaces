@@ -466,8 +466,6 @@ export class ACLFactory {
       return new ResourceAccessACL(ctx, prisma)
     case 'scheduledMessage':
       return new ScheduledMessagesACL(ctx, prisma)
-    case 'sdkApiKey':
-      return new BaseQueryACL(ctx, prisma)
     case 'sessionRecordingFile':
       return new BaseQueryACL(ctx, prisma)
     case 'stagePRStatusMapping':

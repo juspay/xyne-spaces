@@ -13,9 +13,7 @@
  * failures translated into the SDK error envelope. The product routes those
  * controllers also serve are untouched.
  *
- * Authentication options:
- * - ACTIVE: Cookie-based auth via authMiddleware (same as dashboard) - uses req.user
- * - COMMENTED OUT: API key auth via sdkApiKeyAuth middleware - uses req.sdkAuth
+ * Authentication: Cookie-based auth via authMiddleware (same as dashboard).
  */
 
 import { Router, type Request, type RequestHandler, type Response } from 'express';
@@ -37,8 +35,6 @@ import {
 } from '@/services/clawAgentService';
 import { uploadMultiple } from '@/middleware/upload';
 import { config } from '@/config/env';
-// API KEY AUTH (COMMENTED OUT) - SdkAuth type used with req.sdkAuth
-// import type { SdkAuth } from './auth';
 import { SdkApiError } from './errors';
 import { handle } from './handler';
 
@@ -47,10 +43,6 @@ const conversationController = new ConversationController();
 const ticketController = new TicketController();
 const attachmentController = new AttachmentController();
 const draftAttachmentController = new DraftAttachmentController();
-
-// ============================================================================
-// COOKIE-BASED AUTH (ACTIVE) - Uses req.user set by authMiddleware
-// ============================================================================
 
 /**
  * Build SDK auth data from req.user (set by authMiddleware).
@@ -89,10 +81,7 @@ async function buildAuthData(req: Request): Promise<AuthData> {
 type Controller = (req: Request, res: Response) => Promise<void> | void;
 
 /** A service function: returns its payload, so nothing needs capturing. */
-// COOKIE-BASED AUTH (ACTIVE) - service receives authData built from req.user
 type Service = (req: Request, authData: AuthData) => Promise<unknown>;
-// API KEY AUTH (COMMENTED OUT) - service received SdkAuth from req.sdkAuth
-// type Service = (req: Request, auth: SdkAuth) => Promise<unknown>;
 
 interface BaseRoute {
   readonly method: 'get' | 'post';
@@ -303,18 +292,11 @@ export function createDirectRouter(): Router {
       ...(route.middleware ?? []),
       handle(async (req: Request, res: Response) => {
         if (route.service) {
-          // COOKIE-BASED AUTH (ACTIVE) - build authData from req.user
           const authData = await buildAuthData(req);
-          // API KEY AUTH (COMMENTED OUT) - used req.sdkAuth
-          // const auth = req.sdkAuth;
-          // if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
           if (route.query) route.query.parse(req.query);
           if (route.body) route.body.parse(req.body);
           try {
-            // COOKIE-BASED AUTH (ACTIVE) - pass authData to service
             res.status(200).json(await route.service(req, authData));
-            // API KEY AUTH (COMMENTED OUT) - passed auth (SdkAuth) to service
-            // res.status(200).json(await route.service(req, auth));
           } catch (err) {
             throw err instanceof SdkApiError
               ? err
@@ -348,25 +330,15 @@ interface ControllerResult {
 /**
  * Run a product controller as the authenticated caller.
  *
- * COOKIE-BASED AUTH (ACTIVE): req.user is already set by authMiddleware.
- * API KEY AUTH (COMMENTED OUT): Built principal from req.sdkAuth.authData.
- *
- * The controller is handed a request that looks like a session request: the
- * principal is presented on `req.user`, which is where both the controllers and
- * `tenantScopeMiddleware` read identity from.
+ * The controller is handed a request with the authenticated user on `req.user`,
+ * which is where both the controllers and `tenantScopeMiddleware` read identity from.
  */
 export async function callController(
   route: DirectRoute & { controller: Controller },
   req: Request,
 ): Promise<ControllerResult> {
-  // COOKIE-BASED AUTH (ACTIVE) - req.user is already set by authMiddleware
   const user = req.user;
   if (!user) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
-  // API KEY AUTH (COMMENTED OUT) - built principal from req.sdkAuth
-  // const auth = req.sdkAuth;
-  // if (!auth) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
-  // const principal = principalOf(auth.authData);
-  // req.user = principal;
 
   const query = route.query
     ? (route.query.parse(req.query) as Record<string, unknown>)
@@ -374,10 +346,7 @@ export async function callController(
 
   const proxyReq = Object.create(req) as Request;
   Object.defineProperties(proxyReq, {
-    // COOKIE-BASED AUTH (ACTIVE) - use user from req.user (set by authMiddleware)
     user: { value: user, writable: true, configurable: true },
-    // API KEY AUTH (COMMENTED OUT) - used principal built from req.sdkAuth
-    // user: { value: principal, writable: true, configurable: true },
     params: { value: req.params, writable: true, configurable: true },
     query: {
       value: route.mapQuery ? route.mapQuery(query) : query,

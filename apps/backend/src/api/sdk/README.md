@@ -1,8 +1,8 @@
 # `/api/sdk` — the Xyne Spaces public API
 
 The HTTP surface behind [`@xyne/spaces-sdk`](../../../../packages/xyne-spaces-sdk).
-It authenticates an API key, then hands the work to code the product itself
-already runs.
+It authenticates via session cookies (same as the dashboard), then hands the work
+to code the product itself already runs.
 
 That last point is the design. This directory contains **no business logic** — no
 ACL, no search ranking, no sequence allocation, no indexing. Those live in the
@@ -20,7 +20,6 @@ same function within a few frames of stack.
 | `v1/parser.ts` | SDK operation id → the arguments its target expects |
 | `v1/index.ts` | The versioned router |
 | `v1/types.ts` | Shared types for the two above |
-| `auth.ts` | Turn a credential into an `AuthData` |
 | `query.ts` | Run one catalog query |
 | `mutation.ts` | Run one catalog mutator |
 | `direct.ts` | Call the product controllers behind the catalog gaps |
@@ -37,83 +36,16 @@ product.
 
 ## Authentication
 
-Two credentials are accepted, and the server routes on the prefix:
-
-```http
-Authorization: Bearer xyne_sk_<jwt>     # API key, minted in the dashboard
-Authorization: Bearer xyne_sso_<jwt>    # SSO token, from the device flow
-```
-
-Both resolve to the same `AuthData`. They differ in one respect that matters:
-an API key has a row in `sdk_api_keys` and can be revoked mid-life; an SSO token
-has no row, carries a `jti` nothing currently reads, and is therefore valid until
-it expires. Its short lifetime is the containment.
-
-### What an API key is
-
-`xyne_sk_` followed by a JWT, signed with the same `JWT_SECRET` session cookies
-use, carrying the caller's **stable** identity:
-
-```ts
-{ sub, email, name, workspaceId, orgId, memberId }
-```
-
-A distinct `audience` claim (`xyne-sdk`, not `xyne-user`) keeps the two token
-kinds from being interchangeable despite sharing a secret — a session token
-presented here, or an SDK key presented as a session cookie, fails
-`jwt.verify`'s audience check before anything else is inspected.
-
-`role` and `orgRole` are **not** claims — session JWTs never carried them
-either. `apiKeyAuth` re-reads both from `users` and `org_members` on every
-request, the same way `extractAuthDataFromJWT` does for session callers, so a
-demoted or deactivated user loses access on their next request regardless of
-what their key still says.
-
-### Where integrity comes from
-
-Two things, and both must hold.
-
-**The signature** proves the key is authentic. `jwt.verify` rejects anything not
-signed with `JWT_SECRET` before a single claim is trusted.
-
-**The `sdk_api_keys` row decides whether it is still allowed.** A JWT cannot be
-un-issued, so revocation has to live somewhere the server can change after the
-fact. `apiKeyAuth` looks the row up by its `token` on every request and refuses
-a key whose `status` is not `ACTIVE`, whose `expires_at` has passed, or whose
-row is missing entirely. `DELETE /api/sdk-keys/:id` sets `status = 'REVOKED'`
-rather than removing the row, so the key stops working on its very next request
-and the row survives as the audit trail.
-
-A signature that verifies is therefore necessary but not sufficient. The cost is
-one indexed read per request, alongside the two already done for `role` and
-`orgRole` — all three issued together, so it is one round trip rather than
-three. The benefit is that a leaked key can be killed immediately instead of
-being live until its TTL runs out.
-
-### Scoping
-
-A key acts in **one workspace**, and this is structural rather than a policy. A
-`User` row is itself workspace-scoped — somebody with access to two workspaces
-holds two user rows with different ids — so `sub` already determines the
-workspace, and Zero's `Context` carries exactly one. A second workspace needs its
-own key, minted from that workspace.
-
-Keys are minted at `POST /api/sdk-keys` (`routes/sdk-keys.ts`), which is
-**session**-authenticated: you cannot use an API key to mint another one. A user
-may hold **2 live keys**, choosing a lifetime of **30, 60, or 90 days** at
-creation. Neither an expired nor a revoked key occupies a slot.
+The SDK uses cookie-based authentication, reusing the existing Spaces session
+(same as the dashboard). This is handled by `authMiddleware.authenticate`.
 
 ### Authorization
 
-There is none here beyond identity. An API key acts as its user, and **Zero's
-per-table ACL** — folded into every query AST and every wrapped transaction —
-decides what that user may read and write. It is the same boundary the app runs
-behind, which is the point: a second authorization model would be a second thing
-to keep correct.
-
-There are deliberately **no OAuth scopes**. The previous design had 21 scope
-families and a generated 460-line operation→scope map; it was a parallel
-permission system layered over the one that actually guards the rows.
+There is none here beyond identity. The SDK acts as the logged-in user, and
+**Zero's per-table ACL** — folded into every query AST and every wrapped
+transaction — decides what that user may read and write. It is the same boundary
+the app runs behind, which is the point: a second authorization model would be a
+second thing to keep correct.
 
 ---
 
