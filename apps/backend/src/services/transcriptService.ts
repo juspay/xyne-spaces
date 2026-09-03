@@ -19,6 +19,8 @@ import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
+import { callLabelService } from '@/services/callLabelService';
+import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
@@ -1122,7 +1124,7 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate a short AI title from transcript
    * @param transcript - The formatted transcript text
-   * @returns AI-generated title (max 50 chars) or null if generation fails
+   * @returns AI-generated title (length is governed by the prompt) or null if generation fails
    */
   /**
    * Generate a short AI title from transcript with explicit retry loop.
@@ -1146,7 +1148,7 @@ Output ONLY the processed transcript, nothing else.`;
       return null;
     }
 
-    return extracted.content.substring(0, 60);
+    return extracted.content;
   }
 
   /**
@@ -1313,6 +1315,36 @@ Output ONLY the processed transcript, nothing else.`;
       logger.error(`call_labels_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
       return [];
     }
+  }
+
+  /**
+   * Generate topical labels and persist each as a Tag row, returning ids for
+   * Call.labels. Returns [] on any failure, so a bad run never clobbers good
+   * labels. `logPath` names the calling pipeline in the logs.
+   */
+  async generateAndSaveLabels(
+    call: Call,
+    formattedTranscript: string,
+    method: TagMethod = TagMethod.LLM,
+    logPath?: string,
+  ): Promise<string[]> {
+    const callId = call.externalId;
+    if (!call.workspaceId) {
+      logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: logPath });
+      return [];
+    }
+
+    const labels = await this.generateCallLabels(formattedTranscript, callId).catch((err) => {
+      logger.error(`[${callId}] generate_labels_threw`, {
+        path: logPath,
+        error: err,
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      return [] as string[];
+    });
+    if (labels.length === 0) return [];
+
+    return callLabelService.persistGeneratedLabels(call, labels, method, logPath);
   }
 
   /**
@@ -1893,8 +1925,14 @@ Output ONLY the processed transcript, nothing else.`;
         logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
         return [];
       });
+      // Recordings already label themselves on the note-taker path; running here
+      // too would spend a second LLM call on the same tags.
+      const labelsPromise =
+        call.callType === CallType.HEADLESS
+          ? Promise.resolve([] as string[])
+          : this.generateAndSaveLabels(call, formattedTranscript);
 
-      // Start all four post-call LLM operations immediately. Detailed-summary
+      // Start all five post-call LLM operations immediately. Detailed-summary
       // streaming remains unchanged; title, summary, and tickets persist their
       // own result as soon as it is ready rather than waiting on one another.
       pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
@@ -1989,10 +2027,23 @@ Output ONLY the processed transcript, nothing else.`;
         return ticketSuggestions;
       });
 
+      // appendLabels merges, so a label typed mid-processing survives this write.
+      const labelsUiPromise = labelsPromise.then(async (labelIds) => {
+        if (labelIds.length === 0) return labelIds;
+        try {
+          await repositories.calls.appendLabels(call.id, labelIds);
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
+        } catch (error) {
+          logger.error(`[${callId}] labels_save_failed`, { error });
+        }
+        return labelIds;
+      });
+
       const [summary, title, ticketSuggestions] = await Promise.all([
         summaryUiPromise,
         titleUiPromise,
         ticketsUiPromise,
+        labelsUiPromise,
       ]);
 
       const duration = Date.now() - startTime;

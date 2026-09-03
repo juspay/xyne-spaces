@@ -567,6 +567,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     startsAt: call.startsAt!,
     endsAt: call.endsAt!,
     participants: [...participants],
+    organizerUserId: call.organizerId ?? call.createdByUserId,
     channelId: call.channelId,
     recurringSeriesId: call.recurringSeriesId,
     callUpdatesChannel: call.callUpdatesChannel ?? null,

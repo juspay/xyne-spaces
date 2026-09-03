@@ -91,6 +91,7 @@ export interface CreateCallWithParticipantsInput {
   startsAt: Date;
   endsAt: Date;
   targetUserIds?: string[];
+  participantInviters?: Record<string, string>;
   externalInvitees?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
   callUpdatesChannel?: string | null;
@@ -679,7 +680,7 @@ export class CallRepository {
         callId: params.callId,
         workspaceId,
         userId,
-        invitedBy: params.createdByUserId,
+        invitedBy: params.participantInviters?.[userId] ?? params.createdByUserId,
         invitedAt: new Date(),
         response: InvitationResponse.INVITED,
         meetingStatus: userId === params.createdByUserId ? MeetingStatus.ACCEPTED : MeetingStatus.PENDING,
@@ -736,9 +737,9 @@ export class CallRepository {
   }
 
   /**
-   * Get all participants for a call
+   * Get all participants for a call, with the user who invited each of them.
    */
-  async findParticipants(callId: string): Promise<Array<{ userId: string }>> {
+  async findParticipants(callId: string): Promise<Array<{ userId: string; invitedBy: string }>> {
     return await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         callId,
@@ -746,6 +747,7 @@ export class CallRepository {
       },
       select: {
         userId: true,
+        invitedBy: true,
       },
     });
   }
@@ -1339,12 +1341,17 @@ export class CallRepository {
           },
         });
       } else {
-        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE
+        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE.
+        // Preserve startedAt from the first session so it reflects the actual start of the call;
+        // endedAt is refreshed on every leave/room_finished, so the pair spans first join → last leave.
+        // `startedAt` is NOT NULL with a DB default of creation time, so it cannot be used to detect
+        // "never joined". `endedAt` is only ever written when a session ends, so a non-null endedAt is
+        // the reliable signal that a prior session exists and startedAt must be kept.
         await tx.call.update({
           where: { id: call.id },
           data: {
             status: CallStatus.ACTIVE,
-            startedAt: now,
+            startedAt: call.endedAt ? call.startedAt : now,
             lastActivityAt: now,
             updatedAt: now,
           },
@@ -1690,6 +1697,8 @@ export class CallRepository {
    * Update a SCHEDULED call's fields and manage participant delta.
    * Only modifies fields that are explicitly provided.
    * Participant changes: addUserIds are added (skipping duplicates), removeUserIds are deleted.
+   * `invitedByUserId` is stamped on the newly added rows — it is the editor, not necessarily
+   * the organizer, so a participant who added someone can later be allowed to remove them.
    */
   async updateScheduledCall(params: {
     callId: string;
@@ -1699,11 +1708,12 @@ export class CallRepository {
     channelId?: string;
     addUserIds?: string[];
     removeUserIds?: string[];
+    invitedByUserId?: string;
     metadata?: Record<string, unknown>;
     callUpdatesChannel?: string | null;
     externalInvitees?: string[];
   }): Promise<Call> {
-    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, metadata, callUpdatesChannel, externalInvitees } = params;
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees } = params;
     const db = DatabaseClient.getInstance();
 
     const updatedCall = await db.$transaction(async (tx) => {
@@ -1733,7 +1743,7 @@ export class CallRepository {
             callId,
             workspaceId: updatedCall.workspaceId,
             userId,
-            invitedBy: updatedCall.createdByUserId,
+            invitedBy: invitedByUserId ?? updatedCall.createdByUserId,
             invitedAt: new Date(),
             response: InvitationResponse.INVITED,
             meetingStatus: MeetingStatus.PENDING,

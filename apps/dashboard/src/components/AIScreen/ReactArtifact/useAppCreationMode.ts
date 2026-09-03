@@ -90,14 +90,32 @@ export function useAppCreationMode(
     [setSearchParams],
   );
 
+  // Whether the mode SHOULD be on, independent of whether the URL says so yet.
+  //
+  // Entry used to be a single `setMode(true)`, and it was order-dependent. The
+  // artifact lands at stream completion — the same instant the draft acquires
+  // its server id — so two URL writers fired in one commit: this hook adding
+  // `?mode=create-app`, and AIScreen navigating to `/chat/<id>` carrying the
+  // *rendered* `location.search`, which did not have the param yet. Both built
+  // on a stale location; whichever landed second could drop the other's write.
+  // Entry worked or did not depending on effect order.
+  //
+  // So entry is now an intent that is re-asserted until the URL agrees. If a
+  // racing navigate strips the param, the effect below sees `modeOn` false with
+  // the intent still set and writes it again — onto the pathname that has now
+  // settled. It converges in one extra render regardless of who wrote last.
+  const wantMode = useRef(false);
+  useEffect(() => {
+    if (wantMode.current && !modeOn && conversationId) setMode(true);
+  }, [modeOn, conversationId, setMode]);
+
   // Leaving a thread drops everything thread-specific. Without this the pane
   // keeps showing the previous chat's app and a pinned version leaks across.
   const lastConversation = useRef<string | null>(conversationId);
-  const autoEnteredFor = useRef<string | null>(null);
   useEffect(() => {
     if (lastConversation.current === conversationId) return;
     lastConversation.current = conversationId;
-    autoEnteredFor.current = null;
+    wantMode.current = false;
     setPinnedVersionId(null);
   }, [conversationId]);
 
@@ -106,22 +124,18 @@ export function useAppCreationMode(
   // lingering param kept mode-derived layout (the collapsed sidebar) armed on
   // /ai/chat/new. The next thread that generates an app re-enters on its own.
   useEffect(() => {
-    if (!conversationId && modeOn) setMode(false);
+    if (!conversationId && modeOn) {
+      wantMode.current = false;
+      setMode(false);
+    }
   }, [conversationId, modeOn, setMode]);
 
-  // Auto-enter ONCE per conversation. Tracking it per conversation is what lets
-  // an explicit close stick: closing marks this thread handled, so a later
-  // generation reopens nothing, while switching threads starts fresh.
-  useEffect(() => {
-    if (!appId) return;
-    // Wait for the conversation to be named. `autoEnteredFor` starts as null and
-    // a fresh chat's conversationId is also null, so acting here would compare
-    // null === null and mark the thread handled before it even has an identity.
-    if (!conversationId) return;
-    if (autoEnteredFor.current === conversationId) return;
-    autoEnteredFor.current = conversationId;
-    if (!modeOn) setMode(true);
-  }, [appId, conversationId, modeOn, setMode]);
+  // Entry itself is driven by the artifact cards: each one, on mount, asks for
+  // the mode via `enterForApp` (see appCreationModeContext). A card mounts
+  // exactly when a build appears in the thread — on history load, and on every
+  // new generation — which is precisely the set of moments the mode should
+  // open. The card mounts once, so an explicit close sticks until the NEXT
+  // build lands, at which point the new card asks again.
 
   const { data } = useQuery({
     queryKey: ['artifact-app', appId],
@@ -166,12 +180,16 @@ export function useAppCreationMode(
     [appId, restore],
   );
 
-  const open = useCallback(() => setMode(true), [setMode]);
+  const open = useCallback(() => {
+    wantMode.current = true;
+    setMode(true);
+  }, [setMode]);
   const exit = useCallback(() => {
-    // Mark handled so the next generation does not reopen what was just closed.
-    autoEnteredFor.current = conversationId;
+    // Dropping the intent is what makes a close stick: nothing re-asserts the
+    // param until a new build's card asks for the mode again.
+    wantMode.current = false;
     setMode(false);
-  }, [setMode, conversationId]);
+  }, [setMode]);
   const headVersionId = data?.app.headVersionId ?? null;
 
   const viewVersion = useCallback(
