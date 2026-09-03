@@ -297,6 +297,13 @@ interface BoardKanbanScreenProps {
   initialFilters?: TicketFilters;
   initialGroupBy?: string;
   initialColumns?: string[];
+  /**
+   * Overrides where a ticket card opens. Surfaces that embed the board inside
+   * their own screen (the SDLC hub) keep the ticket there instead of routing
+   * away to the chat channel's ticket tab. Desk tickets ignore it — they always
+   * belong to the Support inbox.
+   */
+  onTicketOpen?: ((ticket: Ticket) => void) | undefined;
 }
 
 type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
@@ -398,6 +405,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   initialFilters,
   initialGroupBy,
   initialColumns,
+  onTicketOpen,
 }) => {
   const { projectId: projectIdParam, boardId } = useParams<{
     projectId?: string;
@@ -3134,6 +3142,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ? `/support/${ticket.channelId}/${ticket.xyneId}`
         : `/support/${ticket.channelId}`;
 
+      // An embedding screen (the SDLC hub) opens the ticket on its own surface,
+      // so the click must not navigate out of it — Cmd/Ctrl+click included,
+      // since the chat route it would open is the place we are avoiding.
+      if (onTicketOpen && !isDeskTicket) {
+        onTicketOpen(ticket);
+        return;
+      }
+
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
         const relativeUrl = isDeskTicket
@@ -3170,7 +3186,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         );
       }
     },
-    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels],
+    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels, onTicketOpen],
   );
 
   const openCreateForColumn = useCallback(
@@ -4891,6 +4907,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       availableTags={availableTags || []}
                       visibleColumns={tableVisibleColumns}
                       isComfortView={isComfortView}
+                      // Without this the table routes to the chat channel on its
+                      // own, so an embedding screen's onTicketOpen never runs.
+                      onTitleClick={ticket => handleTicketClick({} as React.MouseEvent, ticket)}
                     />
                   </div>
                 )}

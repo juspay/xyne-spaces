@@ -18,6 +18,10 @@ export const shouldUseInlineAssistantDebugger = (embeddedInSdlc: boolean): boole
 export const SDLC_MAIN_PANEL_ID = 'sdlc-main';
 export const SDLC_CHAT_PANEL_ID = 'sdlc-chat';
 
+/** The tickets section's own split: the board and the open ticket beside it. */
+export const SDLC_TICKET_BOARD_PANEL_ID = 'sdlc-ticket-board';
+export const SDLC_TICKET_PANEL_ID = 'sdlc-ticket-panel';
+
 const SDLC_CLOSED_PANEL_IDS = [SDLC_MAIN_PANEL_ID];
 const SDLC_OPEN_PANEL_IDS = [SDLC_MAIN_PANEL_ID, SDLC_CHAT_PANEL_ID];
 

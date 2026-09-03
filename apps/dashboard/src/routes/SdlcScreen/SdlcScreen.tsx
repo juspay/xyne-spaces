@@ -122,6 +122,8 @@ import {
 import {
   SDLC_CHAT_PANEL_ID,
   SDLC_MAIN_PANEL_ID,
+  SDLC_TICKET_BOARD_PANEL_ID,
+  SDLC_TICKET_PANEL_ID,
   sdlcChatLayout,
   sdlcChatNavigationSearch,
   sdlcRightPanelIds,
@@ -619,9 +621,24 @@ export default function SdlcScreen(): ReactElement {
     queries.ticketRowById({ ticketId: selectedTicketId ?? '' }),
     { enabled: Boolean(selectedTicketId) },
   );
+  // A ticket card belongs to the hub's own tickets section — the board would
+  // otherwise route out to the chat channel's ticket tab. `?ticket=` is the
+  // same deep link the Activity tab builds, so both land in the same place.
+  const openTicketPanel = useCallback(
+    (ticket: { id: string }): void => {
+      const next = new URLSearchParams(location.search);
+      next.set('ticket', ticket.id);
+      // Clicking a card asks for the ticket, not its thread.
+      next.set('selectedTab', 'details');
+      void navigate(`/sdlc/${channelId}/tickets?${next.toString()}`);
+    },
+    [channelId, location.search, navigate],
+  );
+  const ticketPanelOpen = Boolean(selectedTicketRow?.conversationId);
   const closeTicketPanel = useCallback((): void => {
     const next = new URLSearchParams(location.search);
     next.delete('ticket');
+    next.delete('selectedTab');
     const search = next.toString();
     void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
   }, [location.pathname, location.search, navigate]);
@@ -2396,7 +2413,14 @@ export default function SdlcScreen(): ReactElement {
                   />
                 </div>
               ) : (
-                <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
+                <div
+                  className={cn(
+                    'min-h-0 flex-1 bg-background',
+                    // Tickets runs full-bleed so its board/panel divider meets the
+                    // header's border; the board brings its own padding and scroll.
+                    section === 'tickets' ? 'overflow-hidden' : 'overflow-auto p-7',
+                  )}
+                >
                   {section === 'overview' && (
                     <section>
                       <h1 className='mb-5 text-2xl font-semibold tracking-tight'>{repo.name}</h1>
@@ -2584,20 +2608,51 @@ export default function SdlcScreen(): ReactElement {
                     ))}
                   {section === 'tracks' && renderTracks()}
                   {section === 'tickets' && repo.channelId && (
-                    <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
-                      <KanbanBoardScreen channelId={repo.channelId} />
-                      {selectedTicketRow?.conversationId && (
-                        <div className='absolute bottom-4 right-4 top-4 z-20 flex w-[480px] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl'>
-                          <ThreadMessages
-                            ticketId={selectedTicketRow.id}
-                            channelId={selectedTicketRow.channelId ?? repo.channelId}
-                            conversationId={selectedTicketRow.conversationId}
-                            skipInputAutoFocus
-                            onClose={closeTicketPanel}
+                    // Docked beside the board and resizable, as the ticket panel
+                    // is in chat — an overlay card would cover the columns the
+                    // user is still working in.
+                    <ResizableGroup
+                      orientation='horizontal'
+                      className='h-full'
+                      autoSaveId={`sdlc-tickets-${repo.channelId}`}
+                      panelIds={
+                        ticketPanelOpen
+                          ? [SDLC_TICKET_BOARD_PANEL_ID, SDLC_TICKET_PANEL_ID]
+                          : [SDLC_TICKET_BOARD_PANEL_ID]
+                      }
+                    >
+                      <Panel id={SDLC_TICKET_BOARD_PANEL_ID} minSize='40%'>
+                        <div className='h-full'>
+                          <KanbanBoardScreen
+                            channelId={repo.channelId}
+                            onTicketOpen={openTicketPanel}
                           />
                         </div>
+                      </Panel>
+                      {ticketPanelOpen && selectedTicketRow?.conversationId && (
+                        <>
+                          <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                            <div className='h-full w-[1px] bg-border transition-colors group-hover:bg-primary group-active:bg-primary' />
+                          </Separator>
+                          <Panel
+                            id={SDLC_TICKET_PANEL_ID}
+                            defaultSize='40%'
+                            minSize='320px'
+                            maxSize='60%'
+                          >
+                            <div className='flex h-full flex-col overflow-hidden bg-background'>
+                              <ThreadMessages
+                                ticketId={selectedTicketRow.id}
+                                channelId={selectedTicketRow.channelId ?? repo.channelId}
+                                conversationId={selectedTicketRow.conversationId}
+                                skipInputAutoFocus
+                                onClose={closeTicketPanel}
+                              />
+                            </div>
+                          </Panel>
+                        </>
                       )}
-                    </div>
+                    </ResizableGroup>
                   )}
                 </div>
               )}
