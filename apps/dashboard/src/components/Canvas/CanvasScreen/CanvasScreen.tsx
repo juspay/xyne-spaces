@@ -6,9 +6,11 @@ import { usePath } from '../../../hooks/usePath';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/CollaborativeCanvasEditor';
+import type { InlineSuggestionRow } from '../CollaborativeCanvasEditor/suggestionDecorations';
 import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
 import { CanvasList } from '../CanvasList';
 import { CanvasShareModal } from '../CanvasShareModal';
+import { CanvasSuggestionsPanel } from '../CanvasSuggestionsPanel';
 import {
   CanvasVersionDiffPanel,
   CanvasVersionHistory,
@@ -74,7 +76,14 @@ import { PRESENTATION_THEMES } from 'blocknote-layout-extensions';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useZero } from '../../../hooks/useZero';
-import { MessageType, CanvasVisibility, CanvasRole, isBaselineCanvasType } from '@xyne/shared';
+import {
+  MessageType,
+  CanvasVisibility,
+  CanvasRole,
+  computeDeletionEvents,
+  isBaselineCanvasType,
+  type BlockDeletionEvent,
+} from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -888,13 +897,77 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   }, [z]);
   flushCollaborativeCanvasTimestampRef.current = flushCollaborativeCanvasTimestamp;
 
-  const handleCollaborativeContentChange = useCallback((blocks: PartialBlock[]): void => {
-    latestContentRef.current = blocks;
-    hasPendingCollaborativeTimestampRef.current = true;
-  }, []);
+  const [suggestionRows = []] = useCachedQuery(
+    queries.canvasSuggestionChanges({ canvasId: selectedCanvas?.id ?? '' }),
+    { enabled: Boolean(selectedCanvas?.id) },
+  );
+
+  // Suggestion anchors: when a block is deleted by a human, report it so pending
+  // suggestion anchors forward to the deleted block's predecessor. Emits only
+  // while this canvas has pending suggestions; a missed event degrades to a
+  // STALE change at accept time, never a misplaced one.
+  const hasPendingSuggestionsRef = useRef(false);
+  hasPendingSuggestionsRef.current = suggestionRows.some(row => row.status === 'PENDING');
+  const prevBlockIdsRef = useRef<string[] | null>(null);
+  const deletionEventsRef = useRef<BlockDeletionEvent[]>([]);
+  const deletionFlushRef = useRef<number | null>(null);
+
+  const handleCollaborativeContentChange = useCallback(
+    (blocks: PartialBlock[]): void => {
+      latestContentRef.current = blocks;
+      hasPendingCollaborativeTimestampRef.current = true;
+
+      const nowIds = blocks
+        .map(block => (block as { id?: string }).id)
+        .filter((id): id is string => Boolean(id));
+      const prevIds = prevBlockIdsRef.current;
+      prevBlockIdsRef.current = nowIds;
+      if (!prevIds || !hasPendingSuggestionsRef.current) return;
+
+      const events = computeDeletionEvents(prevIds, nowIds);
+      if (!events.length) return;
+      deletionEventsRef.current.push(...events);
+      if (deletionFlushRef.current !== null) window.clearTimeout(deletionFlushRef.current);
+      deletionFlushRef.current = window.setTimeout(() => {
+        deletionFlushRef.current = null;
+        const batch = deletionEventsRef.current.splice(0, 100);
+        const canvasId = selectedCanvasRef.current?.id;
+        if (!canvasId || !batch.length) return;
+        void z.mutate(
+          mutators.canvasSuggestion.blockDeleted({
+            canvasId,
+            events: batch,
+            timestamp: Date.now(),
+          }),
+        );
+      }, 500);
+    },
+    [z],
+  );
 
   useEffect(() => {
+    prevBlockIdsRef.current = null;
+    deletionEventsRef.current = [];
+    // Seed the block-id snapshot from the loaded document. onChange only fires
+    // on edits, so waiting for it to seed would miss a deletion that is the
+    // session's first edit. The document loads asynchronously — retry briefly.
+    let seedTries = 0;
+    const seedTimer = window.setInterval(() => {
+      seedTries += 1;
+      if (prevBlockIdsRef.current !== null || seedTries > 40) {
+        window.clearInterval(seedTimer);
+        return;
+      }
+      const blocks = editorRef.current?.getBlocks?.();
+      if (blocks?.length) {
+        prevBlockIdsRef.current = blocks
+          .map(block => (block as { id?: string }).id)
+          .filter((id): id is string => Boolean(id));
+        window.clearInterval(seedTimer);
+      }
+    }, 500);
     return (): void => {
+      window.clearInterval(seedTimer);
       flushCollaborativeCanvasTimestampRef.current?.();
       saveCanvasExitSnapshotRef.current?.();
     };
@@ -1652,6 +1725,17 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               <CanvasVersionDiffPanel parts={versionDiffParts} />
             )}
 
+            {/* Agent proposals awaiting review. Renders nothing when there are
+                none, so it costs nothing on canvases with no pending changes. */}
+            {selectedCanvas?.id && (
+              <CanvasSuggestionsPanel
+                canvasId={selectedCanvas.id}
+                canEdit={canEdit}
+                editorContainerRef={canvasContentRef}
+                editorRef={editorRef}
+              />
+            )}
+
             {/* Canvas Editor */}
             <div ref={canvasContentRef} className='flex-1 overflow-hidden'>
               {isCreating && !selectedCanvas ? (
@@ -1701,6 +1785,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas.createdBy}
                   currentUserRole={selectedCanvas.accessLevel ?? null}
+                  suggestions={suggestionRows as unknown as InlineSuggestionRow[]}
                 />
               ) : (
                 <CanvasEditor

@@ -413,6 +413,54 @@ async function assertCanvasCommentEditAccess(
   return canvas;
 }
 
+/** Client-applied accept: flip the outcome's rows so their cards vanish instantly. */
+async function applySuggestionOutcome(
+  tx: Transaction<Schema>,
+  outcome: { applied: string[]; stale: string[] },
+  timestamp: number,
+): Promise<void> {
+  const appliedRows = outcome.applied.length
+    ? await tx.run(zql.canvas_suggestion_changes.where('id', 'IN', outcome.applied))
+    : [];
+  for (const id of outcome.applied) {
+    await tx.mutate.canvas_suggestion_changes.update({ id, status: 'ACCEPTED', updatedAt: timestamp });
+  }
+  for (const id of outcome.stale) {
+    await tx.mutate.canvas_suggestion_changes.update({ id, status: 'STALE', updatedAt: timestamp });
+  }
+
+  // Mirror the server: an accepted placement row hands its still-pending
+  // same-anchor followers (same batch, higher orderIndex) to the block it
+  // placed, so their inline paint moves instantly. Descending orderIndex so
+  // simultaneous accepts chain.
+  const accepted = new Set(outcome.applied);
+  const placed = appliedRows
+    .filter(r => r.op === 'insert' || r.op === 'move')
+    .sort((a, b) => b.orderIndex - a.orderIndex);
+  for (const row of placed) {
+    const newAnchor = row.op === 'insert' ? row.id : (row.blockId ?? null);
+    if (!newAnchor) continue;
+    const oldAnchor = row.currentAnchorId ?? null;
+    const followers = await tx.run(
+      zql.canvas_suggestion_changes
+        .where('canvasId', row.canvasId)
+        .where('batchId', row.batchId)
+        .where('status', 'PENDING')
+        .where('op', 'IN', ['insert', 'move'])
+        .where('orderIndex', '>', row.orderIndex),
+    );
+    for (const follower of followers) {
+      if (accepted.has(follower.id)) continue;
+      if ((follower.currentAnchorId ?? null) !== oldAnchor) continue;
+      await tx.mutate.canvas_suggestion_changes.update({
+        id: follower.id,
+        currentAnchorId: newAnchor,
+        updatedAt: timestamp,
+      });
+    }
+  }
+}
+
 async function assertCanvasThreadManageAccess(
   tx: Transaction<Schema>,
   thread: { canvasId: string; createdBy: string },
@@ -6718,6 +6766,91 @@ export const mutators = defineMutators({
       },
     ),
   },
+  canvasSuggestion: {
+    resolveChange: defineMutator(
+      z.object({
+        changeId: z.string(),
+        accept: z.boolean(),
+        timestamp: z.number(),
+        outcome: z
+          .object({
+            applied: z.array(z.string()).max(500),
+            stale: z.array(z.string()).max(500),
+          })
+          .optional(),
+      }),
+      async ({ tx, args: { changeId, accept, timestamp, outcome } }) => {
+        if (accept) {
+          if (!outcome) return; // legacy server apply; server writes statuses
+          await applySuggestionOutcome(tx, outcome, timestamp);
+          return;
+        }
+        await tx.mutate.canvas_suggestion_changes.update({
+          id: changeId,
+          status: 'REJECTED',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    resolveAll: defineMutator(
+      z.object({
+        canvasId: z.string(),
+        accept: z.boolean(),
+        timestamp: z.number(),
+        outcome: z
+          .object({
+            applied: z.array(z.string()).max(500),
+            stale: z.array(z.string()).max(500),
+          })
+          .optional(),
+      }),
+      async ({ tx, args: { canvasId, accept, timestamp, outcome } }) => {
+        if (accept) {
+          if (!outcome) return;
+          await applySuggestionOutcome(tx, outcome, timestamp);
+          return;
+        }
+        const pending = await tx.run(
+          zql.canvas_suggestion_changes.where('canvasId', canvasId).where('status', 'PENDING'),
+        );
+        for (const row of pending) {
+          await tx.mutate.canvas_suggestion_changes.update({
+            id: row.id,
+            status: 'REJECTED',
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+
+    blockDeleted: defineMutator(
+      z.object({
+        canvasId: z.string(),
+        events: z
+          .array(z.object({ deletedId: z.string(), previousAliveId: z.string().nullable() }))
+          .min(1)
+          .max(100),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { canvasId, events, timestamp } }) => {
+        const pending = await tx.run(
+          zql.canvas_suggestion_changes.where('canvasId', canvasId).where('status', 'PENDING'),
+        );
+        for (const event of events) {
+          for (const row of pending) {
+            if (row.currentAnchorId !== event.deletedId) continue;
+            await tx.mutate.canvas_suggestion_changes.update({
+              id: row.id,
+              currentAnchorId: event.previousAliveId,
+              updatedAt: timestamp,
+            });
+          }
+        }
+      },
+    ),
+  },
+
   canvasFolder: {
     create: defineMutator(
       z.object({

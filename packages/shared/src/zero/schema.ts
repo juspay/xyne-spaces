@@ -1356,6 +1356,25 @@ export const canvasVersionTable = table('canvas_versions')
   })
   .primaryKey('id');
 
+export const canvasSuggestionChangeTable = table('canvas_suggestion_changes' /* CanvasSuggestionChange */)
+  .columns({
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
+    id: string(),
+    canvasId: string(),
+    batchId: string(), // one agent proposal session; grouping + accept-all scope
+    op: string(), // insert | replace | delete | move
+    blockId: string().optional(), // target block for replace/delete/move; null for insert
+    proposedAnchorId: string().optional(), // insert/move: block it follows at proposal time; immutable
+    currentAnchorId: string().optional(), // insert/move: forwarding address; deletion events update this
+    orderIndex: number(), // position in the agent's reply
+    beforeContent: json().optional(),
+    afterContent: json().optional(),
+    status: string(), // PENDING | ACCEPTED | REJECTED | STALE | SUPERSEDED
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
@@ -3996,6 +4015,17 @@ export const canvasVersionTableRelationships = relationships(canvasVersionTable,
   }),
 }));
 
+export const canvasSuggestionChangeTableRelationships = relationships(
+  canvasSuggestionChangeTable,
+  ({ one }) => ({
+    canvas: one({
+      sourceField: ['canvasId'],
+      destField: ['id'],
+      destSchema: canvasTable,
+    }),
+  }),
+);
+
 export const canvasCommentThreadTableRelationships = relationships(
   canvasCommentThreadTable,
   ({ one, many }) => ({
@@ -4844,6 +4874,7 @@ export const schema = createSchema({
     canvasFolderTable,
     canvasTable,
     canvasVersionTable,
+    canvasSuggestionChangeTable,
     canvasCommentThreadTable,
     canvasCommentTable,
     canvasParticipantTable,
@@ -4975,6 +5006,7 @@ export const schema = createSchema({
     canvasFolderTableRelationships,
     canvasTableRelationships,
     canvasVersionTableRelationships,
+    canvasSuggestionChangeTableRelationships,
     canvasCommentThreadTableRelationships,
     canvasCommentTableRelationships,
     canvasParticipantTableRelationships,

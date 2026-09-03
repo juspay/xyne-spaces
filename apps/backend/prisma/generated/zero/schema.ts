@@ -1864,6 +1864,25 @@ export const canvasVersionTable = table("canvas_versions")
   })
   .primaryKey("id");
 
+export const canvasSuggestionChangeTable = table("canvas_suggestion_changes")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    canvasId: string(),
+    batchId: string(),
+    op: string(),
+    blockId: string().optional(),
+    proposedAnchorId: string().optional(),
+    currentAnchorId: string().optional(),
+    orderIndex: number(),
+    beforeContent: json().optional(),
+    afterContent: json().optional(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const canvasCommentThreadTable = table("canvas_comment_threads")
   .columns({
     id: string(),
@@ -4468,6 +4487,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ["canvasId"],
     destSchema: canvasCommentThreadTable,
   }),
+  suggestionChanges: many({
+    sourceField: ["id"],
+    destField: ["canvasId"],
+    destSchema: canvasSuggestionChangeTable,
+  }),
   folder: one({
     sourceField: ["folderId"],
     destField: ["id"],
@@ -4486,6 +4510,14 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
 }));
 
 export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one }) => ({
+  canvas: one({
+    sourceField: ["canvasId"],
+    destField: ["id"],
+    destSchema: canvasTable,
+  })
+}));
+
+export const canvasSuggestionChangeTableRelationships = relationships(canvasSuggestionChangeTable, ({ one }) => ({
   canvas: one({
     sourceField: ["canvasId"],
     destField: ["id"],
@@ -5135,6 +5167,7 @@ export const schema = createSchema(
       canvasFolderTable,
       canvasTable,
       canvasVersionTable,
+      canvasSuggestionChangeTable,
       canvasCommentThreadTable,
       canvasCommentTable,
       canvasParticipantTable,
@@ -5286,6 +5319,7 @@ export const schema = createSchema(
       canvasFolderTableRelationships,
       canvasTableRelationships,
       canvasVersionTableRelationships,
+      canvasSuggestionChangeTableRelationships,
       canvasCommentThreadTableRelationships,
       canvasCommentTableRelationships,
       canvasParticipantTableRelationships,
@@ -5438,6 +5472,7 @@ export type RecurringCallParticipant = Row<typeof schema.tables.recurring_call_p
 export type CanvasFolder = Row<typeof schema.tables.canvas_folders>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasVersion = Row<typeof schema.tables.canvas_versions>;
+export type CanvasSuggestionChange = Row<typeof schema.tables.canvas_suggestion_changes>;
 export type CanvasCommentThread = Row<typeof schema.tables.canvas_comment_threads>;
 export type CanvasComment = Row<typeof schema.tables.canvas_comments>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
