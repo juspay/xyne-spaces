@@ -1063,21 +1063,26 @@ export const mutators = defineMutators({
           return;
         }
 
-        const activityBySourceId = new Map(
-          unreadActivities.map(a => [a.actionSourceId, a]),
-        );
-        const uniqueSourceIds = [...activityBySourceId.keys()];
+        const messageIds = [
+          ...new Set(
+            unreadActivities
+              .map(activity => activity.messageId ?? (activity.actionSource === 'message' ? activity.actionSourceId : null))
+              .filter((messageId): messageId is string => Boolean(messageId)),
+          ),
+        ];
 
-        // Batch fetch messages
+        if (messageIds.length === 0) {
+          return;
+        }
+
         const foundMessages = await tx.run(
-          zql.messages.where('messageId', 'IN', uniqueSourceIds),
+          zql.messages.where('messageId', 'IN', messageIds),
         );
         const messageByMessageId = new Map(
           foundMessages.map(m => [m.messageId, m]),
         );
 
-        // For messages not found, try resolveMessage fallback individually
-        const missingIds = uniqueSourceIds.filter(id => !messageByMessageId.has(id));
+        const missingIds = messageIds.filter(id => !messageByMessageId.has(id));
         for (const id of missingIds) {
           const resolved = await resolveMessage(tx, id);
           if (resolved) {
@@ -1085,7 +1090,6 @@ export const mutators = defineMutators({
           }
         }
 
-        // Batch fetch conversations for all found messages
         const conversationIds = [...new Set(
           [...messageByMessageId.values()].map(m => m.conversationId),
         )];
@@ -1096,18 +1100,22 @@ export const mutators = defineMutators({
           conversations.map(c => [c.conversationId, c]),
         );
 
-        for (const [sourceId, activity] of activityBySourceId) {
-          const message = messageByMessageId.get(sourceId);
-          if (!message) {
+        const initialMessageIds = new Set(
+          [...messageByMessageId.values()]
+            .filter(message => convByConversationId.get(message.conversationId)?.initialMessageId === message.messageId)
+            .map(message => message.messageId),
+        );
+
+        for (const activity of unreadActivities) {
+          const messageId = activity.messageId ?? (activity.actionSource === 'message' ? activity.actionSourceId : null);
+          if (!messageId || !initialMessageIds.has(messageId)) {
             continue;
           }
-          const conv = convByConversationId.get(message.conversationId);
-          if (conv?.initialMessageId === message.messageId) {
-            await tx.mutate.activities.update({
-              id: activity.id,
-              isRead: true,
-            });
-          }
+
+          await tx.mutate.activities.update({
+            id: activity.id,
+            isRead: true,
+          });
         }
       },
     ),

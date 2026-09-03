@@ -1660,29 +1660,40 @@ export function createMutators(
           }
 
 
-          const activityBySourceId = new Map(
-            unreadActivities.map(a => [a.actionSourceId, a]),
-          );
-          const uniqueSourceIds = [...activityBySourceId.keys()];
+          const messageIds = [
+            ...new Set(
+              unreadActivities
+                .map(activity => activity.messageId ?? (activity.actionSource === 'message' ? activity.actionSourceId : null))
+                .filter((messageId): messageId is string => Boolean(messageId)),
+            ),
+          ];
+
+          if (messageIds.length === 0) {
+            return;
+          }
 
           const messages = await tx.run(
             zql.messages
-              .where('messageId', 'IN', uniqueSourceIds)
+              .where('messageId', 'IN', messageIds)
               .related('conversation'),
           );
 
-          const messageByMessageId = new Map(
-            messages.map(m => [m.messageId, m]),
+          const initialMessageIds = new Set(
+            messages
+              .filter(message => message.conversation?.initialMessageId === message.messageId)
+              .map(message => message.messageId),
           );
 
-          for (const [sourceId, activity] of activityBySourceId) {
-            const message = messageByMessageId.get(sourceId);
-            if (message?.conversation?.initialMessageId === message?.messageId) {
-              await tx.mutate.activities.update({
-                id: activity.id,
-                isRead: true,
-              });
+          for (const activity of unreadActivities) {
+            const messageId = activity.messageId ?? (activity.actionSource === 'message' ? activity.actionSourceId : null);
+            if (!messageId || !initialMessageIds.has(messageId)) {
+              continue;
             }
+
+            await tx.mutate.activities.update({
+              id: activity.id,
+              isRead: true,
+            });
           }
         },
       ),
