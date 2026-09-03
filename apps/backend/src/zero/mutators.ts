@@ -70,6 +70,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   WorkspaceRole,
   Status,
   OrgRole,
@@ -5808,14 +5809,13 @@ export function createMutators(
             }
           }
 
-          // ACL Business Logic: Check ticket transfer permission for assignedTo, userGroupId,
+          // ACL Business Logic: Check ticket transfer permission for assignedTo,
           // eta, stageName (which triggers stage ETA recalculation), or boardId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
-          const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
 
-          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
+          if ((isAssigneeChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
             // Get board to check if transfer is restricted
             const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
 
@@ -14477,6 +14477,45 @@ export function createMutators(
           }
 
           await tx.mutate.saved_user_configurations.delete({ id: configId });
+        },
+      ),
+    },
+    viewAccess: {
+      grant: defineMutator(
+        z.object({
+          id: z.string(),
+          viewId: z.string(),
+          entityType: z.nativeEnum(ViewAccessEntityType),
+          entityId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, viewId, entityType, entityId, timestamp } }) => {
+          const existing = await tx.run(
+            zql.view_access
+              .where('viewId', viewId)
+              .where('entityType', entityType)
+              .where('entityId', entityId)
+              .one(),
+          );
+          if (existing) return;
+
+          await tx.mutate.view_access.insert({
+            workspaceId: authData.workspaceId,
+            id,
+            viewId,
+            entityType,
+            entityId,
+            sharedBy: authData.sub,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      revoke: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          await tx.mutate.view_access.delete({ id });
         },
       ),
     },

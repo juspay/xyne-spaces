@@ -74,6 +74,7 @@ import {
   RolesACL,
   SavedUserConfigurationsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   StagesACL,
   SubTicketsACL,
@@ -297,6 +298,8 @@ export class ACLFactory {
       return new SavedUserConfigurationsACL(ctx, prisma)
     case 'savedUserConfigurationValue':
       return new SavedUserConfigurationValuesACL(ctx, prisma)
+    case 'viewAccess':
+      return new ViewAccessACL(ctx, prisma)
     case 'stage':
       return new StagesACL(ctx, prisma)
     case 'stageApprovers':

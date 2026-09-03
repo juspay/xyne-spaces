@@ -55,6 +55,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   GuestEntity,
   WorkspaceRole,
   Status,
@@ -10837,6 +10838,45 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.saved_user_configurations.delete({ id: configId });
+      },
+    ),
+  },
+  viewAccess: {
+    grant: defineMutator(
+      z.object({
+        id: z.string(),
+        viewId: z.string(),
+        entityType: z.nativeEnum(ViewAccessEntityType),
+        entityId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, viewId, entityType, entityId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.view_access
+            .where('viewId', viewId)
+            .where('entityType', entityType)
+            .where('entityId', entityId)
+            .one(),
+        );
+        if (existing) return;
+
+        await tx.mutate.view_access.insert({
+          workspaceId: ctx.workspaceId,
+          id,
+          viewId,
+          entityType,
+          entityId,
+          sharedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    revoke: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        await tx.mutate.view_access.delete({ id });
       },
     ),
   },

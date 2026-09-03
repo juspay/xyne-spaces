@@ -47,6 +47,7 @@ import {
   RecapEntityType,
   UserResponsibility,
   UserType,
+  ViewAccessEntityType,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -909,6 +910,7 @@ export const queries = defineQueries({
       channelId: z.string().optional(),
       projectId: z.string().optional(),
       boardId: z.string().optional(),
+      boardIds: z.array(z.string()).optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
       ...flowStepVisibilitySchemaShape,
@@ -921,6 +923,7 @@ export const queries = defineQueries({
         channelId,
         projectId,
         boardId,
+        boardIds,
         userId,
         groupId,
         excludeFlowSteps,
@@ -937,6 +940,11 @@ export const queries = defineQueries({
       // boardId implicitly scopes to project, so no need for separate projectId filter
       if (boardId && viewMode !== 'my-tickets') {
         query = query.where('boardId', boardId);
+      }
+      // Scope by selected boards server-side (mirrors kanbanTicketsPageV3) so a
+      // saved view spanning several boards stays bounded without a projectId.
+      if (!boardId && viewMode !== 'my-tickets' && boardIds?.length) {
+        query = query.where('boardId', 'IN', boardIds);
       }
       // Apply projectId filter ONLY if:
       // 1. No boardId exists (boardId is more specific and implies project)
@@ -4398,6 +4406,17 @@ export const queries = defineQueries({
       .related('values')
       .orderBy('createdAt', 'desc');
   }),
+
+  savedConfigsSharedWithUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.view_access
+        .where('entityType', ViewAccessEntityType.USER)
+        .where('entityId', userId)
+        .related('view', view => view.related('values'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   getWorkspaceById: defineQuery(
     z.object({ workspaceId: z.string() }),
