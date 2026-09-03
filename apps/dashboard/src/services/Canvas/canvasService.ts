@@ -36,6 +36,13 @@ export interface CanvasFileUploadResponse {
   thumbnailUrl?: string;
 }
 
+export interface CanvasEditAccessRequestResponse {
+  success: boolean;
+  requested: number;
+  alreadyRequested?: number;
+  alreadyHasEditAccess?: boolean;
+}
+
 // Cache for prefetched canvas data
 const prefetchedCanvases = new Map<string, { token: YSweetAuthToken; timestamp: number }>();
 const PREFETCH_CACHE_TTL = 1000 * 60 * 50; // 50 minutes (same as staleTime)
@@ -84,6 +91,13 @@ export class CanvasService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  }
+
+  async requestCanvasEditAccess(canvasId: string): Promise<CanvasEditAccessRequestResponse> {
+    const response = await apiInstance.post<CanvasEditAccessRequestResponse>(
+      `/canvas/${canvasId}/request-edit-access`,
+    );
+    return response.data;
   }
 
   async uploadCanvasFile(canvasId: string, file: File): Promise<string> {

@@ -127,6 +127,7 @@ export const ActivityItem = memo(function ActivityItem({
     case 'canvas_shared':
     case 'canvas_role_changed':
     case 'canvas_access_revoked':
+    case 'canvas_edit_access_requested':
       return <CanvasSharedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'recording_shared':

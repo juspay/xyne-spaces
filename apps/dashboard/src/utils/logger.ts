@@ -209,6 +209,7 @@ export const Event = {
   CANVAS_SAVE_STARTED: 'canvas_save_started',
   CANVAS_SAVE_COMPLETE: 'canvas_save_complete',
   CANVAS_SAVE_FAILED: 'canvas_save_failed',
+  CANVAS_REQUEST_EDIT_ACCESS_FAILED: 'canvas_request_edit_access_failed',
   CANVAS_SAVE_SLOW: 'canvas_save_slow',
   CANVAS_SAVE_RERUN_QUEUED: 'canvas_save_rerun_queued',
   CANVAS_AUTOSAVE_TRIGGERED: 'canvas_autosave_triggered',

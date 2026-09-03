@@ -214,6 +214,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [showShareModal, setShowShareModal] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isApproved, setIsApproved] = useState(false);
+  const [isRequestingEditAccess, setIsRequestingEditAccess] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState('white');
   const [collaborators, setCollaborators] = useState<CollaboratorInfo[]>([]);
   const {
@@ -693,6 +694,32 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     canvas: selectedCanvas,
     onCreated: handleVersionCopyCreated,
   });
+
+  const handleRequestEditAccess = useCallback(async (): Promise<void> => {
+    if (!selectedCanvas?.id || isRequestingEditAccess) return;
+
+    setIsRequestingEditAccess(true);
+    try {
+      const response = await canvasService.requestCanvasEditAccess(selectedCanvas.id);
+      if (response.alreadyHasEditAccess) {
+        toast.info('You already have edit access to this canvas.');
+      } else if (response.requested > 0) {
+        toast.success('Requested edit access from the canvas owner.');
+      } else {
+        toast.info('You have already requested edit access.');
+      }
+    } catch (error) {
+      logger.error(Event.CANVAS_REQUEST_EDIT_ACCESS_FAILED, {
+        canvasId: selectedCanvas.id,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      toast.error('Could not request edit access', {
+        description: 'Please try again later.',
+      });
+    } finally {
+      setIsRequestingEditAccess(false);
+    }
+  }, [isRequestingEditAccess, selectedCanvas?.id]);
 
   const handleArchivedStateChange = useCallback((canvasId: string, isArchived: boolean): void => {
     setSelectedCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
@@ -1450,6 +1477,29 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 <ReminderClockwise size={16} className='shrink-0' />
                                 <span className='flex-1'>Version history</span>
                               </DropdownMenuItem>
+
+                              {!canEdit && !selectedCanvas.isArchived && (
+                                <DropdownMenuItem
+                                  className='gap-2'
+                                  disabled={isRequestingEditAccess}
+                                  onClick={() => {
+                                    void handleRequestEditAccess();
+                                  }}
+                                  data-testid='canvas-request-edit-access-item'
+                                  data-track-category='CANVAS'
+                                  data-track-name='REQUEST_CANVAS_EDIT_ACCESS'
+                                  data-track-metadata={JSON.stringify({
+                                    canvasId: selectedCanvas.id,
+                                  })}
+                                >
+                                  {isRequestingEditAccess ? (
+                                    <Loader2 size={16} className='shrink-0 animate-spin' />
+                                  ) : (
+                                    <Share01 size={16} className='shrink-0' />
+                                  )}
+                                  <span className='flex-1'>Request edit access</span>
+                                </DropdownMenuItem>
+                              )}
 
                               <DropdownMenuSub>
                                 <DropdownMenuSubTrigger

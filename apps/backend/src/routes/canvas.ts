@@ -7,16 +7,11 @@ const router = express.Router();
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const canvasController = new CanvasController(messageAttachmentRepository);
 
-router.post(
-  '/upload',
-  uploadSingle(),
-  canvasController.uploadFile
-);
+router.post('/upload', uploadSingle(), canvasController.uploadFile);
 
-router.post(
-  '/:canvasId/mentions',
-  canvasController.handleMentions
-);
+router.post('/:canvasId/mentions', canvasController.handleMentions);
+
+router.post('/:canvasId/request-edit-access', canvasController.requestEditAccess);
 
 router.post('/create', canvasController.createCanvas);
 

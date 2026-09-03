@@ -1,5 +1,10 @@
 import { Request, Response } from 'express';
-import { AttachmentEntityType, ActivityClassification, CanvasRole } from '@xyne/shared';
+import {
+  AttachmentEntityType,
+  ActivityClassification,
+  CanvasRole,
+  NotificationType,
+} from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
@@ -14,8 +19,13 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
-import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
+import { initializeYSweetDoc, syncToYSweet } from '../utils/ysweetUtils.js';
+import {
+  convertMarkdownToBlockNote,
+  convertBlockNoteToMarkdown,
+  getCanvasUrl,
+  getCanvasById,
+} from '../services/canvasService.js';
 
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -24,7 +34,7 @@ export class CanvasController {
     this.messageAttachmentRepository = messageAttachmentRepository;
   }
 
-    createCanvas = async (req: Request, res: Response): Promise<void> => {
+  createCanvas = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
       if (!userId) {
@@ -55,8 +65,8 @@ export class CanvasController {
             title,
             content: [],
             workspaceId: req.user!.workspaceId!,
-            createdBy: creatorId,  // <-- AUTHENTICATED USER
-            channelId: channelId || null,  // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
+            createdBy: creatorId, // <-- AUTHENTICATED USER
+            channelId: channelId || null, // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
             visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
             isTemplate: false,
             isCollaborative: true,
@@ -71,7 +81,7 @@ export class CanvasController {
             id: participantId,
             canvasId,
             workspaceId: req.user!.workspaceId!,
-            userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
+            userId: creatorId, // <-- AUTHENTICATED USER IS OWNER
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
@@ -100,6 +110,141 @@ export class CanvasController {
     }
   };
 
+  /**
+   * POST /api/canvas/:canvasId/request-edit-access
+   * Lets a viewer ask the direct canvas owner(s) for edit access.
+   */
+  requestEditAccess = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      const { canvasId } = req.params;
+
+      if (!userId || !workspaceId) {
+        res.status(403).json({ error: 'Unauthorized - user not authenticated' });
+        return;
+      }
+
+      if (!canvasId) {
+        res.status(400).json({ error: 'Canvas ID is required' });
+        return;
+      }
+
+      const access = await canvasAuthService.checkCanvasAccess(canvasId, userId);
+      if (!access.hasAccess || !access.canView) {
+        res.status(403).json({ error: 'Permission denied' });
+        return;
+      }
+
+      if (access.canEdit) {
+        res.status(200).json({ success: true, alreadyHasEditAccess: true, requested: 0 });
+        return;
+      }
+
+      const db = DatabaseClient.getInstance();
+      const canonicalCanvasId = access.canvas?.id ?? canvasId;
+      const [canvas, requester] = await Promise.all([
+        db.canvas.findUnique({
+          where: { id: canonicalCanvasId },
+          select: {
+            id: true,
+            title: true,
+            createdBy: true,
+            channelId: true,
+            workspaceId: true,
+            participants: {
+              where: { role: CanvasRole.OWNER, userId: { not: null } },
+              select: { userId: true },
+            },
+          },
+        }),
+        db.user.findUnique({ where: { id: userId }, select: { name: true, displayName: true } }),
+      ]);
+
+      if (!canvas || canvas.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
+
+      const ownerIds = Array.from(
+        new Set(
+          [canvas.createdBy, ...canvas.participants.map((p) => p.userId)].filter(
+            Boolean
+          ) as string[]
+        )
+      ).filter((ownerId) => ownerId !== userId);
+
+      if (ownerIds.length === 0) {
+        res.status(404).json({ error: 'No owner available to request edit access from' });
+        return;
+      }
+
+      const existingRequests = await db.activity.findMany({
+        where: {
+          userId: { in: ownerIds },
+          actorId: userId,
+          actorAction: 'canvas_edit_access_requested',
+          canvasId: canvas.id,
+          isRead: false,
+        },
+        select: { userId: true },
+      });
+      const existingOwnerIds = new Set(existingRequests.map((request) => request.userId));
+      const ownersToNotify = ownerIds.filter((ownerId) => !existingOwnerIds.has(ownerId));
+
+      if (ownersToNotify.length > 0) {
+        await activityService.createActivities(
+          ownersToNotify.map((ownerId) => ({
+            id: uuidv4(),
+            userId: ownerId,
+            workspaceId,
+            actorId: userId,
+            actorAction: 'canvas_edit_access_requested',
+            actionSource: 'canvas',
+            actionSourceId: canvas.id,
+            channelId: canvas.channelId ?? undefined,
+            canvasId: canvas.id,
+            classification: ActivityClassification.ACTIONABLE,
+          }))
+        );
+
+        const requesterName = requester?.displayName || requester?.name || 'Someone';
+        const actionUrl = `/${workspaceId}/chat/canvas/${canvas.id}`;
+        await Promise.allSettled(
+          ownersToNotify.map((ownerId) =>
+            notificationService.createNotification(ownerId, {
+              title: `${requesterName} requested edit access`,
+              message: `${requesterName} requested edit access to "${canvas.title || 'Untitled Canvas'}"`,
+              type: NotificationType.CANVAS_SHARED,
+              relatedEntityType: 'canvas',
+              relatedEntityId: canvas.id,
+              actionUrl,
+              workspaceId,
+              metadata: {
+                canvasId: canvas.id,
+                requesterId: userId,
+                requesterName,
+                actorAction: 'canvas_edit_access_requested',
+              },
+            })
+          )
+        );
+      }
+
+      res.status(200).json({
+        success: true,
+        requested: ownersToNotify.length,
+        alreadyRequested: ownerIds.length - ownersToNotify.length,
+      });
+    } catch (error) {
+      logger.error('[CANVAS-REQUEST-EDIT-ACCESS] Error:', error);
+      res.status(500).json({
+        error: 'Failed to request edit access',
+        message: 'An unexpected error occurred.',
+      });
+    }
+  };
+
   uploadFile = async (req: Request, res: Response): Promise<void> => {
     try {
       const { canvasId, width, height } = req.body;
@@ -123,7 +268,7 @@ export class CanvasController {
         await canvasAuthService.requireEditAccess(canvasId, userId);
       } catch (error) {
         logger.warn(`[CANVAS-UPLOAD] Permission denied for user ${userId} on canvas ${canvasId}`, {
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: error instanceof Error ? error.message : 'Unknown error',
         });
         await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(403).json({ error: 'Permission denied' });
@@ -151,7 +296,10 @@ export class CanvasController {
       const uploadResults = await uploadFiles([file]);
 
       if (!uploadResults || uploadResults.length === 0) {
-        logger.error('[CANVAS-UPLOAD] The file upload service did not return a valid result for file:', { fileName: file.originalname });
+        logger.error(
+          '[CANVAS-UPLOAD] The file upload service did not return a valid result for file:',
+          { fileName: file.originalname }
+        );
         await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
         return;
@@ -242,8 +390,15 @@ export class CanvasController {
         return;
       }
 
-      const { mentionType, mentionId, blockId, commentThreadId, canvasTitle, mentionContext, slackUrl } =
-        validatedBody.data;
+      const {
+        mentionType,
+        mentionId,
+        blockId,
+        commentThreadId,
+        canvasTitle,
+        mentionContext,
+        slackUrl,
+      } = validatedBody.data;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -283,7 +438,7 @@ export class CanvasController {
 
       // Resolve mentioned users
       const mentionedUsers: { userId: string; mentionSource: 'direct' | 'group' }[] = [];
-      
+
       if (mentionType === 'user' && mentionId !== userId) {
         mentionedUsers.push({ userId: mentionId, mentionSource: 'direct' });
       } else if (mentionType === 'group') {
@@ -301,8 +456,8 @@ export class CanvasController {
       }
 
       // Batch check canvas access for all mentioned users in a single query
-      const uniqueUserIds = [...new Set(mentionedUsers.map(u => u.userId))];
-      
+      const uniqueUserIds = [...new Set(mentionedUsers.map((u) => u.userId))];
+
       // Fetch canvas details, canvas participants, sender name, and mentioned users' emails in one batch
       const [canvas, canvasParticipants, sender, mentionedUserRecords] = await Promise.all([
         db.canvas.findUnique({
@@ -322,12 +477,11 @@ export class CanvasController {
           select: { id: true, email: true },
         }),
       ]);
-      
+
       // Determine which users have access (canvas creator or canvas participant)
-      const canvasParticipantIds = new Set(canvasParticipants.map(p => p.userId));
-      const usersWithAccessIds = uniqueUserIds.filter(uid => 
-        uid === canvas?.createdBy || 
-        canvasParticipantIds.has(uid)
+      const canvasParticipantIds = new Set(canvasParticipants.map((p) => p.userId));
+      const usersWithAccessIds = uniqueUserIds.filter(
+        (uid) => uid === canvas?.createdBy || canvasParticipantIds.has(uid)
       );
 
       if (usersWithAccessIds.length === 0) {
@@ -336,14 +490,17 @@ export class CanvasController {
       }
 
       // Filter to users with access and create activities
-      const mentionedUsersWithAccess = mentionedUsers.filter(u => usersWithAccessIds.includes(u.userId));
-      const activities = mentionedUsersWithAccess.map(u => ({
+      const mentionedUsersWithAccess = mentionedUsers.filter((u) =>
+        usersWithAccessIds.includes(u.userId)
+      );
+      const activities = mentionedUsersWithAccess.map((u) => ({
         id: uuidv4(),
         userId: u.userId,
         actorId: userId,
         actorAction: u.mentionSource === 'direct' ? 'mentioned_user' : 'group_mention',
         actionSource: mentionContext === 'comment' ? 'canvas_comment' : 'canvas',
-        actionSourceId: mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
+        actionSourceId:
+          mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
         channelId: canvasChannelId ?? undefined,
         canvasId: canvasId,
         blockId: blockId ?? undefined,
@@ -355,8 +512,8 @@ export class CanvasController {
       const usersWithAccessSet = new Set(usersWithAccessIds);
       const userEmailMap = new Map(
         mentionedUserRecords
-          .filter(u => u.email && usersWithAccessSet.has(u.id))
-          .map(u => [u.id, u.email!])
+          .filter((u) => u.email && usersWithAccessSet.has(u.id))
+          .map((u) => [u.id, u.email!])
       );
       const mentionedEmails = Array.from(userEmailMap.values());
 
@@ -378,12 +535,19 @@ export class CanvasController {
           blockId,
           commentThreadId,
           canvasChannelId ?? undefined,
-          mentionContext,
+          mentionContext
         );
 
-        slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
+        slackRecipientEmails = getSlackRecipientEmails(
+          mentionedEmails,
+          deliveredUserIds,
+          userEmailMap
+        );
       } catch (error) {
-        logger.error('[CANVAS-MENTIONS] Spaces notification failed — sending Slack to all recipients', { error });
+        logger.error(
+          '[CANVAS-MENTIONS] Spaces notification failed — sending Slack to all recipients',
+          { error }
+        );
       }
 
       // Step 3: Send Slack notifications only to users who didn't receive app notification
@@ -391,7 +555,7 @@ export class CanvasController {
         slackRecipientEmails,
         senderName,
         canvasTitle ?? 'Canvas',
-        slackUrl!,
+        slackUrl!
       );
 
       res.status(200).json({
