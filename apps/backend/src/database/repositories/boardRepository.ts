@@ -85,15 +85,11 @@ export class BoardRepository {
     // Use transaction to create board and stages together
     return await this.db.$transaction(async (tx) => {
       const resolvedBoardType = data.boardType || BoardType.DEFAULT;
-      // New-board creation writes the explicit versioned etaManagement defaults
-      // rather than leaving it unset, so this board's automation state is unambiguous
-      // from day one - autoRecomputeEnabled defaults on only for DEFAULT (linear) boards;
-      // NON_LINEAR/RELEASE/FLOW start disabled (Standard Path is opt-in later for
-      // NON_LINEAR; RELEASE/FLOW automatic management is deferred entirely this release).
+      // Written explicitly so a board's automation state is never ambiguous. Auto-recompute
+      // starts on for linear (DEFAULT) boards only; NON_LINEAR/RELEASE/FLOW start disabled.
       const metadataWithEtaDefaults = mergeBoardEtaManagement(data.metadata ?? null, {
         autoRecomputeEnabled: resolvedBoardType === BoardType.DEFAULT,
         standardPathStageIds: [],
-        configVersion: 1,
       });
 
       const board = await tx.board.create({

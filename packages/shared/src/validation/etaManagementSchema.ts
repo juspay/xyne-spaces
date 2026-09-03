@@ -12,22 +12,19 @@ import { z } from 'zod';
 export const boardEtaManagementSchema = z.object({
   autoRecomputeEnabled: z.boolean(),
   standardPathStageIds: z.array(z.string()),
-  configVersion: z.number().int().nonnegative(),
 });
 
 export type BoardEtaManagement = z.infer<typeof boardEtaManagementSchema>;
 
 /**
- * A board with no `etaManagement` key (or an unparseable one) is treated as
- * configVersion 0, no Standard Path, automation disabled. This lets existing
- * boards keep their current behavior with zero metadata backfill - only
- * boards that explicitly opt in via the board-settings mutator get a real
- * `etaManagement` object.
+ * A board with no `etaManagement` key (or an unparseable one) is treated as no
+ * Standard Path, automation disabled. This lets existing boards keep their
+ * current behavior with zero metadata backfill - only boards that explicitly
+ * opt in via the board-settings mutator get a real `etaManagement` object.
  */
 export const DEFAULT_BOARD_ETA_MANAGEMENT: BoardEtaManagement = {
   autoRecomputeEnabled: false,
   standardPathStageIds: [],
-  configVersion: 0,
 };
 
 export function validateBoardEtaManagement(data: unknown) {
@@ -108,7 +105,6 @@ const planningRiskSchema = z.object({
   stageVisitId: z.string().nullable(),
   stageEta: z.number().nullable(),
   ticketEta: z.number().nullable(),
-  boardConfigVersion: z.number().int().nullable(),
   acknowledgedAt: z.number().nullable(),
   acknowledgedBy: z.string().nullable(),
   acknowledgmentReason: z.string().nullable(),
@@ -165,7 +161,6 @@ export const DEFAULT_TICKET_ETA_MANAGEMENT: TicketEtaManagement = {
     stageVisitId: null,
     stageEta: null,
     ticketEta: null,
-    boardConfigVersion: null,
     acknowledgedAt: null,
     acknowledgedBy: null,
     acknowledgmentReason: null,

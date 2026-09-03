@@ -10,7 +10,6 @@ export interface EvaluatePlanningRiskInput {
   deadlineTracked: boolean;
   ticketDue: Date | null;
   ticketStatus: string;
-  boardConfigVersion: number;
   now: Date;
   currentRisk: TicketEtaManagementPlanningRisk;
   /** Ticket is in a terminal (Completed/Cancelled) status. */
@@ -34,7 +33,6 @@ export function evaluatePlanningRisk(input: EvaluatePlanningRiskInput): Planning
     deadlineTracked,
     ticketDue,
     ticketStatus,
-    boardConfigVersion,
     now,
     currentRisk,
     isTerminal,
@@ -60,7 +58,6 @@ export function evaluatePlanningRisk(input: EvaluatePlanningRiskInput): Planning
     stageEta: stageDeadline!.getTime(),
     ticketEta: ticketDue!.getTime(),
     ticketStatus,
-    boardConfigVersion,
   });
 
   if (!conditionTrue) {
@@ -76,7 +73,6 @@ export function evaluatePlanningRisk(input: EvaluatePlanningRiskInput): Planning
         stageVisitId: activeStageVisitId,
         stageEta: stageDeadline!.getTime(),
         ticketEta: ticketDue!.getTime(),
-        boardConfigVersion,
         acknowledgedAt: null,
         acknowledgedBy: null,
         acknowledgmentReason: null,
@@ -94,7 +90,6 @@ export function evaluatePlanningRisk(input: EvaluatePlanningRiskInput): Planning
   const changedInputs = diffFingerprintInputs(currentRisk, {
     stageDeadline,
     ticketDue,
-    boardConfigVersion,
     activeStageVisitId,
   });
 
@@ -106,7 +101,6 @@ export function evaluatePlanningRisk(input: EvaluatePlanningRiskInput): Planning
       stageVisitId: activeStageVisitId,
       stageEta: stageDeadline!.getTime(),
       ticketEta: ticketDue!.getTime(),
-      boardConfigVersion,
       acknowledgedAt: null,
       acknowledgedBy: null,
       acknowledgmentReason: null,
@@ -135,14 +129,12 @@ function diffFingerprintInputs(
   next: {
     stageDeadline: Date | null;
     ticketDue: Date | null;
-    boardConfigVersion: number;
     activeStageVisitId: string | null;
   },
 ): string[] {
   const changed: string[] = [];
   if (prev.stageEta !== (next.stageDeadline?.getTime() ?? null)) changed.push('stageEta');
   if (prev.ticketEta !== (next.ticketDue?.getTime() ?? null)) changed.push('ticketEta');
-  if (prev.boardConfigVersion !== next.boardConfigVersion) changed.push('boardConfigVersion');
   if (prev.stageVisitId !== next.activeStageVisitId) changed.push('stageVisitId');
   return changed;
 }

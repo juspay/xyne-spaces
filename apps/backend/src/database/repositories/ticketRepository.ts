@@ -42,7 +42,6 @@ import {
   evaluateEta,
   buildEtaActivityIntents,
   isTerminalStatus,
-  isEtaManagementKillSwitchActive,
   dispatchEtaNotifications,
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
@@ -275,7 +274,6 @@ export class TicketRepository {
         },
         trigger: 'CREATE',
         now: stageEnteredAt,
-        globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
       });
 
       const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
@@ -292,7 +290,6 @@ export class TicketRepository {
       const activityIntents = buildEtaActivityIntents(etaResult, {
         currentStageId: selectedStage.id,
         oldEta: ticket.eta ? ticket.eta.getTime() : null,
-        boardConfigVersion: boardEtaManagement.configVersion,
         trigger: 'CREATE',
         systemReason: 'Automatic ETA set on ticket creation',
         previousRiskFingerprint: null,
@@ -617,13 +614,9 @@ export class TicketRepository {
         }
       }
 
-      // ETA domain-service evaluation: forecast (extend-only) + planning-risk state. Re-read
-      // the active visit rather than trusting branch-local variables above, since a
-      // reactivate-without-reset branch leaves the row's stageEta untouched - this is the one
-      // authoritative source for "the actual deadline now in effect" regardless of which
-      // branch fired above. This legacy path has no StageTransition concept (it never
-      // consulted one for stageEta, unlike the non-linear service), so estimate resolution
-      // here mirrors that: transition is always null, falling through to STAGE_DEFAULT.
+      // Re-read the visit instead of trusting the branch-local vars above: the
+      // reactivate-without-reset branch leaves stageEta untouched, so only the row holds the
+      // deadline actually in effect. No StageTransition on this legacy path -> STAGE_DEFAULT.
       const activeVisitRow = await tx.ticketStageEta.findFirst({
         where: { ticketId, stageId: targetStage.id, stageLeftAt: null },
         orderBy: { createdAt: 'desc' },
@@ -660,19 +653,14 @@ export class TicketRepository {
         },
         trigger: 'STAGE_TRANSITION',
         now,
-        globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
       });
       const mergedMetadata = mergeTicketEtaManagement(
         currentTicket.metadata,
         etaResult.ticketEtaManagementPatch,
       );
 
-      // Update the ticket stage and status (synced with stage's default status), folding in
-      // the ETA/metadata result from the same write when this path owns the ticket update.
-      // When the optimistic-concurrency guard already updated stageName/statusV2 above (its
-      // own committed write, needed so the guard can fail atomically before any stage-visit
-      // work happens), eta/metadata still need a dedicated update here since that guarded
-      // write never touched them.
+      // The optimistic-concurrency guard above already committed stageName/statusV2 but never
+      // eta/metadata, so those still need their own update on that branch.
       const updatedTicket = guardedUpdatedTicket
         ? await tx.ticket.update({
             where: { id: ticketId },
@@ -800,7 +788,6 @@ export class TicketRepository {
       const activityIntents = buildEtaActivityIntents(etaResult, {
         currentStageId: targetStage.id,
         oldEta: currentTicket.eta ? currentTicket.eta.getTime() : null,
-        boardConfigVersion: boardEtaCtx.boardEtaManagement.configVersion,
         trigger: 'STAGE_TRANSITION',
         systemReason: `Automatic recalculation after moving to stage "${newStageName}"`,
         previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,

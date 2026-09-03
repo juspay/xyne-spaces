@@ -9,7 +9,6 @@ import {
   OPEN_STATUSES,
 } from '@/utils/etaNotificationUtils';
 import {
-  parseBoardEtaManagement,
   parseTicketEtaManagement,
   mergeTicketEtaManagement,
   BoardType,
@@ -20,7 +19,6 @@ import {
   buildRiskTransitionActivityIntents,
   dispatchEtaNotifications,
   etaSignalsFromResult,
-  isEtaManagementKillSwitchActive,
 } from '@/services/etaManagement';
 
 interface TicketForReconciliation extends TicketWithStageInfo {
@@ -182,8 +180,6 @@ class StageEtaDeadlineWorker {
    * stage-overdue condition, which the flag sync above owns.
    */
   private async reconcileOpenTicketPlanningRisk(now: Date): Promise<void> {
-    if (isEtaManagementKillSwitchActive()) return;
-
     // Tickets whose overall ETA is already breached are excluded - the daily
     // ticket-overdue worker owns those, and ticket-overdue outranks planning risk.
     const todayMidnight = new Date(now);
@@ -250,15 +246,15 @@ class StageEtaDeadlineWorker {
    * Note it is NOT the clock that creates work here: the risk condition includes
    * `now <= stageDeadline`, so as time passes the condition can only go true -> false. Time
    * ends a planning risk (it becomes stage-overdue); it can never start one. What this pass
-   * catches is risk state that has gone stale against its current inputs, in the cases where
-   * the thing that changed was not a ticket mutation:
+   * catches is tickets never evaluated at all - written before this feature existed, or by a
+   * path that doesn't run the immediate evaluation (imports, flow cascades). Their metadata
+   * parses to state NONE even though the condition is already true.
    *
-   *   - Tickets never evaluated at all - written before this feature existed, or by a path
-   *     that doesn't run the immediate evaluation (imports, flow cascades). Their metadata
-   *     parses to state NONE even though the condition is already true.
-   *   - A board ETA-config change: it bumps `configVersion`, which changes the risk
-   *     fingerprint of every ticket on that board without touching a single ticket row, so
-   *     nothing else would ever notice it.
+   * A board ETA-config change does NOT reopen an acknowledged/active risk on its own - the
+   * fingerprint depends only on the ticket's own stageEta/ticketEta/status/visit, all of
+   * which this pass reads fresh from current settings on every run, but none of which a
+   * config change alone can move. It only reopens if that fresh read produces a genuinely
+   * different value (e.g. auto-recompute pushing the due date out).
    *
    * Scope is deliberately the pre-breach window only - the loader filters `stageEta > now`,
    * so a visit whose deadline has already passed is not seen here at all; that is
@@ -292,7 +288,7 @@ class StageEtaDeadlineWorker {
     ];
     const boards = await db.board.findMany({
       where: { id: { in: boardIds } },
-      select: { id: true, boardType: true, metadata: true },
+      select: { id: true, boardType: true },
     });
     const boardMap = new Map(boards.map(b => [b.id, b]));
 
@@ -320,7 +316,6 @@ class StageEtaDeadlineWorker {
         const stage = stageMap.get(entry.stageId);
         if (!stage || stage.name !== ticket.stageName) continue;
 
-        const boardEtaManagement = parseBoardEtaManagement(board.metadata);
         const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
         const deadlineTracked = entry.stageEta.getTime() !== entry.stageEnteredAt.getTime();
 
@@ -332,7 +327,6 @@ class StageEtaDeadlineWorker {
           deadlineTracked,
           ticketDue: ticket.eta,
           ticketStatus: ticket.statusV2,
-          boardConfigVersion: boardEtaManagement.configVersion,
           now,
           currentRisk: currentTicketEtaManagement.planningRisk,
           isTerminal: false, // OPEN_STATUSES excludes COMPLETED/CANCELLED already
@@ -372,7 +366,6 @@ class StageEtaDeadlineWorker {
               const intents = buildRiskTransitionActivityIntents(decision, {
                 currentStageId: entry.stageId,
                 oldEta: ticket.eta ? ticket.eta.getTime() : null,
-                boardConfigVersion: boardEtaManagement.configVersion,
                 trigger: 'RECONCILIATION',
                 systemReason: 'Hourly reconciliation detected a planning-risk state change',
                 previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,

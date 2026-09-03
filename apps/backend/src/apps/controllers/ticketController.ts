@@ -69,7 +69,6 @@ import {
   evaluateEta,
   buildEtaActivityIntents,
   isTerminalStatus,
-  isEtaManagementKillSwitchActive,
   dispatchEtaNotifications,
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
@@ -485,7 +484,6 @@ const transferTicketToBoard = async (params: {
       },
       trigger: 'STAGE_TRANSITION',
       now,
-      globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
     });
 
     const mergedMetadata = mergeTicketEtaManagement(
@@ -506,7 +504,6 @@ const transferTicketToBoard = async (params: {
     const activityIntents = buildEtaActivityIntents(etaResult, {
       currentStageId: firstStage.id,
       oldEta: currentTicket.eta ? currentTicket.eta.getTime() : null,
-      boardConfigVersion: boardEtaCtx.boardEtaManagement.configVersion,
       trigger: 'STAGE_TRANSITION',
       systemReason: `Automatic recalculation after moving ticket to board "${targetBoardId}"`,
       previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,

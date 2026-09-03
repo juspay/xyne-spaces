@@ -4883,11 +4883,9 @@ export const mutators = defineMutators({
         const board = await tx.run(zql.boards.where('id', boardId).one());
         if (!board) return;
 
-        const current = parseBoardEtaManagement(board.metadata);
         const merged = mergeBoardEtaManagement(board.metadata, {
           autoRecomputeEnabled,
           ...(standardPathStageIds !== undefined && { standardPathStageIds }),
-          configVersion: current.configVersion + 1,
         });
 
         await tx.mutate.boards.update({

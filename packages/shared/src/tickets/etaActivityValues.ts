@@ -29,7 +29,6 @@ export interface EtaAutoRecomputedActivityValue {
   forecastEta: number;
   finalEta: number;
   stageVisitId: string | null;
-  boardConfigVersion: number;
   /** Set when a Standard Path was used to build the forecast route. */
   standardPathUsed: boolean;
   systemReason: string;
@@ -50,7 +49,6 @@ export interface EtaRiskDetectedActivityValue {
   ticketEta: number;
   stageId: string;
   stageVisitId: string;
-  boardConfigVersion: number;
 }
 
 /** ActivityType.ETA_RISK_ACKNOWLEDGED */

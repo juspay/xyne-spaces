@@ -130,7 +130,6 @@ import {
   buildEtaActivityIntents,
   stageEtaActivityOutbox,
   isTerminalStatus,
-  isEtaManagementKillSwitchActive,
   canUserModifyTicketControl,
   msToDate,
   dateToMs,
@@ -6099,13 +6098,11 @@ export function createMutators(
                 activeVisit: etaCtx.activeVisit,
                 trigger: 'STAGE_TRANSITION',
                 now: new Date(now),
-                globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
               });
 
               const boardTransferActivityIntents = buildEtaActivityIntents(etaResult, {
                 currentStageId: firstStage.id,
                 oldEta: ticket.eta ?? null,
-                boardConfigVersion: targetBoardEtaManagement.configVersion,
                 trigger: 'STAGE_TRANSITION',
                 systemReason: `Automatic recalculation after moving ticket to board "${targetBoard?.name ?? params.boardId}"`,
                 previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
@@ -6536,7 +6533,6 @@ export function createMutators(
                 activeVisit: etaCtx.activeVisit,
                 trigger,
                 now: new Date(params.updatedAt),
-                globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
               });
 
               if (etaResult.etaDecision.changed && etaResult.etaDecision.newEta) {
@@ -6550,7 +6546,6 @@ export function createMutators(
               etaActivityIntentsForTicketUpdate = buildEtaActivityIntents(etaResult, {
                 currentStageId: effectiveStage.id,
                 oldEta: ticket.eta ?? null,
-                boardConfigVersion: boardEtaManagement.configVersion,
                 trigger,
                 systemReason: isStageChanging
                   ? `Automatic recalculation after moving to stage "${params.stageName}"`
@@ -7225,7 +7220,6 @@ export function createMutators(
             },
             trigger: 'MANUAL_STAGE_DEADLINE',
             now: new Date(now),
-            globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
           });
 
           const currentStageDeadline = new Date(stageEta);
@@ -7241,7 +7235,6 @@ export function createMutators(
           const etaActivityIntents = buildEtaActivityIntents(etaResult, {
             currentStageId: ticketStageEtaEntry.stageId,
             oldEta: ticket.eta ?? null,
-            boardConfigVersion: boardEtaManagement.configVersion,
             trigger: 'MANUAL_STAGE_DEADLINE',
             systemReason: `Manual stage deadline update for "${currentStage.name}"`,
             previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
@@ -8300,10 +8293,9 @@ export function createMutators(
       /**
        * Toggle automatic ETA management (extend-only forecast-based due-date recalculation)
        * for a board. Deliberately a narrow, dedicated mutator rather than folded into the
-       * generic `board.update` below: this keeps the admin-only gate and the atomic
-       * configVersion bump specific and auditable, and validates through the shared
-       * etaManagement schema rather than accepting `metadata` as arbitrary JSON the way
-       * `board.update` still does for its other fields.
+       * generic `board.update` below: this keeps the admin-only gate specific and auditable,
+       * and validates through the shared etaManagement schema rather than accepting
+       * `metadata` as arbitrary JSON the way `board.update` still does for its other fields.
        */
       updateEtaManagement: defineMutator(
         z.object({
@@ -8403,11 +8395,9 @@ export function createMutators(
             }
           }
 
-          const currentEtaManagement = parseBoardEtaManagement(board.metadata);
           const mergedMetadata = mergeBoardEtaManagement(board.metadata, {
             autoRecomputeEnabled,
             ...(standardPathStageIds !== undefined && { standardPathStageIds }),
-            configVersion: currentEtaManagement.configVersion + 1,
           });
 
           await tx.mutate.boards.update({
@@ -17868,7 +17858,6 @@ export function createMutators(
             },
             trigger: 'STAGE_TRANSITION',
             now: new Date(now),
-            globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
           });
           // Audit trail for the ETA evaluation, staged into the same write as the state it
           // describes; TicketsSideEffectHandler drains it post-commit (system-actor
@@ -17876,7 +17865,6 @@ export function createMutators(
           const etaActivityIntents = buildEtaActivityIntents(etaResult, {
             currentStageId: targetStage.id,
             oldEta: ticket.eta ?? null,
-            boardConfigVersion: boardEtaManagement.configVersion,
             trigger: 'STAGE_TRANSITION',
             systemReason: `Automatic recalculation after moving to stage "${toStageName}"`,
             previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,

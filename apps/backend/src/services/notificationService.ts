@@ -2514,7 +2514,7 @@ class NotificationService {
   }
 
   /**
-   * Planning-risk detected/reopened (PRD §8.2): the current stage deadline is later than
+   * Planning-risk detected/reopened : the current stage deadline is later than
    * the ticket due date, not yet overdue. Sent only to "action recipients" (awareness
    * recipients who also satisfy the board's ETA-update permission policy) - unlike every
    * other ticket notification here, which goes to the full awareness set - since a

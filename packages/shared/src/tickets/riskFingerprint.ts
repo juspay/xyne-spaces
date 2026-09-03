@@ -21,7 +21,6 @@ export interface RiskFingerprintInput {
   /** Ticket due date, epoch ms. */
   ticketEta: number;
   ticketStatus: string;
-  boardConfigVersion: number;
 }
 
 const MAX_HASH_INPUT_LENGTH = 1024;
@@ -36,7 +35,9 @@ function fnv1a(input: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-const FINGERPRINT_VERSION = 'v1';
+// Bumped because boardConfigVersion left the canonical string below - a fingerprint's
+// meaning changed, not just its inputs' values.
+const FINGERPRINT_VERSION = 'v2';
 
 export function computeRiskFingerprint(input: RiskFingerprintInput): string {
   const canonical = [
@@ -45,7 +46,6 @@ export function computeRiskFingerprint(input: RiskFingerprintInput): string {
     String(input.stageEta),
     String(input.ticketEta),
     input.ticketStatus,
-    String(input.boardConfigVersion),
   ].join('|');
   return `${FINGERPRINT_VERSION}:${fnv1a(canonical)}`;
 }

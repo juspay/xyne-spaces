@@ -16,7 +16,6 @@ import {
   evaluateEta,
   buildEtaActivityIntents,
   isTerminalStatus,
-  isEtaManagementKillSwitchActive,
   dispatchEtaNotifications,
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
@@ -486,7 +485,6 @@ export class TicketStageTransitionService {
         },
         trigger: 'STAGE_TRANSITION',
         now,
-        globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
       });
 
       // 8e. Update ticket stage (+ ETA/metadata from the domain-service evaluation, in the
@@ -512,7 +510,6 @@ export class TicketStageTransitionService {
       const activityIntents = buildEtaActivityIntents(etaResult, {
         currentStageId: targetStage.id,
         oldEta: ticket.eta ? ticket.eta.getTime() : null,
-        boardConfigVersion: boardEtaCtx.boardEtaManagement.configVersion,
         trigger: 'STAGE_TRANSITION',
         systemReason: `Automatic recalculation after moving to stage "${toStageName}"`,
         previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,

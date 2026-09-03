@@ -183,12 +183,9 @@ export function calculateETADeadline(
   current = moveToNextWorkingDay(current, config);
   current = skipWeekends(current, config);
 
-  // Consume full working days one at a time, leaving remainingHours in
-  // (0, workingHoursPerDay]. Stopping the loop here (rather than advancing
-  // past every full day and handling only a strictly-partial remainder,
-  // as before) keeps exact multi-day estimates pinned to the end of the
-  // actual last working day instead of the start of the day after it -
-  // consistent with how a single exact day is already pinned above.
+  // Leaves remainingHours in (0, workingHoursPerDay] rather than consuming every full day, so
+  // an exact multi-day estimate pins to the end of the last working day instead of the start
+  // of the next - matching how a single exact day is pinned above.
   let dayIterations = 0;
   while (remainingHours > workingHoursPerDay) {
     if (dayIterations >= MAX_WORKING_DAY_ITERATIONS) {

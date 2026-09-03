@@ -23,7 +23,6 @@ export { buildForecast } from './forecastBuilder';
 export { decideEtaUpdate } from './extendOnly';
 export { evaluatePlanningRisk } from './riskEvaluation';
 export { canUserModifyTicketControl } from './etaPermissions';
-export { isEtaManagementKillSwitchActive } from './featureFlag';
 export {
   buildEtaActivityIntents,
   buildRiskTransitionActivityIntents,
@@ -73,7 +72,6 @@ export interface EvaluateEtaInput {
   activeVisit: ActiveVisitContext;
   trigger: EtaChangeTrigger;
   now: Date;
-  globalKillSwitchEnabled: boolean;
 }
 
 export interface EvaluateEtaResult {
@@ -110,21 +108,7 @@ export function evaluateEta(input: EvaluateEtaInput): EvaluateEtaResult {
     transitions,
     activeVisit,
     now,
-    globalKillSwitchEnabled,
   } = input;
-
-  if (globalKillSwitchEnabled) {
-    return {
-      forecast: { status: 'NOT_APPLICABLE', incompleteReason: null, incompleteStageIds: [], forecastEta: null },
-      etaDecision: { newEta: currentTicketEta, changed: false },
-      planningRisk: {
-        nextState: currentTicketEtaManagement.planningRisk,
-        transitionKind: 'UNCHANGED',
-        changedInputs: [],
-      },
-      ticketEtaManagementPatch: {},
-    };
-  }
 
   const route = resolveForecastRoute({
     boardType,
@@ -155,7 +139,6 @@ export function evaluateEta(input: EvaluateEtaInput): EvaluateEtaResult {
     deadlineTracked: activeVisit.deadlineTracked,
     ticketDue: etaDecision.newEta,
     ticketStatus,
-    boardConfigVersion: boardEtaManagement.configVersion,
     now,
     currentRisk: currentTicketEtaManagement.planningRisk,
     isTerminal,

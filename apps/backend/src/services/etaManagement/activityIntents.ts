@@ -125,7 +125,6 @@ export function etaSystemMessageContent(
 export interface BuildActivityIntentsContext {
   currentStageId: string;
   oldEta: number | null;
-  boardConfigVersion: number;
   trigger: EtaChangeTrigger;
   systemReason: string;
   /** The risk fingerprint that was persisted before this evaluation ran (for ETA_RISK_REOPENED). */
@@ -172,7 +171,6 @@ export function buildEtaActivityIntents(
       forecastEta: result.forecast.forecastEta.getTime(),
       finalEta: result.etaDecision.newEta.getTime(),
       stageVisitId: result.ticketEtaManagementPatch.activeVisit?.stageVisitId ?? null,
-      boardConfigVersion: ctx.boardConfigVersion,
       standardPathUsed: false,
       systemReason: ctx.systemReason,
     };
@@ -188,7 +186,6 @@ export function buildEtaActivityIntents(
         ticketEta: risk.ticketEta ?? 0,
         stageId: ctx.currentStageId,
         stageVisitId: risk.stageVisitId ?? '',
-        boardConfigVersion: risk.boardConfigVersion ?? ctx.boardConfigVersion,
       };
       intents.push({ activityType: ActivityType.ETA_RISK_DETECTED, value });
       break;
