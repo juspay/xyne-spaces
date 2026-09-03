@@ -4273,6 +4273,17 @@ router.post(
       const apiKey = (body.apiKey ?? "").trim();
       const model = (body.model ?? "").trim() || null;
       const baseUrl = (body.baseUrl ?? "").trim() || null;
+      // A custom provider baseUrl is fetched server-side at model-probe and at
+      // runtime; refuse an internal / private / metadata destination at save so
+      // one can never be persisted (the probe/runtime paths validate too).
+      if (baseUrl) {
+        try {
+          await assertSafeOutboundUrl(baseUrl);
+        } catch {
+          res.status(400).json({ success: false, error: "baseUrl must be a public https(s) endpoint" });
+          return;
+        }
+      }
       const authType = (body.authType ?? "").trim() || null;
       const rawEffort = typeof body.reasoningEffort === "string" ? body.reasoningEffort.trim() : body.reasoningEffort;
       let reasoningEffort: string | null;

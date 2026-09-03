@@ -1,5 +1,6 @@
 import type { StdioMcpAdapter, McpToolInfo } from "../types.js";
 import type { Citation } from "xyne-claw-shared";
+import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
 
 // Explicit tool set for `mcp-grafana`. Without `--enabled-tools` the server
 // falls back to its built-in default set — yesterday's release dropped this
@@ -149,6 +150,9 @@ export const GRAFANA_CUSTOM_TOOLS: McpToolInfo[] = [
 
 async function grafanaFetch(baseUrl: string, token: string, path: string, options?: RequestInit): Promise<Response> {
   const url = `${baseUrl.replace(/\/$/, "")}${path}`;
+  // baseUrl comes from a user-stored connection credential; refuse internal /
+  // private / metadata destinations before sending the bearer token.
+  await assertSafeOutboundUrl(url);
   return fetch(url, {
     ...options,
     headers: {
