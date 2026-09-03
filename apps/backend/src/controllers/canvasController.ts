@@ -427,7 +427,8 @@ export class CanvasController {
         return;
       }
 
-      // Check read permission
+      // Read endpoint: require VIEW access (creator / OWNER-EDITOR-VIEWER role / PUBLIC-visibility
+      // channel or project access). Do NOT require edit here — a read must not demand editor rights.
       try {
         await canvasAuthService.requireViewAccess(canvas.id, userId);
       } catch (error) {
