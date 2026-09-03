@@ -15,7 +15,7 @@ import {
   runCatalogQuery,
 } from '@/zero/server';
 import { SdkApiError } from './errors';
-import { sdkConfig } from './config';
+import { config } from '@/config/env';
 
 /**
  * Whether reads can be served at all in this deployment.
@@ -24,7 +24,7 @@ import { sdkConfig } from './config';
  * discovers it one query at a time.
  */
 export function readsAvailable(): boolean {
-  return replicaDbProvider !== null || sdkConfig.allowPrimaryForReads;
+  return replicaDbProvider !== null || config.sdk.allowPrimaryForReads;
 }
 
 /**
@@ -32,14 +32,14 @@ export function readsAvailable(): boolean {
  *
  * Reads go to the replica. In production, a deployment missing one is
  * misconfigured rather than merely slower; outside production, reads fall
- * back to the primary pool automatically (see `sdkConfig.allowPrimaryForReads`).
+ * back to the primary pool automatically (see `config.sdk.allowPrimaryForReads`).
  */
 export async function callQuery<T = unknown>(
   name: string,
   args: unknown,
   ctx: Context,
 ): Promise<T> {
-  const provider = replicaDbProvider ?? (sdkConfig.allowPrimaryForReads ? dbProvider : null);
+  const provider = replicaDbProvider ?? (config.sdk.allowPrimaryForReads ? dbProvider : null);
   if (!provider) {
     throw new SdkApiError(
       'internal',

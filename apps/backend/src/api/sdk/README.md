@@ -26,7 +26,6 @@ same function within a few frames of stack.
 | `handler.ts` | Request id, and the one error envelope |
 | `errors.ts` | The error catalog, and `SdkApiError` |
 | `schemas/search.ts` | The search request schema |
-| `config.ts` | Three environment switches |
 | `index.ts` | Router assembly |
 
 `v1/` is the half that matters. Everything else is plumbing shared with the

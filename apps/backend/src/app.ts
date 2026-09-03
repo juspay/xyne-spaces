@@ -202,7 +202,6 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
-import { sdkConfig } from '@/api/sdk/config';
 
 
 export class App {
@@ -363,7 +362,7 @@ export class App {
     // tried first and falls through on no match, then authMiddleware runs for
     // everything else. The trailing `sdkErrorHandler` gives auth failures the
     // SDK's own error envelope.
-    if (sdkConfig.enabled) {
+    if (config.sdk.enabled) {
       this.app.use('/api/sdk', createSdkPublicRouter());
       this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
