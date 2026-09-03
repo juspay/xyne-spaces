@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 
 import { InputBox } from '../../ui/InputBox';
-import { Button } from '../../ui/Button/Button';
+
 import {
   MessageType,
   ChannelScopeType,
@@ -1063,8 +1063,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       : "You're offline. Messages will be saved as drafts until you reconnect."}
                   </span>
                 </div>
-                <Button
-                  variant='ghost'
+                <button
                   type='button'
                   onClick={refreshConnection}
                   disabled={isReconnecting}
@@ -1073,12 +1072,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 cursor-wait'
                       : 'text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900 hover:bg-amber-200 dark:hover:bg-amber-800'
                   }`}
-                  trackId='reconnect_zero'
+                  data-ph-capture-attribute-track-id='reconnect_zero'
                   data-track-category='CHAT_INPUT'
                   data-track-name='RECONNECT_ZERO'
                 >
                   {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
-                </Button>
+                </button>
               </div>
             )}
             {isReconnected && (

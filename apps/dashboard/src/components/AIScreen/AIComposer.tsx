@@ -36,7 +36,7 @@ import { ModelThinkingSelector, formatModelLabel } from './ModelThinkingSelector
 import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
-import { Button } from '../ui/Button/Button';
+
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
@@ -959,9 +959,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   <Square className='h-2.5 w-2.5 fill-current' aria-hidden strokeWidth={0} />
                 </button>
               ) : (
-                <Button
-                  variant='ghost'
-                  trackId='ai_composer_send'
+                <button
+                  data-ph-capture-attribute-track-id='ai_composer_send'
                   type='submit'
                   disabled={!canSend}
                   aria-label='Send'
@@ -973,7 +972,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   )}
                 >
                   <ArrowUp className='h-4 w-4' aria-hidden strokeWidth={2.25} />
-                </Button>
+                </button>
               )}
             </div>
           </div>

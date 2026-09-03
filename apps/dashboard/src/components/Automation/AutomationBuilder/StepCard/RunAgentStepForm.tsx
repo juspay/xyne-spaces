@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Sparkles, X } from 'lucide-react';
-import { Button } from '../../../ui/Button/Button';
+
 import { Combobox } from '../../../ui/Combobox/Combobox';
 import { AutomationRichTextField } from '../SchemaForm/AutomationRichTextField';
 import { SchemaJsonEditor, type SchemaTree } from '../SchemaForm/SchemaJsonEditor';
@@ -141,10 +141,9 @@ export function RunAgentStepForm({
         ) : agentsError ? (
           <div className='flex items-center gap-2 text-xs text-red-600'>
             <span>Couldn&apos;t reach claw — agents unavailable.</span>
-            <Button
+            <button
               type='button'
-              variant='ghost'
-              trackId='run_agent_step_agents_retry'
+              data-ph-capture-attribute-track-id='run_agent_step_agents_retry'
               data-track-category='automation-builder'
               data-track-name='run-agent-step-agents-retry'
               onClick={() => {
@@ -153,7 +152,7 @@ export function RunAgentStepForm({
               className='underline hover:no-underline'
             >
               Retry
-            </Button>
+            </button>
           </div>
         ) : (
           <Combobox
