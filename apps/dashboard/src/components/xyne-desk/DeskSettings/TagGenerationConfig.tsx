@@ -21,6 +21,7 @@ import type {
 } from '../../../api/tagsConfigApi';
 import { TestClassificationForm } from './TestClassificationForm';
 import { TagChip, CategoryLabel } from '../../tags/TagsBadge';
+import { Button } from '../../ui/Button/Button';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -383,16 +384,19 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   >
                     <Pencil size={14} />
                   </button>
-                  <button
+                  <Button
                     type='button'
-                    className='text-desk-muted hover:text-destructive'
+                    variant='ghost'
+                    size='icon'
+                    trackId='delete_tag_category'
+                    className='size-auto p-0 text-desk-muted hover:bg-transparent hover:text-destructive'
                     onClick={() => void handleDelete(name)}
                     disabled={editingName !== null || isSaving}
                     data-track-category='DeskSettings'
                     data-track-name='DeleteTagCategory'
                   >
                     <Trash2 size={14} />
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -606,16 +610,18 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
 
             {/* Save / Cancel */}
             <div className='flex items-center gap-2'>
-              <button
+              <Button
                 type='button'
-                className='rounded-[10px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50'
+                variant='ghost'
+                trackId='save_tag_category'
+                className='h-auto rounded-[10px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-desk-accent disabled:opacity-50'
                 onClick={() => void handleSave()}
                 disabled={fieldDisabled}
                 data-track-category='DeskSettings'
                 data-track-name='SaveTagCategory'
               >
                 Save
-              </button>
+              </Button>
               <button
                 type='button'
                 className='rounded-[10px] border border-border px-3 py-1.5 text-sm font-medium text-foreground'

@@ -267,6 +267,27 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
 }
 
 /** Snapshot for shutdown/drain forensics — one line per still-active run. */
+/**
+ * `read-app-file` rides on `create-app` selection.
+ *
+ * The two are one feature. `create-app` writes a project but hands back only a
+ * manifest — file paths, never contents — so without the read half an
+ * incremental update is authored from memory, which is how earlier features get
+ * silently dropped. Registering a new tool does NOT add it to agents that
+ * already have a saved `tools.custom` list, so fractal-agent held `create-app`
+ * while never being offered its reader (observed 2026-09-02: an explicit "read
+ * the code and tell me…" turn made zero tool calls and answered from context).
+ *
+ * Pairing at resolution time rather than per-agent means no saved selection has
+ * to be migrated and no new agent can be configured into the same half-state.
+ * Mirrors the sandbox → playwright hoist below.
+ */
+function expandCustomSelection(custom: string[] | undefined): Set<string> {
+  const selected = new Set(custom ?? []);
+  if (selected.has("create-app")) selected.add("read-app-file");
+  return selected;
+}
+
 export function describeActiveRuns(): Array<{ sessionId: string; agentSlug: string; userId: string; ageS: number }> {
   const now = Date.now();
   return [...activeRuns.entries()].map(([sessionId, a]) => ({
@@ -1017,8 +1038,16 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
           : processTaskError !== undefined
             ? String(processTaskError)
             : "Run ended without emitting a result (likely session-locked or silent early-return — check claw logs for this sessionId)";
-        const status: "completed" | "failed" | "cancelled" = processTaskError ? "failed" : "completed";
-        emitter.forceDone(sessionId, status, reason);
+        // Reaching here means the emitter never wrote a done frame — the run
+        // produced NO result. That is a failure whether or not something was
+        // thrown: a loop that gives up after every LLM turn 429s throws
+        // nothing, yet used to finalize as "completed" with a zero-length
+        // answer. Eight consecutive runs reported success that way on
+        // 2026-09-02 while the LiteLLM key was rate-limited, which is why the
+        // outage read as "the agent silently does nothing" for hours. The
+        // `reason` string above already describes a failure; the status now
+        // agrees with it.
+        emitter.forceDone(sessionId, "failed", reason);
       }
       const terminal = emitter.terminalPayload();
       if (terminal && emitter.deliveryFailed() && typeof callbackUrl === "string" && callbackUrl.trim()) {
@@ -2544,7 +2573,7 @@ async function processTask(
       if (!cfg) return tools;
       const allowedSubagents = new Set(cfg.subagents ?? []);
       const allowedDirect = cfg.direct ?? [];
-      const allowedCustom = new Set(cfg.custom ?? []);
+      const allowedCustom = expandCustomSelection(cfg.custom);
       const allowedGatewayServices = new Set(cfg.gateway ?? []);
       return tools.filter((t) => {
         if (sets.subagentTools.some((s) => s.name === t.name)) {
@@ -2818,7 +2847,7 @@ async function processTask(
     if (toolsConfigEarly) {
       const allowedSubagents = new Set(toolsConfigEarly.subagents ?? []);
       const allowedDirect = toolsConfigEarly.direct ?? [];
-      const allowedCustom = new Set(toolsConfigEarly.custom ?? []);
+      const allowedCustom = expandCustomSelection(toolsConfigEarly.custom);
       const allowedGatewayServices = new Set(toolsConfigEarly.gateway ?? []);
 
       allTools = allTools.filter((t) => {
@@ -3244,9 +3273,17 @@ async function processTask(
       eventType === "artifact_app" || (conversationId?.startsWith("app_") ?? false);
     if (isArtifactAppRun) {
       const before = allTools.length;
-      allTools = allTools.filter((t) => t.name !== "create-app" && t.name !== "schedule-task");
+      // read-app-file goes with create-app: it is keyed by conversation, and an
+      // app-invoked run carries the `app_` conversation of the app itself, so
+      // leaving it in would let an app read its own source back.
+      allTools = allTools.filter(
+        (t) =>
+          t.name !== "create-app" && t.name !== "read-app-file" && t.name !== "schedule-task",
+      );
       if (allTools.length !== before) {
-        log("Artifact-app run — create-app + schedule-task removed (self-replication ban)");
+        log(
+          "Artifact-app run — create-app + read-app-file + schedule-task removed (self-replication ban)",
+        );
       }
     }
 

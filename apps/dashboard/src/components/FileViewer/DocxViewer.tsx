@@ -4,6 +4,7 @@ import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
 import { useDomSearch } from './search';
+import { Button } from '../ui/Button/Button';
 
 /**
  * Standard US Letter page width in pixels at 96 DPI.
@@ -135,15 +136,17 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) =>
           <div className='bg-red-100 dark:bg-red-900 p-4 rounded shadow'>
             <p className='text-red-700 dark:text-red-300 font-semibold'>Error loading document</p>
             <p className='text-red-600 dark:text-red-400 text-sm'>{error}</p>
-            <button
+            <Button
               onClick={() => void loadDocument()}
+              variant='ghost'
               className='mt-2 px-3 py-1 bg-red-600 dark:bg-red-700 text-white text-sm rounded hover:bg-red-700 dark:hover:bg-red-600 transition-colors'
               data-track-category='FileViewer'
               data-track-name='RETRY_LOAD_DOCUMENT'
               data-track-metadata={JSON.stringify({ fileType: 'docx', source })}
+              trackId='retry_load_document'
             >
               Retry
-            </button>
+            </Button>
           </div>
         </div>
       )}

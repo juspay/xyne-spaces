@@ -7,6 +7,12 @@ import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.uti
 interface UpcomingCallActionsMenuItemsProps {
   call: Call;
   isOwner: boolean;
+  /**
+   * Whether to offer Edit. Defaults to `isOwner`; callers pass true for a participant of
+   * a direct call, who opens the edit modal restricted to the invite list. Delete stays
+   * owner-only regardless.
+   */
+  canEdit?: boolean;
   onEdit?: (() => void) | undefined;
   onCancel?: (() => void) | undefined;
 }
@@ -19,6 +25,7 @@ interface UpcomingCallActionsMenuItemsProps {
 export function UpcomingCallActionsMenuItems({
   call,
   isOwner,
+  canEdit = isOwner,
   onEdit,
   onCancel,
 }: UpcomingCallActionsMenuItemsProps): React.JSX.Element {
@@ -44,7 +51,7 @@ export function UpcomingCallActionsMenuItems({
         <Copy className='size-4' />
         Copy Link
       </DropdownMenuItem>
-      {isOwner && onEdit && (
+      {canEdit && onEdit && (
         <DropdownMenuItem
           onClick={e => {
             e.stopPropagation();

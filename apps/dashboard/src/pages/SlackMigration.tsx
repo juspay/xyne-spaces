@@ -817,6 +817,7 @@ export default function SlackMigration(): React.JSX.Element {
                         <Button
                           disabled={busy || unreachable || !token.trim()}
                           loading={busy}
+                          trackId='slack_migration_submit_dm'
                           onClick={() =>
                             void run(() => slackMigrationApi.submitDm(token.trim())).then(ok => {
                               if (ok) setToken('');
@@ -913,6 +914,7 @@ export default function SlackMigration(): React.JSX.Element {
                         loading={busy}
                         data-track-category='SLACK_MIGRATION'
                         data-track-name='SUBMIT_CHANNEL_MIGRATION'
+                        trackId='slack_migration_submit_channel'
                         onClick={() =>
                           void run(() => slackMigrationApi.submitChannel(channel)).then(ok => {
                             if (ok)
@@ -1023,6 +1025,7 @@ function IngestionControl({
               variant='outline'
               size='sm'
               disabled={busy}
+              trackId='slack_migration_stop_ingestion'
               onClick={() => void run(() => slackMigrationApi.stopIngestion())}
               data-track-category='SLACK_MIGRATION'
               data-track-name='STOP_INGESTION'
@@ -1034,6 +1037,7 @@ function IngestionControl({
             <Button
               size='sm'
               disabled={busy}
+              trackId='slack_migration_start_ingestion'
               onClick={() => void run(() => slackMigrationApi.startIngestion())}
               data-track-category='SLACK_MIGRATION'
               data-track-name='START_INGESTION'
@@ -1077,6 +1081,7 @@ function OwnerActions({
           size='sm'
           disabled={busy}
           loading={pending === 'resume'}
+          trackId='slack_migration_resume_own'
           onClick={() => act('resume', () => slackMigrationApi.resumeMine(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='RESUME_OWN_JOB'
@@ -1091,6 +1096,7 @@ function OwnerActions({
           size='sm'
           disabled={busy}
           loading={pending === 'remove'}
+          trackId='slack_migration_remove_own'
           onClick={() => act('remove', () => slackMigrationApi.removeMine(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='DELETE_OWN_JOB'
@@ -1128,6 +1134,7 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'approve'}
+          trackId='slack_migration_approve'
           onClick={() => act('approve', () => slackMigrationApi.approve(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='APPROVE_JOB'
@@ -1142,6 +1149,7 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'stop'}
+          trackId='slack_migration_stop'
           onClick={() => act('stop', () => slackMigrationApi.stop(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='STOP_JOB'
@@ -1156,6 +1164,7 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'resume'}
+          trackId='slack_migration_resume_admin'
           onClick={() => act('resume', () => slackMigrationApi.resume(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='RESUME_JOB'
@@ -1169,6 +1178,7 @@ function AdminActions({
         size='sm'
         disabled={busy}
         loading={pending === 'remove'}
+        trackId='slack_migration_remove_admin'
         onClick={() => act('remove', () => slackMigrationApi.remove(job.id))}
         data-track-category='SLACK_MIGRATION'
         data-track-name='DELETE_JOB'

@@ -1569,6 +1569,9 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+  // Mailbox folders are email-only, so other desk types get no folder filter on their list.
+  const selectedChannelHasMailboxFolders =
+    sortedEmailChannels.find(c => c.id === selectedChannelId)?.type === ChannelType.EMAIL;
   // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
   const canExploreTopics =
     isSelectedChannelJoined &&
@@ -2341,7 +2344,10 @@ const SupportScreen = (): ReactElement => {
                   className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
                 };
     const isJoined = joinedChannelIds.has(c.id);
-    const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
+    // Labels apply to email and app desks; mailbox folders (Inbox / Starred / Spam /
+    // Drafts / Sent) stay email-only. Both share this one expandable subtree.
+    const hasMailboxFolders = c.type === ChannelType.EMAIL;
+    const canExpandDesk = isJoined && (hasMailboxFolders || c.type === ChannelType.APP);
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -2423,30 +2429,34 @@ const SupportScreen = (): ReactElement => {
         </div>
         {isExpanded && (
           <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-1'>
-            <DeskMailboxSidebar
-              activeFolder={
-                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
-                  ? selectedFolder.key
-                  : null
-              }
-              onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
-            />
-            <DeskDraftSubtree
-              activeFolder={
-                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
-                  ? selectedFolder.key === 'drafts'
-                    ? 'userDrafts'
-                    : selectedFolder.key === 'sent'
-                      ? 'userSent'
+            {hasMailboxFolders && (
+              <>
+                <DeskMailboxSidebar
+                  activeFolder={
+                    selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                      ? selectedFolder.key
                       : null
-                  : null
-              }
-              // Drafts and Sent are both folders on the ticket list (reply drafts / sent
-              // emails roll up to their tickets); route them through openMailbox for the
-              // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
-              onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
-              onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
-            />
+                  }
+                  onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
+                />
+                <DeskDraftSubtree
+                  activeFolder={
+                    selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                      ? selectedFolder.key === 'drafts'
+                        ? 'userDrafts'
+                        : selectedFolder.key === 'sent'
+                          ? 'userSent'
+                          : null
+                      : null
+                  }
+                  // Drafts and Sent are both folders on the ticket list (reply drafts / sent
+                  // emails roll up to their tickets); route them through openMailbox for the
+                  // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
+                  onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
+                  onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
+                />
+              </>
+            )}
             <DeskLabelsSidebar
               channelId={c.id}
               isMember={isJoined}
@@ -3760,7 +3770,11 @@ const SupportScreen = (): ReactElement => {
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
-                        mailboxFolder={selectedLabel ? undefined : selectedFolder.key}
+                        mailboxFolder={
+                          selectedLabel || !selectedChannelHasMailboxFolders
+                            ? undefined
+                            : selectedFolder.key
+                        }
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,
@@ -3948,6 +3962,7 @@ const SupportScreen = (): ReactElement => {
           onOpenChange={setAutoLabelWizardOpen}
           channelId={selectedChannelId}
           isMember={isSelectedChannelJoined}
+          showKeepInInbox={selectedChannelHasMailboxFolders}
         />
       )}
 
