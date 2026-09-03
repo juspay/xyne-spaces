@@ -3,8 +3,9 @@ import { db, readReplicaDb } from '@/database/client';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { OPEN_STATUSES } from '@/utils/etaNotificationUtils';
 import { Prisma } from '@prisma/client';
+import { config } from '@/config/env';
 
-const BATCH_SIZE = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SIZE || '15', 10);
+const BATCH_SIZE = config.stageEtaDeadlineBatchSize;
 const BATCH_SLEEP_MS = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SLEEP_MS || '1000', 10);
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
