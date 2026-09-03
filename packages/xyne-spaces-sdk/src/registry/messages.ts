@@ -9,7 +9,16 @@
  */
 
 import { op, api } from './types.js';
-import type { Message, MessageType } from '../types/index.js';
+import type {
+  DelayedMessage,
+  DelayedMessageStatus,
+  DraftMessage,
+  Message,
+  MessageAttachment,
+  MessageType,
+  Nudge,
+  NudgeState,
+} from '../types/index.js';
 
 /** Page cursor for the user's sent-message history. */
 export interface MessageCursor {
@@ -124,7 +133,7 @@ export const messagesOperations = {
   /**
    * Nudges attached to a message.
    */
-  listNudges: op<{ messageId: string; states?: string[] }, unknown[]>('messages.listNudges', 'query'),
+  listNudges: op<{ messageId: string; states?: NudgeState[] }, Nudge[]>('messages.listNudges', 'query'),
 
   // ----- Writes -----
 
@@ -187,7 +196,7 @@ export const messagesOperations = {
   /**
    * The current user's saved drafts.
    */
-  listDrafts: op<{ limit?: number }, unknown[]>('messages.listDrafts', 'query'),
+  listDrafts: op<{ limit?: number }, DraftMessage[]>('messages.listDrafts', 'query'),
 
   /**
    * Edit a draft's content.
@@ -209,7 +218,7 @@ export const messagesOperations = {
   /**
    * The current user's scheduled messages.
    */
-  listScheduled: op<void, unknown[]>('messages.listScheduled', 'query'),
+  listScheduled: op<void, DelayedMessage[]>('messages.listScheduled', 'query'),
 
   /**
    * Schedule a message for a future time.
@@ -249,12 +258,12 @@ export const messagesOperations = {
   /**
    * Attachments by id.
    */
-  getAttachments: op<{ attachmentIds: string[] }, unknown[]>('messages.getAttachments', 'query'),
+  getAttachments: op<{ attachmentIds: string[] }, MessageAttachment[]>('messages.getAttachments', 'query'),
 
   /**
    * Attachments on the message that started a thread.
    */
-  listAttachmentsForThread: op<{ initialMessageId: string }, unknown[]>('messages.listAttachmentsForThread', 'query'),
+  listAttachmentsForThread: op<{ initialMessageId: string }, MessageAttachment[]>('messages.listAttachmentsForThread', 'query'),
 
   /**
    * Every attachment shared in a channel, newest first.
@@ -271,12 +280,12 @@ export const messagesOperations = {
       limit?: number;
       start?: { attachementId: string; createdAt: number };
       direction?: 'forward' | 'backward';
-    }, unknown[]>('messages.listChannelAttachments', 'query'),
+    }, MessageAttachment[]>('messages.listChannelAttachments', 'query'),
 
   /**
    * Scheduled messages, a page at a time, optionally filtered by status.
    */
-  listScheduledPaginated: op<{ limit?: number; statuses?: string[]; start?: { id: string; scheduledFor: number } }, unknown[]>('messages.listScheduledPaginated', 'query'),
+  listScheduledPaginated: op<{ limit?: number; statuses?: DelayedMessageStatus[]; start?: { id: string; scheduledFor: number } }, DelayedMessage[]>('messages.listScheduledPaginated', 'query'),
 
   /**
    * Attach files to a draft.

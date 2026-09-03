@@ -177,7 +177,12 @@ for (const [typeName, file, constName] of [
 function zeroTables() {
   const src = readFileSync(join(repoRoot, 'packages/shared/src/zero/schema.ts'), 'utf8');
   const tables = new Map();
-  for (const m of src.matchAll(/export const \w+ = table\(['"]([a-z_0-9]+)['"]\)\s*\n?\s*\.columns\(\{/g)) {
+  // A table declaration may carry a trailing comment before `.columns({` —
+  // `table('stage_transitions') // Prisma: StageTransition`. Without allowing
+  // for it the table is invisible here, and every interface mirroring it goes
+  // unchecked.
+  const decl = /export const \w+ = table\(\s*['"]([a-z_0-9]+)['"]\s*(?:\/\*[\s\S]*?\*\/\s*)?\)\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/|\s)*\.columns\(\{/g;
+  for (const m of src.matchAll(decl)) {
     const open = src.indexOf('{', m.index + m[0].length - 1);
     const end = matchBracketIn(src, open);
     const cols = new Set();
@@ -259,6 +264,65 @@ const ENTITY_TABLES = {
   Canvas: 'canvases',
   Call: 'calls',
   Activity: 'activities',
+  MessageAttachment: 'message_attachments',
+  ProjectTag: 'project_tags',
+  TicketFieldDefinition: 'ticket_entity_mappings',
+  Application: 'applications',
+  Nudge: 'surface_nudges',
+  Dashboard: 'dashboards',
+  DashboardQueryMapping: 'dashboard_queries_mapping',
+  UserGroup: 'user_groups',
+  UserGroupMember: 'user_group_mappings',
+  UserAssignmentState: 'user_assignment_states',
+  UserWorkloadMapping: 'user_workload_mappings',
+  UserExpertiseMapping: 'user_expertise_mappings',
+  Bookmark: 'bookmarks',
+  Workflow: 'workflows',
+  SavedView: 'saved_user_configurations',
+  CollectionPermission: 'collection_permissions',
+  ConversationLabel: 'conversation_labels',
+  ConversationLabelMapping: 'conversation_label_mappings',
+  UserPreferences: 'user_preferences',
+  FormContextMapping: 'forms_context_mapping',
+  ChannelBoardMapping: 'channel_board_mappings',
+  StageTransition: 'stage_transitions',
+  BoardSlaPolicy: 'board_sla_policies',
+  BoardComplexityScore: 'board_complexity_scores',
+  Rca: 'rcas',
+  ReleaseEvent: 'release_events',
+  ApplicationReleaseTicket: 'application_release_tickets',
+  ReleaseChange: 'release_change_types',
+  CustomEmoji: 'custom_emojis',
+  Repo: 'repos',
+  SdlcTrack: 'sdlc_tracks',
+  LookupValue: 'lookup_values',
+  Merchant: 'merchants',
+  TicketTag: 'ticket_tags',
+  ClassificationMapping: 'classification_mappings',
+  SummaryTemplate: 'summary_templates',
+  RecurringCallSeries: 'recurring_call_series',
+  Email: 'emails',
+  Workspace: 'workspaces',
+  Organization: 'organizations',
+  WorkspaceOrganization: 'workspace_organizations',
+  OrgMember: 'org_members',
+  Role: 'roles',
+  AccessResource: 'resources',
+  ResourceAccess: 'resource_access',
+  Invitation: 'invitations',
+  App: 'apps',
+  InstalledApp: 'installed_apps',
+  DelayedMessage: 'delayed_messages',
+  DraftMessage: 'draft_messages',
+  EmailDraft: 'email_drafts',
+  ChannelStats: 'channel_stats',
+  Link: 'links',
+  TicketActivity: 'ticket_activities',
+  TicketAssignment: 'ticket_assignments',
+  TicketExport: 'ticket_exports',
+  TicketMailbox: 'ticket_user_mailbox',
+  SubTicketMapping: 'ticket_sub_ticket_mappings',
+  ReleaseAttribution: 'release_attributions',
 };
 
 const tables = zeroTables();

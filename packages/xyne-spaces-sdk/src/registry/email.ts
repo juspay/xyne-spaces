@@ -15,8 +15,11 @@
 import { op, firstOrNull } from './types.js';
 import type {
   ConversationLabel,
+  ConversationLabelMapping,
+  Email,
   EmailChannelPreference,
   EmailDraft,
+  EmailReadMarker,
   EmailSignature,
 } from '../types/index.js';
 
@@ -42,12 +45,12 @@ export const emailOperations = {
    * channel-membership gating rather than gating inside the query body. Same result
    * shape; the channel is now required.
    */
-  listForConversations: op<{ conversationIds: string[]; channelId: string; isMember?: boolean }, unknown[]>('email.listForConversations', 'query'),
+  listForConversations: op<{ conversationIds: string[]; channelId: string; isMember?: boolean }, Email[]>('email.listForConversations', 'query'),
 
   /**
    * Mail the current user has sent from a channel.
    */
-  listSent: op<{ channelId: string; limit?: number; start?: EmailCursor; scope?: string }, unknown[]>('email.listSent', 'query'),
+  listSent: op<{ channelId: string; limit?: number; start?: EmailCursor; scope?: string }, Email[]>('email.listSent', 'query'),
 
   /**
    * The current user's drafts in a channel.
@@ -101,7 +104,7 @@ export const emailOperations = {
   /**
    * Conversations carrying a given label.
    */
-  listConversationsByLabel: op<{ labelId: string }, unknown[]>('email.listConversationsByLabel', 'query'),
+  listConversationsByLabel: op<{ labelId: string }, ConversationLabelMapping[]>('email.listConversationsByLabel', 'query'),
 
   // ----- Drafts -----
 
@@ -113,9 +116,9 @@ export const emailOperations = {
       conversationId: string;
       channelId: string;
       draftContent?: string;
-      toRecipients?: unknown;
-      ccRecipients?: unknown;
-      bccRecipients?: unknown;
+      toRecipients?: string[];
+      ccRecipients?: string[];
+      bccRecipients?: string[];
       attachmentIds?: string[];
     }, void>('email.saveDraft', 'mutator'),
 
@@ -133,9 +136,9 @@ export const emailOperations = {
       subject?: string;
       fromAddress?: string;
       draftContent?: string;
-      toRecipients?: unknown;
-      ccRecipients?: unknown;
-      bccRecipients?: unknown;
+      toRecipients?: string[];
+      ccRecipients?: string[];
+      bccRecipients?: string[];
       attachmentIds?: string[];
     }, void>('email.saveComposeDraft', 'mutator'),
 
@@ -154,7 +157,7 @@ export const emailOperations = {
   /**
    * Mark several tickets read at once.
    */
-  bulkMarkAsRead: op<{ items: unknown[] }, void>('email.bulkMarkAsRead', 'mutator'),
+  bulkMarkAsRead: op<{ items: EmailReadMarker[] }, void>('email.bulkMarkAsRead', 'mutator'),
 
   /**
    * Mark several tickets unread.
@@ -193,7 +196,7 @@ export const emailOperations = {
       ownerUserId?: string;
       assigneeUserGroupId?: string;
       sendAsEmail?: boolean;
-      defaultCc?: unknown;
+      defaultCc?: string[];
       emailMergeMode?: string;
       twoStepSendEnabled?: boolean;
       autoDraftMode?: string;

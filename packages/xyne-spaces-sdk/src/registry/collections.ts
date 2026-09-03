@@ -11,7 +11,12 @@
  */
 
 import { op } from './types.js';
-import type { Collection, CollectionItem } from '../types/index.js';
+import type {
+  Collection,
+  CollectionItem,
+  CollectionPermission,
+  CollectionRole,
+} from '../types/index.js';
 
 export const collectionsOperations = {
   // ----- Reads -----
@@ -29,7 +34,7 @@ export const collectionsOperations = {
   /**
    * Who a collection is shared with — the user, group and channel grants on it.
    */
-  listPermissions: op<{ collectionId: string }, unknown[]>('collections.listPermissions', 'query'),
+  listPermissions: op<{ collectionId: string }, CollectionPermission[]>('collections.listPermissions', 'query'),
 
   /**
    * Files in a collection — latest versions only.
@@ -114,10 +119,10 @@ export const collectionsOperations = {
   grantPermission: op<{
       id: string;
       collectionId: string;
-      role: string;
-      canShare: boolean;
+      role: CollectionRole;
       userId?: string;
       userGroupId?: string;
+      channelId?: string;
     }, void>('collections.grantPermission', 'mutator'),
 
   /**

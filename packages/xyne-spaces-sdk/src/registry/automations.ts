@@ -10,6 +10,7 @@
  */
 
 import { op } from './types.js';
+import type { Workflow } from '../types/index.js';
 
 /** Page cursor for the workflow listing. */
 export interface WorkflowCursor {
@@ -23,17 +24,17 @@ export const automationsOperations = {
   /**
    * Every automation.
    */
-  list: op<void, unknown[]>('automations.list', 'query'),
+  list: op<void, Workflow[]>('automations.list', 'query'),
 
   /**
    * One automation.
    */
-  get: op<{ id: string }, unknown>('automations.get', 'query'),
+  get: op<{ id: string }, Workflow | null>('automations.get', 'query'),
 
   /**
    * Workflows, paginated. Automations are one workflow type among several.
    */
-  listWorkflows: op<{ limit?: number; start?: WorkflowCursor }, unknown[]>('automations.listWorkflows', 'query'),
+  listWorkflows: op<{ limit?: number; start?: WorkflowCursor }, Workflow[]>('automations.listWorkflows', 'query'),
 
   // ----- Authoring -----
 

@@ -10,6 +10,23 @@
  */
 
 import { op } from './types.js';
+import type {
+  AccessResource,
+  OrgRole,
+  App,
+  InstalledApp,
+  Invitation,
+  OrgMember,
+  Organization,
+  ResourceAccess,
+  ResourceAccessGrant,
+  ResourceAccessUpdate,
+  Role,
+  Workspace,
+  WorkspaceOrganization,
+  WorkspaceUpdate,
+  WorkspaceUserUpdate,
+} from '../types/index.js';
 
 /** Page cursor for the app listings, ordered by creation. */
 export interface AppCursor {
@@ -29,22 +46,22 @@ export const adminOperations = {
   /**
    * One workspace.
    */
-  getWorkspace: op<{ workspaceId: string }, unknown>('admin.getWorkspace', 'query'),
+  getWorkspace: op<{ workspaceId: string }, Workspace | null>('admin.getWorkspace', 'query'),
 
   /**
    * Organizations attached to a workspace.
    */
-  listWorkspaceOrgs: op<{ workspaceId: string }, unknown[]>('admin.listWorkspaceOrgs', 'query'),
+  listWorkspaceOrgs: op<{ workspaceId: string }, WorkspaceOrganization[]>('admin.listWorkspaceOrgs', 'query'),
 
   /**
    * Every active organization, for attaching to a workspace.
    */
-  listAvailableOrgs: op<void, unknown[]>('admin.listAvailableOrgs', 'query'),
+  listAvailableOrgs: op<void, Organization[]>('admin.listAvailableOrgs', 'query'),
 
   /**
    * Rename a workspace or change its settings.
    */
-  updateWorkspace: op<{ workspaceId: string; updates: unknown }, void>('admin.updateWorkspace', 'mutator'),
+  updateWorkspace: op<{ workspaceId: string; updates: WorkspaceUpdate }, void>('admin.updateWorkspace', 'mutator'),
 
   // ----- Organizations -----
 
@@ -75,17 +92,17 @@ export const adminOperations = {
   /**
    * Members of an organization.
    */
-  listOrgMembers: op<{ orgId: string }, unknown[]>('admin.listOrgMembers', 'query'),
+  listOrgMembers: op<{ orgId: string }, OrgMember[]>('admin.listOrgMembers', 'query'),
 
   /**
    * One org member.
    */
-  getOrgMember: op<{ memberId: string }, unknown>('admin.getOrgMember', 'query'),
+  getOrgMember: op<{ memberId: string }, OrgMember | null>('admin.getOrgMember', 'query'),
 
   /**
    * Add someone to an organization by email.
    */
-  addOrgMember: op<{ memberId: string; orgId: string; email: string; role: string }, void>('admin.addOrgMember', 'mutator'),
+  addOrgMember: op<{ memberId: string; orgId: string; email: string; role: OrgRole }, void>('admin.addOrgMember', 'mutator'),
 
   /**
    * Change an org member's role.
@@ -105,7 +122,7 @@ export const adminOperations = {
   /**
    * Change a user's workspace role.
    */
-  updateUserRole: op<{ workspaceId: string; userId: string; updates: unknown }, void>('admin.updateUserRole', 'mutator'),
+  updateUserRole: op<{ workspaceId: string; userId: string; updates: WorkspaceUserUpdate }, void>('admin.updateUserRole', 'mutator'),
 
   /**
    * Remove a user from a workspace.
@@ -117,7 +134,7 @@ export const adminOperations = {
   /**
    * Outstanding invitations.
    */
-  listInvitations: op<void, unknown[]>('admin.listInvitations', 'query'),
+  listInvitations: op<void, Invitation[]>('admin.listInvitations', 'query'),
 
   /**
    * Revoke an invitation.
@@ -129,12 +146,12 @@ export const adminOperations = {
   /**
    * Roles defined in the workspace.
    */
-  listRoles: op<{ limit?: number; start?: RoleCursor }, unknown[]>('admin.listRoles', 'query'),
+  listRoles: op<{ limit?: number; start?: RoleCursor }, Role[]>('admin.listRoles', 'query'),
 
   /**
    * One role.
    */
-  getRole: op<{ id: string }, unknown>('admin.getRole', 'query'),
+  getRole: op<{ id: string }, Role | null>('admin.getRole', 'query'),
 
   /**
    * Create a role.
@@ -161,22 +178,22 @@ export const adminOperations = {
   /**
    * Resources that can have access granted on them.
    */
-  listResources: op<void, unknown[]>('admin.listResources', 'query'),
+  listResources: op<void, AccessResource[]>('admin.listResources', 'query'),
 
   /**
    * A user's resource-level grants.
    */
-  listUserAccess: op<{ userId: string }, unknown[]>('admin.listUserAccess', 'query'),
+  listUserAccess: op<{ userId: string }, ResourceAccess[]>('admin.listUserAccess', 'query'),
 
   /**
    * Grant access to resources. Takes a batch.
    */
-  grantAccess: op<{ grants: unknown[] }, void>('admin.grantAccess', 'mutator'),
+  grantAccess: op<{ grants: ResourceAccessGrant[] }, void>('admin.grantAccess', 'mutator'),
 
   /**
    * Change existing grants. Takes a batch.
    */
-  updateAccess: op<{ updates: unknown[] }, void>('admin.updateAccess', 'mutator'),
+  updateAccess: op<{ updates: ResourceAccessUpdate[] }, void>('admin.updateAccess', 'mutator'),
 
   /**
    * Revoke grants by id.
@@ -188,17 +205,17 @@ export const adminOperations = {
   /**
    * Apps installed in the workspace.
    */
-  listInstalledApps: op<{ limit?: number; start?: AppCursor }, unknown[]>('admin.listInstalledApps', 'query'),
+  listInstalledApps: op<{ limit?: number; start?: AppCursor }, InstalledApp[]>('admin.listInstalledApps', 'query'),
 
   /**
    * Apps published by the organization.
    */
-  listOrgApps: op<{ orgId: string; limit?: number; start?: AppCursor }, unknown[]>('admin.listOrgApps', 'query'),
+  listOrgApps: op<{ orgId: string; limit?: number; start?: AppCursor }, App[]>('admin.listOrgApps', 'query'),
 
   /**
    * Apps available to install.
    */
-  listMarketplaceApps: op<{ limit?: number; start?: AppCursor }, unknown[]>('admin.listMarketplaceApps', 'query'),
+  listMarketplaceApps: op<{ limit?: number; start?: AppCursor }, App[]>('admin.listMarketplaceApps', 'query'),
 
   /**
    * Update an app's name, description, or webhook URL.

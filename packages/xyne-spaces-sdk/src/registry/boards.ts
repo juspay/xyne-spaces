@@ -8,7 +8,20 @@
  */
 
 import { op } from './types.js';
-import type { Board, FlowPlan, Stage, TicketPriority, TicketStatusV2 } from '../types/index.js';
+import type {
+  Board,
+  BoardComplexityScore,
+  BoardSlaPolicy,
+  ChannelBoardMapping,
+  FlowPlan,
+  FormContextMapping,
+  SavedView,
+  Stage,
+  StageTransition,
+  StageTransitionInput,
+  TicketPriority,
+  TicketStatusV2,
+} from '../types/index.js';
 
 /** A stage as accepted by `board.update`, which replaces the whole stage list. */
 export interface StageInput {
@@ -84,42 +97,42 @@ export const boardsOperations = {
    * the board hangs off its `board` relation. A channel can surface more than
    * one board; ordering is by when the mapping was made.
    */
-  listByChannel: op<{ channelId: string }, unknown[]>('boards.listByChannel', 'query'),
+  listByChannel: op<{ channelId: string }, ChannelBoardMapping[]>('boards.listByChannel', 'query'),
 
   /**
    * Allowed stage transitions on a non-linear board.
    */
-  listTransitions: op<{ boardId: string }, unknown[]>('boards.listTransitions', 'query'),
+  listTransitions: op<{ boardId: string }, StageTransition[]>('boards.listTransitions', 'query'),
 
   /**
    * Stage transitions across several boards.
    */
-  listTransitionsForBoards: op<{ boardIds: string[] }, unknown[]>('boards.listTransitionsForBoards', 'query'),
+  listTransitionsForBoards: op<{ boardIds: string[] }, StageTransition[]>('boards.listTransitionsForBoards', 'query'),
 
   /**
    * SLA policies on a board, one per priority.
    */
-  listSlaPolicies: op<{ boardId: string }, unknown[]>('boards.listSlaPolicies', 'query'),
+  listSlaPolicies: op<{ boardId: string }, BoardSlaPolicy[]>('boards.listSlaPolicies', 'query'),
 
   /**
    * SLA policies across several boards.
    */
-  listSlaPoliciesForBoards: op<{ boardIds: string[] }, unknown[]>('boards.listSlaPoliciesForBoards', 'query'),
+  listSlaPoliciesForBoards: op<{ boardIds: string[] }, BoardSlaPolicy[]>('boards.listSlaPoliciesForBoards', 'query'),
 
   /**
    * Complexity scores a user group has assigned to boards.
    */
-  listComplexityScores: op<{ userGroupId: string }, unknown[]>('boards.listComplexityScores', 'query'),
+  listComplexityScores: op<{ userGroupId: string }, BoardComplexityScore[]>('boards.listComplexityScores', 'query'),
 
   /**
    * Saved filter views on a board.
    */
-  listSavedViews: op<{ boardId: string }, unknown[]>('boards.listSavedViews', 'query'),
+  listSavedViews: op<{ boardId: string }, SavedView[]>('boards.listSavedViews', 'query'),
 
   /**
    * Form mappings for several boards.
    */
-  listFormMappings: op<{ boardIds: string[] }, unknown[]>('boards.listFormMappings', 'query'),
+  listFormMappings: op<{ boardIds: string[] }, FormContextMapping[]>('boards.listFormMappings', 'query'),
 
   // ----- Writes -----
 
@@ -156,8 +169,8 @@ export const boardsOperations = {
       resolutionHours: number;
       businessHoursOnly: boolean;
       timezone: string;
-      workdayStart: string;
-      workdayEnd: string;
+      workdayStart: number;
+      workdayEnd: number;
       isActive: boolean;
     }, void>('boards.upsertSlaPolicy', 'mutator'),
 
@@ -169,7 +182,7 @@ export const boardsOperations = {
   /**
    * Replace a non-linear board's transition graph.
    */
-  syncTransitions: op<{ boardId: string; transitions: unknown[] }, void>('boards.syncTransitions', 'mutator'),
+  syncTransitions: op<{ boardId: string; transitions: StageTransitionInput[] }, void>('boards.syncTransitions', 'mutator'),
 
   /**
    * Replace a flow board's plan — its nodes, groups, and decision routing.

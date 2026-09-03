@@ -10,7 +10,18 @@
  */
 
 import { op } from './types.js';
-import type { UserProfile } from '../types/index.js';
+import type {
+  Bookmark,
+  BookmarkEntityType,
+  ChannelFilterMode,
+  ChannelSortOrder,
+  NotificationLevel,
+  SavedConfigContextType,
+  SavedConfigVisibility,
+  SavedView,
+  UserPreferences,
+  UserProfile,
+} from '../types/index.js';
 
 export const preferencesOperations = {
   // ----- Reads -----
@@ -18,12 +29,12 @@ export const preferencesOperations = {
   /**
    * The current user's preference row.
    */
-  get: op<void, unknown>('preferences.get', 'query'),
+  get: op<void, UserPreferences | null>('preferences.get', 'query'),
 
   /**
    * The current user's bookmarks.
    */
-  listBookmarks: op<void, unknown[]>('preferences.listBookmarks', 'query'),
+  listBookmarks: op<void, Bookmark[]>('preferences.listBookmarks', 'query'),
 
   /**
    * Saved filter views a user created.
@@ -32,7 +43,7 @@ export const preferencesOperations = {
    * caller-scoped, the query has no `ctx` fallback, so it required an argument the
    * SDK never sent. Pass `me.id` from `sdk.users.me()` for your own views.
    */
-  listSavedViews: op<{ userId: string }, unknown[]>('preferences.listSavedViews', 'query'),
+  listSavedViews: op<{ userId: string }, SavedView[]>('preferences.listSavedViews', 'query'),
 
   // ----- Notification settings -----
 
@@ -41,8 +52,8 @@ export const preferencesOperations = {
    */
   setNotificationSettings: op<{
       id: string;
-      globalDesktopNotificationLevel?: string;
-      globalMobileNotificationLevel?: string;
+      globalDesktopNotificationLevel?: NotificationLevel;
+      globalMobileNotificationLevel?: NotificationLevel;
       threadReplyNotificationsEnabled?: boolean;
       channelWideMentionsEnabled?: boolean;
     }, void>('preferences.setNotificationSettings', 'mutator'),
@@ -57,8 +68,8 @@ export const preferencesOperations = {
    */
   setChannelNotifications: op<{
       channelId: string;
-      desktopNotificationLevel?: string | null;
-      mobileNotificationLevel?: string | null;
+      desktopNotificationLevel?: NotificationLevel | null;
+      mobileNotificationLevel?: NotificationLevel | null;
       threadReplyNotificationsEnabled?: boolean | null;
       channelWideMentionsEnabled?: boolean | null;
     }, void>('preferences.setChannelNotifications', 'mutator'),
@@ -68,7 +79,7 @@ export const preferencesOperations = {
   /**
    * Set how channels are ordered in the sidebar.
    */
-  setChannelSortOrder: op<{ id: string; channelSortOrder: string }, void>('preferences.setChannelSortOrder', 'mutator'),
+  setChannelSortOrder: op<{ id: string; channelSortOrder: ChannelSortOrder }, void>('preferences.setChannelSortOrder', 'mutator'),
 
   /**
    * Set the filter and sort applied to one sidebar group.
@@ -78,8 +89,8 @@ export const preferencesOperations = {
   setSidebarGroup: op<{
       id: string;
       group: 'starred' | 'channels' | 'dms';
-      filterMode?: string;
-      sortOrder?: string;
+      filterMode?: ChannelFilterMode;
+      sortOrder?: ChannelSortOrder;
     }, void>('preferences.setSidebarGroup', 'mutator'),
 
   /**
@@ -129,17 +140,17 @@ export const preferencesOperations = {
   /**
    * Bookmark something.
    */
-  addBookmark: op<{ bookmarkId: string; entityId: string; entityType: string; metadata?: unknown }, void>('preferences.addBookmark', 'mutator'),
+  addBookmark: op<{ bookmarkId: string; entityId: string; entityType: BookmarkEntityType; metadata?: unknown }, void>('preferences.addBookmark', 'mutator'),
 
   /**
    * Remove a bookmark, or mark it done.
    */
-  removeBookmark: op<{ entityId: string; entityType: string; markAsDone?: boolean }, void>('preferences.removeBookmark', 'mutator'),
+  removeBookmark: op<{ entityId: string; entityType: BookmarkEntityType; markAsDone?: boolean }, void>('preferences.removeBookmark', 'mutator'),
 
   /**
    * Change a bookmark's metadata, such as a reminder time.
    */
-  updateBookmark: op<{ entityId: string; entityType: string; metadata: unknown }, void>('preferences.updateBookmark', 'mutator'),
+  updateBookmark: op<{ entityId: string; entityType: BookmarkEntityType; metadata: unknown }, void>('preferences.updateBookmark', 'mutator'),
 
   // ----- Saved views -----
 
@@ -149,10 +160,10 @@ export const preferencesOperations = {
   createSavedView: op<{
       id: string;
       name: string;
-      contextType: string;
+      contextType: SavedConfigContextType;
       contextId: string;
       channelId: string;
-      visibility: string;
+      visibility: SavedConfigVisibility;
       values: unknown;
     }, void>('preferences.createSavedView', 'mutator'),
 
@@ -163,7 +174,7 @@ export const preferencesOperations = {
       configId: string;
       values: unknown;
       name?: string;
-      visibility?: string;
+      visibility?: SavedConfigVisibility;
       isStarred?: boolean;
     }, void>('preferences.updateSavedView', 'mutator'),
 

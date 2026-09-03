@@ -1,46 +1,53 @@
 /**
  * Search Resource
  *
- * Provides methods for searching across the workspace.
- * Search delegates to Vespa via direct API calls.
+ * Full-text and filtered search across the workspace: messages, tickets, files,
+ * channels, calls, and users.
+ *
+ * Results are grouped by default. Pass `groupBy: ''` when you want one flat
+ * ranked list. Unknown query parameters are rejected rather than ignored, so a
+ * filter that is not documented here will fail the request.
  */
 
 import { Resource } from './base.js';
 import { searchOperations } from '../registry/search.js';
-import type { SearchResponse, SearchOptions } from '../types/index.js';
+import type { SearchOptions, SearchResponse, SearchSchemaName } from '../types/index.js';
 
 export class SearchResource extends Resource {
   /**
    * Search across messages, tickets, files, channels, calls, and users.
    *
-   * @param options - Search options
-   * @param options.q - Search query string
-   * @param options.type - Filter by result type(s)
-   * @param options.channelId - Filter to a specific channel
-   * @param options.limit - Maximum results to return
-   * @param options.offset - Offset for pagination
-   * @param options.sortBy - Field to sort by
-   * @param options.sortOrder - Sort order ('asc' or 'desc')
-   * @returns Search results
+   * @param options - What to search for and how to narrow it.
+   * @param options.q - Free text. Omit it to search by filters alone.
+   * @param options.type - Restrict to result types. Plural, e.g. `'messages'`.
+   * @param options.apps - Restrict to apps: `chat`, `ticket`, `user`, `file`.
+   * @param options.limit - Maximum results to return.
+   * @param options.offset - Where to start, for paging.
+   * @param options.orderBy - `'newest'`, `'oldest'`, or relevance by default.
+   * @param options.groupBy - Pass `''` for one flat ranked list instead of buckets.
+   * @param options.in - Restrict to these channels.
+   * @param options.from - Restrict to messages sent by these users.
+   * @returns Grouped results by default; a flat `results` array when `groupBy` is `''`.
    *
    * @example
-   * // Simple text search
    * const results = await sdk.search.query({ q: 'project update' });
    *
    * @example
-   * // Filter by type
+   * // One flat ranked list of the newest matching messages
    * const messages = await sdk.search.query({
    *   q: 'deployment',
-   *   type: 'message',
-   *   limit: 20
+   *   type: 'messages',
+   *   orderBy: 'newest',
+   *   groupBy: '',
+   *   limit: 20,
    * });
    *
    * @example
-   * // Search within a channel
-   * const channelResults = await sdk.search.query({
+   * // Narrow to a channel
+   * const inChannel = await sdk.search.query({
    *   q: 'bug',
-   *   channelId: 'channel-123',
-   *   type: ['message', 'ticket']
+   *   in: 'channel-123',
+   *   type: ['messages', 'tickets'],
    * });
    */
   query(options: SearchOptions = {}): Promise<SearchResponse> {
@@ -48,16 +55,17 @@ export class SearchResource extends Resource {
   }
 
   /**
-   * Get the schema for a search index.
-   * Useful for building advanced queries with field-specific filters.
+   * Get the raw field schema for one search index.
    *
-   * @param type - The index type to get schema for
-   * @returns Schema definition for the index
+   * Use it to discover which fields an index supports before building a
+   * field-specific query.
    *
+   * @param schema - Index to describe, e.g. `'chat_message'` or `'ticket'`.
+   * @returns The index definition as text, in Vespa's schema format.
    * @example
-   * const messageSchema = await sdk.search.getSchema('message');
+   * const definition = await sdk.search.getSchema('chat_message');
    */
-  getSchema(type: string): Promise<unknown> {
-    return this.call(searchOperations.getSchema, { type });
+  getSchema(schema: SearchSchemaName): Promise<string> {
+    return this.call(searchOperations.getSchema, { schema });
   }
 }

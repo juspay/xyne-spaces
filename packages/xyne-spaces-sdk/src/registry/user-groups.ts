@@ -6,6 +6,14 @@
  */
 
 import { op } from './types.js';
+import type {
+  RotationInterval,
+  UserAssignmentState,
+  UserExpertiseMapping,
+  UserGroup,
+  UserGroupMember,
+  UserWorkloadMapping,
+} from '../types/index.js';
 
 export const userGroupsOperations = {
   // ----- Reads -----
@@ -13,49 +21,49 @@ export const userGroupsOperations = {
   /**
    * Every user group.
    */
-  list: op<void, unknown[]>('userGroups.list', 'query'),
+  list: op<void, UserGroup[]>('userGroups.list', 'query'),
 
   /**
    * Groups by id.
    */
-  getMany: op<{ groupIds: string[] }, unknown[]>('userGroups.getMany', 'query'),
+  getMany: op<{ groupIds: string[] }, UserGroup[]>('userGroups.getMany', 'query'),
 
   /**
    * One group.
    */
-  get: op<{ userGroupId: string }, unknown>('userGroups.get', 'query'),
+  get: op<{ userGroupId: string }, UserGroup | null>('userGroups.get', 'query'),
 
   /**
    * Search groups by name.
    *
    * `limit` is required by the query and accepts null for no cap.
    */
-  search: op<{ query: string; limit?: number }, unknown[]>('userGroups.search', 'query'),
+  search: op<{ query: string; limit?: number }, UserGroup[]>('userGroups.search', 'query'),
 
   /**
    * Members of a group.
    */
-  listMembers: op<{ userGroupId: string }, unknown[]>('userGroups.listMembers', 'query'),
+  listMembers: op<{ userGroupId: string }, UserGroupMember[]>('userGroups.listMembers', 'query'),
 
   /**
    * Members across several groups.
    */
-  listMembersForGroups: op<{ userGroupIds: string[] }, unknown[]>('userGroups.listMembersForGroups', 'query'),
+  listMembersForGroups: op<{ userGroupIds: string[] }, UserGroupMember[]>('userGroups.listMembersForGroups', 'query'),
 
   /**
    * The current user's group memberships.
    */
-  listMine: op<void, unknown[]>('userGroups.listMine', 'query'),
+  listMine: op<void, UserGroupMember[]>('userGroups.listMine', 'query'),
 
   /**
    * On-call and availability state for a group's members.
    */
-  listAssignmentStates: op<{ userGroupId: string }, unknown[]>('userGroups.listAssignmentStates', 'query'),
+  listAssignmentStates: op<{ userGroupId: string }, UserAssignmentState[]>('userGroups.listAssignmentStates', 'query'),
 
   /**
    * Assignment states for several groups at once.
    */
-  listAssignmentStatesForGroups: op<{ userGroupIds: string[] }, unknown[]>('userGroups.listAssignmentStatesForGroups', 'query'),
+  listAssignmentStatesForGroups: op<{ userGroupIds: string[] }, UserAssignmentState[]>('userGroups.listAssignmentStatesForGroups', 'query'),
 
   /**
    * Per-member workload weightings for a group.
@@ -63,17 +71,17 @@ export const userGroupsOperations = {
    * Feeds the same assignment routing as `listAssignmentStates`: availability says
    * who *can* take work, this says how much each of them is carrying.
    */
-  listWorkloadMappings: op<{ userGroupId: string }, unknown[]>('userGroups.listWorkloadMappings', 'query'),
+  listWorkloadMappings: op<{ userGroupId: string }, UserWorkloadMapping[]>('userGroups.listWorkloadMappings', 'query'),
 
   /**
    * One user's assignment state across their groups.
    */
-  getAssignmentStateForUser: op<{ userId: string }, unknown[]>('userGroups.getAssignmentStateForUser', 'query'),
+  getAssignmentStateForUser: op<{ userId: string }, UserAssignmentState[]>('userGroups.getAssignmentStateForUser', 'query'),
 
   /**
    * Which members of a group have expertise on a board.
    */
-  listExpertise: op<{ userGroupId: string; boardId: string }, unknown[]>('userGroups.listExpertise', 'query'),
+  listExpertise: op<{ userGroupId: string; boardId: string }, UserExpertiseMapping[]>('userGroups.listExpertise', 'query'),
 
   // ----- Writes -----
 
@@ -142,7 +150,7 @@ export const userGroupsOperations = {
   toggleAutoRotation: op<{
       userGroupId: string;
       autoRotationEnabled: boolean;
-      rotationInterval?: number;
+      rotationInterval?: RotationInterval;
       rotationStartDate?: number;
     }, void>('userGroups.toggleAutoRotation', 'mutator'),
 } as const;

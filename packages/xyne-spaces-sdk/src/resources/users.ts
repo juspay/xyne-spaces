@@ -1,7 +1,7 @@
 /**
  * Users Resource
  *
- * Provides methods for user-related operations.
+ * The workspace directory, user profiles, and the identity this client acts as.
  */
 
 import { Resource } from './base.js';
@@ -13,13 +13,15 @@ export class UsersResource extends Resource {
   /**
    * Identify the user this client acts as.
    *
-   * An API key is an opaque encrypted blob, not a JWT, so there are no claims to
-   * read locally — this is a request. Cache it if you need it often; the identity
-   * behind a key does not change.
+   * This is a request rather than a local decode: `role` and `orgRole` are read
+   * from the database on each call, so they reflect the user's permissions right
+   * now. Cache the result if you need it often — the identity behind a credential
+   * does not change.
    *
-   * `keyExpiresAt` says when the key stops working, so a long-running process can
-   * rotate before it does rather than discovering the expiry mid-request.
+   * `keyExpiresAt` says when the credential stops working, so a long-running
+   * process can renew before it does rather than discovering expiry mid-request.
    *
+   * @returns The acting user, their workspace and org, and `keyExpiresAt`.
    * @example
    * const me = await sdk.users.me();
    * await sdk.tickets.upsertStageRequest({
@@ -33,12 +35,15 @@ export class UsersResource extends Resource {
   /**
    * List users in the workspace, one page at a time.
    *
-   * `getUsers` has no server-side cursor — it returns the whole workspace
-   * directory in one response — so this fetches that and windows it. Defaults
-   * to the first 100, which is also the cap. `updatedAt` still narrows the fetched set server-side
-   * before paging happens.
+   * The server returns the whole workspace directory in one response, so paging
+   * here windows that result rather than saving a round trip. `updatedAt`
+   * narrows the fetched set server-side before the window is applied.
    *
-   * @param options.updatedAt - Only return users updated after this timestamp (epoch ms)
+   * @param options - Paging window, plus an optional freshness filter.
+   * @param options.updatedAt - Only return users changed after this epoch-ms timestamp.
+   * @param options.limit - Page size. Defaults to 100, which is also the maximum.
+   * @param options.offset - Where the page starts.
+   * @returns One page of users, with `hasMore` and `nextOffset` for walking on.
    *
    * @example
    * const page = await sdk.users.list();
@@ -55,10 +60,15 @@ export class UsersResource extends Resource {
    * List users with basic fields only (no presence data), one page at a time.
    * More efficient when presence status is not needed.
    *
-   * Same shape as {@link list} and for the same reason: `getUsersV2` has no
-   * server-side cursor.
+   * Same shape as {@link list}, and windowed the same way for the same reason.
    *
-   * @param options.updatedAt - Only return users updated after this timestamp
+   * @param options - Paging window, plus an optional freshness filter.
+   * @param options.updatedAt - Only return users changed after this epoch-ms timestamp.
+   * @param options.limit - Page size. Defaults to 100, which is also the maximum.
+   * @param options.offset - Where the page starts.
+   * @returns One page of users, without presence data.
+   * @example
+   * const page = await sdk.users.listBasic({ limit: 50 });
    */
   async listBasic(options?: { updatedAt?: number } & PageOptions): Promise<Page<User>> {
     const all = await this.call(usersOperations.listBasic, { updatedAt: options?.updatedAt });
@@ -68,8 +78,8 @@ export class UsersResource extends Resource {
   /**
    * Get user profiles by their user IDs.
    *
-   * @param userIds - Array of user IDs to fetch profiles for
-   * @returns Array of user profiles
+   * @param userIds - Ids to fetch profiles for. Unknown ids are skipped.
+   * @returns One profile per user found.
    *
    * @example
    * const profiles = await sdk.users.getProfiles(['user-1', 'user-2']);
@@ -81,8 +91,8 @@ export class UsersResource extends Resource {
   /**
    * Get a single user's profile.
    *
-   * @param userId - The user ID
-   * @returns The user profile, or null if not found
+   * @param userId - Id of the user.
+   * @returns The profile, or `null` if the user has none.
    *
    * @example
    * const profile = await sdk.users.getProfile('user-123');

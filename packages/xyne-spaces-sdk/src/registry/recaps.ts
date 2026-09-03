@@ -12,7 +12,7 @@
  */
 
 import { op } from './types.js';
-import type { Recap } from '../types/index.js';
+import type { Nudge, NudgeState, Recap } from '../types/index.js';
 
 export const recapsOperations = {
   // ----- Reads -----
@@ -35,12 +35,12 @@ export const recapsOperations = {
   /**
    * Nudges attached to an entity such as a ticket.
    */
-  listEntityNudges: op<{ sourceId: string; states?: string[] }, unknown[]>('recaps.listEntityNudges', 'query'),
+  listEntityNudges: op<{ sourceId: string; states?: NudgeState[] }, Nudge[]>('recaps.listEntityNudges', 'query'),
 
   /**
    * Nudges behind aggregate counts, resolved by count-row id.
    */
-  listNudgesByCountRows: op<{ countRowIds: string[] }, unknown[]>('recaps.listNudgesByCountRows', 'query'),
+  listNudgesByCountRows: op<{ countRowIds: string[] }, Nudge[]>('recaps.listNudgesByCountRows', 'query'),
 
   // ----- Writes -----
 

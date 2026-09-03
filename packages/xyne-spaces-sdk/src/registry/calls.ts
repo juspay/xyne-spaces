@@ -10,7 +10,14 @@
  */
 
 import { op } from './types.js';
-import type { Call, CallParticipant } from '../types/index.js';
+import type {
+  Call,
+  CallType,
+  CallParticipant,
+  Conversation,
+  RecurringCallSeries,
+  SummaryTemplate,
+} from '../types/index.js';
 
 /** Page cursor for the call and recording listings, ordered by start time. */
 export interface CallCursor {
@@ -49,17 +56,17 @@ export const callsOperations = {
   /**
    * A recurring call series.
    */
-  getRecurringSeries: op<{ seriesId: string }, unknown>('calls.getRecurringSeries', 'query'),
+  getRecurringSeries: op<{ seriesId: string }, RecurringCallSeries | null>('calls.getRecurringSeries', 'query'),
+
+  /**
+   * One call-summary template by id.
+   */
+  getSummaryTemplate: op<{ templateId: string }, SummaryTemplate | null>('calls.getSummaryTemplate', 'query'),
 
   /**
    * Summary templates available for call notes.
    */
-  /**
-   * One call-summary template by id.
-   */
-  getSummaryTemplate: op<{ templateId: string }, unknown | null>('calls.getSummaryTemplate', 'query'),
-
-  listSummaryTemplates: op<void, unknown[]>('calls.listSummaryTemplates', 'query'),
+  listSummaryTemplates: op<void, SummaryTemplate[]>('calls.listSummaryTemplates', 'query'),
 
   // ----- Recordings -----
 
@@ -86,7 +93,7 @@ export const callsOperations = {
   /**
    * The thread attached to a call.
    */
-  getConversation: op<{ callId: string }, unknown>('calls.getConversation', 'query'),
+  getConversation: op<{ callId: string }, Conversation | null>('calls.getConversation', 'query'),
 
   // ----- Writes -----
 
@@ -100,7 +107,7 @@ export const callsOperations = {
   initiate: op<{
       callId: string;
       channelId: string;
-      callType: string;
+      callType: CallType;
       externalId: string;
       roomLink: string;
       targetUserIds?: string[];

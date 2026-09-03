@@ -10,7 +10,14 @@
  */
 
 import { op } from './types.js';
-import type { Form, FormEntityValue, FormField } from '../types/index.js';
+import type {
+  Form,
+  FormContextMapping,
+  FormContextType,
+  FormEntityType,
+  FormEntityValue,
+  FormField,
+} from '../types/index.js';
 
 /** A field as accepted by `form.update`, which replaces the whole field list. */
 export interface FormFieldInput {
@@ -57,7 +64,7 @@ export const formsOperations = {
    * `contextType` is BOARD | RELEASE_CHANGE | STAGE; `entityType` is
    * TICKET | SUB_TICKET | RELEASE_MIGRATION_FORM | RELEASE_ENV_FORM.
    */
-  listMappingsByContextIds: op<{ contextIds: string[]; contextType: string; entityType: string }, unknown[]>('forms.listMappingsByContextIds', 'query'),
+  listMappingsByContextIds: op<{ contextIds: string[]; contextType: FormContextType; entityType: FormEntityType }, FormContextMapping[]>('forms.listMappingsByContextIds', 'query'),
 
   /**
    * A form's fields, in sequence order.
@@ -67,12 +74,12 @@ export const formsOperations = {
   /**
    * Which form applies in a particular context.
    */
-  getMapping: op<{ contextId: string; contextType: string; entityType: string }, unknown>('forms.getMapping', 'query'),
+  getMapping: op<{ contextId: string; contextType: FormContextType; entityType: FormEntityType }, FormContextMapping | null>('forms.getMapping', 'query'),
 
   /**
    * Form mappings across several boards.
    */
-  listMappingsForBoards: op<{ boardIds: string[] }, unknown[]>('forms.listMappingsForBoards', 'query'),
+  listMappingsForBoards: op<{ boardIds: string[] }, FormContextMapping[]>('forms.listMappingsForBoards', 'query'),
 
   /**
    * The values submitted for one entity, e.g. a ticket.

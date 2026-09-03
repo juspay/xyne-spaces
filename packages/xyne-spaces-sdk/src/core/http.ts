@@ -125,6 +125,12 @@ export class HttpClient {
       // Handle empty responses (e.g., 204 No Content)
       if (!text) return undefined as T;
 
+      // Not every endpoint answers in JSON — a schema definition comes back as
+      // plain text. Parsing by content type keeps a malformed JSON body a real
+      // error instead of being silently handed back as a string.
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.includes('json')) return text as T;
+
       return JSON.parse(text) as T;
     } catch (error) {
       clearTimeout(timeoutId);

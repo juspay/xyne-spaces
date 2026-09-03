@@ -9,6 +9,19 @@
  */
 
 import { op } from './types.js';
+import type {
+  ApplicationReleaseTicket,
+  AttributionConfidence,
+  CoeStatus,
+  RcaStatus,
+  Severity,
+  FormEntityValue,
+  MessageAttachment,
+  Rca,
+  ReleaseChange,
+  ReleaseEvent,
+  Ticket,
+} from '../types/index.js';
 
 /** Page cursor for the RCA listing. */
 export interface RcaCursor {
@@ -22,52 +35,52 @@ export const incidentsOperations = {
   /**
    * Every RCA, most recent first.
    */
-  listRcas: op<{ limit?: number; start?: RcaCursor }, unknown[]>('incidents.listRcas', 'query'),
+  listRcas: op<{ limit?: number; start?: RcaCursor }, Rca[]>('incidents.listRcas', 'query'),
 
   /**
    * One RCA.
    */
-  getRca: op<{ rcaId: string }, unknown>('incidents.getRca', 'query'),
+  getRca: op<{ rcaId: string }, Rca | null>('incidents.getRca', 'query'),
 
   /**
    * Impacts recorded against an RCA.
    */
-  listImpactAttachments: op<{ impactId: string }, unknown[]>('incidents.listImpactAttachments', 'query'),
+  listImpactAttachments: op<{ impactId: string }, MessageAttachment[]>('incidents.listImpactAttachments', 'query'),
 
   /**
    * Attachments across several impacts.
    */
-  listAttachmentsForImpacts: op<{ impactIds: string[] }, unknown[]>('incidents.listAttachmentsForImpacts', 'query'),
+  listAttachmentsForImpacts: op<{ impactIds: string[] }, MessageAttachment[]>('incidents.listAttachmentsForImpacts', 'query'),
 
   /**
    * Release tickets.
    */
-  listReleaseTickets: op<void, unknown[]>('incidents.listReleaseTickets', 'query'),
+  listReleaseTickets: op<void, Ticket[]>('incidents.listReleaseTickets', 'query'),
 
   /**
    * Search release tickets.
    */
-  searchReleaseTickets: op<{ search?: string; limit?: number }, unknown[]>('incidents.searchReleaseTickets', 'query'),
+  searchReleaseTickets: op<{ search?: string; limit?: number }, Ticket[]>('incidents.searchReleaseTickets', 'query'),
 
   /**
    * Application release tickets for a release.
    */
-  listApplicationReleaseTickets: op<{ releaseId: string; limit?: number }, unknown[]>('incidents.listApplicationReleaseTickets', 'query'),
+  listApplicationReleaseTickets: op<{ releaseId: string; limit?: number }, ApplicationReleaseTicket[]>('incidents.listApplicationReleaseTickets', 'query'),
 
   /**
    * Changes bundled into a release.
    */
-  listReleaseChanges: op<{ releaseId: string }, unknown[]>('incidents.listReleaseChanges', 'query'),
+  listReleaseChanges: op<{ releaseId: string }, ReleaseChange[]>('incidents.listReleaseChanges', 'query'),
 
   /**
    * Form values captured against a release's changes.
    */
-  listReleaseChangeFormValues: op<{ releaseId: string }, unknown[]>('incidents.listReleaseChangeFormValues', 'query'),
+  listReleaseChangeFormValues: op<{ releaseId: string }, FormEntityValue[]>('incidents.listReleaseChangeFormValues', 'query'),
 
   /**
    * Change-log entries for a release.
    */
-  listReleaseChangeLog: op<{ releaseId: string }, unknown[]>('incidents.listReleaseChangeLog', 'query'),
+  listReleaseChangeLog: op<{ releaseId: string }, FormEntityValue[]>('incidents.listReleaseChangeLog', 'query'),
 
   // ----- RCA -----
 
@@ -78,10 +91,10 @@ export const incidentsOperations = {
       id: string;
       ticketId: string;
       title: string;
-      severity: string;
+      severity: Severity;
       bugTypeId: string;
       categoryTypeId: string;
-      status: string;
+      status: RcaStatus;
       ownerId?: string;
       summary?: string;
       rootCause?: string;
@@ -98,12 +111,12 @@ export const incidentsOperations = {
       title?: string;
       summary?: string;
       rootCause?: string;
-      severity?: string;
+      severity?: Severity;
       bugTypeId?: string;
       categoryTypeId?: string;
       issueCategoryId?: string;
       issueStartAt?: number;
-      status?: string;
+      status?: RcaStatus;
     }, void>('incidents.updateRca', 'mutator'),
 
   // ----- Impacts -----
@@ -134,7 +147,7 @@ export const incidentsOperations = {
       ownerId: string;
       actionTypeId: string;
       action: string;
-      status: string;
+      status: CoeStatus;
       dueDate?: number;
     }, void>('incidents.createAction', 'mutator'),
 
@@ -146,7 +159,7 @@ export const incidentsOperations = {
       ownerId?: string;
       actionTypeId?: string;
       action?: string;
-      status?: string;
+      status?: CoeStatus;
       dueDate?: number;
       completedAt?: number;
     }, void>('incidents.updateAction', 'mutator'),
@@ -165,7 +178,7 @@ export const incidentsOperations = {
       id: string;
       ticketId: string;
       releaseId: string;
-      confidence: number;
+      confidence: AttributionConfidence;
       releaseApplicationId?: string;
       rootCauseTicketId?: string;
     }, void>('incidents.createAttribution', 'mutator'),
@@ -178,7 +191,7 @@ export const incidentsOperations = {
       releaseId?: string;
       releaseApplicationId?: string;
       rootCauseTicketId?: string;
-      confidence?: number;
+      confidence?: AttributionConfidence;
     }, void>('incidents.updateAttribution', 'mutator'),
 
   /**
@@ -205,5 +218,5 @@ export const incidentsOperations = {
    * A release's event log, newest first. `FORM_SAVED` events are filtered out
    * server-side as noise.
    */
-  listReleaseEvents: op<{ releaseId: string; limit?: number }, unknown[]>('incidents.listReleaseEvents', 'query'),
+  listReleaseEvents: op<{ releaseId: string; limit?: number }, ReleaseEvent[]>('incidents.listReleaseEvents', 'query'),
 } as const;

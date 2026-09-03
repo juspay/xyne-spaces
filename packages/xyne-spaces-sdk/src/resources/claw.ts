@@ -28,6 +28,7 @@ export class ClawResource extends Resource {
   /**
    * List the agents this deployment can run.
    *
+   * @returns Available agents. Use an agent's `slug` to dispatch it.
    * @example
    * const agents = await sdk.claw.listAgents();
    * const slug = agents[0].slug;
@@ -42,6 +43,13 @@ export class ClawResource extends Resource {
    * Passing `channelId` also posts the agent's reply into that Spaces thread —
    * the one place the two services meet.
    *
+   * @param input - The agent to run and what to give it.
+   * @param input.agent - Agent slug, from {@link listAgents}.
+   * @param input.task - The task or prompt to send.
+   * @param input.context - Extra context prepended to the task.
+   * @param input.channelId - Post the reply into this channel or DM.
+   * @param input.conversationId - Continue an existing thread.
+   * @returns The session id, for {@link getRun}.
    * @example
    * const { sessionId } = await sdk.claw.run({ agent: 'ask-ai', task: 'Summarise today' });
    */
@@ -52,7 +60,11 @@ export class ClawResource extends Resource {
   /**
    * Read a run's current state, including its result once it has finished.
    *
-   * @throws {NotFoundError} if the session id is unknown
+   * @param sessionId - Session id returned by {@link run}.
+   * @returns The run, with `result` set once its `status` is terminal.
+   * @throws {NotFoundError} if the session id is unknown.
+   * @example
+   * const run = await sdk.claw.getRun('session-1');
    */
   getRun(sessionId: string): Promise<ClawRun> {
     return this.call(clawOperations.getRun, { sessionId });
@@ -65,6 +77,12 @@ export class ClawResource extends Resource {
    * nothing. A timeout stops the waiting, not the run: the `sessionId` in the
    * error message can still be passed to {@link getRun}.
    *
+   * @param input - Everything {@link run} takes, plus how long to wait.
+   * @param input.timeoutMs - Give up waiting after this long. Defaults to 5 minutes.
+   * @param input.onProgress - Called after each poll while the run is in flight.
+   * @param input.signal - Abort waiting. The run itself keeps going.
+   * @returns The finished run.
+   * @throws {SdkError} with code `timeout` if the wait elapses first.
    * @example
    * const run = await sdk.claw.runAndWait({ agent: 'ask-ai', task: 'Summarise today' });
    * console.log(run.status, run.result);

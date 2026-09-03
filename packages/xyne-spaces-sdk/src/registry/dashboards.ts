@@ -8,6 +8,7 @@
  */
 
 import { op } from './types.js';
+import type { Dashboard, DashboardLayoutUpdate } from '../types/index.js';
 
 export const dashboardsOperations = {
   // ----- Reads -----
@@ -15,12 +16,12 @@ export const dashboardsOperations = {
   /**
    * Every dashboard.
    */
-  list: op<void, unknown[]>('dashboards.list', 'query'),
+  list: op<void, Dashboard[]>('dashboards.list', 'query'),
 
   /**
    * One dashboard with its components.
    */
-  get: op<{ dashboardId: string }, unknown>('dashboards.get', 'query'),
+  get: op<{ dashboardId: string }, Dashboard | null>('dashboards.get', 'query'),
 
   // ----- Writes -----
 
@@ -40,7 +41,7 @@ export const dashboardsOperations = {
   /**
    * Move tiles around a dashboard.
    */
-  updateLayout: op<{ updates: unknown[] }, void>('dashboards.updateLayout', 'mutator'),
+  updateLayout: op<{ updates: DashboardLayoutUpdate[] }, void>('dashboards.updateLayout', 'mutator'),
 
   // ----- Saved queries -----
 

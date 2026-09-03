@@ -17,18 +17,30 @@ import {
 import { newId } from '../core/ids.js';
 import type {
   ConversationLabel,
+  ConversationLabelMapping,
+  Email,
   EmailChannelPreference,
   EmailDraft,
+  EmailReadMarker,
   EmailSignature,
 } from '../types/index.js';
 
 export class EmailResource extends Resource {
-  /** List the emails on several conversations at once. */
+  /**
+   * List the emails on several conversations at once.
+   *
+   * @param conversationIds - Threads to read.
+   * @param channelId - Desk channel they belong to.
+   * @param isMember - ACL hint; leave unset unless you know otherwise.
+   * @returns Emails across every thread named.
+   * @example
+   * const emails = await sdk.email.listForConversations(['conv-1'], 'channel-desk');
+   */
   listForConversations(
     conversationIds: string[],
     channelId: string,
     isMember?: boolean
-  ): Promise<unknown[]> {
+  ): Promise<Email[]> {
     return this.call(emailOperations.listForConversations, {
       conversationIds,
       channelId,
@@ -36,17 +48,34 @@ export class EmailResource extends Resource {
     });
   }
 
-  /** List mail the current user has sent from a channel. */
+  /**
+   * List mail the caller has sent from a channel.
+   *
+   * @param channelId - Desk channel to read.
+   * @param options.limit - Page size.
+   * @param options.start - Cursor from the previous page.
+   * @param options.scope - Narrow the listing, e.g. to one mailbox.
+   * @returns One page of sent mail, newest first.
+   * @example
+   * const sent = await sdk.email.listSent('channel-desk', { limit: 20 });
+   */
   listSent(
     channelId: string,
     options?: { limit?: number; start?: EmailCursor; scope?: string }
-  ): Promise<unknown[]> {
+  ): Promise<Email[]> {
     return this.call(emailOperations.listSent, { channelId, ...options });
   }
 
   // ----- Drafts -----
 
-  /** List the current user's drafts in a channel. */
+  /**
+   * List the caller's reply drafts in a channel.
+   *
+   * @param channelId - Desk channel to read.
+   * @returns Their drafts there.
+   * @example
+   * const drafts = await sdk.email.listDrafts('channel-desk');
+   */
   listDrafts(
     channelId: string,
     options?: { limit?: number; start?: EmailDraftCursor }
@@ -54,7 +83,15 @@ export class EmailResource extends Resource {
     return this.call(emailOperations.listDrafts, { channelId, ...options });
   }
 
-  /** Get the reply draft on a conversation, if there is one. */
+  /**
+   * Get the reply draft on a conversation.
+   *
+   * @param conversationId - Thread to read.
+   * @param channelId - Desk channel it belongs to.
+   * @returns The draft, or `null` if there is none.
+   * @example
+   * const draft = await sdk.email.getDraftForConversation('conv-1', 'channel-desk');
+   */
   getDraftForConversation(
     conversationId: string,
     channelId: string,
@@ -67,7 +104,14 @@ export class EmailResource extends Resource {
     });
   }
 
-  /** List compose drafts in a channel — those not yet tied to a conversation. */
+  /**
+   * List compose drafts in a channel — new mail not yet tied to a thread.
+   *
+   * @param channelId - Desk channel to read.
+   * @returns The caller's compose drafts.
+   * @example
+   * const drafts = await sdk.email.listComposeDrafts('channel-desk');
+   */
   listComposeDrafts(channelId: string): Promise<EmailDraft[]> {
     return this.call(emailOperations.listComposeDrafts, { channelId });
   }
@@ -77,8 +121,16 @@ export class EmailResource extends Resource {
    *
    * There is one reply draft per conversation, so saving again replaces it.
    *
-   * @returns The draft id
-   *
+   * @param data - The draft to save.
+   * @param data.id - Existing draft to overwrite. Generated if omitted.
+   * @param data.conversationId - Thread being replied to.
+   * @param data.channelId - Desk channel it belongs to.
+   * @param data.draftContent - Body, as HTML.
+   * @param data.toRecipients - Recipient addresses.
+   * @param data.ccRecipients - Copied addresses.
+   * @param data.bccRecipients - Blind-copied addresses.
+   * @param data.attachmentIds - Ids from `sdk.attachments.uploadDraft`.
+   * @returns The draft id.
    * @example
    * await sdk.email.saveDraft({
    *   conversationId: 'conv-1',
@@ -91,9 +143,9 @@ export class EmailResource extends Resource {
     conversationId: string;
     channelId: string;
     draftContent?: string;
-    toRecipients?: unknown;
-    ccRecipients?: unknown;
-    bccRecipients?: unknown;
+    toRecipients?: string[];
+    ccRecipients?: string[];
+    bccRecipients?: string[];
     attachmentIds?: string[];
   }): Promise<{ id: string }> {
     const id = data.id ?? newId();
@@ -104,8 +156,12 @@ export class EmailResource extends Resource {
   /**
    * Discard a conversation's reply draft.
    *
-   * Takes the conversation id, not the draft id — drafts are keyed by the
+   * Takes the conversation id, not the draft id — reply drafts are keyed by the
    * conversation they reply to.
+   *
+   * @param conversationId - Thread whose draft to discard.
+   * @example
+   * await sdk.email.deleteDraft('conv-1');
    */
   deleteDraft(conversationId: string): Promise<void> {
     return this.call(emailOperations.deleteDraft, { conversationId });
@@ -114,7 +170,23 @@ export class EmailResource extends Resource {
   /**
    * Create or replace a compose draft — a new email not yet tied to a thread.
    *
-   * @returns The draft id
+   * @param data - The draft to save.
+   * @param data.id - Existing draft to overwrite. Generated if omitted.
+   * @param data.channelId - Desk channel it belongs to.
+   * @param data.subject - Subject line.
+   * @param data.fromAddress - Address to send from.
+   * @param data.draftContent - Body, as HTML.
+   * @param data.toRecipients - Recipient addresses.
+   * @param data.ccRecipients - Copied addresses.
+   * @param data.bccRecipients - Blind-copied addresses.
+   * @param data.attachmentIds - Ids from `sdk.attachments.uploadDraft`.
+   * @returns The draft id.
+   * @example
+   * const { id } = await sdk.email.saveComposeDraft({
+   *   channelId: 'channel-desk',
+   *   subject: 'Refund update',
+   *   toRecipients: ['merchant@example.com'],
+   * });
    */
   async saveComposeDraft(data: {
     id?: string;
@@ -122,9 +194,9 @@ export class EmailResource extends Resource {
     subject?: string;
     fromAddress?: string;
     draftContent?: string;
-    toRecipients?: unknown;
-    ccRecipients?: unknown;
-    bccRecipients?: unknown;
+    toRecipients?: string[];
+    ccRecipients?: string[];
+    bccRecipients?: string[];
     attachmentIds?: string[];
   }): Promise<{ id: string }> {
     const id = data.id ?? newId();
@@ -132,14 +204,28 @@ export class EmailResource extends Resource {
     return { id };
   }
 
-  /** Discard a compose draft. */
+  /**
+   * Discard a compose draft.
+   *
+   * @param id - Id of the draft.
+   * @example
+   * await sdk.email.deleteComposeDraft('draft-1');
+   */
   deleteComposeDraft(id: string): Promise<void> {
     return this.call(emailOperations.deleteComposeDraft, { id });
   }
 
   // ----- Read state -----
 
-  /** Mark a desk ticket's mail read up to a given email. */
+  /**
+   * Mark a desk ticket's mail read up to a given email.
+   *
+   * @param data.id - Existing read marker to update. Generated if omitted.
+   * @param data.ticketId - Desk ticket being marked.
+   * @param data.lastReadEmailId - Most recent email the caller has read.
+   * @example
+   * await sdk.email.markAsRead({ ticketId: 'ticket-1', lastReadEmailId: 'email-9' });
+   */
   markAsRead(data: {
     id?: string;
     ticketId: string;
@@ -148,27 +234,49 @@ export class EmailResource extends Resource {
     return this.call(emailOperations.markAsRead, { ...data, id: data.id ?? newId() });
   }
 
-  /** Mark several tickets read at once. */
-  bulkMarkAsRead(items: unknown[]): Promise<void> {
+  /**
+   * Mark several desk tickets read at once.
+   *
+   * @param items - Each ticket with the last email read on it.
+   * @example
+   * await sdk.email.bulkMarkAsRead([{ id: 'email-9', ticketId: 'ticket-1' }]);
+   */
+  bulkMarkAsRead(items: EmailReadMarker[]): Promise<void> {
     return this.call(emailOperations.bulkMarkAsRead, { items });
   }
 
-  /** Mark several tickets unread. */
+  /**
+   * Mark several desk tickets unread.
+   *
+   * @param ticketIds - Tickets to mark.
+   * @example
+   * await sdk.email.bulkMarkAsUnread(['ticket-1', 'ticket-2']);
+   */
   bulkMarkAsUnread(ticketIds: string[]): Promise<void> {
     return this.call(emailOperations.bulkMarkAsUnread, { ticketIds });
   }
 
   // ----- Signatures -----
 
-  /** List the current user's signatures. */
+  /**
+   * List the caller's email signatures.
+   *
+   * @returns Their signatures, including which is the default.
+   * @example
+   * const signatures = await sdk.email.listSignatures();
+   */
   listSignatures(): Promise<EmailSignature[]> {
     return this.call(emailOperations.listSignatures, undefined);
   }
 
   /**
-   * Create a signature.
+   * Create an email signature.
    *
-   * @returns The signature id
+   * @param data.name - Display name for the signature.
+   * @param data.content - The signature body, as HTML.
+   * @returns The new signature's id.
+   * @example
+   * const { id } = await sdk.email.createSignature({ name: 'Support', content: '<p>Team</p>' });
    */
   async createSignature(data: { name: string; content: string }): Promise<{ id: string }> {
     const id = newId();
@@ -176,36 +284,79 @@ export class EmailResource extends Resource {
     return { id };
   }
 
-  /** Update a signature. */
+  /**
+   * Update a signature.
+   *
+   * @param id - Id of the signature.
+   * @param data.name - New display name.
+   * @param data.content - New body, as HTML.
+   * @example
+   * await sdk.email.updateSignature('sig-1', { name: 'Support', content: '<p>Team</p>' });
+   */
   updateSignature(id: string, data: { name: string; content: string }): Promise<void> {
     return this.call(emailOperations.updateSignature, { id, ...data });
   }
 
-  /** Delete a signature. */
+  /**
+   * Delete a signature.
+   *
+   * @param id - Id of the signature.
+   * @example
+   * await sdk.email.deleteSignature('sig-1');
+   */
   deleteSignature(id: string): Promise<void> {
     return this.call(emailOperations.deleteSignature, { id });
   }
 
-  /** Make a signature the default for new mail. */
+  /**
+   * Make a signature the default for new mail.
+   *
+   * @param id - Id of the signature.
+   * @example
+   * await sdk.email.setDefaultSignature('sig-1');
+   */
   setDefaultSignature(id: string): Promise<void> {
     return this.call(emailOperations.setDefaultSignature, { id });
   }
 
   // ----- Channel configuration -----
 
-  /** Get a channel's desk configuration. */
+  /**
+   * Get a channel's desk configuration.
+   *
+   * @param channelId - Desk channel to read.
+   * @returns Its configuration, or `null` if none has been set.
+   * @example
+   * const prefs = await sdk.email.getChannelPreference('channel-desk');
+   */
   getChannelPreference(channelId: string): Promise<EmailChannelPreference | null> {
     return this.call(emailOperations.getChannelPreference, { channelId });
   }
 
-  /** Update a channel's desk configuration. */
+  /**
+   * Update a channel's desk configuration.
+   *
+   * @param channelId - Desk channel to configure.
+   * @param data - Fields to change; omitted fields are left alone.
+   * @param data.ownerUserId - Who owns the desk.
+   * @param data.assigneeUserGroupId - Group new mail is routed to.
+   * @param data.sendAsEmail - Send replies as email rather than chat.
+   * @param data.defaultCc - Addresses copied on every reply.
+   * @param data.emailMergeMode - How incoming mail is merged into threads.
+   * @param data.twoStepSendEnabled - Require a confirmation before sending.
+   * @param data.autoDraftMode - When replies are drafted automatically.
+   * @param data.autoDraftAgentSlug - Agent that writes those drafts.
+   * @param data.metricsEnabled - Collect desk metrics for this channel.
+   * @example
+   * await sdk.email.setChannelPreference('channel-desk', { sendAsEmail: true });
+   */
   setChannelPreference(
     channelId: string,
     data: {
       ownerUserId?: string;
       assigneeUserGroupId?: string;
       sendAsEmail?: boolean;
-      defaultCc?: unknown;
+      defaultCc?: string[];
       emailMergeMode?: string;
       twoStepSendEnabled?: boolean;
       autoDraftMode?: string;
@@ -216,7 +367,22 @@ export class EmailResource extends Resource {
     return this.call(emailOperations.setChannelPreference, { channelId, ...data });
   }
 
-  /** Configure AI categorisation of incoming mail. */
+  /**
+   * Configure automatic categorisation of incoming mail.
+   *
+   * @param data.channelId - Desk channel to configure.
+   * @param data.classificationEnabled - Whether categorisation runs.
+   * @param data.classificationPrompt - Instruction used to categorise.
+   * @param data.categoryField - Field the category is written to.
+   * @param data.subCategoryField - Field the sub-category is written to.
+   * @example
+   * await sdk.email.setClassificationConfig({
+   *   channelId: 'channel-desk',
+   *   classificationEnabled: true,
+   *   classificationPrompt: 'Classify by refund, chargeback or other.',
+   *   categoryField: 'category',
+   * });
+   */
   setClassificationConfig(data: {
     channelId: string;
     classificationEnabled: boolean;
@@ -227,7 +393,19 @@ export class EmailResource extends Resource {
     return this.call(emailOperations.setClassificationConfig, data);
   }
 
-  /** Configure AI priority scoring of incoming mail. */
+  /**
+   * Configure automatic priority scoring of incoming mail.
+   *
+   * @param data.channelId - Desk channel to configure.
+   * @param data.priorityClassificationEnabled - Whether scoring runs.
+   * @param data.priorityClassificationPrompt - Instruction used to score.
+   * @param data.priorityClassificationThreshold - Score above which mail is escalated.
+   * @example
+   * await sdk.email.setPriorityClassificationConfig({
+   *   channelId: 'channel-desk',
+   *   priorityClassificationEnabled: true,
+   * });
+   */
   setPriorityClassificationConfig(data: {
     channelId: string;
     priorityClassificationEnabled: boolean;
@@ -239,20 +417,39 @@ export class EmailResource extends Resource {
 
   // ----- Labels -----
 
-  /** List the labels defined in a channel. */
+  /**
+   * List the labels defined in a channel.
+   *
+   * @param channelId - Channel to read.
+   * @returns The labels available there.
+   * @example
+   * const labels = await sdk.email.listLabels('channel-desk');
+   */
   listLabels(channelId: string): Promise<ConversationLabel[]> {
     return this.call(emailOperations.listLabels, { channelId });
   }
 
-  /** List the conversations carrying a given label. */
-  listConversationsByLabel(labelId: string): Promise<unknown[]> {
+  /**
+   * List the conversations carrying a given label.
+   *
+   * @param labelId - Label to look up.
+   * @returns One mapping per thread carrying it.
+   * @example
+   * const threads = await sdk.email.listConversationsByLabel('label-1');
+   */
+  listConversationsByLabel(labelId: string): Promise<ConversationLabelMapping[]> {
     return this.call(emailOperations.listConversationsByLabel, { labelId });
   }
 
   /**
    * Create a label in a channel.
    *
-   * @returns The label id
+   * @param data.name - Display name.
+   * @param data.channelId - Channel the label belongs to.
+   * @param data.color - Display colour.
+   * @returns The new label's id.
+   * @example
+   * const { id } = await sdk.email.createLabel({ name: 'Refunds', channelId: 'channel-desk' });
    */
   async createLabel(data: {
     name: string;
@@ -267,7 +464,19 @@ export class EmailResource extends Resource {
   /**
    * Apply a label to a conversation.
    *
-   * @returns The id of the mapping row
+   * @param data.labelId - Label to apply.
+   * @param data.labelName - The label's name, stored alongside the mapping.
+   * @param data.conversationId - Thread to label.
+   * @param data.channelId - Channel the thread belongs to.
+   * @param data.color - The label's colour.
+   * @returns The mapping's id, needed to remove it later.
+   * @example
+   * const { mappingId } = await sdk.email.applyLabel({
+   *   labelId: 'label-1',
+   *   labelName: 'Refunds',
+   *   conversationId: 'conv-1',
+   *   channelId: 'channel-desk',
+   * });
    */
   async applyLabel(data: {
     labelId: string;
@@ -285,6 +494,11 @@ export class EmailResource extends Resource {
    * Remove a label from a conversation.
    *
    * Takes the label as well as the conversation — one thread can carry several.
+   *
+   * @param conversationId - Thread to unlabel.
+   * @param labelId - Label to remove.
+   * @example
+   * await sdk.email.removeLabel('conv-1', 'label-1');
    */
   removeLabel(conversationId: string, labelId: string): Promise<void> {
     return this.call(emailOperations.removeLabel, { conversationId, labelId });

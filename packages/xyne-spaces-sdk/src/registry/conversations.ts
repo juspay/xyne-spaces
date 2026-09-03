@@ -15,6 +15,8 @@ import { op, api } from './types.js';
 import { appendFiles, appendOptional } from '../core/form-data.js';
 import type {
   Conversation,
+  ConversationLabel,
+  ConversationLabelMapping,
   ConversationParticipant,
   CreateConversationWithAttachmentsInput,
   Message,
@@ -130,7 +132,7 @@ export const conversationsOperations = {
    * a hint to Zero's ACL layer, and is supplied here so a caller does not have
    * to know that.
    */
-  listLabels: op<{ channelId: string }, unknown[]>('conversations.listLabels', 'query'),
+  listLabels: op<{ channelId: string }, ConversationLabel[]>('conversations.listLabels', 'query'),
 
   /**
    * Labels applied to a thread.
@@ -138,7 +140,7 @@ export const conversationsOperations = {
    * The V2 query takes the owning `channelId` as well, for the same ACL reason
    * as {@link listLabels}, so callers must now pass it.
    */
-  listAppliedLabels: op<{ conversationId: string; channelId: string }, unknown[]>('conversations.listAppliedLabels', 'query'),
+  listAppliedLabels: op<{ conversationId: string; channelId: string }, ConversationLabelMapping[]>('conversations.listAppliedLabels', 'query'),
 
   // ----- Writes -----
 

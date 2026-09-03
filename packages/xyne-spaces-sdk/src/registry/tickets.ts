@@ -7,17 +7,31 @@
  * same table and live in `registry/support-tickets.ts`.
  */
 
-import { op, api } from './types.js';
+import { api, firstOrNull, op } from './types.js';
 import { appendArray, appendFiles, appendOptional } from '../core/form-data.js';
 import type {
   CreateTicketInput,
   CreateTicketResponse,
+  Email,
+  MailboxState,
+  MessageAttachment,
+  ProjectTag,
+  Rca,
+  ReleaseAttribution,
   StageRequestStatus,
   SubTicket,
+  SubTicketMapping,
   Ticket,
+  TicketActivity,
+  TicketAssignment,
+  TicketExport,
+  TicketFieldDefinition,
+  TicketMailbox,
+  TicketReferenceRelation,
   TicketPriority,
   TicketStageRequest,
   TicketStatusV2,
+  Workflow,
 } from '../types/index.js';
 
 /** How a ticket list is scoped. Determines which of the id filters apply. */
@@ -210,14 +224,14 @@ export const ticketsOperations = {
   listByProject: op<{ projectId: string }, Ticket[]>('tickets.listByProject', 'query'),
 
   /**
-   * A ticket's activity timeline.
-   */
-  /**
    * The current user's ticket exports, newest first (server caps at 100).
    */
-  listExports: op<void, unknown[]>('tickets.listExports', 'query'),
+  listExports: op<void, TicketExport[]>('tickets.listExports', 'query'),
 
-  listActivities: op<{ ticketId: string }, unknown[]>('tickets.listActivities', 'query'),
+  /**
+   * A ticket's activity timeline.
+   */
+  listActivities: op<{ ticketId: string }, TicketActivity[]>('tickets.listActivities', 'query'),
 
   /**
    * Activities across several tickets at once, newest first, paginated.
@@ -225,27 +239,29 @@ export const ticketsOperations = {
    * The batch counterpart to `listActivities`. `start` is nullable rather than
    * optional server-side, so it is always sent — as null on the first page.
    */
-  listActivitiesForTickets: op<{ ticketIds: string[]; limit?: number; start?: TicketActivityCursor }, unknown[]>('tickets.listActivitiesForTickets', 'query'),
+  listActivitiesForTickets: op<{ ticketIds: string[]; limit?: number; start?: TicketActivityCursor }, TicketActivity[]>('tickets.listActivitiesForTickets', 'query'),
 
   /**
    * Assignment history for a ticket.
    */
-  listAssignments: op<{ ticketId: string }, unknown[]>('tickets.listAssignments', 'query'),
+  listAssignments: op<{ ticketId: string }, TicketAssignment[]>('tickets.listAssignments', 'query'),
 
   /**
    * The workflow attached to a ticket, if any.
    */
-  getWorkflow: op<{ ticketId: string }, unknown>('tickets.getWorkflow', 'query'),
+  getWorkflow: op<{ ticketId: string }, Workflow | null>('tickets.getWorkflow', 'query', {
+    mapResult: firstOrNull,
+  }),
 
   /**
    * Files attached to a ticket.
    */
-  listAttachments: op<{ ticketId: string }, unknown[]>('tickets.listAttachments', 'query'),
+  listAttachments: op<{ ticketId: string }, MessageAttachment[]>('tickets.listAttachments', 'query'),
 
   /**
    * Emails on a ticket's conversation (desk tickets).
    */
-  listEmails: op<{ conversationId: string }, unknown[]>('tickets.listEmails', 'query'),
+  listEmails: op<{ conversationId: string }, Email[]>('tickets.listEmails', 'query'),
 
   /**
    * The current user's mailbox state for a ticket (inbox / archived, starred).
@@ -253,22 +269,26 @@ export const ticketsOperations = {
    * The V2 query takes the ticket's `channelId` too, as a hint to Zero's ACL
    * layer, so callers must now pass it. `isMember` is supplied here.
    */
-  getMailbox: op<{ ticketId: string; channelId: string }, unknown>('tickets.getMailbox', 'query'),
+  getMailbox: op<{ ticketId: string; channelId: string }, TicketMailbox | null>(
+    'tickets.getMailbox',
+    'query',
+    { mapResult: firstOrNull }
+  ),
 
   /**
    * The RCA linked to a ticket.
    */
-  getRca: op<{ ticketId: string }, unknown>('tickets.getRca', 'query'),
+  getRca: op<{ ticketId: string }, Rca | null>('tickets.getRca', 'query'),
 
   /**
    * Release attributions for a ticket.
    */
-  listReleaseAttributions: op<{ ticketId: string }, unknown[]>('tickets.listReleaseAttributions', 'query'),
+  listReleaseAttributions: op<{ ticketId: string }, ReleaseAttribution[]>('tickets.listReleaseAttributions', 'query'),
 
   /**
    * Custom-field values set on a ticket.
    */
-  listFieldValues: op<{ ticketId: string }, unknown[]>('tickets.listFieldValues', 'query'),
+  listFieldValues: op<{ ticketId: string }, TicketFieldDefinition[]>('tickets.listFieldValues', 'query'),
 
   // ----- Sub-tickets -----
 
@@ -288,7 +308,7 @@ export const ticketsOperations = {
    * Returns the mapping rows (each carrying its sub-ticket), not bare sub-tickets,
    * so a caller batching many parents can tell which parent each one belongs to.
    */
-  listSubTicketMappings: op<{ ticketIds: string[] }, unknown[]>('tickets.listSubTicketMappings', 'query'),
+  listSubTicketMappings: op<{ ticketIds: string[] }, SubTicketMapping[]>('tickets.listSubTicketMappings', 'query'),
 
   /**
    * Create a sub-ticket. The row id and its mapping id are supplied by the
@@ -353,7 +373,7 @@ export const ticketsOperations = {
   /**
    * Tags defined on a project, available to its tickets.
    */
-  listProjectTags: op<{ projectId: string }, unknown[]>('tickets.listProjectTags', 'query'),
+  listProjectTags: op<{ projectId: string }, ProjectTag[]>('tickets.listProjectTags', 'query'),
 
   /**
    * Apply a tag to a ticket. The tag, project-tag, and mapping row ids are all
@@ -372,12 +392,12 @@ export const ticketsOperations = {
   /**
    * Link two tickets (blocks, relates-to, and so on).
    */
-  addReference: op<{ sourceTicketId: string; targetTicketId: string; relationType: string }, void>('tickets.addReference', 'mutator'),
+  addReference: op<{ sourceTicketId: string; targetTicketId: string; relationType: TicketReferenceRelation }, void>('tickets.addReference', 'mutator'),
 
   /**
    * Change how two linked tickets relate.
    */
-  updateReference: op<{ id: string; relationType: string }, void>('tickets.updateReference', 'mutator'),
+  updateReference: op<{ id: string; relationType: TicketReferenceRelation }, void>('tickets.updateReference', 'mutator'),
 
   /**
    * Unlink two tickets.
@@ -429,7 +449,7 @@ export const ticketsOperations = {
   /**
    * Move a ticket between inbox and archive for the current user.
    */
-  setMailboxState: op<{ id: string; ticketId: string; channelId: string; state: string }, void>('tickets.setMailboxState', 'mutator'),
+  setMailboxState: op<{ id: string; ticketId: string; channelId: string; state: MailboxState }, void>('tickets.setMailboxState', 'mutator'),
 
   /**
    * Star or unstar a ticket for the current user.

@@ -7,7 +7,19 @@
  */
 
 import { op } from './types.js';
-import type { SdlcTrackStatus } from '../types/index.js';
+import type {
+  Channel,
+  LinkVisibility,
+  ClassificationMapping,
+  CustomEmoji,
+  LookupType,
+  LookupValue,
+  Merchant,
+  Repo,
+  SdlcTrack,
+  SdlcTrackStatus,
+  TicketTag,
+} from '../types/index.js';
 
 export const workspaceOperations = {
   // ----- Links -----
@@ -20,7 +32,7 @@ export const workspaceOperations = {
       url: string;
       title: string;
       channelId: string;
-      visibility: string;
+      visibility: LinkVisibility;
       description?: string;
       favicon?: string;
     }, void>('workspace.createLink', 'mutator'),
@@ -33,7 +45,7 @@ export const workspaceOperations = {
       title?: string;
       description?: string;
       favicon?: string;
-      visibility?: string;
+      visibility?: LinkVisibility;
     }, void>('workspace.updateLink', 'mutator'),
 
   /**
@@ -56,7 +68,7 @@ export const workspaceOperations = {
   /**
    * Connected repositories.
    */
-  listRepos: op<void, unknown[]>('workspace.listRepos', 'query'),
+  listRepos: op<void, Repo[]>('workspace.listRepos', 'query'),
 
   /**
    * Connect a repository.
@@ -90,14 +102,14 @@ export const workspaceOperations = {
    * repositories to channels, and `getSdlcRepoByChannelId` no longer exists —
    * the SDLC hub *is* a channel now, so there is no separate repo row to fetch.
    */
-  getSdlcChannel: op<{ channelId: string }, unknown | null>('workspace.getSdlcChannel', 'query'),
+  getSdlcChannel: op<{ channelId: string }, Channel | null>('workspace.getSdlcChannel', 'query'),
 
   /**
    * Tracks belonging to an SDLC channel, oldest first.
    *
    * Keyed by `channelId` since the same re-keying; it took `repoId` before.
    */
-  listSdlcTracks: op<{ channelId: string }, unknown[]>('workspace.listSdlcTracks', 'query'),
+  listSdlcTracks: op<{ channelId: string }, SdlcTrack[]>('workspace.listSdlcTracks', 'query'),
 
   /**
    * Start a track on an SDLC repository.
@@ -126,17 +138,17 @@ export const workspaceOperations = {
   /**
    * Custom emoji in the workspace.
    */
-  listEmojis: op<void, unknown[]>('workspace.listEmojis', 'query'),
+  listEmojis: op<void, CustomEmoji[]>('workspace.listEmojis', 'query'),
 
   /**
    * One custom emoji by id.
    */
-  getEmoji: op<{ emojiId: string }, unknown>('workspace.getEmoji', 'query'),
+  getEmoji: op<{ emojiId: string }, CustomEmoji | null>('workspace.getEmoji', 'query'),
 
   /**
    * One custom emoji by name.
    */
-  getEmojiByName: op<{ name: string }, unknown>('workspace.getEmojiByName', 'query'),
+  getEmojiByName: op<{ name: string }, CustomEmoji | null>('workspace.getEmojiByName', 'query'),
 
   // ----- Reference data -----
 
@@ -144,24 +156,24 @@ export const workspaceOperations = {
    * Lookup values of a given type — the enumerations used across forms and
    * incident records.
    */
-  listLookupValues: op<{ type: string }, unknown[]>('workspace.listLookupValues', 'query'),
+  listLookupValues: op<{ type: LookupType }, LookupValue[]>('workspace.listLookupValues', 'query'),
 
   /**
    * Merchants known to the workspace.
    */
-  listMerchants: op<void, unknown[]>('workspace.listMerchants', 'query'),
+  listMerchants: op<void, Merchant[]>('workspace.listMerchants', 'query'),
 
   /**
    * Tags defined across projects.
    */
-  listTicketTags: op<{ projectId: string }, unknown[]>('workspace.listTicketTags', 'query'),
+  listTicketTags: op<{ projectId: string }, TicketTag[]>('workspace.listTicketTags', 'query'),
 
   // ----- Classification routing -----
 
   /**
    * Rules mapping a mail category to the team that handles it, for one channel.
    */
-  listClassificationMappings: op<{ channelId: string }, unknown[]>('workspace.listClassificationMappings', 'query'),
+  listClassificationMappings: op<{ channelId: string }, ClassificationMapping[]>('workspace.listClassificationMappings', 'query'),
 
   /**
    * Route a category to a team.

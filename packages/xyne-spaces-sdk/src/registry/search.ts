@@ -6,7 +6,11 @@
  */
 
 import { api } from './types.js';
-import type { SearchResponse, SearchOptions } from '../types/index.js';
+import type {
+  SearchOptions,
+  SearchResponse,
+  SearchSchemaName,
+} from '../types/index.js';
 
 /** The contract takes comma-separated lists for multi-value filters. */
 function csv(value: string | string[] | undefined): string | undefined {
@@ -76,5 +80,5 @@ export const searchOperations = {
   /**
    * Get search schema for building advanced queries.
    */
-  getSchema: api<{ type: string }, unknown>('GET', '/api/sdk/v1/search/schema'),
+  getSchema: api<{ schema: SearchSchemaName }, string>('GET', '/api/sdk/v1/search/schema'),
 } as const;

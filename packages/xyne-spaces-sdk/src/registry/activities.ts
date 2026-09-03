@@ -9,7 +9,10 @@
  */
 
 import { op } from './types.js';
-import type { Activity } from '../types/index.js';
+import type {
+  Activity,
+  Bookmark,
+} from '../types/index.js';
 
 /** Page cursor for the paginated activity feed. */
 export interface ActivityCursor {
@@ -48,7 +51,7 @@ export const activitiesOperations = {
   /**
    * The current user's bookmarks.
    */
-  listBookmarks: op<void, unknown[]>('activities.listBookmarks', 'query'),
+  listBookmarks: op<void, Bookmark[]>('activities.listBookmarks', 'query'),
 
   // ----- Writes -----
 

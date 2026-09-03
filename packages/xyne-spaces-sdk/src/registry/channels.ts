@@ -13,12 +13,15 @@
 import { op, api } from './types.js';
 import type {
   Channel,
+  ChannelAddUserPolicy,
   ChannelParticipant,
   ChannelRole,
   ChannelSection,
+  ChannelStats,
   ChannelUserStatus,
   CheckDuplicateChannelResponse,
   CreateChannelInput,
+  Link,
 } from '../types/index.js';
 
 export const channelsOperations = {
@@ -67,7 +70,7 @@ export const channelsOperations = {
   /**
    * Message and participant counts for one channel.
    */
-  getStats: op<{ channelId: string }, unknown>('channels.getStats', 'query'),
+  getStats: op<{ channelId: string }, ChannelStats | null>('channels.getStats', 'query'),
 
   /**
    * The current user's read state for one channel.
@@ -92,7 +95,7 @@ export const channelsOperations = {
   /**
    * Links shared in a channel.
    */
-  listLinks: op<{ channelId: string }, unknown[]>('channels.listLinks', 'query'),
+  listLinks: op<{ channelId: string }, Link[]>('channels.listLinks', 'query'),
 
   /**
    * The current user's sidebar sections.
@@ -226,7 +229,7 @@ export const channelsOperations = {
   /**
    * Set who may add people to the channel.
    */
-  setAddUserPolicy: op<{ channelId: string; policy: string }, void>('channels.setAddUserPolicy', 'mutator'),
+  setAddUserPolicy: op<{ channelId: string; policy: ChannelAddUserPolicy }, void>('channels.setAddUserPolicy', 'mutator'),
 
   /**
    * Set the prompt used to summarise calls held in this channel.
@@ -245,7 +248,7 @@ export const channelsOperations = {
   /**
    * Stats for several channels at once.
    */
-  getStatsForChannels: op<{ channelIds: string[] }, unknown[]>('channels.getStatsForChannels', 'query'),
+  getStatsForChannels: op<{ channelIds: string[] }, ChannelStats[]>('channels.getStatsForChannels', 'query'),
 
   /**
    * Participants of a channel, a page at a time.
