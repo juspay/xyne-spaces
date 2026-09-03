@@ -31,6 +31,12 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
 
+/**
+ * Vespa document-summary class used when the caller does not ask for a specific one.
+ * `lean` returns only the fields the search UI needs, keeping payloads small.
+ */
+const DEFAULT_PRESENTATION_SUMMARY = 'lean';
+
 function escapeQueryForUserInput(query: string): string {
   if (!query) return query;
 
@@ -92,6 +98,7 @@ interface SearchOptions {
   mail?: MailFilters;
   call?: CallFilters;
   prefixBoostWeight?: number;
+  /** Vespa document-summary class to request. Defaults to `lean` when not set. */
   presentationSummary?: string;
   captureDebug?: (info: VespaSearchDebugInfo) => void;
   // Display name(s) of scoped mention chips, highlighted as exact phrases in results (not in YQL).
@@ -220,7 +227,7 @@ export class SearchService {
       'ranking.profile': 'default_native',
       'input.query(alpha)': 0.35,
       timeout: '15s',
-      'presentation.summary': 'lean',
+      'presentation.summary': DEFAULT_PRESENTATION_SUMMARY,
       ...(useSemantic ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
     };
 
@@ -292,7 +299,7 @@ export class SearchService {
         mail = {},
         call = {},
         prefixBoostWeight = 0.2,
-        presentationSummary,
+        presentationSummary = DEFAULT_PRESENTATION_SUMMARY,
         mentionHighlights = [],
         workspaceId,
         captureDebug,
@@ -449,7 +456,7 @@ export class SearchService {
           "input.query(time_from)": timeRangeStart,
           "input.query(time_to)": timeRangeEnd,
           "ranking.listFeatures": true,
-          ...(presentationSummary ? { "presentation.summary": presentationSummary } : {}),
+          "presentation.summary": presentationSummary?.trim() || DEFAULT_PRESENTATION_SUMMARY,
           tracelevel: 0,
           // Exact match turns off the default searchrules.sr rewriting (stopword removal + ranking
           // boosts): stripping a word like "is"/"the" mid-query silently breaks phrase adjacency.
@@ -464,10 +471,18 @@ export class SearchService {
 
       // Execute search
       // Fetch feature flags from Superposition
-      const useSemanticAnyway = await superpositionClient.getBooleanValue(
-        'vespa_search_use_semantic_anyway',
-        true,
+      // Rank profiles that skip the vector half of retrieval. `personalized` reads no vector
+      // feature, so nearestNeighbor cannot change its ranking -- it only costs a filtered-HNSW
+      // traversal plus an embed call, and floods recall with zero-lexical docs that the
+      // channel-affinity tier then promotes over real matches. Default [] = nothing skipped.
+      const semanticDisabledRankProfiles = await superpositionClient.getObjectValue(
+        'vespa_search_semantic_disabled_rank_profiles',
+        [],
         {}
+      );
+      const useSemanticAnyway = !(
+        Array.isArray(semanticDisabledRankProfiles) &&
+        semanticDisabledRankProfiles.includes(rankProfile)
       );
       const newFallbackMethod = await superpositionClient.getBooleanValue(
         'vespa_search_new_fallback_method',

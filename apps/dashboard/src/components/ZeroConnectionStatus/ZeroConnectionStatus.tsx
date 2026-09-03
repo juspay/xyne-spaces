@@ -8,6 +8,7 @@ import {
   type PikaStyle,
 } from '@xyne/icons';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
 import { stateMachineActor } from '../../machines/stateMachine';
@@ -102,9 +103,11 @@ export const ZeroConnectionStatus = ({
   return (
     <Tooltip content={tooltip} side='right' delayDuration={0}>
       {status.actionable ? (
-        <button
+        <Button
           type='button'
+          variant='ghost'
           onClick={refreshConnection}
+          trackId='reconnect_zero_connection'
           aria-label={`Connection status: ${status.label}. ${status.hint ?? ''}`.trim()}
           data-testid='zero-connection-status'
           data-connection-state={connectionState.name}
@@ -113,7 +116,7 @@ export const ZeroConnectionStatus = ({
           className={cn(shell, 'cursor-pointer hover:bg-sidebar-accent')}
         >
           {icon}
-        </button>
+        </Button>
       ) : (
         <div
           role='status'

@@ -20,6 +20,7 @@ import { BlockNoteView } from '@blocknote/mantine';
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
 import { getMathSlashMenuItems } from '@blocknote/math-block';
 import type {
+  Block,
   BlockNoteEditor,
   BlockSchema,
   InlineContentSchema,
@@ -39,6 +40,7 @@ import {
 } from '../../../hooks/useCanvasYjsProvider';
 import { useAuth } from '../../../hooks/useAuth';
 import { useSelf, useUsers, searchUsers } from '../../../hooks/useUsers';
+import { Button } from '../../ui/Button';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
@@ -87,6 +89,16 @@ import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
+const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
+const RECORDING_SUMMARY_TEXT_BLOCK_TYPES = new Set([
+  'paragraph',
+  'bulletListItem',
+  'numberedListItem',
+  'checkListItem',
+  'toggleListItem',
+  'quote',
+  'heading',
+]);
 
 const buildCanvasDictionary = (placeholder: string): typeof en => ({
   ...en,
@@ -119,6 +131,8 @@ interface CollaborativeCanvasEditorProps {
   onOpenCommentCountChange?: (count: number) => void;
   /** Auto-focus the editor on mount */
   autoFocus?: boolean;
+  /** Recording summaries render generated body copy muted; local edits mark touched blocks foreground. */
+  trackEditedRecordingSummaryBlocks?: boolean;
   /** Optional preloaded canvas participants to avoid duplicate query */
   canvasParticipants?: CanvasParticipant[] | undefined;
   /** Optional preloaded canvas creator */
@@ -148,6 +162,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       initialCommentThreadId,
       onOpenCommentCountChange,
       autoFocus,
+      trackEditedRecordingSummaryBlocks = false,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
@@ -172,15 +187,23 @@ export const CollaborativeCanvasEditor = forwardRef<
       'Anonymous';
     const currentUserColor = generateUserColor(currentUserId);
 
-    const { fragment, provider, awareness, collaborators, connectionStatus, isReadOnly } =
-      useCanvasYjsProvider({
-        canvasId,
-        userId: currentUserId,
-        userName: currentUserName,
-        userColor: currentUserColor,
-        channelId,
-        title,
-      });
+    const {
+      fragment,
+      provider,
+      awareness,
+      collaborators,
+      connectionStatus,
+      isReadOnly,
+      connectionFailed,
+      reconnect,
+    } = useCanvasYjsProvider({
+      canvasId,
+      userId: currentUserId,
+      userName: currentUserName,
+      userColor: currentUserColor,
+      channelId,
+      title,
+    });
 
     useEffect(() => {
       onCollaboratorsChange?.(collaborators);
@@ -608,6 +631,50 @@ export const CollaborativeCanvasEditor = forwardRef<
       onChange?.(editor.document as PartialBlock[]);
     }, [debouncedExtractHeadings, editor, onChange, refreshCommentHighlights]);
 
+    const isApplyingRecordingSummaryEditColorRef = useRef(false);
+    useEffect(() => {
+      if (!editor || !trackEditedRecordingSummaryBlocks || !editable || isReadOnly) return;
+
+      const editorTyped = editor as unknown as BlockNoteEditor<
+        BlockSchema,
+        InlineContentSchema,
+        StyleSchema
+      >;
+
+      const unsubscribe = editorTyped.onChange((_changedEditor, context) => {
+        if (isApplyingRecordingSummaryEditColorRef.current) return;
+
+        const changedBlocks = context
+          .getChanges()
+          .filter(change => change.type === 'insert' || change.type === 'update')
+          .map(change => change.block)
+          .filter(
+            (block): block is Block<BlockSchema, InlineContentSchema, StyleSchema> =>
+              RECORDING_SUMMARY_TEXT_BLOCK_TYPES.has(String(block.type)) &&
+              block.props?.['textColor'] !== RECORDING_SUMMARY_EDITED_TEXT_COLOR,
+          );
+
+        if (changedBlocks.length === 0) return;
+
+        isApplyingRecordingSummaryEditColorRef.current = true;
+        try {
+          changedBlocks.forEach(block => {
+            editorTyped.updateBlock(block.id, {
+              props: {
+                textColor: RECORDING_SUMMARY_EDITED_TEXT_COLOR,
+              },
+            } as unknown as PartialBlock<BlockSchema, InlineContentSchema, StyleSchema>);
+          });
+        } finally {
+          queueMicrotask(() => {
+            isApplyingRecordingSummaryEditColorRef.current = false;
+          });
+        }
+      }, false);
+
+      return unsubscribe;
+    }, [editable, editor, isReadOnly, trackEditedRecordingSummaryBlocks]);
+
     const handleHeadingClick = useCallback((id: string) => {
       scrollToHeading(id, containerRef.current);
     }, []);
@@ -690,6 +757,14 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
+        {connectionFailed && (
+          <div className='flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive'>
+            <span>Connection to the canvas failed. Your changes may not be saved.</span>
+            <Button size='sm' variant='outline' onClick={reconnect}>
+              Reconnect
+            </Button>
+          </div>
+        )}
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div
             className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'

@@ -89,6 +89,7 @@ import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendin
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AskAiRatingButtons } from '../../../AIScreen/AskAiRatingButtons';
+import { Button } from '../../../ui/Button/Button';
 
 /**
  * v3-style inline citation chip for `[clf-<toolCallId>#<chunkIndex>]` tokens.
@@ -262,6 +263,8 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
                       {citation.url ? (
                         <Link
                           to={citation.url}
+                          data-track-category='XyneAI'
+                          data-track-name='inline-citation-link-click'
                           className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                         >
                           <Link2 size={10} />
@@ -279,6 +282,8 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
               ) : citation.url ? (
                 <Link
                   to={citation.url}
+                  data-track-category='XyneAI'
+                  data-track-name='inline-citation-link-click'
                   className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                 >
                   <Link2 size={10} />
@@ -357,7 +362,7 @@ const ImageWithDownload = ({
         onClick={handleDownload}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
         title='Download image'
-        data-track-category='xyne-ai'
+        data-track-category='XyneAI'
         data-track-name='download-image'
       >
         {downloaded ? (
@@ -785,7 +790,7 @@ const AttachmentImagePreview = ({
         disabled={isDownloading}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover/image:opacity-100 transition-all duration-200 hover:bg-background disabled:opacity-50'
         title='Download image'
-        data-track-category='xyne-ai'
+        data-track-category='XyneAI'
         data-track-name='download-image'
       >
         {isDownloading ? (
@@ -954,7 +959,7 @@ export const AttachmentPreview = ({
           onClick={() => void handleDownload()}
           disabled={isDownloading}
           className='flex items-center gap-2 hover:opacity-80 transition-opacity disabled:opacity-50'
-          data-track-category='xyne-ai'
+          data-track-category='XyneAI'
           data-track-name='attachment-download'
         >
           <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
@@ -1266,20 +1271,22 @@ export const MessageItem = React.memo(
                   >
                     Cancel
                   </button>
-                  <button
+                  <Button
+                    variant='ghost'
                     onClick={() => {
                       if (editText.trim()) {
                         onEditSubmit?.(editText.trim());
                         setIsEditing(false);
                       }
                     }}
+                    trackId='edit_message_submit'
                     disabled={!editText.trim()}
                     className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
                     data-track-category='XyneAI'
                     data-track-name='EDIT_SUBMIT'
                   >
                     Send
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : message.type === 'user' ? (
@@ -1333,6 +1340,8 @@ export const MessageItem = React.memo(
                               href={href}
                               target='_blank'
                               rel='noopener noreferrer'
+                              data-track-category='XyneAI'
+                              data-track-name='open-external-link'
                               className='text-blue-500 hover:text-blue-600 underline'
                               {...props}
                             >
@@ -1346,7 +1355,7 @@ export const MessageItem = React.memo(
                             <a
                               href={href}
                               className='text-blue-500 hover:text-blue-600 underline'
-                              data-track-category='xyne-ai'
+                              data-track-category='XyneAI'
                               data-track-name='api-download'
                               onClick={e => {
                                 e.preventDefault();
@@ -1362,6 +1371,8 @@ export const MessageItem = React.memo(
                         return (
                           <a
                             href={href}
+                            data-track-category='XyneAI'
+                            data-track-name='open-internal-link'
                             className='text-blue-500 hover:text-blue-600 underline'
                             {...props}
                           >
@@ -1757,7 +1768,14 @@ const MessageContent = ({
         // Add target="_blank" for external links
         if (isExternal) {
           return (
-            <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+            <a
+              href={href}
+              target='_blank'
+              rel='noopener noreferrer'
+              data-track-category='XyneAI'
+              data-track-name='open-external-link'
+              {...props}
+            >
               {children}
             </a>
           );
@@ -1767,7 +1785,7 @@ const MessageContent = ({
           return (
             <a
               href={href}
-              data-track-category='xyne-ai'
+              data-track-category='XyneAI'
               data-track-name='api-download'
               onClick={e => {
                 e.preventDefault();
@@ -1781,7 +1799,12 @@ const MessageContent = ({
         }
 
         return (
-          <a href={href} {...props}>
+          <a
+            href={href}
+            data-track-category='XyneAI'
+            data-track-name='open-internal-link'
+            {...props}
+          >
             {children}
           </a>
         );
@@ -2107,7 +2130,14 @@ const SummarizerContent = ({
                   // Add target="_blank" for external links
                   if (isExternal) {
                     return (
-                      <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                      <a
+                        href={href}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        data-track-category='XyneAI'
+                        data-track-name='open-external-link'
+                        {...props}
+                      >
                         {children}
                       </a>
                     );
@@ -2117,7 +2147,7 @@ const SummarizerContent = ({
                     return (
                       <a
                         href={href}
-                        data-track-category='xyne-ai'
+                        data-track-category='XyneAI'
                         data-track-name='api-download'
                         onClick={e => {
                           e.preventDefault();
@@ -2131,7 +2161,12 @@ const SummarizerContent = ({
                   }
 
                   return (
-                    <a href={href} {...props}>
+                    <a
+                      href={href}
+                      data-track-category='XyneAI'
+                      data-track-name='open-internal-link'
+                      {...props}
+                    >
                       {children}
                     </a>
                   );
@@ -2216,7 +2251,14 @@ const SummarizerContent = ({
 
                             if (isExternal) {
                               return (
-                                <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                                <a
+                                  href={href}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  data-track-category='XyneAI'
+                                  data-track-name='open-external-link'
+                                  {...props}
+                                >
                                   {children}
                                 </a>
                               );
@@ -2226,7 +2268,7 @@ const SummarizerContent = ({
                               return (
                                 <a
                                   href={href}
-                                  data-track-category='xyne-ai'
+                                  data-track-category='XyneAI'
                                   data-track-name='api-download'
                                   onClick={e => {
                                     e.preventDefault();
@@ -2240,7 +2282,12 @@ const SummarizerContent = ({
                             }
 
                             return (
-                              <a href={href} {...props}>
+                              <a
+                                href={href}
+                                data-track-category='XyneAI'
+                                data-track-name='open-internal-link'
+                                {...props}
+                              >
                                 {children}
                               </a>
                             );
@@ -2335,7 +2382,14 @@ const GeniusKeyPoints = ({
 
                     if (isExternal) {
                       return (
-                        <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                        <a
+                          href={href}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          data-track-category='XyneAI'
+                          data-track-name='open-external-link'
+                          {...props}
+                        >
                           {children}
                         </a>
                       );
@@ -2345,7 +2399,7 @@ const GeniusKeyPoints = ({
                       return (
                         <a
                           href={href}
-                          data-track-category='xyne-ai'
+                          data-track-category='XyneAI'
                           data-track-name='api-download'
                           onClick={e => {
                             e.preventDefault();
@@ -2359,7 +2413,12 @@ const GeniusKeyPoints = ({
                     }
 
                     return (
-                      <a href={href} {...props}>
+                      <a
+                        href={href}
+                        data-track-category='XyneAI'
+                        data-track-name='open-internal-link'
+                        {...props}
+                      >
                         {children}
                       </a>
                     );
@@ -2523,8 +2582,10 @@ const MessageActions = ({
 
       {/* Regenerate Button - only on the latest bot message */}
       {onRegenerate && (
-        <button
+        <Button
+          variant='ghost'
           onClick={onRegenerate}
+          trackId='regenerate_message'
           className='p-1.5 rounded transition-colors hover:bg-accent'
           title='Regenerate response'
           data-track-category='XyneAI'
@@ -2532,7 +2593,7 @@ const MessageActions = ({
           data-track-metadata={JSON.stringify({ messageId: message.id })}
         >
           <RefreshCw size={16} className='text-current' />
-        </button>
+        </Button>
       )}
 
       {isV2 ? (
@@ -2547,8 +2608,10 @@ const MessageActions = ({
       ) : (
         <>
           {/* Like Button */}
-          <button
+          <Button
+            variant='ghost'
             onClick={() => onFeedback(message.id, 'LIKE')}
+            trackId='like_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Like'
             data-track-category='XyneAI'
@@ -2586,11 +2649,13 @@ const MessageActions = ({
                 </clipPath>
               </defs>
             </svg>
-          </button>
+          </Button>
 
           {/* Dislike Button */}
-          <button
+          <Button
+            variant='ghost'
             onClick={() => onFeedback(message.id, 'DISLIKE')}
+            trackId='dislike_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Dislike'
             data-track-category='XyneAI'
@@ -2633,7 +2698,7 @@ const MessageActions = ({
                 </clipPath>
               </defs>
             </svg>
-          </button>
+          </Button>
         </>
       )}
       {/* Participants avatars - shown for Summarizer messages */}
@@ -2658,6 +2723,8 @@ const MessageActions = ({
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'
+          data-track-category='XyneAI'
+          data-track-name='open-searxng-attribution'
           className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
         >
           <Globe className='w-2 h-2 text-primary-foreground' />

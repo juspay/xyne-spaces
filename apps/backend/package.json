@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-backend",
-  "version": "1.0.0",
+  "version": "1.269.2",
   "description": "Backend server for Xyne Spaces application",
   "main": "dist/index.js",
   "type": "module",
@@ -153,7 +153,7 @@
     "simple-oauth2": "^5.1.0",
     "socket.io": "^4.8.1",
     "sudo-query": "^1.0.0",
-    "superposition-provider": "^0.97.0",
+    "superposition-provider": "^0.117.2",
     "undici": "7.28.0",
     "unified": "^11.0.5",
     "unzipper": "^0.12.3",

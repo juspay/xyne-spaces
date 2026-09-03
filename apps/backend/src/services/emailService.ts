@@ -47,8 +47,6 @@ import {
   NotificationType, AutoDraftStatus, AutoDraftMode } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
-import { superpositionClient } from './superpositionClient';
-import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
@@ -72,6 +70,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -116,7 +115,6 @@ export interface CreateConversationWithEmailParams {
   rfcMessageId?: string | null;
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
-  sourceName?: string; // External source name for Superposition context
   receivedAt?: Date;
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
@@ -204,7 +202,6 @@ export interface IngestEmailThreadParams {
     uploadedFiles?: UploadedFileResult[];
   }>;
   ticketMetadata?: Record<string, unknown>;
-  sourceName?: string;
   referencedMessageIds?: string[];
 }
 
@@ -1064,7 +1061,6 @@ export class EmailService {
       rfcMessageId,
       ticketMetadata,
       uploadedFiles = [],
-      sourceName,
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
@@ -1085,49 +1081,6 @@ export class EmailService {
       await this.channelRepository.update(channelId, {
         type: ChannelType.EMAIL,
       });
-    }
-
-    // Step 0: Superposition guard — bail out before creating anything
-    if (sourceName) {
-      try {
-        const context = createBlockingContext({
-          sourceName: sourceName,
-          email: emailFrom,
-          emailSubject: emailSubject,
-        });
-
-        if (!superpositionClient.isReady()) {
-          logger.warn('[EmailService] SuperpositionClient not ready, proceeding without blocking check', {
-            sourceName,
-            email: emailFrom,
-            domain: context.domain,
-          });
-        } else {
-          const isBlocked = await superpositionClient.getBooleanValue('blocked', false, context);
-          
-          logger.info('[EmailService] Superposition check result', {
-            sourceName,
-            domain: context.domain,
-            email: emailFrom,
-            isBlocked,
-          });
-
-          if (isBlocked) {
-            logger.warn('[EmailService] Blocking Zoho ingestion (no conversation/ticket/email)', {
-              sourceName,
-              domain: context.domain,
-              email: emailFrom,
-            });
-            return { blocked: true };
-          }
-        }
-      } catch (error) {
-        logger.error('[EmailService] Error checking Superposition flag, proceeding with ticket creation', {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          sourceName,
-        });
-        // If Superposition check fails, proceed with ticket creation (fail-open)
-      }
     }
 
     // Fetch boardId from EmailChannelPreference table
@@ -1309,6 +1262,24 @@ export class EmailService {
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
+
+    // Ticket-creating mail only: DEFAULT (inbound) and COMPOSE (outbound-new).
+    // Fire-and-forget — a failure leaves the ticket with no related tickets, no retry.
+    if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
+      ticketDuplicateService.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        userId,
+      }).catch((error: unknown) => {
+        logger.error('[EmailService] Failed to persist duplicate references for ticket', {
+          ticketId: ticket.id,
+          error,
+        });
+      });
+    }
 
     // Enqueue AI classification as a Redis worker job
     await emailClassificationQueue.getQueue().add('classify', {
@@ -2046,7 +2017,6 @@ export class EmailService {
       externalSourceId,
       userId,
       ticketMetadata,
-      sourceName,
     } = params;
 
     if (params.emails.length === 0) {
@@ -2066,26 +2036,6 @@ export class EmailService {
       throw new Error(
         `[EmailService] refusing to ingest into non-EMAIL channel ${channelId} (type=${channel.type})`,
       );
-    }
-
-    if (sourceName) {
-      try {
-        const ctx = createBlockingContext({
-          sourceName,
-          email: firstEmail.from,
-          emailSubject: firstEmail.subject,
-        });
-        if (
-          superpositionClient.isReady() &&
-          (await superpositionClient.getBooleanValue('blocked', false, ctx))
-        ) {
-          return { conversationId: '', inserted: 0, duplicates: 0, isNew: false, blocked: true };
-        }
-      } catch (error) {
-        logger.error('[EmailService] Superposition check failed, proceeding', {
-          error: error,
-        });
-      }
     }
 
     const existingFirstEmail = await this.emailRepository.findFirstByThreadAndChannel(
@@ -2558,6 +2508,24 @@ export class EmailService {
           error,
         );
       });
+
+      // isNew implies !existingFirstEmail, where projectId is resolved — so this is always
+      // truthy here; the guard is what narrows string | undefined for TS.
+      if (projectId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: txResult.ticketId,
+          ticketCreatedBy: userId,
+          title: firstEmail.subject,
+          description: firstEmail.body,
+          projectId,
+          userId,
+        }).catch((error: unknown) => {
+          logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
+            ticketId: txResult.ticketId,
+            error,
+          });
+        });
+      }
 
       // Enqueue AI classification as a Redis worker job
       await emailClassificationQueue.getQueue().add('classify', {

@@ -238,16 +238,18 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
             Create a Root Cause Analysis to track the incident.
           </p>
         </div>
-        <button
+        <Button
           type='button'
+          variant='ghost'
           className='px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50'
           onClick={() => void handleCreateRCA()}
           disabled={isCreatingRCA}
+          trackId='rca_start_from_panel'
           data-track-category='RCA'
           data-track-name='StartRCAFromPanel'
         >
           {isCreatingRCA ? 'Creating...' : 'Start RCA'}
-        </button>
+        </Button>
       </div>
     );
   } else if (isReadOnlyView) {

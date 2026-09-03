@@ -7,6 +7,12 @@ import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.uti
 interface UpcomingCallActionsMenuItemsProps {
   call: Call;
   isOwner: boolean;
+  /**
+   * Whether to offer Edit. Defaults to `isOwner`; callers pass true for a participant of
+   * a direct call, who opens the edit modal restricted to the invite list. Delete stays
+   * owner-only regardless.
+   */
+  canEdit?: boolean;
   onEdit?: (() => void) | undefined;
   onCancel?: (() => void) | undefined;
 }
@@ -19,6 +25,7 @@ interface UpcomingCallActionsMenuItemsProps {
 export function UpcomingCallActionsMenuItems({
   call,
   isOwner,
+  canEdit = isOwner,
   onEdit,
   onCancel,
 }: UpcomingCallActionsMenuItemsProps): React.JSX.Element {
@@ -37,20 +44,20 @@ export function UpcomingCallActionsMenuItems({
     <>
       <DropdownMenuItem
         onClick={handleCopyLink}
-        data-track-category='calls'
+        data-track-category='CALLS'
         data-track-name='COPY_UPCOMING_CALL_LINK'
         className='flex items-center gap-2 text-sm font-medium rounded-lg'
       >
         <Copy className='size-4' />
         Copy Link
       </DropdownMenuItem>
-      {isOwner && onEdit && (
+      {canEdit && onEdit && (
         <DropdownMenuItem
           onClick={e => {
             e.stopPropagation();
             onEdit();
           }}
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='EDIT_UPCOMING_CALL'
           className='flex items-center gap-2 text-sm font-medium rounded-lg'
         >
@@ -64,7 +71,7 @@ export function UpcomingCallActionsMenuItems({
             e.stopPropagation();
             onCancel();
           }}
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='CANCEL_UPCOMING_CALL'
           className='flex items-center gap-2 text-sm font-medium text-destructive focus:text-destructive rounded-lg'
         >

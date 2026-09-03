@@ -30,6 +30,23 @@ export interface ArtifactAppVersionSummary {
   createdAt: string;
 }
 
+/**
+ * One recorded restore: head moved backward at a point in time.
+ *
+ * The move itself is invisible after the fact — `headVersionId` is a pointer, so
+ * a restored app looks exactly like one that was always on that version. This is
+ * what lets the thread say what happened, and when.
+ */
+export interface ArtifactAppRestoreEvent {
+  id: string;
+  versionId: string;
+  versionNumber: number;
+  fromVersionId: string | null;
+  fromVersionNumber: number | null;
+  userId: string;
+  createdAt: string;
+}
+
 export interface ArtifactAppDetail {
   id: string;
   title: string;
@@ -37,6 +54,11 @@ export interface ArtifactAppDetail {
   visibility: ArtifactAppVisibility;
   ownerUserId: string;
   publishedVersionId: string | null;
+  /** The build the owner and the agent are currently on. Moves forward on every
+   *  generation and BACKWARD on restore — which is why staleness is measured
+   *  against this and not against the highest version number. Null for apps
+   *  saved before head tracking. */
+  headVersionId: string | null;
   publishedAt: string | null;
   isOwner: boolean;
 }
@@ -72,6 +94,24 @@ export async function publishArtifactApp(
   });
 }
 
+/**
+ * Move HEAD back to an earlier version. A pointer move, not a copy: every
+ * version stays in the list, so restoring is reversible — including restoring
+ * back to the build you just left.
+ *
+ * Does not touch the published pin. Head is what the owner and the agent work
+ * on; rolling back a draft must not silently republish to the workspace.
+ */
+export async function restoreArtifactAppVersion(
+  appId: string,
+  versionId: string,
+): Promise<{ app: ArtifactAppDetail; versionId: string; versionNumber: number }> {
+  return clawRequest(`${BASE}/${encodeURIComponent(appId)}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ versionId }),
+  });
+}
+
 export async function unpublishArtifactApp(appId: string): Promise<{ app: ArtifactAppDetail }> {
   return clawRequest(`${BASE}/${encodeURIComponent(appId)}/unpublish`, { method: 'POST' });
 }
@@ -83,9 +123,13 @@ export async function listArtifactApps(
   return clawRequest(`${BASE}?scope=${scope}`);
 }
 
-export async function getArtifactApp(
-  appId: string,
-): Promise<{ app: ArtifactAppDetail; versions: ArtifactAppVersionSummary[] }> {
+export async function getArtifactApp(appId: string): Promise<{
+  app: ArtifactAppDetail;
+  versions: ArtifactAppVersionSummary[];
+  /** Oldest first. Empty for non-owners — restore history describes drafts they
+   *  are not served. */
+  restores: ArtifactAppRestoreEvent[];
+}> {
   return clawRequest(`${BASE}/${encodeURIComponent(appId)}`);
 }
 

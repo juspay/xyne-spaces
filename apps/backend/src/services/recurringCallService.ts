@@ -71,7 +71,7 @@ class RecurringCallService {
     const callId = uuidv4();
     const externalId = uuidv4();
     const roomLink = buildCallInviteUrl(externalId);
-    const { targetUserIds, externalInvitees } =
+    const { targetUserIds, participantInviters, externalInvitees } =
       await repositories.recurringCallParticipants.findInstanceSeed(recurringSeries.id, tx);
 
     // Background schedulers (callValidationWorker setInterval, scheduledCallNotificationService
@@ -112,6 +112,7 @@ class RecurringCallService {
         startsAt,
         endsAt,
         targetUserIds,
+        participantInviters,
         ...(externalInvitees.length > 0 && { externalInvitees }),
         callUpdatesChannel: callUpdatesChannel ?? null,
       }, tx);

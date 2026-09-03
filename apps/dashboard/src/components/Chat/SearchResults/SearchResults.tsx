@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from '@xyne/icons';
+import { ArrowLeft, ArrowRight } from '@xyne/icons';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
@@ -15,7 +15,10 @@ import {
 } from 'lucide-react';
 
 const utcToIst = (utcString?: string): string => {
-  if (!utcString) return '';
+  // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
+  // treat it as absent — otherwise it parses to an Invalid Date and every card
+  // that doesn't pre-guard renders the string "Invalid Date".
+  if (!utcString || utcString === 'N/A') return '';
   const dateUtc = new Date(`${utcString} UTC`);
   return dateUtc.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -51,13 +54,13 @@ import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
-  formatChannelLabel,
   getDMNames,
   isDMChannel,
   isGroupDMChannel,
   groupChannelsByScope,
 } from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { formatFileSize } from '../MessageAttachment/utils';
 import {
   TabType,
   MentionType,
@@ -199,9 +202,17 @@ const SearchResults = (): ReactElement => {
     const mentionsParam = searchParams.get('mentions') ?? '';
     const channelMentionsParam = searchParams.get('channelMentions') ?? '';
     const tabParam = parseDocTypeParam(searchParams.get('tab'));
+    // Toggles come from cmd+K (see buildSearchParams). Absent for deep links / other entry
+    // points → fall back to DEFAULT_SEARCH_FILTERS.
+    const onlyMyChannelsParam = searchParams.get('onlyMyChannels');
+    const includeBotMessagesParam = searchParams.get('includeBotMessages');
     return {
       ...DEFAULT_SEARCH_FILTERS,
       ...(tabParam ? { docType: tabParam } : {}),
+      ...(onlyMyChannelsParam !== null ? { onlyMyChannels: onlyMyChannelsParam === 'true' } : {}),
+      ...(includeBotMessagesParam !== null
+        ? { includeBotMessages: includeBotMessagesParam === 'true' }
+        : {}),
       fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
       fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
       toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
@@ -300,6 +311,7 @@ const SearchResults = (): ReactElement => {
     searchResults: backendResults,
     isGrouped,
     isSearching: isLoading,
+    isSearchPending,
     searchError: error,
     text: searchedText,
     setText,
@@ -597,9 +609,6 @@ const SearchResults = (): ReactElement => {
     });
   }, [baseResults, filters.sortBy, isChannelsMode]);
 
-  // Track whether a search has been initiated for the current query/filters to avoid
-  // showing "No results" before the first search fires (300ms debounce window)
-  const hasEverLoadedRef = useRef(false);
   const autoOpenedResultKeyRef = useRef<string | null>(null);
   const hasManualPanelSelectionRef = useRef(false);
   const filterKey = JSON.stringify([
@@ -616,23 +625,6 @@ const SearchResults = (): ReactElement => {
   ]);
   const searchRequestKey = JSON.stringify([query, filterKey]);
   const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
-  const prevSearchKeyRef = useRef(searchRequestKey);
-  const prevFilterKeyRef = useRef(filterKey);
-  if (searchRequestKey !== prevSearchKeyRef.current) {
-    prevSearchKeyRef.current = searchRequestKey;
-    // Only show the loading bridge when a new API call will actually run: a filter change,
-    // or a query the search hook hasn't fetched yet. Since results now update live while
-    // typing, pressing Enter commits the already-searched query to the URL but fires no API
-    // call (the hook duplicate-suppresses it) — so resetting here would leave `isLoading`
-    // false forever and spin the screen indefinitely. Guard against that.
-    // `query` is already both-ends trimmed (line ~183); the hook dedupes on text.trimEnd()
-    // (useSearchMetrics), so normalize the same way here or a leading-space edit would
-    // disagree with whether the hook actually re-fetches.
-    const willFetch = filterKey !== prevFilterKeyRef.current || query !== searchedText.trimEnd();
-    if (willFetch) hasEverLoadedRef.current = false; // reset for new search
-    prevFilterKeyRef.current = filterKey;
-  }
-  if (isLoading) hasEverLoadedRef.current = true;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
@@ -809,6 +801,20 @@ const SearchResults = (): ReactElement => {
           >
             <ArrowLeft size={16} />
           </button>
+          {/* Paired with Back so a step backwards is undoable — refining a query pushes
+              history entries, and without this the only way forward is retyping. Mirrors
+              Back exactly, including staying enabled: forward past the end of the stack
+              is a harmless no-op. */}
+          <button
+            type='button'
+            aria-label='Forward'
+            onClick={() => void navigate(1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_FORWARD'
+          >
+            <ArrowRight size={16} />
+          </button>
           <div className='flex-1 min-w-0'>
             <SearchQueryInput
               query={query}
@@ -860,7 +866,7 @@ const SearchResults = (): ReactElement => {
             query={query}
             displayQuery={displayQuery}
             hasActiveFilters={filtersActive}
-            hasEverLoaded={hasEverLoadedRef.current}
+            isSearchPending={isSearchPending}
             isLoading={isLoading}
             error={error}
             results={results}
@@ -869,6 +875,7 @@ const SearchResults = (): ReactElement => {
             onSelectUser={handleSelectUser}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
+            usersById={usersById}
             compareMode={compareMode}
             isGrouped={isGrouped}
             selectedIds={selectedIds}
@@ -963,7 +970,7 @@ interface ResultsBodyProps {
    *  query). Drives empty-state copy and local-section gating so they track live typing. */
   displayQuery: string;
   hasActiveFilters: boolean;
-  hasEverLoaded: boolean;
+  isSearchPending: boolean;
   isLoading: boolean;
   error: string | null;
   results: DisplaySearchResult[];
@@ -976,6 +983,7 @@ interface ResultsBodyProps {
     category: ChannelCategory;
     searchableNames?: string[];
   }>;
+  usersById: Map<string, Parameters<typeof getUserDisplayName>[0]>;
   compareMode: boolean;
   isGrouped: boolean;
   selectedIds: Set<string>;
@@ -1107,7 +1115,7 @@ function ResultsBody({
   query,
   displayQuery,
   hasActiveFilters,
-  hasEverLoaded,
+  isSearchPending,
   isLoading,
   error,
   results,
@@ -1116,6 +1124,7 @@ function ResultsBody({
   onSelectUser,
   channelData,
   searchableChannels,
+  usersById,
   compareMode,
   isGrouped,
   selectedIds,
@@ -1126,9 +1135,20 @@ function ResultsBody({
 }: ResultsBodyProps): ReactElement {
   const navigate = useNavigate();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  // `searchableNames` is already the rendered form: getDMNames(...).display for DMs
+  // (participant names — `channel.name` is a participant id there) and [channel.name]
+  // for everything else. That is `formatChannelLabel` without its `#`, which rows
+  // supplying their own lead-in ("in design") don't want.
   const channelLabelsById = useMemo(
     () =>
-      new Map(searchableChannels.map(channel => [channel.channel.id, formatChannelLabel(channel)])),
+      new Map(
+        searchableChannels.map(channel => [
+          channel.channel.id,
+          (channel.searchableNames?.length ? channel.searchableNames : [channel.channel.name]).join(
+            ', ',
+          ),
+        ]),
+      ),
     [searchableChannels],
   );
 
@@ -1196,7 +1216,22 @@ function ResultsBody({
       const icon = getAttachmentResultIcon(result);
       const channelId = result.searchContext?.channelId;
       const channelName = channelId ? channelLabelsById.get(channelId) : undefined;
-      const subtitle = channelName ? `File uploaded in ${channelName}` : result.subtitle;
+      const uploaderId = result.avatar;
+      const uploader = uploaderId ? usersById.get(uploaderId) : undefined;
+      const uploaderName = uploader ? getUserDisplayName(uploader) : '';
+      const shouldShowUploader = !!uploader && uploaderName !== 'Unknown';
+      const rawTs = result.metadata.timestamp;
+      const uploadedAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+      const fileSize = result.searchContext?.fileSize;
+      const fileSizeLabel = typeof fileSize === 'number' ? formatFileSize(fileSize) : '';
+      // Same shape as every other card on this screen: metadata left, timestamp
+      // right. Segments are middot-separated, except the channel, which closes
+      // the line as a phrase ("in design") and so takes no separator in front.
+      const metaLine = [shouldShowUploader ? `Uploaded by ${uploaderName}` : '', fileSizeLabel]
+        .filter(Boolean)
+        .join(' · ');
+      const infoLine = [metaLine, channelName ? `in ${channelName}` : ''].filter(Boolean).join(' ');
+
       return (
         <button
           key={key}
@@ -1209,21 +1244,22 @@ function ResultsBody({
             {icon}
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              {subtitle && (
-                <span className='truncate'>
-                  {channelName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
-                </span>
-              )}
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
+            {/* Timestamp sits on the title row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {uploadedAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {uploadedAt}
                 </span>
               )}
             </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {infoLine ||
+                (result.subtitle ? <RenderMessageWithHTML message={result.subtitle} /> : null)}
+            </span>
           </div>
         </button>
       );
@@ -1232,10 +1268,11 @@ function ResultsBody({
     // Conversation message card (type === 'conversation')
     // DESK mails navigate away; regular messages open in the side panel
     if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
-      // Mirrors cmdK's desk-mail row: subject, then sender + recipient count and
-      // timestamp, then the body snippet.
+      // Mirrors cmdK's desk-mail row: subject and timestamp, then sender +
+      // recipient count, then the body snippet.
       const senderName = result.searchContext?.senderName || result.subtitle || '';
       const recipientCount = result.searchContext?.recipientCount ?? 0;
+      const sentAt = utcToIst(result.metadata.timestamp);
       const deskTicketSubtitle = [
         result.subtitle || result.searchContext.xyneId,
         ...(result.searchContext.formFieldMatches ?? []).map(
@@ -1256,25 +1293,27 @@ function ResultsBody({
             <Mail className='size-4 text-muted-foreground' />
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
+            {/* Timestamp sits on the subject row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {sentAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {sentAt}
+                </span>
+              )}
+            </div>
             {deskTicketSubtitle && (
               <div className='text-xs text-foreground truncate'>
                 <RenderMessageWithHTML message={deskTicketSubtitle} />
               </div>
             )}
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              <span className='min-w-0 truncate'>
-                {senderName}
-                {recipientCount > 0 && ` +${recipientCount} more`}
-              </span>
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
-                </span>
-              )}
-            </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {senderName}
+              {recipientCount > 0 && ` +${recipientCount} more`}
+            </span>
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />
@@ -1316,7 +1355,12 @@ function ResultsBody({
     // message, missing ticket_md), so render a compact data-driven ticket card.
     if (isDeskTicket && ticketSummary) {
       return (
-        <div key={key} className='w-full'>
+        <div
+          key={key}
+          className='w-full'
+          data-track-category='SEARCH_RESULTS'
+          data-track-name='OPEN_DESK_TICKET_RESULT'
+        >
           <TicketCardV2
             ticket={ticketSummary}
             isConversation
@@ -1505,7 +1549,8 @@ function ResultsBody({
           <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
         );
       }
-      if (isLoading || !hasEverLoaded) {
+      // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
+      if (isLoading || isSearchPending) {
         return (
           <div className='flex items-center justify-center h-full'>
             <Loader2 className='animate-spin text-muted-foreground' size={32} />
@@ -1571,7 +1616,8 @@ function ResultsBody({
         <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
       );
     }
-    if (isLoading || !hasEverLoaded) {
+    // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
+    if (isLoading || isSearchPending) {
       return (
         <div className='flex items-center justify-center h-full'>
           <Loader2 className='animate-spin text-muted-foreground' size={32} />

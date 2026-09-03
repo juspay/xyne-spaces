@@ -907,25 +907,25 @@
     --chip-fg: var(--mention-current-user-color, var(--mention-color));
   }
 
-  /* cmd+K "active" row tier (Slack-style): once the user engages a row (ArrowUp/Down or hover)
-     the selection turns blue; the resting auto-selection stays gray. Theme-tuned per data-theme.
+  /* cmd+K selected-row highlight: gray for the selected row from the moment it's selected,
+     resting or keyboard-engaged alike, matching the mention picker's .cmdk-active-row.
      Result rows carry aria-selected + an aria-selected:bg-accent utility, so !important is needed
      to win over the utilities layer; mention rows use the .cmdk-active-row class directly.
      When a mention typeahead is open (data-mention-active) selection is owned by the mention list's
-     own .cmdk-active-row, so the aria-selected blue is suppressed to avoid a second highlighted row. */
-  [data-nav-active="true"]:not([data-mention-active="true"]) [cmdk-item][aria-selected="true"] {
-    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
+     own .cmdk-active-row, so the aria-selected gray is suppressed to avoid a second highlighted row. */
+  [cmdk-root]:not([data-mention-active="true"]) [cmdk-item][aria-selected="true"] {
+    background-color: hsl(var(--accent)) !important; /* gray, matches .cmdk-active-row */
   }
   .cmdk-active-row {
-    background-color: rgb(219 234 254); /* blue-100 */
+    background-color: hsl(var(--accent)); /* gray */
   }
   [data-theme="midnight"]
-    [data-nav-active="true"]:not([data-mention-active="true"])
+    [cmdk-root]:not([data-mention-active="true"])
     [cmdk-item][aria-selected="true"] {
-    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
+    background-color: hsl(var(--accent)) !important; /* gray, matches .cmdk-active-row */
   }
   [data-theme="midnight"] .cmdk-active-row {
-    background-color: rgb(30 58 138 / 0.4); /* blue-900 @ 40% */
+    background-color: hsl(var(--accent)); /* gray */
   }
 
   /* Paragraph Adjacent Sibling */
@@ -2875,6 +2875,7 @@ html .bn-code-block-source-popup-ok-button:hover {
   .bn-block-outer
   .bn-block
   .bn-block-content[data-content-type="numberedListItem"]::before {
+  content: attr(data-index) ".";
   min-width: 24px;
   height: 1.55em;
   align-self: flex-start;
@@ -3124,7 +3125,7 @@ img.inline-emoji,
 
 /* Base markdown content styling with text wrapping for overflow prevention.
    Typography sits in `components` so a surface that sets its own size on the
-   wrapper (e.g. AIChatThread's `text-[15px] leading-7`) still wins. */
+   wrapper still wins over this baseline. */
 @layer components {
   .bot-markdown-content,
   .bot-markdown-content-call-summary {
@@ -3938,9 +3939,9 @@ img.inline-emoji,
   line-height: 1.5;
 }
 
-/* Headless detailed summaries use muted body copy while section headings retain
+/* Recording summaries use muted generated body copy while section headings retain
    foreground contrast. List markers inherit this color from their content block. */
-.detailed-summary-canvas-editor
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
   .bn-editor
   .bn-block-content:is(
     [data-content-type="paragraph"],
@@ -3953,7 +3954,18 @@ img.inline-emoji,
   color: hsl(var(--muted-foreground)) !important;
 }
 
-.detailed-summary-canvas-editor .bn-editor .bn-block-content[data-content-type="heading"] {
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block-content[data-content-type="heading"] {
+  color: hsl(var(--foreground)) !important;
+}
+
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block-content[data-text-color="recording-summary-edited"],
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block:has(> .bn-block-content[data-text-color="recording-summary-edited"]) {
   color: hsl(var(--foreground)) !important;
 }
 
@@ -4234,23 +4246,15 @@ img.inline-emoji,
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* AI composer — match the page bg (overrides the component's own literal) */
-[data-theme="classic"] .ai-composer-wrapper,
-[data-theme="summer_breeze"] .ai-composer-wrapper {
-  background-color: hsl(var(--background));
-}
-
-/* AI composer dark mode overrides */
+/* AI composer dark mode shadows — surface/border come from the shared
+   chat-composer tokens the channel & thread input uses */
 [data-theme="midnight"] .ai-composer-wrapper {
-  border-color: #3a3a3a;
-  background-color: #1e1e1e;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.05),
     0 8px 24px -12px rgba(0, 0, 0, 0.3);
 }
 
 [data-theme="midnight"] .ai-composer-wrapper:focus-within {
-  border-color: #555;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.1),
     0 12px 30px -12px rgba(0, 0, 0, 0.4);

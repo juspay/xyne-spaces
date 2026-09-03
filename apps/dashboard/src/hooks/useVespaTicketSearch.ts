@@ -108,7 +108,7 @@ const fetchAllFilterOnlyDynamicFieldResults = async (
   }
 };
 
-const stripHighlightMarkup = (value: string | undefined): string =>
+export const stripHighlightMarkup = (value: string | undefined): string =>
   value?.replace(/<\/?hi>/gi, '') ?? '';
 
 function toTicket(r: DisplaySearchResult): Ticket {

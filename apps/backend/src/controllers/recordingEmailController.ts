@@ -464,7 +464,7 @@ export class RecordingEmailController {
       throw new RecordingEmailError('Canvas attachment is no longer available', 400);
     }
 
-    const ySweetBlocks = await readFromYSweet(canvas.id);
+    const ySweetBlocks = await readFromYSweet(canvas.id, userId);
     const storedBlocks = Array.isArray(canvas.content) ? canvas.content : [];
     const markdown = await convertBlockNoteToMarkdown(
       ySweetBlocks.length > 0 ? ySweetBlocks : storedBlocks

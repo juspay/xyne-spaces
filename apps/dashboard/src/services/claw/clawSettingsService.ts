@@ -151,3 +151,40 @@ export async function listCodexModelsForUser(userId: string): Promise<ProviderMo
   );
   return data.data;
 }
+
+export interface ClaudeOauthFlow {
+  url: string;
+  state: string;
+  expiresIn: number;
+}
+
+/** Begin the Claude browser sign-in; returns the consent URL to open. */
+export async function startClaudeOauth(userId: string): Promise<ClaudeOauthFlow> {
+  const data = await clawRequest<{ success: boolean; data: ClaudeOauthFlow }>(
+    '/api/v1/settings/provider-credentials/claude/oauth/start',
+    {
+      method: 'POST',
+      headers: { [USER_ID_HEADER]: userId },
+      body: JSON.stringify({}),
+    },
+  );
+  return data.data;
+}
+
+/**
+ * Finish sign-in with what Anthropic showed the user. Accepts a bare code, a
+ * "code#state" pair, or the whole redirect URL — the server normalises it.
+ */
+export async function exchangeClaudeOauth(
+  userId: string,
+  payload: { code: string; state: string },
+): Promise<void> {
+  await clawRequest<{ success: boolean }>(
+    '/api/v1/settings/provider-credentials/claude/oauth/exchange',
+    {
+      method: 'POST',
+      headers: { [USER_ID_HEADER]: userId },
+      body: JSON.stringify(payload),
+    },
+  );
+}

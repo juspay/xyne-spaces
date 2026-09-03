@@ -2,6 +2,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useContext,
   useMemo,
   forwardRef,
   useRef,
@@ -13,8 +14,8 @@ import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 
 import { InputBox } from '../../ui/InputBox';
+import { Button } from '../../ui/Button/Button';
 import {
-  type SdlcDiscussion,
   MessageType,
   ChannelScopeType,
   ChannelVisibility,
@@ -41,17 +42,18 @@ import { saveDraft, useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
 import { getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { sendMessage, type ConversationRef, type PendingAttachment } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
+import {
+  ATTACHMENT_STILL_UPLOADING,
+  isAttachmentUploaded,
+  isAttachmentUploadInFlight,
+} from '@xyne/shared/zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
@@ -129,8 +131,6 @@ interface ChatInputProps {
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
-  /** SDLC discussion binding: new channel conversations are linked to this owner. */
-  sdlcDiscussion?: Omit<SdlcDiscussion, 'linkId'>;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -152,13 +152,13 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       threadParticipantIds,
       dockSlot,
       twinEdit,
-      sdlcDiscussion,
     },
     ref,
   ) => {
     const zero = useZero();
     const navigate = useNavigate();
     const { user } = useAuth();
+    const entityLinkScope = useContext(EntityLinkContext);
     const canCreateTicket = useCanCreateTicket();
     const { isOffline, showOfflineBanner, isReconnecting, isReconnected, refreshConnection } =
       useZeroOfflineState();
@@ -461,6 +461,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // composer; used to carry attachments through the pending-message send.
     const channelDraftForSend = useDraftFromDB(channelId, conversationId ?? null);
 
+    // An attachment row exists from the moment a file is picked; its bytes land later over
+    // a separate upload request. Sending in between would publish a tile with no file behind
+    // it, so the send button stays disabled until the upload finishes. Attachments whose
+    // upload died long ago are not held: the send mutator drops those instead.
+    const isAttachmentUploading = useMemo(
+      () =>
+        !messageId &&
+        (channelDraftForSend?.attachments ?? []).some(
+          a => !isAttachmentUploaded(a) && isAttachmentUploadInFlight(a),
+        ),
+      [messageId, channelDraftForSend?.attachments],
+    );
+
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
       if (isForwardedContent || initialContent) return initialContent;
@@ -662,6 +675,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             )
           : bodyHtml;
         const hasFiles = files && files.length > 0;
+
+        // Backstop for callers that reach the send handler with the button bypassed
+        // (the send mutators reject it too — this is only so the user is told why).
+        if (isAttachmentUploading) {
+          toast.warning('Attachment is still uploading', {
+            description: 'It will be ready in a moment — try sending again.',
+          });
+          throw new Error(ATTACHMENT_STILL_UPLOADING);
+        }
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
@@ -674,10 +696,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             description: '@channel and @here are disabled in thread replies.',
           });
         }
-        const scopeType =
-          channel?.scopeType && channel.scopeType !== ChannelScopeType.DEFAULT
-            ? channel.scopeType
-            : 'Channel';
 
         // Zero normalizes every server mutation failure to { type: 'app' | 'zero', message }.
         // - 'zero' = protocol / connection / out-of-order error. The connection resets and
@@ -811,9 +829,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             isEdit: true,
             messageLength: processedHtml.length,
           });
-          mixpanelService.track(EVENTS.INITIATE_ACTION, {
-            type: EVENT_PROPERTIES.ACTION_TYPES.EDIT,
-          });
         } else if (conversationId) {
           try {
             const messageCreatedAt = Date.now();
@@ -858,11 +873,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageLength: processedHtml.length,
             });
 
-            mixpanelService.track(EVENTS.INITIATE_ACTION, {
-              type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_REPLY,
-              scopeType,
-              hasAttachments: hasFiles,
-            });
             setAlsoSendToChannel(false);
             // Invalidate summary cache when reply is sent
             onMessageChange(conversationId, channelId);
@@ -877,12 +887,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               conversationId,
               isReply: true,
               error: errorMessage,
-            });
-
-            mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
-              errorCode: 'CONVERSATION_SEND_ERROR',
-              scopeType,
-              errorReason: errorMessage,
             });
           }
         } else {
@@ -923,8 +927,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageId: newMessageId,
               timestamp: messageCreatedAt,
               ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
-              ...(sdlcDiscussion !== undefined && {
-                sdlcDiscussion: { ...sdlcDiscussion, linkId: uuidv4() },
+              ...(entityLinkScope && {
+                entityLinkContext: { ...entityLinkScope, linkId: uuidv4() },
               }),
             });
 
@@ -946,11 +950,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageLength: processedHtml.length,
             });
 
-            mixpanelService.track(EVENTS.INITIATE_ACTION, {
-              type: EVENT_PROPERTIES.ACTION_TYPES.DIRECT_MESSAGE,
-              scopeType,
-              hasAttachments: hasFiles,
-            });
             // Invalidate channel summary cache when new conversation is created
             // Note: We only invalidate channel summaries, not thread (no conversationId yet)
             onMessageChange('', channelId);
@@ -966,12 +965,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               isNewConversation: true,
               error: errorMessage,
             });
-
-            mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
-              errorCode: 'CHANNEL_SEND_ERROR',
-              scopeType,
-              errorReason: errorMessage,
-            });
           }
         }
       },
@@ -986,6 +979,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         allUsersForMentionResolution,
         onMessageChange,
         isOffline,
+        isAttachmentUploading,
         user?.id,
         context.workspaceId,
         allowThreadBroadcastMentions,
@@ -1100,10 +1094,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </div>
         ) : (
           <>
-            <AgentProgressIndicator
-              sessionId={agentProgressConversationId ?? currentSessionId}
-              conversationId={agentProgressConversationId}
-            />
             {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>
@@ -1114,7 +1104,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       : "You're offline. Messages will be saved as drafts until you reconnect."}
                   </span>
                 </div>
-                <button
+                <Button
+                  variant='ghost'
                   type='button'
                   onClick={refreshConnection}
                   disabled={isReconnecting}
@@ -1123,11 +1114,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 cursor-wait'
                       : 'text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900 hover:bg-amber-200 dark:hover:bg-amber-800'
                   }`}
+                  trackId='reconnect_zero'
                   data-track-category='CHAT_INPUT'
                   data-track-name='RECONNECT_ZERO'
                 >
                   {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
-                </button>
+                </Button>
               </div>
             )}
             {isReconnected && (
@@ -1146,7 +1138,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                     type='button'
                     onClick={() => void navigate('/chat/scheduled')}
                     className='font-semibold text-primary hover:underline'
-                    data-track-category='chat-input'
+                    data-track-category='CHAT_INPUT'
                     data-track-name='open-delayed-messages-from-banner'
                   >
                     See all scheduled messages
@@ -1258,7 +1250,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }}
               onCreateCanvas={handleCreateCanvasFromComposer}
               hasTicket={hasTicket}
-              sendDisabled={isOffline}
+              sendDisabled={isOffline || isAttachmentUploading}
+              {...(isAttachmentUploading && {
+                sendDisabledReason: 'Attachment is still uploading',
+              })}
               onScheduleSend={handleScheduleSend}
               {...(globalShortcuts.length > 0 && {
                 bottomLeftSlot: (
@@ -1269,7 +1264,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                         onClick={() => setShortcutModalOpen(true)}
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Open shortcuts'
-                        data-track-category='chat-input'
+                        data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'
                       >
                         <Zap className='h-4 w-4 text-muted-foreground' />

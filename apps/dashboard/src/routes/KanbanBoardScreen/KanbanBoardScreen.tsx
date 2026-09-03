@@ -1855,22 +1855,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Filter tickets based on view mode and filters.
   // NOTE: ALL filters including dynamic field filters are applied CLIENT-SIDE.
-  //
-  // In a channel Kanban view a board can be shared across multiple channels, so
-  // the board's tickets are not all "this channel's" tickets. Scope every ticket
-  // path (page fetch, counts, board-nav args, legacy client filter) to tickets
-  // created in this channel by forcing `sourceChannels` to the current channel.
-  // This applies both when a specific board is selected and in the "All Boards"
-  // view. The filter dropdown UI still reads the raw `filters`, so this scoping
-  // stays invisible there.
-  const scopedFilters = useMemo(() => {
-    if (channelId && viewMode === 'project') {
-      return { ...filters, sourceChannels: [channelId] };
-    }
-    return filters;
-  }, [filters, channelId, viewMode]);
-
-  const deferredFilters = useDeferredValue(scopedFilters);
+  const deferredFilters = useDeferredValue(filters);
 
   const filteredTickets = useMemo(() => {
     if (!shouldUseLegacyTicketsQuery || !allProjectTickets) {
@@ -3624,7 +3609,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             <button
               data-testid='kanban-create-ticket-button'
               data-track-event='BUTTON_CLICK'
-              data-track-category='TICKETS'
+              data-track-category='Tickets'
               data-track-name='CREATE_TICKET_KANBAN'
               data-track-metadata={JSON.stringify({ boardId, channelId })}
               onClick={() => {
@@ -3953,7 +3938,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             transition hover:bg-muted focus:outline-none
             ${isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
-                          data-track-category='TICKETS'
+                          data-track-category='Tickets'
                           data-track-name='KANBAN_VIEW_COMFORTABLE'
                           data-track-metadata={JSON.stringify({ boardId, viewMode: 'comfortable' })}
                         >
@@ -3969,7 +3954,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             transition hover:bg-background hover:text-foreground
             ${!isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
-                          data-track-category='TICKETS'
+                          data-track-category='Tickets'
                           data-track-name='KANBAN_VIEW_COMPACT'
                           data-track-metadata={JSON.stringify({ boardId, viewMode: 'compact' })}
                         >
@@ -4941,7 +4926,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     {showGroupHeader && (
                       <button
                         onClick={() => toggleGroupExpansion(group.key)}
-                        data-track-category='KanbanBoard'
+                        data-track-category='KANBAN'
                         data-track-name='ToggleGroupExpansion'
                         data-track-metadata={JSON.stringify({ groupKey: group.key, groupBy })}
                         className={`flex items-center gap-3 p-4 bg-muted hover:bg-border transition-colors sticky left-0 z-10 w-full text-left border-b border-border ${isExpanded ? 'rounded-t-lg ' : 'rounded-lg'}`}

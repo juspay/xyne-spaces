@@ -3,10 +3,12 @@ import { MoreVertical } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { CallStatus } from '@xyne/shared';
 import {
+  canEditScheduledCallParticipants,
   getPreviewParticipantUserIds,
   getCallParticipantCount,
   type Call,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import Button from '../../ui/Button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../../ui/dropdown-menu';
 import { formatParticipantText } from '../../../hooks/useCalls';
@@ -43,6 +45,8 @@ export function CallRow({
     getCallParticipantCount(call),
   );
   const isOwner = currentUserId === call.createdByUserId;
+  const visibleChannels = useAllVisibleChannels();
+  const canEdit = isOwner || canEditScheduledCallParticipants(call, currentUserId, visibleChannels);
 
   return (
     <div className='flex items-center gap-2'>
@@ -61,7 +65,7 @@ export function CallRow({
               }
             : undefined
         }
-        data-track-category='Calls'
+        data-track-category='CALLS'
         data-track-name='upcoming-call-click'
       >
         <div
@@ -84,7 +88,7 @@ export function CallRow({
             e.stopPropagation();
             onJoinCall(call);
           }}
-          data-track-category='Calls'
+          data-track-category='CALLS'
           data-track-name='JOIN_UPCOMING_CALL'
           className={cn(
             'shrink-0 text-sm',
@@ -101,7 +105,7 @@ export function CallRow({
           <Button
             variant='ghost'
             className='shrink-0 size-6 p-0 text-muted-foreground hover:text-foreground'
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='upcoming-call-more-options'
             onClick={e => e.stopPropagation()}
             aria-label='More options'
@@ -113,6 +117,7 @@ export function CallRow({
           <UpcomingCallActionsMenuItems
             call={call}
             isOwner={isOwner}
+            canEdit={canEdit}
             onEdit={onEditCall ? () => onEditCall(call) : undefined}
             onCancel={onCancelCall ? () => onCancelCall(call) : undefined}
           />
