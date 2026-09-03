@@ -129,6 +129,15 @@ export async function encryptionResponseInterceptor(
     return response;
   }
 
+  // A Blob/ArrayBuffer response has `typeof === 'object'` but no enumerable
+  // own properties, so decryptObject's Object.entries() walk would silently
+  // replace it with `{}` instead of leaving it alone — skip binary response
+  // types outright rather than only guarding on the value's shape.
+  const responseType = response.config.responseType;
+  if (responseType === 'blob' || responseType === 'arraybuffer' || responseType === 'stream') {
+    return response;
+  }
+
   // Only decrypt JSON responses
   if (!response.data || typeof response.data !== 'object') {
     return response;

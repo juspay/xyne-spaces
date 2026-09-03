@@ -1,3 +1,85 @@
+## [1.270.0](https://github.com/juspay/xyne-spaces/compare/v1.269.3...v1.270.0) (2026-09-03)
+
+
+### Features
+
+* ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([#1471](https://github.com/juspay/xyne-spaces/issues/1471)) ([#1479](https://github.com/juspay/xyne-spaces/issues/1479)) ([73d18f7](https://github.com/juspay/xyne-spaces/commit/73d18f78a63bced57cd4f280465ea391b0295327)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
+
+
+### Bug Fixes
+
+* open links in external browser by default ([#1470](https://github.com/juspay/xyne-spaces/issues/1470)) ([5599371](https://github.com/juspay/xyne-spaces/commit/559937155f3e1a628cdae8e479a3a6377f377f8c))
+* wire onExpand into carousel SlideContent so video minimize/maximize works in thread viewer ([#1369](https://github.com/juspay/xyne-spaces/issues/1369)) ([4cd80cd](https://github.com/juspay/xyne-spaces/commit/4cd80cde0b1b0b8092facbb168b3878d9953f847))
+
+## [1.269.3](https://github.com/juspay/xyne-spaces/compare/v1.269.2...v1.269.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* message deep-links land on wrong message for older messages ([#1393](https://github.com/juspay/xyne-spaces/issues/1393)) ([e34ac5c](https://github.com/juspay/xyne-spaces/commit/e34ac5c1388b0a7057230429798fb1b7f04cb9f7))
+
+## [1.269.2](https://github.com/juspay/xyne-spaces/compare/v1.269.1...v1.269.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* Modifying the script to skip ci check for workspaceId in certain tables ([#1468](https://github.com/juspay/xyne-spaces/issues/1468)) ([9ec3c34](https://github.com/juspay/xyne-spaces/commit/9ec3c34e648c77ccb2469103985f2c86dddd47a8))
+
+## [1.269.1](https://github.com/juspay/xyne-spaces/compare/v1.269.0...v1.269.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* -Fix-scheduled-call-start-time-not-updating ([#1467](https://github.com/juspay/xyne-spaces/issues/1467)) ([856bd49](https://github.com/juspay/xyne-spaces/commit/856bd4995867a212933e966eab621f1944c51cfa))
+
+## [1.269.0](https://github.com/juspay/xyne-spaces/compare/v1.268.1...v1.269.0) (2026-09-03)
+
+
+### Features
+
+* adding lables in app based desk ([#1412](https://github.com/juspay/xyne-spaces/issues/1412)) ([d06da8a](https://github.com/juspay/xyne-spaces/commit/d06da8a0bb267f797e15fab7c4e6f290eb0c0181))
+
+## [1.268.1](https://github.com/juspay/xyne-spaces/compare/v1.268.0...v1.268.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* made ai priority toggle independent of classification toggle ([#1435](https://github.com/juspay/xyne-spaces/issues/1435)) ([96feae5](https://github.com/juspay/xyne-spaces/commit/96feae54eaa0d6491a64f83df6737a53d4c86e0a))
+
+## [1.268.0](https://github.com/juspay/xyne-spaces/compare/v1.267.0...v1.268.0) (2026-09-03)
+
+
+### Features
+
+* add sidebar call hover card ([#1262](https://github.com/juspay/xyne-spaces/issues/1262)) ([ad203f3](https://github.com/juspay/xyne-spaces/commit/ad203f3a90ddf289b45ed1d5ff56496dc1efdc97))
+
+## [1.267.0](https://github.com/juspay/xyne-spaces/compare/v1.266.1...v1.267.0) (2026-09-03)
+
+
+### Features
+
+* schedule call fixes ([#1396](https://github.com/juspay/xyne-spaces/issues/1396)) ([6c671f2](https://github.com/juspay/xyne-spaces/commit/6c671f2220b760f6b707715c07d3d6f1ba4551bd))
+
+
+### Bug Fixes
+
+* title substring fix ([#1408](https://github.com/juspay/xyne-spaces/issues/1408)) ([1e2456d](https://github.com/juspay/xyne-spaces/commit/1e2456d12031dbf90b824d90de7a843ea081c1cc))
+* video recording stream ([#1407](https://github.com/juspay/xyne-spaces/issues/1407)) ([087523f](https://github.com/juspay/xyne-spaces/commit/087523f95931c28e7d656c2b066be89d23af7f0a))
+
+## [1.266.1](https://github.com/juspay/xyne-spaces/compare/v1.266.0...v1.266.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* fix Cmd+K search keyboard navigation and mention auto… ([#1147](https://github.com/juspay/xyne-spaces/issues/1147)) ([ede1c2d](https://github.com/juspay/xyne-spaces/commit/ede1c2d8b8c52ba1badeb062f6dabb92ca357067))
+
+## [1.266.0](https://github.com/juspay/xyne-spaces/compare/v1.265.2...v1.266.0) (2026-09-03)
+
+
+### Features
+
+* add PPTX viewer and search-text extraction ([#1376](https://github.com/juspay/xyne-spaces/issues/1376)) ([fc6d4f3](https://github.com/juspay/xyne-spaces/commit/fc6d4f3592acb3ddfe2e01cec4af4291e310c54d)), closes [#1329](https://github.com/juspay/xyne-spaces/issues/1329)
+
 ## [1.265.2](https://github.com/juspay/xyne-spaces/compare/v1.265.1...v1.265.2) (2026-09-02)
 
 ## [1.265.1](https://github.com/juspay/xyne-spaces/compare/v1.265.0...v1.265.1) (2026-09-02)

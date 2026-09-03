@@ -3011,6 +3011,110 @@ const ChannelCommandMenu = ({
     return null;
   };
 
+  // Accept the currently highlighted mention row (user/channel/priority/DM). Shared by Enter
+  // and by Tab/ArrowRight so `from:ar` + Tab completes the mention the same way Enter would,
+  // instead of falling through to tab-cycling or the ticket-preview shortcut.
+  const acceptHighlightedMention = (): void => {
+    // Handle 'in:' trigger - Channels + DMs (NO Users)
+    if (channelTrigger === 'in:') {
+      const regularChannelCount = availableRegularChannels.length;
+
+      if (selectedMentionIndex < regularChannelCount) {
+        // Selecting a regular channel
+        const channelIndex = selectedMentionIndex;
+        if (availableRegularChannels[channelIndex]) {
+          const { channel, displayName } = availableRegularChannels[channelIndex];
+          void handleMentionSelect({
+            id: channel.id,
+            name: displayName,
+            type: MentionType.CHANNEL,
+          });
+        }
+      } else {
+        // Selecting a DM
+        const dmIndex = selectedMentionIndex - regularChannelCount;
+        if (availableDMs[dmIndex]) {
+          const { channel, displayName } = availableDMs[dmIndex];
+          void handleMentionSelect({
+            id: channel.id,
+            name: displayName,
+            type: MentionType.CHANNEL,
+          });
+        }
+      }
+      return;
+    }
+
+    // Handle 'in:#' trigger - Channels only (NO DMs)
+    if (channelTrigger === 'in:#') {
+      if (availableRegularChannels[selectedMentionIndex]) {
+        const { channel, displayName } = availableRegularChannels[selectedMentionIndex];
+        void handleMentionSelect({
+          id: channel.id,
+          name: displayName,
+          type: MentionType.CHANNEL,
+        });
+      }
+      return;
+    }
+
+    // Handle 'in:@' trigger - DMs only (NOT Users!)
+    if (channelTrigger === 'in:@') {
+      if (availableDMs[selectedMentionIndex]) {
+        const { channel, displayName } = availableDMs[selectedMentionIndex];
+        void handleMentionSelect({
+          id: channel.id,
+          name: displayName,
+          type: MentionType.CHANNEL,
+        });
+      }
+      return;
+    }
+
+    // Handle '#' trigger - only Channels (legacy combined list)
+    if (channelTrigger === '#' && availableChannels[selectedMentionIndex]) {
+      const { channel, displayName } = availableChannels[selectedMentionIndex];
+      void handleMentionSelect({
+        id: channel.id,
+        name: displayName,
+        type: MentionType.CHANNEL,
+      });
+      return;
+    }
+
+    // Handle priority value selection (closed enum, no backend)
+    if (mentionSearchType === MentionType.PRIORITY && availablePriorities[selectedMentionIndex]) {
+      const priority = availablePriorities[selectedMentionIndex];
+      void handleMentionSelect({
+        id: priority.id,
+        name: priority.name,
+        type: MentionType.PRIORITY,
+      });
+      return;
+    }
+
+    // Handle regular user mention search (@, from:, with:, assignee:)
+    if (mentionSearchType === MentionType.USER && availableUsers[selectedMentionIndex]) {
+      const user = availableUsers[selectedMentionIndex];
+      void handleMentionSelect({
+        id: user.id,
+        name: getUserDisplayName(user),
+        type: MentionType.USER,
+        ...(user.email ? { email: user.email } : {}),
+      });
+    } else if (
+      mentionSearchType === MentionType.CHANNEL &&
+      availableChannels[selectedMentionIndex]
+    ) {
+      const { channel, displayName } = availableChannels[selectedMentionIndex];
+      void handleMentionSelect({
+        id: channel.id,
+        name: displayName,
+        type: MentionType.CHANNEL,
+      });
+    }
+  };
+
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
     // A picked target renders its own UI (composer or confirm modal) — let it own all
     // keys (typing, Enter to send/confirm, its own @/# mention pickers).
@@ -3052,6 +3156,17 @@ const ChannelCommandMenu = ({
         return;
       }
       // ArrowUp/ArrowDown fall through to the shared list-navigation below.
+    }
+
+    // ── Tab / Right Arrow: accept the highlighted mention suggestion ──────
+    // e.g. `from:ar` -> Tab/Right completes to `from:Arjun Rao`, mirroring Enter's mention
+    // handling. Must run before tab-cycling and the ArrowRight ticket-preview shortcut below,
+    // neither of which know about mention mode.
+    if ((e.key === 'Tab' || e.key === 'ArrowRight') && mentionSearchType !== null) {
+      e.preventDefault();
+      e.stopPropagation();
+      acceptHighlightedMention();
+      return;
     }
 
     // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
@@ -3108,16 +3223,6 @@ const ChannelCommandMenu = ({
       const currentIndex = Array.from(items).findIndex(
         item => item.getAttribute('aria-selected') === 'true',
       );
-
-      // First arrow (Up OR Down) from the resting row activates it IN PLACE (gray -> blue)
-      // instead of moving to an adjacent row; keeps ArrowUp from rest off the last row.
-      if (!hasNavigated && currentIndex >= 0) {
-        hasNavigatedRef.current = true;
-        markNavigated();
-        setSuppressHover(true);
-        syncEnterIntent();
-        return;
-      }
 
       // Calculate next index
       let nextIndex: number;
@@ -3287,108 +3392,9 @@ const ChannelCommandMenu = ({
 
     // If mention search is active, let the mention selection handle Enter
     if (mentionSearchType !== null) {
-      // Select the currently highlighted mention
       e.preventDefault();
       e.stopPropagation();
-
-      // Handle 'in:' trigger - Channels + DMs (NO Users)
-      if (channelTrigger === 'in:') {
-        const regularChannelCount = availableRegularChannels.length;
-
-        if (selectedMentionIndex < regularChannelCount) {
-          // Selecting a regular channel
-          const channelIndex = selectedMentionIndex;
-          if (availableRegularChannels[channelIndex]) {
-            const { channel, displayName } = availableRegularChannels[channelIndex];
-            void handleMentionSelect({
-              id: channel.id,
-              name: displayName,
-              type: MentionType.CHANNEL,
-            });
-          }
-        } else {
-          // Selecting a DM
-          const dmIndex = selectedMentionIndex - regularChannelCount;
-          if (availableDMs[dmIndex]) {
-            const { channel, displayName } = availableDMs[dmIndex];
-            void handleMentionSelect({
-              id: channel.id,
-              name: displayName,
-              type: MentionType.CHANNEL,
-            });
-          }
-        }
-        return;
-      }
-
-      // Handle 'in:#' trigger - Channels only (NO DMs)
-      if (channelTrigger === 'in:#') {
-        if (availableRegularChannels[selectedMentionIndex]) {
-          const { channel, displayName } = availableRegularChannels[selectedMentionIndex];
-          void handleMentionSelect({
-            id: channel.id,
-            name: displayName,
-            type: MentionType.CHANNEL,
-          });
-        }
-        return;
-      }
-
-      // Handle 'in:@' trigger - DMs only (NOT Users!)
-      if (channelTrigger === 'in:@') {
-        if (availableDMs[selectedMentionIndex]) {
-          const { channel, displayName } = availableDMs[selectedMentionIndex];
-          void handleMentionSelect({
-            id: channel.id,
-            name: displayName,
-            type: MentionType.CHANNEL,
-          });
-        }
-        return;
-      }
-
-      // Handle '#' trigger - only Channels (legacy combined list)
-      if (channelTrigger === '#' && availableChannels[selectedMentionIndex]) {
-        const { channel, displayName } = availableChannels[selectedMentionIndex];
-        void handleMentionSelect({
-          id: channel.id,
-          name: displayName,
-          type: MentionType.CHANNEL,
-        });
-        return;
-      }
-
-      // Handle priority value selection (closed enum, no backend)
-      if (mentionSearchType === MentionType.PRIORITY && availablePriorities[selectedMentionIndex]) {
-        const priority = availablePriorities[selectedMentionIndex];
-        void handleMentionSelect({
-          id: priority.id,
-          name: priority.name,
-          type: MentionType.PRIORITY,
-        });
-        return;
-      }
-
-      // Handle regular user mention search (@, from:, with:, assignee:)
-      if (mentionSearchType === MentionType.USER && availableUsers[selectedMentionIndex]) {
-        const user = availableUsers[selectedMentionIndex];
-        void handleMentionSelect({
-          id: user.id,
-          name: getUserDisplayName(user),
-          type: MentionType.USER,
-          ...(user.email ? { email: user.email } : {}),
-        });
-      } else if (
-        mentionSearchType === MentionType.CHANNEL &&
-        availableChannels[selectedMentionIndex]
-      ) {
-        const { channel, displayName } = availableChannels[selectedMentionIndex];
-        void handleMentionSelect({
-          id: channel.id,
-          name: displayName,
-          type: MentionType.CHANNEL,
-        });
-      }
+      acceptHighlightedMention();
       return;
     }
 
@@ -3965,11 +3971,7 @@ const ChannelCommandMenu = ({
                                     selectMention(index);
                                   }}
                                   className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    index === selectedMentionIndex
-                                      ? hasNavigated
-                                        ? 'cmdk-active-row'
-                                        : 'bg-muted'
-                                      : ''
+                                    index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
@@ -4011,11 +4013,7 @@ const ChannelCommandMenu = ({
                                     selectMention(adjustedIndex);
                                   }}
                                   className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    adjustedIndex === selectedMentionIndex
-                                      ? hasNavigated
-                                        ? 'cmdk-active-row'
-                                        : 'bg-muted'
-                                      : ''
+                                    adjustedIndex === selectedMentionIndex ? 'cmdk-active-row' : ''
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
@@ -4070,11 +4068,7 @@ const ChannelCommandMenu = ({
                                       selectMention(index);
                                     }}
                                     className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                      index === selectedMentionIndex
-                                        ? hasNavigated
-                                          ? 'cmdk-active-row'
-                                          : 'bg-muted'
-                                        : ''
+                                      index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                     } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                     style={{ WebkitTapHighlightColor: 'transparent' }}
                                   >
@@ -4140,11 +4134,7 @@ const ChannelCommandMenu = ({
                                     selectMention(index);
                                   }}
                                   className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    index === selectedMentionIndex
-                                      ? hasNavigated
-                                        ? 'cmdk-active-row'
-                                        : 'bg-muted'
-                                      : ''
+                                    index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
@@ -4191,11 +4181,7 @@ const ChannelCommandMenu = ({
                               selectMention(index);
                             }}
                             className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                              index === selectedMentionIndex
-                                ? hasNavigated
-                                  ? 'cmdk-active-row'
-                                  : 'bg-muted'
-                                : ''
+                              index === selectedMentionIndex ? 'cmdk-active-row' : ''
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
@@ -4241,11 +4227,7 @@ const ChannelCommandMenu = ({
                                 selectMention(index);
                               }}
                               className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                index === selectedMentionIndex
-                                  ? hasNavigated
-                                    ? 'cmdk-active-row'
-                                    : 'bg-muted'
-                                  : ''
+                                index === selectedMentionIndex ? 'cmdk-active-row' : ''
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
@@ -4300,11 +4282,7 @@ const ChannelCommandMenu = ({
                                   selectMention(index);
                                 }}
                                 className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                  index === selectedMentionIndex
-                                    ? hasNavigated
-                                      ? 'cmdk-active-row'
-                                      : 'bg-muted'
-                                    : ''
+                                  index === selectedMentionIndex ? 'cmdk-active-row' : ''
                                 } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
@@ -4366,11 +4344,7 @@ const ChannelCommandMenu = ({
                                 selectMention(index);
                               }}
                               className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                index === selectedMentionIndex
-                                  ? hasNavigated
-                                    ? 'cmdk-active-row'
-                                    : 'bg-muted'
-                                  : ''
+                                index === selectedMentionIndex ? 'cmdk-active-row' : ''
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >

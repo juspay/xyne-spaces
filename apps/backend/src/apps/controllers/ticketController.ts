@@ -19,6 +19,7 @@ import {
   ExternalEntityType,
   EmailType,
   DeskType,
+  isDeskChannelType,
 } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
@@ -29,7 +30,9 @@ import { config } from '@/config/env';
 import { buildEmailTicketAcknowledgmentBody } from '../core/emailUtils';
 import { extractEmailAddress } from '@/utils/email';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { scopeExternalMessageIdToSource } from '@/integrations/core/deskSources';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 
@@ -59,6 +62,7 @@ import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger
 import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 
 const externalSourceRepo = new ExternalSourceRepository();
+const externalMessageRepo = new ExternalMessageRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const appsFilesBaseUrl = `${config.backendUrl.replace(/\/$/, '')}/api/apps/files`;
 
@@ -2098,7 +2102,9 @@ export class TicketController {
       //   1. EmailChannelPreference.sendAsEmail — admin-configured alias (highest priority)
       //   2. ExternalSource.displayName — connected mailbox from OAuth integration
       //   3. Desk owner's user email — last-resort fallback
-      const externalSource = await externalSourceRepo.findByChannelId(channelId);
+      const externalSource = await externalSourceRepo.findChannelSource(channelId, {
+        sourceTypes: ['google', 'microsoft'],
+      });
       const ownerUser = channelPref?.ownerUserId
         ? await repositories.users.findById(channelPref.ownerUserId)
         : null;
@@ -2443,16 +2449,21 @@ export class TicketController {
 
       const channelPref = await prismaClient.emailChannelPreference.findUnique({
         where: { channelId },
-        select: { sendAsEmail: true, ownerUserId: true, boardId: true, deskType: true },
+        select: { sendAsEmail: true, ownerUserId: true, boardId: true },
       });
-      if (!channelPref || channelPref.deskType !== DeskType.APP) {
-        res.status(400).json({ error: 'Channel is not an APP desk', code: 'NOT_APP_DESK' });
+      if (!channelPref || !isDeskChannelType(channel.type)) {
+        res.status(400).json({ error: 'Channel is not a desk channel', code: 'NOT_DESK_CHANNEL' });
         return;
       }
 
-      const externalSource = await externalSourceRepo.findByChannelId(channelId);
+      const installedAppId = (req as any).auth?.installedAppId as string | undefined;
+      if (!installedAppId) {
+        res.status(403).json({ error: 'App identity not established', code: 'APP_NOT_CONNECTED' });
+        return;
+      }
+      const externalSource = await externalSourceRepo.findChannelAppSource(channelId, installedAppId);
       if (!externalSource) {
-        res.status(503).json({ error: 'App desk source is not configured', code: 'MISCONFIGURED' });
+        res.status(403).json({ error: 'App is not connected to this channel', code: 'APP_NOT_CONNECTED' });
         return;
       }
       if (!externalSource.isActive) {
@@ -2461,7 +2472,16 @@ export class TicketController {
       }
 
       const externalThreadId = threadId;
-      const externalMessageId = bodyExternalId || randomUUID();
+      const appExternalId = bodyExternalId || randomUUID();
+      // Source-namespaced, and written to BOTH Email.externalMessageId and
+      // ExternalMessage.externalId. Those two columns are the same identifier
+      // throughout this repo (core.ts writes normalizedData.externalId to both,
+      // emailService.ts:2517 copies one into the other), and joins rely on that —
+      // so the namespace has to be applied on both sides or not at all. Applying it
+      // is what stops two apps on one channel from colliding on a shared id, since
+      // Email's unique is (externalMessageId, channelId) and the id is app-chosen.
+      const externalMessageId = scopeExternalMessageIdToSource(externalSource.id, appExternalId);
+
       let customFieldValues: CustomFieldWritePayload | undefined;
       let emailFrom =
         (senderName && senderEmail && `${senderName} <${senderEmail}>`) ||
@@ -2477,15 +2497,23 @@ export class TicketController {
       const uploadedFiles = files.length > 0 ? await uploadFiles(files) : [];
 
       const ownerUser = channelPref.ownerUserId ? await repositories.users.findById(channelPref.ownerUserId) : null;
+      // The desk's own address comes from its mailbox source, never from the app
+      // binding — an app-desk displayName is the app's name and holds no address, so
+      // reading it here would skip a perfectly good mailbox for the owner's personal
+      // address on any EMAIL desk without sendAsEmail.
+      const mailboxSource = await externalSourceRepo.findChannelSource(channelId, {
+        sourceTypes: ['google', 'microsoft', 'zoho'],
+      });
       const recipientEmail =
         channelPref.sendAsEmail ||
-        extractEmailAddress(externalSource.displayName ?? '') ||
+        extractEmailAddress(mailboxSource?.displayName ?? '') ||
         ownerUser?.email ||
         `desk-${channelId}@apps.xyne.ai`;
 
       logger.info('[AppDeskInbound] received', {
         channelId,
         threadId: externalThreadId,
+        externalId: appExternalId,
         externalMessageId,
         externalIdProvided: !!bodyExternalId,
         from: emailFrom,
@@ -2495,7 +2523,41 @@ export class TicketController {
         appUserId: userId,
       });
 
-      const threadEmail = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
+      // Thread continuation is source-scoped via the app's ExternalMessage link; the
+      // channel-scoped fallback only covers pre-existing threads with a missing link
+      // (self-healed by the externalSourceLink write below). Do not remove the fallback.
+      const linkedMessage = await externalMessageRepo.findByThreadId(externalSource.id, externalThreadId, ExternalEntityType.EMAIL);
+      let threadEmail = linkedMessage?.entityId ? await repositories.emails.findById(linkedMessage.entityId) : null;
+      if (!threadEmail) {
+        const candidate = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
+        if (candidate) {
+          // The candidate matched on (threadId, channelId) alone, which says nothing
+          // about who owns it. On a shared desk another app — or the mailbox — can
+          // already own that thread, and adopting it would file this app's message
+          // into someone else's ticket. Only adopt a thread no other source claims.
+          const conversationEmails = await repositories.emails.findByConversationId(candidate.conversationId);
+          const foreignLink = await externalMessageRepo.findForeignLinkByEmailIds(
+            conversationEmails.map(e => e.id),
+            externalSource.id,
+          );
+          if (foreignLink) {
+            logger.info('[AppDeskInbound] thread id collides with another source on this channel — starting a new ticket', {
+              channelId,
+              threadId: externalThreadId,
+              externalSourceId: externalSource.id,
+              ownedByExternalSourceId: foreignLink.externalSourceId,
+            });
+          } else {
+            threadEmail = candidate;
+            logger.warn('[AppDeskInbound] legacy channel-scoped thread fallback used (ExternalMessage link missing)', {
+              channelId,
+              threadId: externalThreadId,
+              externalSourceId: externalSource.id,
+            });
+          }
+        }
+      }
+
       if (threadEmail) {
         const { email } = await emailService.addEmailToConversation({
           conversationId: threadEmail.conversationId,
@@ -2503,13 +2565,13 @@ export class TicketController {
           emailBody,
           emailTo: [recipientEmail],
           emailFrom,
+          externalSourceId: externalSource.id,
           externalThreadId,
           externalMessageId,
           emailType: EmailType.DEFAULT,
           ...(uploadedFiles.length > 0 && { uploadedFiles }),
           receivedAt: new Date(),
         });
-        await this.recordIncomingAppMessage(externalSource.id, workspaceId, externalMessageId, externalThreadId, email.id);
         const existingTicket = await prismaClient.ticket.findFirst({
           where: { conversationId: threadEmail.conversationId },
           select: { id: true, xyneId: true, boardId: true },
@@ -2581,15 +2643,21 @@ export class TicketController {
         emailBody,
         emailFrom,
         emailTo: [recipientEmail],
+        externalSourceId: externalSource.id,
         externalThreadId,
         externalMessageId,
         ...(uploadedFiles.length > 0 && { uploadedFiles }),
-        ...(senderEmail && {
-          ticketMetadata: {
+        ticketMetadata: {
+          deskSource: {
+            type: 'app',
+            installedAppId,
+            appName: externalSource.displayName ?? installedAppId,
+          },
+          ...(senderEmail && {
             reporterEmail: extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase(),
             fromEmailAddress: senderEmail,
-          },
-        }),
+          }),
+        },
         receivedAt: new Date(),
         boardId: effectiveBoardId,
       });
@@ -2608,8 +2676,6 @@ export class TicketController {
       if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
       }
-
-      await this.recordIncomingAppMessage(externalSource.id, workspaceId, externalMessageId, externalThreadId, initialEmail.id);
 
       logger.info('[AppDeskInbound] created new ticket', {
         threadId: externalThreadId,
@@ -2637,29 +2703,4 @@ export class TicketController {
     }
   };
 
-  private async recordIncomingAppMessage(
-    externalSourceId: string,
-    workspaceId: string,
-    externalMessageId: string,
-    externalThreadId: string,
-    emailId: string,
-  ): Promise<void> {
-    try {
-      await prismaClient.externalMessage.create({
-        data: {
-          externalSourceId,
-          externalId: externalMessageId,
-          externalThreadId,
-          messageId: emailId,
-          entityId: emailId,
-          direction: MessageDirection.INCOMING,
-          entityType: ExternalEntityType.EMAIL,
-          workspaceId,
-        },
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return;
-      throw error;
-    }
-  }
 }
