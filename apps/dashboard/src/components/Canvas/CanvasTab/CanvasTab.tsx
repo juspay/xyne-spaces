@@ -173,6 +173,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     setOpenCommentCount(0);
   }, [canvas?.id]);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
+  const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const titleRef = useRef('Untitled Canvas'); // Track title synchronously to avoid race conditions
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
@@ -1022,12 +1023,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               titleRef.current = newTitle;
             }}
             readOnly={!canEdit}
+            onFocus={() => {
+              if (canEdit) setIsRenamingTitle(true);
+            }}
             onBlur={() => {
+              setIsRenamingTitle(false);
               handleTitleSave();
             }}
-            className={`text-base md:text-xl font-semibold flex-1 border-none shadow-none focus:ring-0 focus-visible:ring-0 focus-visible:border-none px-2 py-1 h-auto rounded min-w-0 ${
-              canEdit ? 'hover:bg-accent' : 'cursor-default'
-            }`}
+            onKeyDown={event => {
+              // Blur rather than save directly, so onBlur remains the single save path
+              // and the name cannot be committed twice.
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
+            className={`text-base md:text-xl font-semibold flex-1 shadow-none focus:ring-0 focus-visible:ring-0 px-2 py-1 h-auto rounded min-w-0 transition-colors ${
+              isRenamingTitle
+                ? 'border border-primary/40 bg-background ring-2 ring-primary/10 focus-visible:border-primary/40'
+                : 'border-none focus-visible:border-none'
+            } ${canEdit ? 'hover:bg-accent' : 'cursor-default'}`}
             placeholder='Untitled Canvas'
             data-testid='canvas-title-input'
             data-track-category='CANVAS'

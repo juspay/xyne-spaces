@@ -10,10 +10,11 @@ import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
 import { CanvasList } from '../CanvasList';
 import { CanvasShareModal } from '../CanvasShareModal';
 import {
-  CanvasVersionDiffPanel,
+  CanvasVersionDiffLegend,
   CanvasVersionHistory,
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
+import { buildCanvasVersionDiffContent } from '../../../utils/canvasVersionDiffContent';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button';
 import {
@@ -27,6 +28,7 @@ import {
 } from '../../ui/dropdown-menu';
 import { Dialog } from '../../ui/Dialog';
 import { Popover } from '../../ui/Popover';
+import { Switch } from '../../ui/Switch';
 import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import {
@@ -85,6 +87,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import { logger, Event } from '../../../utils/logger';
 import { apiInstance } from '../../../services/clients/apiClient';
+import { useSelector } from '@xstate/react';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
@@ -208,10 +211,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   }, [selectedCanvas?.id]);
   const [isCreating, setIsCreating] = useState(false);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
+  const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const [showSendConfirmation, setShowSendConfirmation] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  // Owned by the editor; mirrored here so the header can mark its comments button as active.
+  const [isCommentsPanelOpen, setIsCommentsPanelOpen] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isApproved, setIsApproved] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState('white');
@@ -224,7 +230,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   } = usePersistedCanvasPreferences();
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [previewVersion, setPreviewVersion] = useState<CanvasVersionRecord | null>(null);
-  const [showVersionDiff, setShowVersionDiff] = useState(false);
+  const [showVersionDiff, setShowVersionDiff] = useState(true);
   const [restoringVersionId, setRestoringVersionId] = useState<string | undefined>(undefined);
   const [renamingVersionId, setRenamingVersionId] = useState<string | undefined>(undefined);
 
@@ -927,7 +933,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     }
     previewVersionRef.current = version;
     setPreviewVersion(version);
-    setShowVersionDiff(false);
+    // Opening a version shows its changes highlighted straight away; the toggle turns the
+    // highlighting off to read the version plain.
+    setShowVersionDiff(true);
   }, []);
 
   const handleBackToCurrentVersion = useCallback((): void => {
@@ -1055,9 +1063,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const currentContentForVersionCompare =
     latestContentRef.current || currentContent || selectedCanvas?.content || [];
-  const displayedContent = previewVersion
-    ? (normalizeCanvasContent(previewVersion.content) as PartialBlock[])
-    : currentContent || selectedCanvas?.content || [];
   const isPreviewSameAsCurrent = previewVersion
     ? stableStringifyCanvasContent(previewVersion.content) ===
       stableStringifyCanvasContent(currentContentForVersionCompare)
@@ -1066,6 +1071,15 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     ? createCanvasContentTextDiff(currentContentForVersionCompare, previewVersion.content)
     : [];
   const hasVersionDiff = versionDiffParts.some(isVisibleCanvasContentDiffPart);
+  // When on, the preview renders the version document with its changes highlighted inline.
+  const isVersionDiffVisible = Boolean(previewVersion) && showVersionDiff && hasVersionDiff;
+  const previewContent =
+    previewVersion && isVersionDiffVisible
+      ? buildCanvasVersionDiffContent(currentContentForVersionCompare, previewVersion.content)
+      : previewVersion
+        ? (normalizeCanvasContent(previewVersion.content) as PartialBlock[])
+        : null;
+  const displayedContent = previewContent ?? currentContent ?? selectedCanvas?.content ?? [];
   const previewUpdatedAtText = previewVersion
     ? new Date(previewVersion.updatedAt).toLocaleString(undefined, {
         month: 'short',
@@ -1199,9 +1213,18 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     return rows;
   }, [allUsers, selectedCanvas, user?.id, user?.name, visibleChannels]);
 
-  // Shared metrics for the header's 28px icon buttons.
-  const headerIconButtonClass =
-    'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  // Ask AI shares one global sidebar, so its button reads that machine rather than local state.
+  const isAskAIOpen = useSelector(xyneAIActor, snapshot => snapshot.matches('open'));
+
+  // Shared metrics for the header's 28px icon buttons. A button whose surface is currently
+  // showing keeps the hover fill and drops the icon back to full strength, so the row says
+  // which panel is open. Radix triggers (popover, dropdown) flip data-state themselves.
+  const headerIconButtonClass = (isActive = false): string =>
+    cn(
+      'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+      'data-[state=open]:bg-accent data-[state=open]:[&_svg]:opacity-100',
+      isActive && 'bg-accent [&_svg]:opacity-100',
+    );
 
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
@@ -1236,7 +1259,14 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       <ArrowLeft size={16} />
                     </Button>
 
-                    <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-1'>
+                    <div
+                      className={cn(
+                        'flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-1 transition-colors',
+                        isRenamingTitle
+                          ? 'border-primary/40 bg-background ring-2 ring-primary/10'
+                          : 'border-transparent',
+                      )}
+                    >
                       {canvasPanelContext?.leftHeaderSlot}
                       <FileText size={16} className='shrink-0 text-foreground' />
                       <Input
@@ -1251,8 +1281,20 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           titleRef.current = newTitle;
                         }}
                         readOnly={!canEdit}
+                        onFocus={() => {
+                          if (canEdit) setIsRenamingTitle(true);
+                        }}
                         onBlur={() => {
+                          setIsRenamingTitle(false);
                           handleTitleSave();
+                        }}
+                        onKeyDown={event => {
+                          // Blur rather than save directly, so onBlur remains the single
+                          // save path and the name cannot be committed twice.
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          }
                         }}
                         className={cn(
                           'h-auto min-w-0 flex-1 border-none bg-transparent px-0 py-0 text-base font-semibold text-foreground shadow-none focus:ring-0 focus-visible:border-none focus-visible:ring-0',
@@ -1303,7 +1345,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           trigger={
                             <button
                               type='button'
-                              className='flex shrink-0 items-center justify-center rounded-lg py-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                              className='flex shrink-0 items-center justify-center rounded-lg px-1 py-2 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-accent'
                               aria-label='Canvas details'
                               data-testid='canvas-details-button'
                               data-track-category='CANVAS'
@@ -1343,8 +1385,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                         <button
                           type='button'
                           onClick={() => editorRef.current?.toggleComments()}
-                          className={headerIconButtonClass}
+                          className={headerIconButtonClass(isCommentsPanelOpen)}
                           title='Comments'
+                          aria-pressed={isCommentsPanelOpen}
                           aria-label='Open comment activity'
                           data-testid='canvas-comments-button'
                           data-track-category='CANVAS'
@@ -1363,7 +1406,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                         <button
                           type='button'
                           onClick={() => setShowShareModal(true)}
-                          className={headerIconButtonClass}
+                          className={headerIconButtonClass(showShareModal)}
                           title='Share'
                           aria-label='Share'
                           data-testid='canvas-share-button'
@@ -1378,7 +1421,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           <button
                             type='button'
                             onClick={handleOpenRecordingNotes}
-                            className={`${headerIconButtonClass} bg-muted text-muted-foreground hover:bg-border hover:text-foreground`}
+                            className={cn(
+                              headerIconButtonClass(),
+                              'bg-muted text-muted-foreground hover:bg-border hover:text-foreground',
+                            )}
                             title='Open recording notes'
                             aria-label='Open recording notes'
                             data-track-category='CANVAS'
@@ -1394,11 +1440,12 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
+                          {/* Ask AI */}
                           {showAskAiAction && (
                             <button
                               type='button'
                               onClick={handleAskAI}
-                              className={headerIconButtonClass}
+                              className={headerIconButtonClass(isAskAIOpen)}
                               title='Ask AI'
                               aria-label='Ask AI'
                               data-track-category='CANVAS'
@@ -1418,7 +1465,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                             <DropdownMenuTrigger asChild>
                               <button
                                 type='button'
-                                className={headerIconButtonClass}
+                                className={headerIconButtonClass()}
                                 title='More options'
                                 aria-label='More options'
                                 data-testid='canvas-more-menu-button'
@@ -1609,6 +1656,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   <span className='font-medium text-foreground'>{previewUpdatedAtText}</span>
                 </div>
                 <div className='flex items-center gap-2'>
+                  {isVersionDiffVisible && (
+                    <CanvasVersionDiffLegend className='mr-1 hidden sm:flex' />
+                  )}
                   <Button
                     variant='secondary'
                     size='sm'
@@ -1619,17 +1669,15 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     Back to current
                   </Button>
                   {hasVersionDiff && (
-                    <Button
-                      variant={showVersionDiff ? 'default' : 'secondary'}
-                      size='sm'
-                      onClick={() => setShowVersionDiff(prev => !prev)}
-                      data-track-category='CANVAS'
-                      data-track-name='TOGGLE_VERSION_DIFF'
-                      aria-pressed={showVersionDiff}
-                    >
+                    <div className='flex items-center gap-2 text-sm text-muted-foreground'>
                       <GitCompare size={14} />
-                      Diff
-                    </Button>
+                      <span>Diff</span>
+                      <Switch
+                        checked={showVersionDiff}
+                        onCheckedChange={setShowVersionDiff}
+                        aria-label='Highlight changes against the current canvas'
+                      />
+                    </div>
                   )}
                   {canEdit && !isPreviewSameAsCurrent && (
                     <Button
@@ -1648,10 +1696,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               </div>
             )}
 
-            {previewVersion && showVersionDiff && hasVersionDiff && (
-              <CanvasVersionDiffPanel parts={versionDiffParts} />
-            )}
-
             {/* Canvas Editor */}
             <div ref={canvasContentRef} className='flex-1 overflow-hidden'>
               {isCreating && !selectedCanvas ? (
@@ -1663,7 +1707,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 </div>
               ) : previewVersion ? (
                 <CanvasEditor
-                  key={`preview-${previewVersion.id}`}
+                  key={`preview-${previewVersion.id}-${isVersionDiffVisible ? 'diff' : 'plain'}`}
                   ref={editorRef}
                   content={displayedContent}
                   editable={false}
@@ -1674,6 +1718,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   initialBlockIdToFocus={blockIdFromUrl}
                   initialCommentThreadId={commentThreadIdFromUrl}
                   onOpenCommentCountChange={setOpenCommentCount}
+                  onCommentsOpenChange={setIsCommentsPanelOpen}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
                   currentUserRole={selectedCanvas?.accessLevel ?? null}
@@ -1697,6 +1742,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   initialBlockIdToFocus={blockIdFromUrl}
                   initialCommentThreadId={commentThreadIdFromUrl}
                   onOpenCommentCountChange={setOpenCommentCount}
+                  onCommentsOpenChange={setIsCommentsPanelOpen}
                   autoFocus={!skipAutoFocus}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas.createdBy}
@@ -1719,6 +1765,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   initialBlockIdToFocus={blockIdFromUrl}
                   initialCommentThreadId={commentThreadIdFromUrl}
                   onOpenCommentCountChange={setOpenCommentCount}
+                  onCommentsOpenChange={setIsCommentsPanelOpen}
                   autoFocus={!skipAutoFocus}
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas?.createdBy}
