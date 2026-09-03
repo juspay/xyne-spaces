@@ -3,10 +3,12 @@ import { MoreVertical } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { CallStatus } from '@xyne/shared';
 import {
+  canEditScheduledCallParticipants,
   getPreviewParticipantUserIds,
   getCallParticipantCount,
   type Call,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import Button from '../../ui/Button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../../ui/dropdown-menu';
 import { formatParticipantText } from '../../../hooks/useCalls';
@@ -43,6 +45,8 @@ export function CallRow({
     getCallParticipantCount(call),
   );
   const isOwner = currentUserId === call.createdByUserId;
+  const visibleChannels = useAllVisibleChannels();
+  const canEdit = isOwner || canEditScheduledCallParticipants(call, currentUserId, visibleChannels);
 
   return (
     <div className='flex items-center gap-2'>
@@ -113,6 +117,7 @@ export function CallRow({
           <UpcomingCallActionsMenuItems
             call={call}
             isOwner={isOwner}
+            canEdit={canEdit}
             onEdit={onEditCall ? () => onEditCall(call) : undefined}
             onCancel={onCancelCall ? () => onCancelCall(call) : undefined}
           />
