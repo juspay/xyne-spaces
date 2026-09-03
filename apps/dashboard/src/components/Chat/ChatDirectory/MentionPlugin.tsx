@@ -18,7 +18,7 @@ import {
 import { TicketPriority } from '@xyne/shared';
 import { type ChipPrefix } from '../../../search/filterModel';
 import { $createFilterChip, $removeExistingPriorityChips } from './FilterChipNode';
-import { MentionType, type MentionData } from './ChannelCommandMenu.types';
+import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 
 export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
 /**
@@ -73,10 +73,10 @@ function normalizePrefix(trigger: string): ChipPrefix | null {
 
 function buildMentionData(
   item: { id: string; name: string; email?: string },
-  type: MentionType,
+  type: ChipType,
   trigger: string,
-): MentionData {
-  const mentionData: MentionData = { id: item.id, name: item.name, type };
+): ChipData {
+  const mentionData: ChipData = { id: item.id, name: item.name, type };
   const prefix = normalizePrefix(trigger);
   if (prefix) mentionData.prefix = prefix;
   if (item.email) mentionData.email = item.email;
@@ -98,9 +98,9 @@ interface MentionPluginProps {
   availablePriorities?: Array<{ id: string; name: string }>;
   availableDates?: Array<{ id: string; name: string }>;
   availableBoards?: Array<{ id: string; name: string }>;
-  availableMentionTargets?: Array<{ id: string; name: string; type: MentionType }>;
-  onMentionSelect?: (mention: MentionData) => void;
-  mentionSearchType?: MentionType | null;
+  availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
+  onMentionSelect?: (mention: ChipData) => void;
+  mentionSearchType?: ChipType | null;
   selectedMentionIndex?: number;
   setSelectedMentionIndex?: (index: number | ((prev: number) => number)) => void;
   // Called when the user moves the highlight via ArrowUp/Down in the typeahead, so the parent
@@ -110,7 +110,7 @@ interface MentionPluginProps {
   // ArrowDown activates the resting candidate (index 0) IN PLACE instead of skipping to index 1.
   hasNavigated?: boolean;
   /** Exposes `replaceTriggerWithChips` — a filter needing several chips (a date range). */
-  onReplaceTriggerChipsReady?: (replaceChips: (chips: MentionData[]) => void) => void;
+  onReplaceTriggerChipsReady?: (replaceChips: (chips: ChipData[]) => void) => void;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -120,7 +120,7 @@ interface MentionPluginProps {
   currentUserID?: string;
 }
 
-type TriggerType = MentionType | null;
+type TriggerType = ChipType | null;
 
 export function MentionPlugin({
   onUserSearch,
@@ -157,7 +157,7 @@ export function MentionPlugin({
 
     // Debounce search to avoid too many calls
     const timeoutId = setTimeout(() => {
-      if (triggerType === MentionType.USER && onUserSearch) {
+      if (triggerType === ChipType.USER && onUserSearch) {
         // User triggers: '@' navigates to DM; 'from:'/'to:'/'assignee:'/'with:' create filter chips
         const userTrigger: UserTriggerType =
           triggerText.current === '@'
@@ -170,19 +170,19 @@ export function MentionPlugin({
                   ? 'with:'
                   : 'from:';
         onUserSearch(searchTerm, userTrigger);
-      } else if (triggerType === MentionType.CHANNEL && onChannelSearch) {
+      } else if (triggerType === ChipType.CHANNEL && onChannelSearch) {
         // Channel triggers today: '#' or 'in:'. Anything else falls back to
         // 'in:' (chip semantics) — safer default since '#' navigates away.
         // If a new channel-type trigger is added, register it explicitly.
         const channelTrigger: ChannelTriggerType =
           triggerText.current === '#' ? '#' : triggerText.current === 'in:#' ? 'in:#' : 'in:';
         onChannelSearch(searchTerm, channelTrigger);
-      } else if (triggerType === MentionType.PRIORITY && onPrioritySearch) {
+      } else if (triggerType === ChipType.PRIORITY && onPrioritySearch) {
         onPrioritySearch(searchTerm, 'priority:');
-      } else if (triggerType === MentionType.DATE && onDateSearch) {
+      } else if (triggerType === ChipType.DATE && onDateSearch) {
         const dateTrigger = (triggerText.current || 'on:') as DateTriggerType;
         onDateSearch(searchTerm, dateTrigger);
-      } else if (triggerType === MentionType.BOARD && onBoardSearch) {
+      } else if (triggerType === ChipType.BOARD && onBoardSearch) {
         onBoardSearch(searchTerm, 'board:');
       }
     }, 150); // Reduced debounce for better responsiveness
@@ -199,7 +199,7 @@ export function MentionPlugin({
   ]);
 
   const replaceTriggerWithChips = useCallback(
-    (chips: MentionData[]) => {
+    (chips: ChipData[]) => {
       isInsertingMention.current = true;
       const mentionStart = mentionStartOffset.current;
       const trigger = triggerText.current;
@@ -252,7 +252,7 @@ export function MentionPlugin({
 
   // Insert mention
   const insertMention = useCallback(
-    (item: { id: string; name: string; email?: string; type?: MentionType }) => {
+    (item: { id: string; name: string; email?: string; type?: ChipType }) => {
       // Set flag to prevent update listener from interfering
       isInsertingMention.current = true;
 
@@ -310,7 +310,7 @@ export function MentionPlugin({
 
             const mentionData = buildMentionData(item, type, trigger);
             // Priority is the exclusive filter — drop any existing priority chip first.
-            if (type === MentionType.PRIORITY) {
+            if (type === ChipType.PRIORITY) {
               $removeExistingPriorityChips();
             }
             // Insert the chip pill (icon + editable label) then a trailing space.
@@ -356,7 +356,7 @@ export function MentionPlugin({
 
         const mentionData = buildMentionData(item, type, trigger);
         // Priority is the exclusive filter — drop any existing priority chip first.
-        if (type === MentionType.PRIORITY) {
+        if (type === ChipType.PRIORITY) {
           $removeExistingPriorityChips();
         }
         // Insert the chip pill (icon + editable label) then a trailing space.
@@ -393,15 +393,15 @@ export function MentionPlugin({
       // USER or CHANNEL, so keying off it would re-open the people/channel typeahead.
       if (wasMentionsTrigger && onMentionsSearch) {
         onMentionsSearch('');
-      } else if (type === MentionType.USER && onUserSearch) {
+      } else if (type === ChipType.USER && onUserSearch) {
         onUserSearch('');
-      } else if (type === MentionType.CHANNEL && onChannelSearch) {
+      } else if (type === ChipType.CHANNEL && onChannelSearch) {
         onChannelSearch('');
-      } else if (type === MentionType.PRIORITY && onPrioritySearch) {
+      } else if (type === ChipType.PRIORITY && onPrioritySearch) {
         onPrioritySearch('');
-      } else if (type === MentionType.DATE && onDateSearch) {
+      } else if (type === ChipType.DATE && onDateSearch) {
         onDateSearch('');
-      } else if (type === MentionType.BOARD && onBoardSearch) {
+      } else if (type === ChipType.BOARD && onBoardSearch) {
         onBoardSearch('');
       }
 
@@ -440,9 +440,9 @@ export function MentionPlugin({
     if (!mentionSearchType || !setSelectedMentionIndex) return;
 
     const currentItems =
-      mentionSearchType === MentionType.USER
+      mentionSearchType === ChipType.USER
         ? availableUsers
-        : mentionSearchType === MentionType.PRIORITY
+        : mentionSearchType === ChipType.PRIORITY
           ? availablePriorities
           : availableChannels;
     if (currentItems.length === 0) return;
@@ -490,7 +490,7 @@ export function MentionPlugin({
           const item = currentItems[selectedMentionIndex];
           if (item) {
             const userItem =
-              mentionSearchType === MentionType.USER
+              mentionSearchType === ChipType.USER
                 ? (item as { id: string; name: string; email?: string })
                 : (item as { id: string; name: string });
             insertMention(userItem);
@@ -516,7 +516,7 @@ export function MentionPlugin({
           const item = currentItems[selectedMentionIndex];
           if (item) {
             const userItem =
-              mentionSearchType === MentionType.USER
+              mentionSearchType === ChipType.USER
                 ? (item as { id: string; name: string; email?: string })
                 : (item as { id: string; name: string });
             insertMention(userItem);
@@ -542,11 +542,11 @@ export function MentionPlugin({
             onUserSearch(null);
           } else if (mentionSearchType === 'channel' && onChannelSearch) {
             onChannelSearch(null);
-          } else if (mentionSearchType === MentionType.PRIORITY && onPrioritySearch) {
+          } else if (mentionSearchType === ChipType.PRIORITY && onPrioritySearch) {
             onPrioritySearch(null);
-          } else if (mentionSearchType === MentionType.DATE && onDateSearch) {
+          } else if (mentionSearchType === ChipType.DATE && onDateSearch) {
             onDateSearch(null);
-          } else if (mentionSearchType === MentionType.BOARD && onBoardSearch) {
+          } else if (mentionSearchType === ChipType.BOARD && onBoardSearch) {
             onBoardSearch(null);
           }
           return true;
@@ -659,42 +659,42 @@ export function MentionPlugin({
           };
         } else if (priorityMatch && priorityQueryHasMatch(priorityMatch[1] || '')) {
           trigger = {
-            type: MentionType.PRIORITY,
+            type: ChipType.PRIORITY,
             text: 'priority:',
             query: (priorityMatch[1] || '').trim(),
             index: textBeforeCursor.lastIndexOf('priority:'),
           };
         } else if (boardMatch) {
           trigger = {
-            type: MentionType.BOARD,
+            type: ChipType.BOARD,
             text: 'board:',
             query: (boardMatch[1] || '').trim(),
             index: textBeforeCursor.toLowerCase().lastIndexOf('board:'),
           };
         } else if (onMatch) {
           trigger = {
-            type: MentionType.DATE,
+            type: ChipType.DATE,
             text: 'on:',
             query: (onMatch[1] || '').trim(),
             index: textBeforeCursor.toLowerCase().lastIndexOf('on:'),
           };
         } else if (afterMatch) {
           trigger = {
-            type: MentionType.DATE,
+            type: ChipType.DATE,
             text: 'after:',
             query: (afterMatch[1] || '').trim(),
             index: textBeforeCursor.toLowerCase().lastIndexOf('after:'),
           };
         } else if (beforeMatch) {
           trigger = {
-            type: MentionType.DATE,
+            type: ChipType.DATE,
             text: 'before:',
             query: (beforeMatch[1] || '').trim(),
             index: textBeforeCursor.toLowerCase().lastIndexOf('before:'),
           };
         } else if (mentionsMatch) {
           trigger = {
-            type: MentionType.MENTIONS,
+            type: ChipType.MENTIONS,
             text: 'mentions:',
             query: (mentionsMatch[1] || '').replace(/^[@#]/, '').trim(),
             index: textBeforeCursor.toLowerCase().lastIndexOf('mentions:'),
@@ -782,9 +782,9 @@ export function MentionPlugin({
                     ? 'in:@'
                     : 'in:';
             onChannelSearch(trigger.query.trim(), channelTrigger);
-          } else if (trigger.type === MentionType.PRIORITY && onPrioritySearch) {
+          } else if (trigger.type === ChipType.PRIORITY && onPrioritySearch) {
             onPrioritySearch(trigger.query.trim(), 'priority:');
-          } else if (trigger.type === MentionType.MENTIONS && onMentionsSearch) {
+          } else if (trigger.type === ChipType.MENTIONS && onMentionsSearch) {
             onMentionsSearch(trigger.query.trim(), 'mentions:');
           }
 
@@ -805,13 +805,13 @@ export function MentionPlugin({
             onUserSearch(null);
           } else if (triggerType === 'channel' && onChannelSearch) {
             onChannelSearch(null);
-          } else if (triggerType === MentionType.PRIORITY && onPrioritySearch) {
+          } else if (triggerType === ChipType.PRIORITY && onPrioritySearch) {
             onPrioritySearch(null);
-          } else if (triggerType === MentionType.DATE && onDateSearch) {
+          } else if (triggerType === ChipType.DATE && onDateSearch) {
             onDateSearch(null);
-          } else if (triggerType === MentionType.BOARD && onBoardSearch) {
+          } else if (triggerType === ChipType.BOARD && onBoardSearch) {
             onBoardSearch(null);
-          } else if (triggerType === MentionType.MENTIONS && onMentionsSearch) {
+          } else if (triggerType === ChipType.MENTIONS && onMentionsSearch) {
             onMentionsSearch(null);
           }
         }

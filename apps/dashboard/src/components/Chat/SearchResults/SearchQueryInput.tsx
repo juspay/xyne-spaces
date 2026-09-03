@@ -194,7 +194,10 @@ export function SearchQueryInput({
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
-        placeholder='Search messages, files, tickets…'
+        // The cold-start prompt only makes sense on an empty box; among applied tokens it
+        // claims nothing is searched yet. The leading magnifier already says what this is,
+        // so it shrinks rather than explains.
+        placeholder={tokens.length > 0 ? 'Search' : 'Search messages, files, tickets…'}
         aria-label='Search query'
         className={cn(
           'flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none',

@@ -20,8 +20,10 @@ export {
  */
 export function hasAnySearchState(params: URLSearchParams): boolean {
   if (params.get('query')?.trim() || params.get('display')?.trim()) return true;
-  // `tab` alone is just which tab you're on, not a search — ignore it here.
-  return ALL_FILTER_PARAM_KEYS.some(key => key !== 'tab' && Boolean(params.get(key)));
+  // `tab`, `sort` and `rank` count too: each is written only when it differs from the
+  // default (see writeFiltersToParams), so their presence means a deliberate choice —
+  // picking the Tickets tab narrows the results exactly like any other filter.
+  return ALL_FILTER_PARAM_KEYS.some(key => Boolean(params.get(key)));
 }
 
 /**

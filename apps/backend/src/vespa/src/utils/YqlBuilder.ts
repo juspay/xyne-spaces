@@ -797,7 +797,7 @@ export class YqlBuilder {
     if (filters.messageActs && filters.messageActs.length > 0) {
       const acts = filters.messageActs
         .map((value) => `messageActs contains ${params.bind('messageActs', value.trim())}`)
-        .join(' or ');
+        .join(' and ');
       conditions.push(`(${acts})`);
     }
 

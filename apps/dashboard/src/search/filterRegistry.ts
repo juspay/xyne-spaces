@@ -14,7 +14,7 @@
  * is still one entry.
  */
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
-import { MentionType } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
+import { ChipType } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import {
   DEFAULT_SEARCH_FILTERS,
   resolveDateKeyword,
@@ -27,7 +27,7 @@ import {
 /** A chip as the search hook wants it. */
 export type ResultsMention = {
   id: string;
-  type: MentionType;
+  type: ChipType;
   prefix?: ChipPrefix;
   name?: string;
 };
@@ -111,6 +111,8 @@ export type FilterControl =
   // `excludeDMs` for filters a DM can't satisfy — a DM is never `#`-referenced in a
   // message, so it has no business in the channel-mentions picker.
   | { kind: 'channels'; placeholder: string; excludeDMs?: boolean }
+  // People and channels in one picker — see the `mentions` entry.
+  | { kind: 'mentions'; placeholder: string }
   | { kind: 'boards' }
   | { kind: 'enumMulti'; options: ReadonlyArray<{ value: string; label: string }> }
   | {
@@ -210,7 +212,7 @@ function chipListEntry(opts: {
     | 'assigneeIds'
     | 'mentionUserIds'
     | 'mentionChannelIds';
-  mentionType: MentionType;
+  mentionType: ChipType;
   prefix?: ResultsMention['prefix'];
   /**
    * Syntax shown in the search box, e.g. `from:name`. No `@`/`#` sigil when the token also
@@ -300,7 +302,7 @@ function textListEntry(opts: {
   appliesTo?: (docType: DocType) => boolean;
   /** Set when the palette picks this filter's values, so it rides as a chip, not syntax. */
   chip?: {
-    type: MentionType;
+    type: ChipType;
     prefix: ChipPrefix;
     label: (value: string, resolve: FilterResolvers) => string;
   };
@@ -424,7 +426,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     label: 'From',
     param: 'from',
     field: 'fromUserIds',
-    mentionType: MentionType.USER,
+    mentionType: ChipType.USER,
     prefix: 'from:',
     tokenPrefix: 'from:',
     resolveWith: 'user',
@@ -438,7 +440,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     label: 'From (email)',
     param: 'fromEmail',
     field: 'fromEmails',
-    mentionType: MentionType.USER,
+    mentionType: ChipType.USER,
     prefix: 'from:',
     tokenPrefix: 'from:',
     resolveWith: 'raw',
@@ -451,7 +453,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     label: 'To',
     param: 'toEmail',
     field: 'toEmails',
-    mentionType: MentionType.USER,
+    mentionType: ChipType.USER,
     prefix: 'to:',
     tokenPrefix: 'to:',
     resolveWith: 'raw',
@@ -463,7 +465,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     label: 'In',
     param: 'in',
     field: 'inChannelIds',
-    mentionType: MentionType.CHANNEL,
+    mentionType: ChipType.CHANNEL,
     prefix: 'in:',
     tokenPrefix: 'in:',
     resolveWith: 'channel',
@@ -477,7 +479,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     label: 'With',
     param: 'with',
     field: 'withUserIds',
-    mentionType: MentionType.USER,
+    mentionType: ChipType.USER,
     prefix: 'with:',
     tokenPrefix: 'with:',
     resolveWith: 'user',
@@ -485,37 +487,72 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     control: { kind: 'people', placeholder: 'e.g. Paul Leung' },
     appliesTo: isMessageType,
   }),
-  chipListEntry({
+  // ONE entry owning two state fields, the way `date` owns three. A mention is "someone
+  // or something named in the message" — the user picks from one list and doesn't care
+  // whether it turned out to be a person or a channel. Splitting it in two gave the
+  // palette one merged typeahead and the modal two separate boxes for the same filter.
+  //
+  // Two URL params and two backend fields remain, because Vespa matches people against
+  // `mentions` and channels against `channelMentions`; that's a storage detail the UI
+  // shouldn't leak.
+  {
     id: 'mentions',
     label: 'Mentions',
-    param: 'mentions',
-    field: 'mentionUserIds',
-    mentionType: MentionType.USER,
-    prefix: 'mentions:',
-    tokenPrefix: 'mentions:',
-    resolveWith: 'user',
-    // `mentions: @alice` — the sigil is the mention syntax being searched for, and an
-    // avatar can't duplicate it. Channel mentions get none: the glyph already draws a hash.
-    valueSigil: '@',
-    control: { kind: 'people', placeholder: 'e.g. Emily Anderson' },
+    params: ['mentions', 'channelMentions'],
+    appliesTo: isMessageType,
+    isActive: f => f.mentionUserIds.length > 0 || f.mentionChannelIds.length > 0,
+    cleared: { mentionUserIds: [], mentionChannelIds: [] },
+    read: params => ({
+      mentionUserIds: csv(params.get('mentions')),
+      mentionChannelIds: csv(params.get('channelMentions')),
+    }),
+    write: (f, params) => {
+      setOrDelete(params, 'mentions', f.mentionUserIds.join(','));
+      setOrDelete(params, 'channelMentions', f.mentionChannelIds.join(','));
+    },
+    chips: (f, resolve) => [
+      ...f.mentionUserIds.map(id => ({
+        id,
+        type: ChipType.USER,
+        prefix: 'mentions:' as const,
+        name: resolve.userName(id) ?? id,
+      })),
+      ...f.mentionChannelIds.map(id => ({
+        id,
+        type: ChipType.CHANNEL,
+        prefix: 'mentions:' as const,
+        name: resolve.channelName(id) ?? id,
+      })),
+    ],
     // Prefix-less chips are still accepted: `hi @vishal` produced them before `mentions:`
     // existed, and a saved URL can still bring one back.
-    matches: m => (m.prefix === 'mentions:' || !m.prefix) && m.type === MentionType.USER,
-    appliesTo: isMessageType,
-  }),
-  chipListEntry({
-    id: 'channelMentions',
-    label: 'Channel mentions',
-    param: 'channelMentions',
-    field: 'mentionChannelIds',
-    mentionType: MentionType.CHANNEL,
-    prefix: 'mentions:',
-    tokenPrefix: 'mentions:',
-    resolveWith: 'channel',
-    matches: m => (m.prefix === 'mentions:' || !m.prefix) && m.type === MentionType.CHANNEL,
-    control: { kind: 'channels', placeholder: 'e.g. general', excludeDMs: true },
-    appliesTo: isMessageType,
-  }),
+    fromChips: mentions => {
+      const mine = mentions.filter(m => m.prefix === 'mentions:' || !m.prefix);
+      return {
+        mentionUserIds: mine.filter(m => m.type === ChipType.USER).map(m => m.id),
+        mentionChannelIds: mine.filter(m => m.type === ChipType.CHANNEL).map(m => m.id),
+      };
+    },
+    tokens: (f, resolve) => [
+      ...f.mentionUserIds.map(id => ({
+        key: `mentions-user-${id}`,
+        prefix: 'mentions:',
+        // The `@` is the mention syntax being searched for, not a type marker — an avatar
+        // can't duplicate it the way the hash glyph would duplicate a `#`.
+        label: `@${resolve.userName(id) ?? id}`,
+        patch: { mentionUserIds: f.mentionUserIds.filter(v => v !== id) },
+        icon: { kind: 'user', userId: id } as const,
+      })),
+      ...f.mentionChannelIds.map(id => ({
+        key: `mentions-channel-${id}`,
+        prefix: 'mentions:',
+        label: resolve.channelName(id) ?? id,
+        patch: { mentionChannelIds: f.mentionChannelIds.filter(v => v !== id) },
+        icon: { kind: 'channel', channelId: id } as const,
+      })),
+    ],
+    control: { kind: 'mentions', placeholder: 'e.g. Emily Anderson or general' },
+  },
   {
     id: 'date',
     label: 'Date',
@@ -544,13 +581,13 @@ export const FILTER_REGISTRY: FilterEntry[] = [
       // A window that opens and closes on the same day is a single day — `on:` says that
       // directly, where `after:X before:X` reads like an empty range.
       if (bounds.after && bounds.after === bounds.before) {
-        return [{ id: bounds.after, type: MentionType.DATE, prefix: 'on:', name: bounds.after }];
+        return [{ id: bounds.after, type: ChipType.DATE, prefix: 'on:', name: bounds.after }];
       }
       const out: ResultsMention[] = [];
       if (bounds.after) {
         out.push({
           id: bounds.after,
-          type: MentionType.DATE,
+          type: ChipType.DATE,
           prefix: 'after:',
           name: bounds.after,
         });
@@ -558,7 +595,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
       if (bounds.before) {
         out.push({
           id: bounds.before,
-          type: MentionType.DATE,
+          type: ChipType.DATE,
           prefix: 'before:',
           name: bounds.before,
         });
@@ -566,7 +603,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
       return out;
     },
     fromChips: mentions => {
-      const dates = mentions.filter(m => m.type === MentionType.DATE);
+      const dates = mentions.filter(m => m.type === ChipType.DATE);
       if (dates.length === 0) return {};
       const on = dates.find(m => m.prefix === 'on:');
       if (on) return { dateRange: '', after: on.id, before: on.id };
@@ -662,7 +699,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     label: 'Assignee',
     param: 'assignee',
     field: 'assigneeIds',
-    mentionType: MentionType.USER,
+    mentionType: ChipType.USER,
     prefix: 'assignee:',
     tokenPrefix: 'assignee:',
     resolveWith: 'user',
@@ -681,7 +718,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     write: (f, params) => setOrDelete(params, 'priority', f.priority),
     // Priority is a chip in the palette, so it needs no query text of its own.
     chips: f =>
-      f.priority ? [{ id: f.priority, type: MentionType.PRIORITY, prefix: 'priority:' }] : [],
+      f.priority ? [{ id: f.priority, type: ChipType.PRIORITY, prefix: 'priority:' }] : [],
     tokens: f =>
       f.priority
         ? [
@@ -695,7 +732,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
           ]
         : [],
     fromChips: mentions => {
-      const chip = mentions.find(m => m.type === MentionType.PRIORITY);
+      const chip = mentions.find(m => m.type === ChipType.PRIORITY);
       return { priority: chip?.id ?? '' };
     },
     control: { kind: 'enumSingle', options: PRIORITY_OPTIONS, anyLabel: 'Any priority' },
@@ -726,7 +763,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     searchKey: 'board',
     tokenIcon: { kind: 'board' },
     chip: {
-      type: MentionType.BOARD,
+      type: ChipType.BOARD,
       prefix: 'board:',
       label: (id, resolve) => resolve.boardName?.(id) ?? id,
     },

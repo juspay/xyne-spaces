@@ -6,7 +6,7 @@ import { searchService, clearVespaSearchCache } from '../services/searchService'
 import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
 import {
   TabType,
-  MentionType,
+  ChipType,
   VespaApps,
   VespaDocTypes,
   SearchableTypes,
@@ -37,7 +37,7 @@ type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
 type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
 
-type SelectedMention = { id: string; type: MentionType; prefix?: string; name?: string };
+type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
 type MentionBuckets = {
   from: SelectedMention[];
@@ -89,7 +89,7 @@ interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
   onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
-  mentionSearchType?: MentionType | null;
+  mentionSearchType?: ChipType | null;
   isCallSearchPage?: boolean;
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
@@ -145,12 +145,12 @@ function resolveTextFilters(
  * date filter would render as a chip and quietly not be applied.
  */
 function boardFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
-  const boards = mentions.filter(m => m.type === MentionType.BOARD).map(m => m.id);
+  const boards = mentions.filter(m => m.type === ChipType.BOARD).map(m => m.id);
   return boards.length > 0 ? { board: boards.join(',') } : {};
 }
 
 function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
-  const dates = mentions.filter(m => m.type === MentionType.DATE);
+  const dates = mentions.filter(m => m.type === ChipType.DATE);
   if (dates.length === 0) return {};
   const on = dates.find(m => m.prefix === 'on:');
   if (on) return { on: on.id };
@@ -195,7 +195,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Per-tab CAC default; an explicit user pick (rankProfile) wins.
   const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
-    Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
+    Array<{ id: string; type: ChipType; prefix?: string; name?: string }>
   >([]);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
   const [includeBotMessages, setIncludeBotMessages] = useState(
@@ -506,7 +506,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       const parsedFiltersForImpression = parseSearchFilters(params.queryText);
 
       // Priority is chip-only — track it from the chip, not parsed text.
-      if (selectedMentions.some(m => m.type === MentionType.PRIORITY)) {
+      if (selectedMentions.some(m => m.type === ChipType.PRIORITY)) {
         sessionFiltersRef.current.add('priority');
       }
       if (parsedFiltersForImpression.board) sessionFiltersRef.current.add('board');
@@ -767,7 +767,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       abortController: AbortController,
       query: string,
       activeTab: TabType,
-      selectedMentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
+      selectedMentions: Array<{ id: string; type: ChipType; prefix?: string; name?: string }>,
       filteredLocalUsers: User[],
       filteredLocalChannels: Array<{
         channel: Channel;
@@ -799,7 +799,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
       // Priority is chip-only: value comes solely from the chip; raw `priority:` text
       // isn't a filter (falls through to full-text search).
-      const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
+      const priorityFilter = selectedMentions.find(m => m.type === ChipType.PRIORITY)?.id;
 
       // Adjust local results count logic for context
       let localCount = 0;
@@ -1375,7 +1375,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     });
 
     // Mirror performSearch: priority is chip-only (value from the chip, not text).
-    const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
+    const priorityFilter = selectedMentions.find(m => m.type === ChipType.PRIORITY)?.id;
 
     const hasFilters =
       priorityFilter ||

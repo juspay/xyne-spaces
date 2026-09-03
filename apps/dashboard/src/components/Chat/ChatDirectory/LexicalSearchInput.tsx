@@ -38,7 +38,7 @@ import {
 } from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
-import { MentionType, type MentionData } from './ChannelCommandMenu.types';
+import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 import { Search } from 'lucide-react';
 import { usePlatform } from '../../../hooks/usePlatform';
 
@@ -47,7 +47,7 @@ interface LexicalSearchInputProps {
   value?: string;
   onChange?: (
     text: string,
-    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+    mentions: Array<{ id: string; type: ChipType; prefix?: string }>,
   ) => void;
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
   onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
@@ -60,15 +60,15 @@ interface LexicalSearchInputProps {
   availablePriorities?: Array<{ id: string; name: string }>;
   availableDates?: Array<{ id: string; name: string }>;
   availableBoards?: Array<{ id: string; name: string }>;
-  availableMentionTargets?: Array<{ id: string; name: string; type: MentionType }>;
+  availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
   className?: string;
   open?: boolean;
-  mentionSearchType?: MentionType | null;
+  mentionSearchType?: ChipType | null;
   selectedMentionIndex?: number;
   setSelectedMentionIndex?: (index: number | ((prev: number) => number)) => void;
   onNavigate?: () => void;
   hasNavigated?: boolean;
-  onReplaceTriggerChipsReady?: (replaceChips: (chips: MentionData[]) => void) => void;
+  onReplaceTriggerChipsReady?: (replaceChips: (chips: ChipData[]) => void) => void;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -79,7 +79,7 @@ interface LexicalSearchInputProps {
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
   onSetTextReady?: (setText: (text: string) => void) => void;
-  initialMention?: MentionData | null | undefined;
+  initialMention?: ChipData | null | undefined;
   initialQuery?: InitialQueryData | null | undefined;
   disableAutoFocus?: boolean;
   // Current user's id — threaded to chip creation so a current-user chip gets Slack's color.
@@ -90,7 +90,7 @@ interface LexicalSearchInputProps {
 }
 
 export interface InitialQueryData {
-  mentions: MentionData[];
+  mentions: ChipData[];
   text: string;
 }
 
@@ -114,7 +114,7 @@ function InitialMentionPlugin({
   initialMention,
   currentUserID,
 }: {
-  initialMention?: MentionData | null;
+  initialMention?: ChipData | null;
   currentUserID?: string;
 }) {
   const [editor] = useLexicalComposerContext();
@@ -412,17 +412,17 @@ function OnChangePluginWrapper({
 }: {
   onChange?: (
     text: string,
-    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+    mentions: Array<{ id: string; type: ChipType; prefix?: string }>,
   ) => void;
 }) {
   const extractMentions = (
     node: LexicalNode,
-  ): Array<{ id: string; type: MentionType; prefix?: string; name: string }> => {
-    const mentions: Array<{ id: string; type: MentionType; prefix?: string; name: string }> = [];
+  ): Array<{ id: string; type: ChipType; prefix?: string; name: string }> => {
+    const mentions: Array<{ id: string; type: ChipType; prefix?: string; name: string }> = [];
 
     if ($isFilterChipNode(node)) {
       const mentionData = node.getMentionData();
-      const mention: { id: string; type: MentionType; prefix?: string; name: string } = {
+      const mention: { id: string; type: ChipType; prefix?: string; name: string } = {
         id: mentionData.id,
         type: mentionData.type,
         name: mentionData.name,

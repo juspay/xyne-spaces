@@ -52,8 +52,8 @@ import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
   TAB_TO_DOC_TYPE,
-  MentionType,
-  type MentionData,
+  ChipType,
+  type ChipData,
   type SearchScopeToggles,
   type PaletteRestore,
   ChannelCommandMenuProps,
@@ -271,8 +271,8 @@ const TEXT_FILTER_HINT_REGEX = /\b(before|after|on|range|board|tags|stage|status
  * them — the rendered offsets are derived from that array, so the two must not drift.
  */
 const MENTION_GROUPS = [
-  { key: 'people', type: MentionType.USER, heading: 'People' },
-  { key: 'channels', type: MentionType.CHANNEL, heading: 'Channels' },
+  { key: 'people', type: ChipType.USER, heading: 'People' },
+  { key: 'channels', type: ChipType.CHANNEL, heading: 'Channels' },
 ] as const;
 
 type MentionGroupKey = (typeof MENTION_GROUPS)[number]['key'];
@@ -580,7 +580,7 @@ const ChannelCommandMenu = ({
 
   // Mention search state - declared before useSearchMetrics so it can be passed to the hook
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
-  const [mentionSearchType, setMentionSearchType] = useState<MentionType | null>(null);
+  const [mentionSearchType, setMentionSearchType] = useState<ChipType | null>(null);
   // Which `mentions:` sections have been expanded past their first five rows.
   const [expandedMentionGroups, setExpandedMentionGroups] = useState<
     Record<MentionGroupKey, boolean>
@@ -659,12 +659,12 @@ const ChannelCommandMenu = ({
     m =>
       m.prefix === 'from:' ||
       m.prefix === 'with:' ||
-      (m.prefix === 'in:' && m.type === MentionType.CHANNEL),
+      (m.prefix === 'in:' && m.type === ChipType.CHANNEL),
   );
 
   // Only show merge option when a desk channel is explicitly scoped via in:<channel>
   const hasDeskChannelFilter = selectedMentions.some(
-    m => m.prefix === 'in:' && m.type === MentionType.CHANNEL,
+    m => m.prefix === 'in:' && m.type === ChipType.CHANNEL,
   );
 
   // Shared Cmd+K user rank for the plain-search USERS section. Hoisted so the
@@ -725,9 +725,9 @@ const ChannelCommandMenu = ({
     [markNavigated],
   );
 
-  const replaceTriggerChipsRef = useRef<((chips: MentionData[]) => void) | null>(null);
+  const replaceTriggerChipsRef = useRef<((chips: ChipData[]) => void) | null>(null);
   const insertMentionRef = useRef<
-    ((item: { id: string; name: string; email?: string; type?: MentionType }) => void) | null
+    ((item: { id: string; name: string; email?: string; type?: ChipType }) => void) | null
   >(null);
 
   const insertTextRef = useRef<((text: string) => void) | null>(null);
@@ -1079,7 +1079,7 @@ const ChannelCommandMenu = ({
       text: searchText,
       // The cast is the hook's looser `prefix: string` meeting the editor's prefix union —
       // same values at runtime, they're only ever set from that union.
-      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as MentionData[],
+      mentions: selectedMentions.map(m => ({ ...m, name: m.name ?? m.id })) as ChipData[],
       // Scope travels with the search: without it, back-navigation would restore the query
       // but silently re-run it at the default scope.
       toggles: { onlyMyChannels, includeBotMessages },
@@ -1221,7 +1221,7 @@ const ChannelCommandMenu = ({
   const handleEditorChange = useCallback(
     (
       text: string,
-      mentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
+      mentions: Array<{ id: string; type: ChipType; prefix?: string; name?: string }>,
     ) => {
       // Slash-command mode: the hook consumes `/`-prefixed text (keeping it OUT of the search
       // hook so Vespa never runs) and returns true; keep prevSearchTextRef in sync and bail.
@@ -1260,21 +1260,21 @@ const ChannelCommandMenu = ({
   // On a mention pick: quick-switch (navigate to the DM/channel) only when the box is truly
   // empty; otherwise it becomes a prefix-less mention-filter chip (mentions/channelMentions).
   const handleMentionSelect = useCallback(
-    async (mention: { id: string; name: string; type: MentionType; email?: string }) => {
+    async (mention: { id: string; name: string; type: ChipType; email?: string }) => {
       // Quick-switch only for a "pure" bare mention: no chips AND nothing typed before the
       // trigger. "hi @vishal" has preceding text, so it becomes a mention filter instead.
-      const triggerChar = mention.type === MentionType.CHANNEL ? '#' : '@';
+      const triggerChar = mention.type === ChipType.CHANNEL ? '#' : '@';
       const triggerIndex = searchText.lastIndexOf(triggerChar);
       const hasTextBeforeMention =
         triggerIndex > 0 && searchText.slice(0, triggerIndex).trim().length > 0;
       // A `mentions:` pick is always a filter — the user asked for one by name. Only a
       // bare `@`/`#` in an otherwise-empty box still jumps to the DM/channel.
       const isQuickSwitch =
-        mentionSearchType !== MentionType.MENTIONS &&
+        mentionSearchType !== ChipType.MENTIONS &&
         selectedMentions.length === 0 &&
         !hasTextBeforeMention;
 
-      if (mention.type === MentionType.CHANNEL && channelTrigger === '#' && isQuickSwitch) {
+      if (mention.type === ChipType.CHANNEL && channelTrigger === '#' && isQuickSwitch) {
         setMentionSearchType(null);
         setMentionSearchQuery('');
         setChannelTrigger(null);
@@ -1285,7 +1285,7 @@ const ChannelCommandMenu = ({
       }
 
       // Navigate to the DM only in quick-switch; otherwise fall through to a mention chip.
-      if (mention.type === MentionType.USER && userTrigger === '@' && isQuickSwitch) {
+      if (mention.type === ChipType.USER && userTrigger === '@' && isQuickSwitch) {
         setMentionSearchType(null);
         setMentionSearchQuery('');
         setUserTrigger(null);
@@ -1344,15 +1344,15 @@ const ChannelCommandMenu = ({
       // `after:` and `before:`, rather than as raw text.
       if (option.isRange && replaceTriggerChipsRef.current) {
         replaceTriggerChipsRef.current([
-          { id: option.id, name: option.id, type: MentionType.DATE, prefix: 'after:' },
-          { id: option.before, name: option.before, type: MentionType.DATE, prefix: 'before:' },
+          { id: option.id, name: option.id, type: ChipType.DATE, prefix: 'after:' },
+          { id: option.before, name: option.before, type: ChipType.DATE, prefix: 'before:' },
         ]);
         setMentionSearchType(null);
         setMentionSearchQuery('');
         setSelectedMentionIndex(0);
         return;
       }
-      void handleMentionSelect({ id: option.id, name: option.id, type: MentionType.DATE });
+      void handleMentionSelect({ id: option.id, name: option.id, type: ChipType.DATE });
     },
     [handleMentionSelect],
   );
@@ -1360,12 +1360,7 @@ const ChannelCommandMenu = ({
   // Store the insertMention function when it's ready
   const handleInsertMentionReady = useCallback(
     (
-      insertMention: (item: {
-        id: string;
-        name: string;
-        email?: string;
-        type?: MentionType;
-      }) => void,
+      insertMention: (item: { id: string; name: string; email?: string; type?: ChipType }) => void,
     ) => {
       insertMentionRef.current = insertMention;
     },
@@ -1387,7 +1382,7 @@ const ChannelCommandMenu = ({
         return;
       }
       setMentionSearchQuery(query);
-      setMentionSearchType(MentionType.USER);
+      setMentionSearchType(ChipType.USER);
       setUserTrigger(trigger ?? 'from:');
       setSelectedMentionIndex(0); // Reset selection when search changes
     },
@@ -1415,19 +1410,19 @@ const ChannelCommandMenu = ({
       // When trigger is '#', we want to show only channels (quick switcher)
       if (trigger === 'in:@') {
         // 'in:@' shows DMs only (not users!)
-        setMentionSearchType(MentionType.CHANNEL);
+        setMentionSearchType(ChipType.CHANNEL);
         setChannelTrigger('in:@');
       } else if (trigger === 'in:#') {
         // Show only channels (like '#' trigger but with 'in:' prefix)
-        setMentionSearchType(MentionType.CHANNEL);
+        setMentionSearchType(ChipType.CHANNEL);
         setChannelTrigger('in:#');
       } else if (trigger === '#') {
         // '#' trigger - show only channels (Slack-style quick switcher)
-        setMentionSearchType(MentionType.CHANNEL);
+        setMentionSearchType(ChipType.CHANNEL);
         setChannelTrigger('#');
       } else {
         // Plain 'in:' - show both channels and DMs
-        setMentionSearchType(MentionType.CHANNEL);
+        setMentionSearchType(ChipType.CHANNEL);
         setChannelTrigger('in:');
       }
       setSelectedMentionIndex(0); // Reset selection when search changes
@@ -1449,7 +1444,7 @@ const ChannelCommandMenu = ({
         return;
       }
       setMentionSearchQuery(query);
-      setMentionSearchType(MentionType.PRIORITY);
+      setMentionSearchType(ChipType.PRIORITY);
       setSelectedMentionIndex(0);
     },
     [isInCommandMode],
@@ -1467,7 +1462,7 @@ const ChannelCommandMenu = ({
         return;
       }
       setMentionSearchQuery(query);
-      setMentionSearchType(MentionType.DATE);
+      setMentionSearchType(ChipType.DATE);
       setSelectedMentionIndex(0);
     },
     [isInCommandMode],
@@ -1485,7 +1480,7 @@ const ChannelCommandMenu = ({
         return;
       }
       setMentionSearchQuery(query);
-      setMentionSearchType(MentionType.BOARD);
+      setMentionSearchType(ChipType.BOARD);
       setSelectedMentionIndex(0);
     },
     [isInCommandMode],
@@ -1503,7 +1498,7 @@ const ChannelCommandMenu = ({
         return;
       }
       setMentionSearchQuery(query);
-      setMentionSearchType(MentionType.MENTIONS);
+      setMentionSearchType(ChipType.MENTIONS);
       setUserTrigger(null);
       setChannelTrigger(null);
       setSelectedMentionIndex(0);
@@ -1524,17 +1519,15 @@ const ChannelCommandMenu = ({
   // Left out, the hook is called with '' — which returns the default everyone-list, and
   // rankUsersWithMfu only *ranks* what it's handed, so nothing would filter it back down.
   const mentionUsersQuery =
-    mentionSearchType === MentionType.USER ||
-    mentionSearchType === MentionType.MENTIONS ||
+    mentionSearchType === ChipType.USER ||
+    mentionSearchType === ChipType.MENTIONS ||
     channelTrigger === 'in:'
       ? mentionSearchQuery
       : '';
   const mentionUsers = useUserSearch(mentionUsersQuery, CMDK_USER_LIMIT);
 
   const deskChannelId = useMemo(() => {
-    const inMention = selectedMentions.find(
-      m => m.type === MentionType.CHANNEL && m.prefix === 'in:',
-    );
+    const inMention = selectedMentions.find(m => m.type === ChipType.CHANNEL && m.prefix === 'in:');
     if (!inMention) return undefined;
     const match = allChannels.find(c => c.channel.id === inMention.id);
     return match && isDeskChannelType(match.channel.type) ? inMention.id : undefined;
@@ -1589,10 +1582,10 @@ const ChannelCommandMenu = ({
 
     // `to:` is desk-only and handled above; scoped to USER mode so a stale trigger from an
     // earlier `to:` can't blank the People section of a later `mentions:` search.
-    if (userTrigger === 'to:' && mentionSearchType === MentionType.USER) return [];
+    if (userTrigger === 'to:' && mentionSearchType === ChipType.USER) return [];
     if (
-      mentionSearchType !== MentionType.USER &&
-      mentionSearchType !== MentionType.MENTIONS &&
+      mentionSearchType !== ChipType.USER &&
+      mentionSearchType !== ChipType.MENTIONS &&
       channelTrigger !== 'in:'
     )
       return [];
@@ -1629,7 +1622,7 @@ const ChannelCommandMenu = ({
   // Regular channels (excludes DMs) - used for `in:` and `in:#` triggers
   // When DESK tab is active, show only email channels; otherwise exclude them.
   const availableRegularChannels = useMemo(() => {
-    if (mentionSearchType !== MentionType.CHANNEL && mentionSearchType !== MentionType.MENTIONS)
+    if (mentionSearchType !== ChipType.CHANNEL && mentionSearchType !== ChipType.MENTIONS)
       return [];
 
     // Filter to only regular channels (no DMs), then scope by active tab
@@ -1700,7 +1693,7 @@ const ChannelCommandMenu = ({
   // DMs and Group DMs - used for `in:` trigger (includes self-DMs / notes to yourself)
   // Hidden when DESK tab is active — only email channels are relevant there.
   const availableDMs = useMemo(() => {
-    if (mentionSearchType !== MentionType.CHANNEL) return [];
+    if (mentionSearchType !== ChipType.CHANNEL) return [];
     if (activeTab === TabType.DESK) return [];
 
     // Filter to only DM channels
@@ -1787,19 +1780,19 @@ const ChannelCommandMenu = ({
    * in a message, so it can't be a channel mention.
    */
   const mentionCandidates = useMemo<
-    Record<MentionGroupKey, Array<{ id: string; name: string; type: MentionType }>>
+    Record<MentionGroupKey, Array<{ id: string; name: string; type: ChipType }>>
   >(() => {
-    if (mentionSearchType !== MentionType.MENTIONS) return { people: [], channels: [] };
+    if (mentionSearchType !== ChipType.MENTIONS) return { people: [], channels: [] };
     return {
       people: availableUsers
         .slice(0, MENTION_GROUP_MAX)
-        .map(u => ({ id: u.id, name: u.name, type: MentionType.USER })),
+        .map(u => ({ id: u.id, name: u.name, type: ChipType.USER })),
       channels: availableRegularChannels
         .slice(0, MENTION_GROUP_MAX)
         .map(({ channel, displayName }) => ({
           id: channel.id,
           name: displayName,
-          type: MentionType.CHANNEL,
+          type: ChipType.CHANNEL,
         })),
     };
   }, [mentionSearchType, availableUsers, availableRegularChannels]);
@@ -1812,7 +1805,7 @@ const ChannelCommandMenu = ({
    * The flat, people-then-channels list the keyboard indexes. It holds exactly the rows on
    * screen — expanding a section grows it — so arrow keys can never land on a hidden row.
    */
-  const availableMentionTargets = useMemo<Array<{ id: string; name: string; type: MentionType }>>(
+  const availableMentionTargets = useMemo<Array<{ id: string; name: string; type: ChipType }>>(
     () =>
       MENTION_GROUPS.flatMap(group =>
         mentionCandidates[group.key].slice(
@@ -1827,7 +1820,7 @@ const ChannelCommandMenu = ({
   // `id` is the canonical uppercase value (wire/backend); `name` is the capitalized
   // dropdown label. The chip renders lowercase (buildChipText), so the two are decoupled.
   const availablePriorities = useMemo(() => {
-    if (mentionSearchType !== MentionType.PRIORITY) return [];
+    if (mentionSearchType !== ChipType.PRIORITY) return [];
     const query = mentionSearchQuery.trim().toLowerCase();
     return Object.values(TicketPriority)
       .map(value => ({ id: value, name: value.charAt(0) + value.slice(1).toLowerCase() }))
@@ -1837,7 +1830,7 @@ const ChannelCommandMenu = ({
   const [allBoardsForSearch] = useCachedQuery(queries.getAllBoardsList());
   /** Board candidates, filtered by name. The chip carries the id the backend matches on. */
   const availableBoards = useMemo(() => {
-    if (mentionSearchType !== MentionType.BOARD) return [];
+    if (mentionSearchType !== ChipType.BOARD) return [];
     const query = mentionSearchQuery.trim().toLowerCase();
     const boards = (allBoardsForSearch ?? []) as ReadonlyArray<{ id: string; name: string }>;
     return boards
@@ -1853,7 +1846,7 @@ const ChannelCommandMenu = ({
    * parser may not know.
    */
   const availableDates = useMemo(() => {
-    if (mentionSearchType !== MentionType.DATE) return [];
+    if (mentionSearchType !== ChipType.DATE) return [];
     const query = mentionSearchQuery.trim().toLowerCase();
     const presets = DATE_RANGE_OPTIONS.filter(opt => opt.value)
       .map(opt => {
@@ -1884,23 +1877,23 @@ const ChannelCommandMenu = ({
   // The highlighted candidate in the open mention popup — the exact row Enter/click selects.
   // Reads the same arrays the Enter handler indexes, so the ghost never disagrees with Enter.
   const mentionActiveLabel = useMemo<string | null>(() => {
-    if (mentionSearchType === MentionType.USER) {
+    if (mentionSearchType === ChipType.USER) {
       const user = availableUsers[selectedMentionIndex];
       return user ? getUserDisplayName(user) : null;
     }
-    if (mentionSearchType === MentionType.CHANNEL) {
+    if (mentionSearchType === ChipType.CHANNEL) {
       return availableChannels[selectedMentionIndex]?.displayName ?? null;
     }
-    if (mentionSearchType === MentionType.DATE) {
+    if (mentionSearchType === ChipType.DATE) {
       return availableDates[selectedMentionIndex]?.name ?? null;
     }
-    if (mentionSearchType === MentionType.BOARD) {
+    if (mentionSearchType === ChipType.BOARD) {
       return availableBoards[selectedMentionIndex]?.name ?? null;
     }
-    if (mentionSearchType === MentionType.PRIORITY) {
+    if (mentionSearchType === ChipType.PRIORITY) {
       return availablePriorities[selectedMentionIndex]?.name ?? null;
     }
-    if (mentionSearchType === MentionType.MENTIONS) {
+    if (mentionSearchType === ChipType.MENTIONS) {
       return availableMentionTargets[selectedMentionIndex]?.name ?? null;
     }
     return null;
@@ -3251,7 +3244,7 @@ const ChannelCommandMenu = ({
           void handleMentionSelect({
             id: channel.id,
             name: displayName,
-            type: MentionType.CHANNEL,
+            type: ChipType.CHANNEL,
           });
         }
       } else {
@@ -3262,7 +3255,7 @@ const ChannelCommandMenu = ({
           void handleMentionSelect({
             id: channel.id,
             name: displayName,
-            type: MentionType.CHANNEL,
+            type: ChipType.CHANNEL,
           });
         }
       }
@@ -3276,7 +3269,7 @@ const ChannelCommandMenu = ({
         void handleMentionSelect({
           id: channel.id,
           name: displayName,
-          type: MentionType.CHANNEL,
+          type: ChipType.CHANNEL,
         });
       }
       return;
@@ -3289,7 +3282,7 @@ const ChannelCommandMenu = ({
         void handleMentionSelect({
           id: channel.id,
           name: displayName,
-          type: MentionType.CHANNEL,
+          type: ChipType.CHANNEL,
         });
       }
       return;
@@ -3301,64 +3294,58 @@ const ChannelCommandMenu = ({
       void handleMentionSelect({
         id: channel.id,
         name: displayName,
-        type: MentionType.CHANNEL,
+        type: ChipType.CHANNEL,
       });
       return;
     }
 
     // Board value selection (candidate list from Zero, no backend lookup).
-    if (mentionSearchType === MentionType.BOARD && availableBoards[selectedMentionIndex]) {
+    if (mentionSearchType === ChipType.BOARD && availableBoards[selectedMentionIndex]) {
       const board = availableBoards[selectedMentionIndex];
-      void handleMentionSelect({ id: board.id, name: board.name, type: MentionType.BOARD });
+      void handleMentionSelect({ id: board.id, name: board.name, type: ChipType.BOARD });
       return;
     }
 
     // Date value selection. Goes through `selectDate` rather than handleMentionSelect: a
     // range has two bounds, which one chip can't hold, so it lands as two chips.
-    if (mentionSearchType === MentionType.DATE && availableDates[selectedMentionIndex]) {
+    if (mentionSearchType === ChipType.DATE && availableDates[selectedMentionIndex]) {
       selectDate(availableDates[selectedMentionIndex]);
       return;
     }
 
     // `mentions:` value selection — one list, two kinds; the candidate carries its type.
-    if (
-      mentionSearchType === MentionType.MENTIONS &&
-      availableMentionTargets[selectedMentionIndex]
-    ) {
+    if (mentionSearchType === ChipType.MENTIONS && availableMentionTargets[selectedMentionIndex]) {
       const target = availableMentionTargets[selectedMentionIndex];
       void handleMentionSelect({ id: target.id, name: target.name, type: target.type });
       return;
     }
 
     // Handle priority value selection (closed enum, no backend)
-    if (mentionSearchType === MentionType.PRIORITY && availablePriorities[selectedMentionIndex]) {
+    if (mentionSearchType === ChipType.PRIORITY && availablePriorities[selectedMentionIndex]) {
       const priority = availablePriorities[selectedMentionIndex];
       void handleMentionSelect({
         id: priority.id,
         name: priority.name,
-        type: MentionType.PRIORITY,
+        type: ChipType.PRIORITY,
       });
       return;
     }
 
     // Handle regular user mention search (@, from:, with:, assignee:)
-    if (mentionSearchType === MentionType.USER && availableUsers[selectedMentionIndex]) {
+    if (mentionSearchType === ChipType.USER && availableUsers[selectedMentionIndex]) {
       const user = availableUsers[selectedMentionIndex];
       void handleMentionSelect({
         id: user.id,
         name: getUserDisplayName(user),
-        type: MentionType.USER,
+        type: ChipType.USER,
         ...(user.email ? { email: user.email } : {}),
       });
-    } else if (
-      mentionSearchType === MentionType.CHANNEL &&
-      availableChannels[selectedMentionIndex]
-    ) {
+    } else if (mentionSearchType === ChipType.CHANNEL && availableChannels[selectedMentionIndex]) {
       const { channel, displayName } = availableChannels[selectedMentionIndex];
       void handleMentionSelect({
         id: channel.id,
         name: displayName,
-        type: MentionType.CHANNEL,
+        type: ChipType.CHANNEL,
       });
     }
   };
@@ -3734,10 +3721,10 @@ const ChannelCommandMenu = ({
         <span className='flex items-center flex-wrap gap-1'>
           <span className='text-sm'>Show detailed results for:</span>
           {selectedMentions.map(m => {
-            const isPriority = m.type === MentionType.PRIORITY;
-            const isDate = m.type === MentionType.DATE;
-            const isBoard = m.type === MentionType.BOARD;
-            const isUser = m.type === MentionType.USER;
+            const isPriority = m.type === ChipType.PRIORITY;
+            const isDate = m.type === ChipType.DATE;
+            const isBoard = m.type === ChipType.BOARD;
+            const isUser = m.type === ChipType.USER;
             const name = isPriority
               ? m.id.toLowerCase()
               : isDate
@@ -4175,7 +4162,7 @@ const ChannelCommandMenu = ({
                                     void handleMentionSelect({
                                       id: channel.id,
                                       name: displayName,
-                                      type: MentionType.CHANNEL,
+                                      type: ChipType.CHANNEL,
                                     });
                                   }}
                                   onMouseEnter={() => {
@@ -4217,7 +4204,7 @@ const ChannelCommandMenu = ({
                                     void handleMentionSelect({
                                       id: channel.id,
                                       name: displayName,
-                                      type: MentionType.CHANNEL,
+                                      type: ChipType.CHANNEL,
                                     });
                                   }}
                                   onMouseEnter={() => {
@@ -4251,7 +4238,7 @@ const ChannelCommandMenu = ({
                           )}
 
                         {/* Regular USER mention search (@, from:, assignee:) - Show only Users */}
-                        {mentionSearchType === MentionType.USER &&
+                        {mentionSearchType === ChipType.USER &&
                           (userTrigger === '@' ||
                             userTrigger === 'from:' ||
                             userTrigger === 'to:' ||
@@ -4271,7 +4258,7 @@ const ChannelCommandMenu = ({
                                       void handleMentionSelect({
                                         id: user.id,
                                         name: getUserDisplayName(user),
-                                        type: MentionType.USER,
+                                        type: ChipType.USER,
                                         ...(user.email ? { email: user.email } : {}),
                                       });
                                     }}
@@ -4306,7 +4293,7 @@ const ChannelCommandMenu = ({
                               })}
                             </Command.Group>
                           )}
-                        {mentionSearchType === MentionType.USER &&
+                        {mentionSearchType === ChipType.USER &&
                           (userTrigger === '@' ||
                             userTrigger === 'from:' ||
                             userTrigger === 'to:' ||
@@ -4338,7 +4325,7 @@ const ChannelCommandMenu = ({
                                     void handleMentionSelect({
                                       id: channel.id,
                                       name: displayName,
-                                      type: MentionType.CHANNEL,
+                                      type: ChipType.CHANNEL,
                                     });
                                   }}
                                   onMouseEnter={() => {
@@ -4385,7 +4372,7 @@ const ChannelCommandMenu = ({
                               void handleMentionSelect({
                                 id: channel.id,
                                 name: displayName,
-                                type: MentionType.CHANNEL,
+                                type: ChipType.CHANNEL,
                               });
                             }}
                             onMouseEnter={() => {
@@ -4431,7 +4418,7 @@ const ChannelCommandMenu = ({
                                 void handleMentionSelect({
                                   id: channel.id,
                                   name: displayName,
-                                  type: MentionType.CHANNEL,
+                                  type: ChipType.CHANNEL,
                                 });
                               }}
                               onMouseEnter={() => {
@@ -4464,7 +4451,7 @@ const ChannelCommandMenu = ({
                       )}
 
                     {/* Regular USER mention search (@, from:, with:, assignee:) - Show only Users */}
-                    {mentionSearchType === MentionType.USER &&
+                    {mentionSearchType === ChipType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
                         userTrigger === 'to:' ||
@@ -4485,7 +4472,7 @@ const ChannelCommandMenu = ({
                                   void handleMentionSelect({
                                     id: user.id,
                                     name: getUserDisplayName(user),
-                                    type: MentionType.USER,
+                                    type: ChipType.USER,
                                     ...(user.email ? { email: user.email } : {}),
                                   });
                                 }}
@@ -4520,7 +4507,7 @@ const ChannelCommandMenu = ({
                           })}
                         </Command.Group>
                       )}
-                    {mentionSearchType === MentionType.USER &&
+                    {mentionSearchType === ChipType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
                         userTrigger === 'to:' ||
@@ -4534,7 +4521,7 @@ const ChannelCommandMenu = ({
                       )}
 
                     {/* 'priority:' trigger — the closed TicketPriority value list */}
-                    {mentionSearchType === MentionType.BOARD && availableBoards.length > 0 && (
+                    {mentionSearchType === ChipType.BOARD && availableBoards.length > 0 && (
                       <Command.Group
                         heading='Board'
                         className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
@@ -4547,7 +4534,7 @@ const ChannelCommandMenu = ({
                               void handleMentionSelect({
                                 id: board.id,
                                 name: board.name,
-                                type: MentionType.BOARD,
+                                type: ChipType.BOARD,
                               });
                             }}
                             onMouseEnter={() => {
@@ -4580,7 +4567,7 @@ const ChannelCommandMenu = ({
                         people-then-channels, so a channel row's index is offset by the
                         number of people above it. Enter and the arrow keys read that flat
                         array, so what's highlighted can't disagree with what's selected. */}
-                    {mentionSearchType === MentionType.MENTIONS &&
+                    {mentionSearchType === ChipType.MENTIONS &&
                       MENTION_GROUPS.map(group => {
                         const rows = availableMentionTargets
                           .map((target, index) => ({ target, index }))
@@ -4616,7 +4603,7 @@ const ChannelCommandMenu = ({
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
                                 <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                                  {target.type === MentionType.USER ? (
+                                  {target.type === ChipType.USER ? (
                                     <Avatar userId={target.id} size='xs' />
                                   ) : (
                                     <ChannelChipIcon id={target.id} size={16} />
@@ -4656,7 +4643,7 @@ const ChannelCommandMenu = ({
                         );
                       })}
 
-                    {mentionSearchType === MentionType.DATE && availableDates.length > 0 && (
+                    {mentionSearchType === ChipType.DATE && availableDates.length > 0 && (
                       <Command.Group
                         heading='Date'
                         className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
@@ -4696,47 +4683,46 @@ const ChannelCommandMenu = ({
                       </Command.Group>
                     )}
 
-                    {mentionSearchType === MentionType.PRIORITY &&
-                      availablePriorities.length > 0 && (
-                        <Command.Group
-                          heading='Priority'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                        >
-                          {availablePriorities.map((priority, index) => (
-                            <Command.Item
-                              key={priority.id}
-                              value={`mention-priority-${priority.id}`}
-                              onSelect={() => {
-                                void handleMentionSelect({
-                                  id: priority.id,
-                                  name: priority.name,
-                                  type: MentionType.PRIORITY,
-                                });
-                              }}
-                              onMouseEnter={() => {
-                                selectMention(index);
-                              }}
-                              className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                              } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
+                    {mentionSearchType === ChipType.PRIORITY && availablePriorities.length > 0 && (
+                      <Command.Group
+                        heading='Priority'
+                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                      >
+                        {availablePriorities.map((priority, index) => (
+                          <Command.Item
+                            key={priority.id}
+                            value={`mention-priority-${priority.id}`}
+                            onSelect={() => {
+                              void handleMentionSelect({
+                                id: priority.id,
+                                name: priority.name,
+                                type: ChipType.PRIORITY,
+                              });
+                            }}
+                            onMouseEnter={() => {
+                              selectMention(index);
+                            }}
+                            className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
+                              index === selectedMentionIndex ? 'cmdk-active-row' : ''
+                            } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                          >
+                            <div
+                              className={`flex items-center justify-center h-4 w-5 flex-shrink-0 ${
+                                PRIORITY_ICON_COLOR[priority.id] ?? 'text-muted-foreground'
+                              }`}
                             >
-                              <div
-                                className={`flex items-center justify-center h-4 w-5 flex-shrink-0 ${
-                                  PRIORITY_ICON_COLOR[priority.id] ?? 'text-muted-foreground'
-                                }`}
-                              >
-                                <SignalHigh size={16} />
+                              <SignalHigh size={16} />
+                            </div>
+                            <div className='flex-1 min-w-0'>
+                              <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
+                                {priority.name}
                               </div>
-                              <div className='flex-1 min-w-0'>
-                                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-                                  {priority.name}
-                                </div>
-                              </div>
-                            </Command.Item>
-                          ))}
-                        </Command.Group>
-                      )}
+                            </div>
+                          </Command.Item>
+                        ))}
+                      </Command.Group>
+                    )}
                   </>
                 )}
 

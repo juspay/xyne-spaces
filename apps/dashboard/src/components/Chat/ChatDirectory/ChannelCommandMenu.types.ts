@@ -146,7 +146,15 @@ export const VespaDocTypes = {
 
 export type VespaDocTypes = (typeof VespaDocTypes)[keyof typeof VespaDocTypes];
 
-export const MentionType = {
+/**
+ * What a search-filter chip stands for. Named for the chip, not for "mentions": most of
+ * these aren't mentions at all — a priority, a date bound and a board are value filters,
+ * and MENTIONS is a typeahead mode rather than a chip type.
+ *
+ * The string values are persisted (URL params, saved searches), so they must not change
+ * even when the identifiers do.
+ */
+export const ChipType = {
   USER: 'user',
   CHANNEL: 'channel',
   // Value filter (not an entity): the exclusive priority chip. `id` holds the
@@ -164,11 +172,11 @@ export const MentionType = {
   BOARD: 'board',
 } as const;
 
-export type MentionType = (typeof MentionType)[keyof typeof MentionType];
+export type ChipType = (typeof ChipType)[keyof typeof ChipType];
 
 /**
  * Picked entity + filter metadata for a mention/filter chip (cmd+K search,
- * GlobalCommandMenu). `type` mirrors the MentionType values above.
+ * GlobalCommandMenu). `type` mirrors the ChipType values above.
  */
 /**
  * The palette's two scope toggles. They shape which documents a search can match, so they
@@ -185,11 +193,11 @@ export interface SearchScopeToggles {
  */
 export type PaletteRestore = InitialQueryData & { toggles?: SearchScopeToggles };
 
-export interface MentionData {
+export interface ChipData {
   id: string;
   name: string;
-  // Was a hand-written copy of MentionType's values; use the enum so they can't drift.
-  type: MentionType;
+  // Was a hand-written copy of ChipType's values; use the enum so they can't drift.
+  type: ChipType;
   prefix?: ChipPrefix;
   email?: string;
   photoLink?: string;
@@ -220,7 +228,7 @@ export interface ChannelCommandMenuProps {
   /** Called when user confirms selection ("Add to Thread") */
   onContextSelectionConfirm?: () => void;
   /** Pre-populated mention filter (e.g., from Cmd+F for current channel) */
-  initialMention?: MentionData | null;
+  initialMention?: ChipData | null;
   /**
    * Pre-populated full query (mention chips + trailing text) used to restore
    * the previous search when reopening the overlay from the results-page header.
@@ -410,14 +418,14 @@ export function filterChipToKind(chip: FilterChip): FilterKind | null {
   // than cast — an unrecognised prefix falls through to the bare-chip checks as before.
   // `mentions:` is the one prefix two chip types share, so it's routed by type first.
   if (chip.prefix === 'mentions:') {
-    return chip.type === MentionType.CHANNEL ? 'channelMention' : 'mention';
+    return chip.type === ChipType.CHANNEL ? 'channelMention' : 'mention';
   }
   if (chip.prefix && isChipPrefix(chip.prefix)) return PREFIX_TO_KIND[chip.prefix];
   // Priority chip carries type 'priority' even without a prefix.
-  if (chip.type === MentionType.PRIORITY) return 'priority';
+  if (chip.type === ChipType.PRIORITY) return 'priority';
   // Bare @user / #channel chips (no prefix) scope to message content.
-  if (chip.type === MentionType.USER) return 'mention';
-  if (chip.type === MentionType.CHANNEL) return 'channelMention';
+  if (chip.type === ChipType.USER) return 'mention';
+  if (chip.type === ChipType.CHANNEL) return 'channelMention';
   return null;
 }
 

@@ -19,7 +19,7 @@ import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import {
   TabType,
-  type MentionData,
+  type ChipData,
   type SearchScopeToggles,
   type PaletteRestore,
 } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -60,7 +60,7 @@ interface GlobalCommandMenuProps {
   inline?: boolean;
   onTabChange?: (tab: TabType) => void;
   disableAutoFocus?: boolean;
-  initialMention?: MentionData | null;
+  initialMention?: ChipData | null;
   initialTab?: TabType;
   hideTabs?: boolean;
   restoreQueryFromUrl?: boolean;
@@ -93,7 +93,7 @@ const GlobalCommandMenu = ({
   // (they load async after mount and are otherwise invisible until an unrelated dep changes).
   const affinityVersion = useAffinityCallback();
   const [internalOpen, setInternalOpen] = useState(false);
-  const [internalInitialMention, setInternalInitialMention] = useState<MentionData | null>(null);
+  const [internalInitialMention, setInternalInitialMention] = useState<ChipData | null>(null);
   const [internalContextualTab, setInternalContextualTab] = useState<TabType | undefined>(
     undefined,
   );
@@ -142,7 +142,7 @@ const GlobalCommandMenu = ({
     const supportIndex = pathParts.indexOf('support');
     setDeskMergeEnabled(supportIndex !== -1);
 
-    const buildChannelMention = (channel: (typeof channelData)[number]): MentionData => {
+    const buildChannelMention = (channel: (typeof channelData)[number]): ChipData => {
       const channelName = resolveDMChannelName(channel, context.userID ?? '', allUsers);
       return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
     };
@@ -278,7 +278,7 @@ const GlobalCommandMenu = ({
     (params: URLSearchParams): InitialQueryData | null => {
       const filters = { ...DEFAULT_SEARCH_FILTERS, ...readFiltersFromParams(params, {}) };
 
-      const mentions: MentionData[] = buildChips(filters, {
+      const mentions: ChipData[] = buildChips(filters, {
         userName: id => {
           const user = allUsers.find(u => u.id === id);
           return user ? getUserDisplayName(user) : undefined;
@@ -296,7 +296,7 @@ const GlobalCommandMenu = ({
             b => b.id === id,
           )?.name,
       })
-        .map((chip): MentionData | null => {
+        .map((chip): ChipData | null => {
           // An id with no resolvable name is a user/channel we can't render — drop it
           // rather than show a raw id. Emails and the priority chip are their own label.
           const isEntity = chip.type !== 'priority';
@@ -309,7 +309,7 @@ const GlobalCommandMenu = ({
             ...(chip.prefix ? { prefix: chip.prefix } : {}),
           };
         })
-        .filter((m): m is MentionData => m !== null);
+        .filter((m): m is ChipData => m !== null);
 
       // Whatever has no chip form (status, tags, date ranges) goes back as the typed syntax
       // the palette parses — how it was expressible there in the first place. Filters that
