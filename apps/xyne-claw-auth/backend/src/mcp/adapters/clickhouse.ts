@@ -16,17 +16,30 @@ export const clickhouseAdapter: StdioMcpAdapter = {
     { name: "port", label: "Port", type: "text", placeholder: "8443", optional: true },
     { name: "user", label: "Username", type: "text", placeholder: "default", optional: true },
     { name: "password", label: "Password", type: "password", placeholder: "", optional: true },
+    { name: "secure", label: "Use TLS (secure)", type: "text", placeholder: "true", optional: true },
+    { name: "verify", label: "Verify TLS cert", type: "text", placeholder: "true", optional: true },
   ],
   buildCommand(credentials) {
-    const host = String(credentials["host"] ?? "").trim();
+    // Strip any scheme/trailing slash a user may have pasted into the host
+    // field (prevents the mangled `https://http://host:port` seen in logs).
+    const host = String(credentials["host"] ?? "")
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/+$/, "");
     const port = String(credentials["port"] ?? "").trim();
     const user = String(credentials["user"] ?? "").trim();
     const password = String(credentials["password"] ?? "");
 
-    // SECURE/VERIFY default on — the legacy connector hardcoded both to "true".
+    // SECURE/VERIFY default on (matches legacy behaviour) but are now
+    // credential-driven so plaintext-HTTP servers (e.g. port 8123) can opt out
+    // by setting secure="false". Only an explicit "false" disables them.
+    const secure =
+      String(credentials["secure"] ?? "true").trim().toLowerCase() === "false" ? "false" : "true";
+    const verify =
+      String(credentials["verify"] ?? "true").trim().toLowerCase() === "false" ? "false" : "true";
     const env: Record<string, string> = {
-      CLICKHOUSE_SECURE: "true",
-      CLICKHOUSE_VERIFY: "true",
+      CLICKHOUSE_SECURE: secure,
+      CLICKHOUSE_VERIFY: verify,
     };
     if (host) env["CLICKHOUSE_HOST"] = host;
     if (port) env["CLICKHOUSE_PORT"] = port; // legacy template appended a stray space; trimmed here
