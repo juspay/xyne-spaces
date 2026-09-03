@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.13](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.12...v1.251.0-release-20260901.13) (2026-09-03)
+
+
+### Bug Fixes
+
+* close sidebar quick-nav hover card on navigation ([#1500](https://github.com/juspay/xyne-spaces/issues/1500)) ([931ba07](https://github.com/juspay/xyne-spaces/commit/931ba0796b82b6374b334f57d54eb7b71c547159))
+
 ## [1.251.0-release-20260901.12](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.11...v1.251.0-release-20260901.12) (2026-09-03)
 
 
