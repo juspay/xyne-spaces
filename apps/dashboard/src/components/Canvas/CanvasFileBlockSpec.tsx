@@ -1,10 +1,13 @@
 import { defaultBlockSpecs } from '@blocknote/core';
 import {
   AddFileButton,
+  AudioBlock,
   createReactBlockSpec,
   FileBlockWrapper,
+  ImageBlock,
   useResolveUrl,
   useUploadLoading,
+  VideoBlock,
 } from '@blocknote/react';
 import axios from 'axios';
 import { Download, FileText, Loader2 } from 'lucide-react';
@@ -123,7 +126,7 @@ function FileBlockView({ block, editor }: FileBlockViewProps): ReactElement {
 
   if (isUploading) {
     return (
-      <div className='bn-file-block-content-wrapper'>
+      <div className='bn-file-block-content-wrapper w-full'>
         <UploadingCard name={name} />
       </div>
     );
@@ -142,4 +145,44 @@ export const canvasFileBlockSpec = createReactBlockSpec(
     render: ({ block, editor }) => <FileBlockView block={block} editor={editor} />,
   },
   defaultBlockSpecs.file.extensions,
+)();
+
+/**
+ * The same uploading card for BlockNote's own image, video and audio blocks.
+ *
+ * Dragging or pasting a file creates one of those directly rather than a file
+ * block, so without this those routes still show the bare "Loading..." that the
+ * file block no longer does.
+ */
+function withUploadingCard<P extends { block: { id: string; props: { name: string } } }>(
+  Block: (props: P) => ReactElement,
+): (props: P) => ReactElement {
+  return function MediaBlock(props: P): ReactElement {
+    const isUploading = useUploadLoading(props.block.id);
+    if (!isUploading) return <Block {...props} />;
+
+    return (
+      <div className='bn-file-block-content-wrapper w-full'>
+        <UploadingCard name={props.block.props.name} />
+      </div>
+    );
+  };
+}
+
+export const canvasImageBlockSpec = createReactBlockSpec(
+  defaultBlockSpecs.image.config,
+  { render: withUploadingCard(ImageBlock) },
+  defaultBlockSpecs.image.extensions,
+)();
+
+export const canvasVideoBlockSpec = createReactBlockSpec(
+  defaultBlockSpecs.video.config,
+  { render: withUploadingCard(VideoBlock) },
+  defaultBlockSpecs.video.extensions,
+)();
+
+export const canvasAudioBlockSpec = createReactBlockSpec(
+  defaultBlockSpecs.audio.config,
+  { render: withUploadingCard(AudioBlock) },
+  defaultBlockSpecs.audio.extensions,
 )();
