@@ -45,6 +45,24 @@ blockedV6.addSubnet('fc00::', 7, 'ipv6');
 blockedV6.addSubnet('fe80::', 10, 'ipv6');
 blockedV6.addSubnet('ff00::', 8, 'ipv6');
 
+// A stricter subset that is refused even when internal webhook hosts are otherwise
+// allowed: loopback and link-local / cloud-metadata (169.254.x — the instance
+// metadata endpoint that can return the workload's credentials).
+const metadataV4 = new BlockList();
+metadataV4.addRange('0.0.0.0', '0.255.255.255');
+metadataV4.addRange('127.0.0.0', '127.255.255.255');
+metadataV4.addRange('169.254.0.0', '169.254.255.255');
+const metadataV6 = new BlockList();
+metadataV6.addAddress('::', 'ipv6');
+metadataV6.addAddress('::1', 'ipv6');
+metadataV6.addSubnet('fe80::', 10, 'ipv6');
+// The IPv6 instance-metadata prefix (fd00:ec2::/32) sits inside the fc00::/7 ULA
+// range that internal webhooks are otherwise allowed to reach — refuse just this
+// metadata prefix without blocking legitimate internal ULA addresses.
+metadataV6.addSubnet('fd00:ec2::', 32, 'ipv6');
+// (IPv4-mapped loopback/link-local/metadata — dotted and compact ::ffff: forms — is
+// handled by ipv4FromMapped() in isMetadataV6, mirroring the strict isBlockedV6 path.)
+
 function ipv4FromMapped(addr: string): string | null {
   const lower = addr.toLowerCase();
   const dotted = lower.match(/^::ffff:((?:\d{1,3}\.){3}\d{1,3})$/);
@@ -70,6 +88,27 @@ function isBlockedV6(addr: string): boolean {
   const mapped = ipv4FromMapped(addr);
   if (mapped) return isBlockedV4(mapped);
   return blockedV6.check(addr, 'ipv6');
+}
+
+function isMetadataV4(addr: string): boolean {
+  return metadataV4.check(addr);
+}
+
+function isMetadataV6(addr: string): boolean {
+  const mapped = ipv4FromMapped(addr);
+  if (mapped) return isMetadataV4(mapped);
+  return metadataV6.check(addr, 'ipv6');
+}
+
+// Hostnames refused even when internal webhook targets are allowed.
+function isMetadataHostname(host: string): boolean {
+  const lower = host.toLowerCase().trim();
+  return (
+    lower === 'localhost' ||
+    lower === 'metadata.google.internal' ||
+    lower === 'metadata' ||
+    lower === 'instance-data'
+  );
 }
 
 // Internal host suffixes are refused by name, before DNS resolution, as
@@ -265,13 +304,49 @@ export function pinnedDispatcherFor(hostname: string, pinned: PinnedHost): Agent
 }
 
 /**
- * Validate an outbound URL and fetch it pinned to the addresses that passed, so a
- * second DNS answer cannot swing the connection to an internal host between the
- * check and the request (rebinding). This is the fetch() counterpart to how
- * LinkPreviewService uses resolveExternalHostPinned + pinnedAgentsFor. Use it for
- * caller-supplied external webhook URLs. Callers MUST still pass
- * `redirect: 'manual'` — a 3xx target is a fresh URL that this has not validated.
- * Throws SsrfBlockedError on a blocked destination.
+ * Webhook variant used when WEBHOOK_ALLOW_INTERNAL_HOSTS is enabled: allows private /
+ * internal destinations but still refuses loopback and link-local / cloud-metadata
+ * (the instance-metadata credential endpoint). Resolves and pins to the checked
+ * addresses so a later DNS answer cannot swing to a refused address (rebinding-safe).
+ */
+export async function resolveWebhookHostAllowingInternal(host: string): Promise<PinnedHost> {
+  const trimmed = host.trim();
+  if (!trimmed) throw new SsrfBlockedError(host, null, 'empty host');
+  if (isMetadataHostname(trimmed)) {
+    throw new SsrfBlockedError(trimmed, null, 'loopback / metadata host is never allowed');
+  }
+  const literalKind = isIP(trimmed);
+  if (literalKind === 4) {
+    if (isMetadataV4(trimmed)) throw new SsrfBlockedError(trimmed, trimmed, 'loopback / link-local / metadata');
+    return { family: 4, addresses: [trimmed] };
+  }
+  if (literalKind === 6) {
+    if (isMetadataV6(trimmed)) throw new SsrfBlockedError(trimmed, trimmed, 'loopback / link-local / metadata');
+    return { family: 6, addresses: [trimmed] };
+  }
+  const [v4, v6] = await Promise.all([
+    dns.resolve4(trimmed).catch(() => [] as string[]),
+    dns.resolve6(trimmed).catch(() => [] as string[]),
+  ]);
+  if (v4.length === 0 && v6.length === 0) {
+    throw new SsrfBlockedError(trimmed, null, 'no DNS records (hostname does not resolve)');
+  }
+  for (const addr of v4) {
+    if (isMetadataV4(addr)) throw new SsrfBlockedError(trimmed, addr, 'resolves to loopback / link-local / metadata');
+  }
+  for (const addr of v6) {
+    if (isMetadataV6(addr)) throw new SsrfBlockedError(trimmed, addr, 'resolves to loopback / link-local / metadata');
+  }
+  return v4.length > 0 ? { family: 4, addresses: v4 } : { family: 6, addresses: v6 };
+}
+
+/**
+ * Validate an outbound webhook URL and fetch it pinned to the addresses that passed,
+ * so a second DNS answer cannot swing the connection between the check and the request
+ * (rebinding). The fetch() counterpart to how LinkPreviewService uses
+ * resolveExternalHostPinned + pinnedAgentsFor. Honors WEBHOOK_ALLOW_INTERNAL_HOSTS.
+ * Callers MUST still pass `redirect: 'manual'` — a 3xx target is a fresh URL this has
+ * not validated. Throws SsrfBlockedError on a blocked destination.
  */
 export async function safeWebhookFetch(rawUrl: string, init: RequestInit = {}): Promise<Response> {
   let parsed: URL;
@@ -280,8 +355,11 @@ export async function safeWebhookFetch(rawUrl: string, init: RequestInit = {}): 
   } catch {
     throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
   }
-  const allowPrivate = isAllowPrivate() && config.env === 'development';
-  const pinned = await resolveExternalHostPinned(parsed.hostname, allowPrivate);
+  // When WEBHOOK_ALLOW_INTERNAL_HOSTS is set, internal webhook targets are allowed
+  // while loopback and cloud-metadata stay refused.
+  const pinned = config.webhooks.allowInternalHosts
+    ? await resolveWebhookHostAllowingInternal(parsed.hostname)
+    : await resolveExternalHostPinned(parsed.hostname, isAllowPrivate() && config.env === 'development');
   // A fresh dispatcher per request — never shared, so a pinned socket is never
   // reused under a later verdict; its idle socket is dropped on keep-alive timeout.
   const dispatcher = pinned
@@ -306,8 +384,16 @@ export async function assertWebhookUrlSafe(rawUrl: string): Promise<void> {
   } catch {
     throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
   }
-  // Webhooks honor the private-host bypass only in local development, not in
-  // shared non-prod where DATA_SOURCE_ALLOW_PRIVATE_HOSTS may be set for
+  // When WEBHOOK_ALLOW_INTERNAL_HOSTS is set, internal webhook targets are allowed
+  // while loopback and cloud-metadata stay refused. Validation only: this throws on a
+  // disallowed destination; the pinned outbound connection is made by safeWebhookFetch,
+  // so the resolved addresses are intentionally not returned here.
+  if (config.webhooks.allowInternalHosts) {
+    await resolveWebhookHostAllowingInternal(parsed.hostname);
+    return;
+  }
+  // Otherwise webhooks honor the private-host bypass only in local development, not
+  // in shared non-prod where DATA_SOURCE_ALLOW_PRIVATE_HOSTS may be set for
   // data-source connectors.
   const allowPrivate = isAllowPrivate() && config.env === 'development';
   await assertHostIsExternal(parsed.hostname, allowPrivate);

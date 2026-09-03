@@ -571,6 +571,11 @@ const envSchema = Joi.object({
   // refuses by name (e.g. corporate or in-cluster domains). Empty by default; set
   // per environment so no internal topology is committed to source.
   SSRF_INTERNAL_HOST_SUFFIXES: Joi.string().allow('').default(''),
+  // When true (default), the webhook SSRF guard allows private / internal
+  // destinations but still refuses loopback and link-local / cloud-metadata
+  // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
+  // are unaffected either way (always strict).
+  WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
 
 }).unknown();
 
@@ -1208,5 +1213,8 @@ export const config = {
       .split(',')
       .map((suffix: string) => suffix.trim().toLowerCase().replace(/^\.+/, ''))
       .filter(Boolean),
+  },
+  webhooks: {
+    allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
   },
 };
