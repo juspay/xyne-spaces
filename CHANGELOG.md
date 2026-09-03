@@ -1,3 +1,15 @@
+## [1.273.2](https://github.com/juspay/xyne-spaces/compare/v1.273.1...v1.273.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* virtualize SearchUserV2 user-list dropdown ([#1477](https://github.com/juspay/xyne-spaces/issues/1477)) ([cb0c275](https://github.com/juspay/xyne-spaces/commit/cb0c275a665b4eb6f7b29fc7a2e536ddadbb1992))
+
+
+### Performance Improvements
+
+* scalar channel-access fast-paths + stagesByProject flip (PR [#602](https://github.com/juspay/xyne-spaces/issues/602)) ([#602](https://github.com/juspay/xyne-spaces/issues/602)) ([0d58ee6](https://github.com/juspay/xyne-spaces/commit/0d58ee6991e5aace98a16e6eec0e008f1d522785))
+
 ## [1.273.1](https://github.com/juspay/xyne-spaces/compare/v1.273.0...v1.273.1) (2026-09-03)
 
 
