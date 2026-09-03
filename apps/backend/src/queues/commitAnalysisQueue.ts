@@ -113,7 +113,7 @@ class CommitAnalysisQueue {
           });
 
           logger.info(
-            `[COMMIT-ANALYSIS] Completed PR #${prId}: ${result.totalCommits} commits ` +
+            `[COMMIT-ANALYSIS] Completed PR #${String(prId).replace(/[\r\n]/g, '')}: ${result.totalCommits} commits ` +
               `(${result.botCommits} bot, ${result.humanCommits} human)`,
           );
         });
@@ -162,7 +162,7 @@ class CommitAnalysisQueue {
       jobId: `pr-${data.prInternalId}-${Date.now()}`, // Unique job ID
     });
 
-    logger.info(`[COMMIT-ANALYSIS] Enqueued analysis for PR #${data.prId}`);
+    logger.info(`[COMMIT-ANALYSIS] Enqueued analysis for PR #${String(data.prId).replace(/[\r\n]/g, '')}`);
   }
 
   async close(): Promise<void> {
