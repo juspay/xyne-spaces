@@ -540,6 +540,24 @@ export function isTransientProviderError(err: unknown): boolean {
   );
 }
 
+/**
+ * The union of the three conditions run.ts's provider-fallback walk treats as
+ * "this provider cannot serve this run — advance to the next one": quota
+ * exhaustion, a present-but-bad credential (401/403/revoked OAuth), and a
+ * transient/terminal provider failure. Secondary callers that run a single
+ * task outside runWithProviderFallback (e.g. the PR review room's findings
+ * run) use this to decide whether a one-shot hop to the platform provider is
+ * worth attempting, without restating any of the matching rules.
+ */
+export function isProviderFallbackEligibleError(err: unknown): boolean {
+  return (
+    err instanceof QuotaExhaustedError ||
+    isQuotaExhaustedError(err) ||
+    isProviderAuthError(err) ||
+    isTransientProviderError(err)
+  );
+}
+
 export class RunCancelledError extends Error {
   readonly toolsUsed: string[];
   readonly toolInvocations: ToolInvocation[];

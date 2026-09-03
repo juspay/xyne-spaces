@@ -536,6 +536,7 @@ import {
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
 import { postGoalPhase, USE_EPHEMERAL_PROGRESS } from "../lib/goal-phase.js";
 import { postGeneratedMarkdownFile } from "../lib/spaces-generated-file.js";
+import { normalizeReviewRoomReason, reviewRoomFailureText } from "../lib/review-room-notice.js";
 import { handleWebhookCommands, type PendingGoalStart } from "../lib/webhook-commands/index.js";
 import {
   MAX_MESSAGE_CHARS,
@@ -3386,18 +3387,59 @@ async function publishThreadArtifactShare(
 }
 
 const REVIEW_ROOM_MAX_HTML_BYTES = 10 * 1024 * 1024;
-
 router.post("/review-room", requireStrictS2S, async (req: Request, res: Response) => {
   const body = req.body as {
     sessionId?: string;
     roomConversationId?: string;
     fileName?: string;
     html?: string;
+    failed?: boolean;
+    reason?: string;
     pr?: { title?: string; url?: string; number?: string; repo?: string };
   };
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
   const roomConversationId = typeof body.roomConversationId === "string" ? body.roomConversationId.trim() : "";
   const html = typeof body.html === "string" ? body.html : "";
+
+  // The abort variant: claw could not build a room and is asking us to say so
+  // in the thread. No artifact, no share, no base64 — just the notice.
+  if (body.failed === true) {
+    const reason = normalizeReviewRoomReason(body.reason);
+    if (!sessionId || !roomConversationId || !reason) {
+      res.status(400).json({ success: false, error: "sessionId, roomConversationId and reason are required" });
+      return;
+    }
+    try {
+      const ctx = await getSession(sessionId);
+      if (!ctx || !ctx.conversationId || !ctx.agentSlug || !ctx.agentOrgId) {
+        res.status(404).json({ success: false, error: "No deliverable session context for this run" });
+        return;
+      }
+      const runOwnerId = ctx.targetUserId ?? (ctx.responseMode === "approval" ? ctx.mentionedUserId : ctx.senderId);
+      if (!runOwnerId) {
+        res.status(404).json({ success: false, error: "Run owner is unknown" });
+        return;
+      }
+      if (ctx.responseMode === "conversation") {
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: reviewRoomFailureText(body.pr?.number ? `#${body.pr.number}` : "", reason),
+            metadata: { contentFormat: "markdown" },
+          }
+        );
+      }
+      clog.info(`[webhook/review-room] notified failure room=${roomConversationId} session=${sessionId} reason=${reason}`);
+      res.json({ success: true, notified: true });
+    } catch (err) {
+      clog.warn(`[webhook/review-room] failure notice failed: ${errMsg(err)}`);
+      res.status(500).json({ success: false, error: "Failed to post review room notice" });
+    }
+    return;
+  }
+
   if (!sessionId || !roomConversationId || !html) {
     res.status(400).json({ success: false, error: "sessionId, roomConversationId and html are required" });
     return;
@@ -3461,22 +3503,38 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
     });
     const link = designShareUrl(share.sharePath);
 
+    const markdownText =
+      `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
+      `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`;
+
+    // ONE message carries both the link and the HTML: `/files/filesUpload`
+    // takes `markdownText` alongside the file parts (same shape the copilot
+    // attachment path and postGeneratedMarkdownFile use), so there is no reason
+    // to split this into a text post plus a file post. Spaces failing here must
+    // not fail the request — the artifact and its share link are already
+    // persisted, and the caller gets `delivered: false`.
+    let delivered = true;
     if (ctx.responseMode === "conversation") {
-      await postAgentMessage(
-        { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
-        {
+      try {
+        await postGeneratedMarkdownFile({
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
-          markdownText:
-            `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
-            `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`,
-          metadata: { contentFormat: "markdown" },
-        }
-      );
+          ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+          userId: ctx.spacesAppUserId,
+          appToken: ctx.appToken,
+          filename: fileName,
+          markdown: buffer,
+          mimeType: "text/html",
+          summary: markdownText,
+        });
+      } catch (err) {
+        delivered = false;
+        clog.warn(`[webhook/review-room] Spaces delivery failed room=${roomConversationId}: ${errMsg(err)}`);
+      }
     }
 
     clog.info(`[webhook/review-room] published shareId=${share.id} room=${roomConversationId} session=${sessionId}`);
-    res.json({ success: true, url: link });
+    res.json({ success: true, url: link, delivered });
   } catch (err) {
     clog.warn(`[webhook/review-room] failed: ${errMsg(err)}`);
     res.status(500).json({ success: false, error: "Failed to publish review room" });

@@ -7,6 +7,7 @@ import { buildSandboxStoreKey, getSandboxSession } from "xyne-claw-shared";
 
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
+import { metric } from "./metrics.js";
 import { deleteSession, getLiveSession, snapshotLiveSessionHandle, type LiveSessionHandle } from "./session-store.js";
 import {
   buildSubmitResultInstruction,
@@ -471,6 +472,59 @@ function buildFindingsPalette(
   ];
 }
 
+export interface FindingsAttempt {
+  provider: string | undefined;
+  providerConfig: unknown;
+  sessionId: string;
+}
+
+export interface FindingsFallbackArgs {
+  roomConversationId: string;
+  provider: string | undefined;
+  providerConfig: unknown;
+  sessionId: string;
+  run: (attempt: FindingsAttempt) => Promise<void>;
+  isFallbackEligible: (err: unknown) => boolean;
+}
+
+/**
+ * One findings attempt on the run's own provider, and — when that provider
+ * fails the same way run.ts's fallback walk would advance on (quota, bad
+ * credential, transient/terminal provider error) — exactly one more on the
+ * platform provider. The retry carries no providerConfig, which is what makes
+ * runTask resolve it to "spaces"/LiteLLM, and a fresh session id so it can
+ * never land on the first attempt's session files.
+ */
+export async function runFindingsWithFallback(
+  args: FindingsFallbackArgs,
+): Promise<{ ok: true } | { ok: false; error: unknown }> {
+  const primary: FindingsAttempt = {
+    provider: args.provider,
+    providerConfig: args.providerConfig,
+    sessionId: args.sessionId,
+  };
+  try {
+    await args.run(primary);
+    return { ok: true };
+  } catch (err) {
+    const from = args.provider ?? "spaces";
+    if (from === "spaces" || !args.isFallbackEligible(err)) return { ok: false, error: err };
+    const reason = err instanceof Error ? err.message : String(err);
+    log.warn(`[pr-room] findings provider fallback: ${from} → spaces (${reason.slice(0, 200)})`);
+    metric.count("pr_room_provider_fallback", { from });
+    try {
+      await args.run({
+        provider: undefined,
+        providerConfig: undefined,
+        sessionId: `${args.sessionId}_fb${randomUUID().slice(0, 8)}`,
+      });
+      return { ok: true };
+    } catch (retryErr) {
+      return { ok: false, error: retryErr };
+    }
+  }
+}
+
 async function requestFindings(
   roomConversationId: string,
   ctx: PrRunContext,
@@ -480,32 +534,39 @@ async function requestFindings(
   evidence: PrEvidence,
   session: SandboxSession,
 ): Promise<ReviewFinding[] | undefined> {
-  const { runTask } = await import("./agent.js");
+  const { runTask, isProviderFallbackEligibleError } = await import("./agent.js");
   const findingsSessionId = `${roomConversationId}_${randomUUID().slice(0, 8)}`;
   const structuredOutputRef: StructuredOutputRef = {};
   const customTools = buildFindingsPalette(session, evidence.repoRoot, structuredOutputRef);
 
-  try {
-    await runTask({
-      userId: ctx.userId,
-      task: buildFindingsPrompt(pr, evidence),
-      conversationId: roomConversationId,
-      sessionId: findingsSessionId,
-      cwd: ctx.cwd,
-      customTools,
-      structuredOutputRef,
-      provider: ctx.provider,
-      providerConfig: ctx.providerConfig as never,
-      modelSettings: ctx.modelSettings as never,
-      progressMeta: {
-        conversationId: parentConversationId,
-        ...(agentSlug ? { agentSlug } : {}),
-      },
-      automationRun: true,
-    });
-  } catch (err) {
+  const outcome = await runFindingsWithFallback({
+    roomConversationId,
+    provider: ctx.provider,
+    providerConfig: ctx.providerConfig,
+    sessionId: findingsSessionId,
+    isFallbackEligible: isProviderFallbackEligibleError,
+    run: (attempt) =>
+      runTask({
+        userId: ctx.userId,
+        task: buildFindingsPrompt(pr, evidence),
+        conversationId: roomConversationId,
+        sessionId: attempt.sessionId,
+        cwd: ctx.cwd,
+        customTools,
+        structuredOutputRef,
+        provider: attempt.provider,
+        providerConfig: attempt.providerConfig as never,
+        modelSettings: ctx.modelSettings as never,
+        progressMeta: {
+          conversationId: parentConversationId,
+          ...(agentSlug ? { agentSlug } : {}),
+        },
+        automationRun: true,
+      }).then(() => undefined),
+  });
+  if (!outcome.ok) {
     log.warn(
-      `[pr-room] findings run failed for ${roomConversationId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[pr-room] findings run failed for ${roomConversationId}: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`,
     );
     return undefined;
   }
@@ -581,10 +642,10 @@ function buildMeta(pr: PrRoomFact, evidence: PrEvidence, findings: ReviewFinding
   };
 }
 
-async function deliverRoom(sessionId: string, roomConversationId: string, pr: PrRoomFact, html: string): Promise<void> {
+async function deliverRoom(sessionId: string, roomConversationId: string, pr: PrRoomFact, html: string): Promise<boolean> {
   if (!SERVER.authServiceUrl) {
     log.warn(`[pr-room] no auth service URL configured — room for ${roomConversationId} not delivered`);
-    return;
+    return false;
   }
   const url = `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/webhook/review-room`;
   const res = await fetch(url, {
@@ -604,9 +665,55 @@ async function deliverRoom(sessionId: string, roomConversationId: string, pr: Pr
   });
   if (!res.ok) {
     log.warn(`[pr-room] deliver responded ${res.status} for ${roomConversationId}`);
-    return;
+    return false;
   }
   log.info(`[pr-room] delivered room ${roomConversationId} for session ${sessionId}`);
+  return true;
+}
+
+export function buildReviewRoomNoticeBody(
+  sessionId: string,
+  roomConversationId: string,
+  pr: PrRoomFact,
+  reason: string,
+): Record<string, unknown> {
+  return {
+    sessionId,
+    roomConversationId,
+    failed: true,
+    reason: reason.slice(0, 200),
+    pr: { number: pr.number, url: pr.url },
+  };
+}
+
+/**
+ * Every abort inside generate() used to be visible only in claw's own logs: the
+ * thread that was promised a room simply never got one. This posts the same
+ * webhook the delivered room uses, with `failed: true`, so claw-auth can say in
+ * the thread what stopped it.
+ */
+async function postReviewRoomNotice(
+  sessionId: string,
+  roomConversationId: string,
+  pr: PrRoomFact,
+  reason: string,
+): Promise<void> {
+  if (!SERVER.authServiceUrl) return;
+  try {
+    const url = `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/webhook/review-room`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      },
+      body: JSON.stringify(buildReviewRoomNoticeBody(sessionId, roomConversationId, pr, reason)),
+      signal: AbortSignal.timeout(DELIVER_TIMEOUT_MS),
+    });
+    if (!res.ok) log.warn(`[pr-room] notice responded ${res.status} for ${roomConversationId}`);
+  } catch (err) {
+    log.warn(`[pr-room] notice failed for ${roomConversationId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHandle): Promise<void> {
@@ -625,15 +732,20 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
 
   const storeKey =
     buildSandboxStoreKey(ctx.userId, parentConversationId, agentSlug) ?? ctx.conversationId;
+  const sandboxGone = "the run's sandbox was gone before the room could be built";
+  const earlyRoomId = reviewRoomConversationId(pr, "");
+
   const session = storeKey ? getSandboxSession(storeKey) : undefined;
   if (!session) {
     log.info(`[pr-room] no live sandbox for storeKey ${storeKey ?? "(none)"} — skipping room`);
+    await postReviewRoomNotice(sessionId, earlyRoomId, pr, sandboxGone);
     return;
   }
 
   const repoRoot = await discoverRepoRoot(session, pr);
   if (!repoRoot) {
     log.info(`[pr-room] no git checkout found in the sandbox — skipping room`);
+    await postReviewRoomNotice(sessionId, earlyRoomId, pr, sandboxGone);
     return;
   }
 
@@ -642,6 +754,7 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
   const headSha = head.ok ? head.stdout.trim() : "";
   if (!headSha) {
     log.info(`[pr-room] ${repoRoot} in the sandbox is not a git checkout — skipping room`);
+    await postReviewRoomNotice(sessionId, earlyRoomId, pr, sandboxGone);
     return;
   }
 
@@ -657,6 +770,7 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
     const snapshot = await snapshotLiveSessionHandle(handle, roomConversationId, sessionId, { overwrite: true });
     if (!snapshot.ok) {
       log.warn(`[pr-room] snapshot failed (${snapshot.reason}) — room for ${roomConversationId} aborted`);
+      await postReviewRoomNotice(sessionId, roomConversationId, pr, sandboxGone);
       return;
     }
     snapshotWritten = true;
@@ -666,16 +780,24 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
       log.warn(
         `[pr-room] could not resolve a base ref in ${repoRoot} — room ${roomConversationId} aborted rather than described against HEAD~1`,
       );
+      await postReviewRoomNotice(sessionId, roomConversationId, pr, "no base branch could be resolved for the PR");
       return;
     }
 
     const evidence = await collectPrEvidence({ git, repoRoot, baseRef, headRef: headSha });
     if (evidence.diffFailure) {
       log.warn(`[pr-room] evidence diff failed (${evidence.diffFailure}) — room ${roomConversationId} aborted`);
+      await postReviewRoomNotice(
+        sessionId,
+        roomConversationId,
+        pr,
+        "the diff between base and head could not be read",
+      );
       return;
     }
     if (evidence.filesChanged === 0) {
       log.info(`[pr-room] no changed files between ${baseRef} and ${headSha.slice(0, 10)} — skipping room`);
+      await postReviewRoomNotice(sessionId, roomConversationId, pr, "no changed files between base and head");
       return;
     }
 
@@ -690,6 +812,7 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
     );
     if (!findings) {
       log.warn(`[pr-room] no valid findings — room ${roomConversationId} aborted`);
+      await postReviewRoomNotice(sessionId, roomConversationId, pr, "the findings model failed on every provider");
       return;
     }
 
@@ -698,8 +821,15 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
       evidence,
       findings,
     });
-    await deliverRoom(sessionId, roomConversationId, pr, html);
-    roomDelivered = true;
+    roomDelivered = await deliverRoom(sessionId, roomConversationId, pr, html).catch(async (err) => {
+      log.warn(
+        `[pr-room] deliver threw for ${roomConversationId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    });
+    if (!roomDelivered) {
+      await postReviewRoomNotice(sessionId, roomConversationId, pr, "review room could not be delivered");
+    }
   } finally {
     inFlight.delete(roomConversationId);
     if (snapshotWritten && !roomDelivered) {
