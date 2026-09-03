@@ -1006,7 +1006,15 @@ export class CallDocumentService {
     return defaultTemplate;
   }
 
-  /** Generate a headless-recording summary using a saved or code-backed template. */
+  /**
+   * Generate a summary using a saved or code-backed template.
+   *
+   * `actorUserId` is whose template library the id resolves against, defaulting to
+   * the call's creator — right for recordings, whose endpoint is owner-only. A
+   * channel call is regenerable by its whole audience, so that path passes the
+   * requester: otherwise a member's own private template (which the picker lists
+   * for them) would resolve against someone else's library and come back empty.
+   */
   async generateRecordingSummary(
     transcript: string,
     callId: string,
@@ -1014,6 +1022,7 @@ export class CallDocumentService {
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     citationSegments?: CitationContext['segments'],
     modelType?: SummaryModelType,
+    actorUserId?: string,
   ): Promise<{
     summary: string;
     template: SummaryTemplate;
@@ -1022,16 +1031,13 @@ export class CallDocumentService {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call?.workspaceId) return null;
 
+    const actor = actorUserId ?? call.createdByUserId;
     const selectedTemplate = templateId
-      ? await summaryTemplateService.findAccessibleById(
-          templateId,
-          call.workspaceId,
-          call.createdByUserId,
-        )
+      ? await summaryTemplateService.findAccessibleById(templateId, call.workspaceId, actor)
       : await this.selectRecordingSummaryTemplateForTranscript(
           transcript,
           call.workspaceId,
-          call.createdByUserId,
+          actor,
           callId,
         );
 
@@ -1915,6 +1921,19 @@ A comprehensive detailed summary has been generated from this call.
       logger.error('[CallDocumentService] Failed to post detailed summary to conversation:', error);
       throw error;
     }
+  }
+
+  /**
+   * Point a call's message at its detailed-summary canvas. Idempotent, and worth
+   * calling on every generation: canvas and pointer are separate writes, so
+   * re-stamping is what recovers a canvas whose pointer never landed.
+   */
+  async linkDetailedSummaryToCallMessage(
+    conversationId: string,
+    callId: string,
+    canvasUrl: string,
+  ): Promise<void> {
+    await this.updateCallMessageMetadata(conversationId, callId, 'detailedSummaryCanvasUrl', canvasUrl);
   }
 
   /**

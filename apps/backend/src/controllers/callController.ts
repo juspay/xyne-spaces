@@ -47,6 +47,7 @@ import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { markDetailedSummaryStatus } from '@/services/detailedSummaryStatus';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
@@ -73,10 +74,12 @@ const UpdateCallLabelsSchema = z.object({
   labels: z.array(z.string().trim().min(1).max(80)).max(50),
 });
 
-const RegenerateHeadlessSummarySchema = z.object({
+// Shared by the recording and channel-call regenerate endpoints: both take a
+// template and an optional tier, and both run detached from the request.
+const RegenerateSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
-  // Optional explicit model tier (e.g. the "Try the thinking model" button).
-  // Omitted → the creator's saved preference is used.
+  // Optional explicit model tier (e.g. the "Retry with Thinking" footer).
+  // Omitted → the tier that wrote the current summary is reused.
   modelType: z.enum(['fast', 'thinking']).optional(),
 });
 
@@ -1720,7 +1723,7 @@ export class CallController {
     }
 
     try {
-      const input = RegenerateHeadlessSummarySchema.parse(req.body);
+      const input = RegenerateSummarySchema.parse(req.body);
       const call = await repositories.calls.findByExternalId(callId);
 
       if (
@@ -1802,6 +1805,80 @@ export class CallController {
     } catch (error) {
       logger.error(`[${callId}] Failed to generate recording labels`, error);
       res.status(500).json({ success: false, error: 'Failed to generate recording labels' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/regenerate-summary
+   * Rewrite a regular call's detailed summary with a different template. Returns
+   * 202 on acceptance; progress lands on Call.metadata.detailedSummaryStatus and
+   * reaches the caller over Zero. Open to the call's audience, matching who can
+   * already read the summary it rewrites — recordings keep their own creator-only
+   * endpoint at /recordings/:callId/generate-summary.
+   */
+  regenerateCallSummary = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = RegenerateSummarySchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType === CallType.HEADLESS ||
+        !workspaceId ||
+        call.workspaceId !== workspaceId
+      ) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      // The generation resolves this again, but only after the 202, where a
+      // rejection is indistinguishable from any other failure and would surface as
+      // a summary silently flipping to 'failed'. Checking here turns an id this
+      // user cannot use into an answer they can act on.
+      if (
+        !(await summaryTemplateService.findAccessibleById(
+          input.summaryTemplateId,
+          workspaceId,
+          userId,
+        ))
+      ) {
+        res.status(403).json({ success: false, error: 'You do not have access to this template' });
+        return;
+      }
+
+      // Fire-and-forget, like the recordings endpoint above: the service owns every
+      // status transition and those reach the screen over Zero, so holding this
+      // request open for a minutes-long LLM run only adds timeout risk.
+      void transcriptService
+        .regenerateCallSummary(call, input.summaryTemplateId, userId, input.modelType)
+        .catch(error => {
+          logger.error(`[${callId}] Background call summary regeneration threw`, error);
+          // Outermost boundary: whatever escaped skipped the service's own 'failed'
+          // writes, and a stuck 'pending' strands the panel on a shimmer.
+          void markDetailedSummaryStatus(call, 'failed');
+        });
+
+      res.status(202).json({ success: true, status: 'pending' });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        return;
+      }
+      logger.error(`[${callId}] Failed to regenerate call summary`, error);
+      res.status(500).json({ success: false, error: 'Failed to regenerate call summary' });
     }
   };
 

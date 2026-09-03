@@ -1,5 +1,5 @@
 import { repositories } from '@/database/repositories';
-import { getCanvasUrl } from '@/services/canvasService';
+import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
@@ -21,8 +21,14 @@ import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelT
 import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
-import { callDocumentService } from '@/services/callDocumentService';
+import {
+  callDocumentService,
+  numberTranscriptSegments,
+  type CitationContext,
+} from '@/services/callDocumentService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
+import { markDetailedSummaryStatus, toMetadataRecord } from '@/services/detailedSummaryStatus';
+import { mergeRecordingSummaryMarkedItems } from '@/services/recordingSummaryMarkedItems';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -1348,6 +1354,156 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * The tier a call's next summary uses when the caller names none: whichever wrote
+   * the current one. A call gets no owner-preference handoff at creation the way a
+   * recording does, so 'fast' is the floor until someone picks a tier explicitly.
+   */
+  private resolveCallSummaryModel(call: Call): SummaryModelType {
+    const metadata = toMetadataRecord(call.metadata);
+    return metadata.summaryModelUsed === 'thinking' ? 'thinking' : 'fast';
+  }
+
+  /**
+   * Generate or rewrite a regular call's detailed summary with a given template.
+   * The canvas is pointed at from the call message; recordings instead point from
+   * Call.metadata.detailedSummaryCanvasId (see the note-taker regenerateSummary).
+   *
+   * Runs detached from the request that started it, so it owns every transition on
+   * Call.metadata.detailedSummaryStatus: 'pending' once work is definitely
+   * starting, 'ready'/'failed' on each way out. Every early return marks 'failed' —
+   * leaving 'pending' would strand the screen on a shimmer nothing can resolve.
+   *
+   * `actorUserId` is the audience member who asked, and what the template id is
+   * resolved against — unlike a recording, that is usually not the call's creator.
+   */
+  async regenerateCallSummary(
+    call: Call,
+    templateId: string,
+    actorUserId: string,
+    modelType?: SummaryModelType,
+  ): Promise<{ summaryTemplateId: string; detailedSummaryCanvasId: string } | null> {
+    const callId = call.externalId;
+    const workspaceId = call.workspaceId;
+    if (!workspaceId) {
+      logger.warn(`[${callId}] regenerate_call_summary_skipped`, { reason: 'no_workspace' });
+      // No workspace means no summary is ever coming for this row.
+      await markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
+
+    // Fetched even when a canvas exists. Canvas and pointer are separate writes —
+    // the automatic path creates the canvas before stamping the URL — so a crash
+    // between them orphans a canvas with no pointer (what
+    // recordingSummaryPointerBackfillController repairs). Skipping the message
+    // there would mark the call 'ready' with nothing the screen can find. Only a
+    // first generation needs the message; a rewrite just re-stamps.
+    const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
+    const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
+    if (!existingCanvas && !callMessage) {
+      logger.warn(`[${callId}] regenerate_call_summary_skipped`, { reason: 'no_call_message' });
+      await markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
+
+    const formattedTranscript = await this.getTranscriptContent(callId);
+    if (!formattedTranscript) {
+      logger.warn(`[${callId}] regenerate_call_summary_skipped`, { reason: 'no_transcript' });
+      await markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
+
+    // Numbered segments let the LLM cite them; the map turns `[clf-n]` tokens into
+    // canvas citation chips.
+    const { numbered, segments } = numberTranscriptSegments(formattedTranscript);
+    const citationCtx: CitationContext = {
+      callId,
+      segments: new Map(segments.map(segment => [segment.n, segment])),
+    };
+
+    // Only once work is definitely starting, so a request that bails on a
+    // pre-flight check never flickers the panel into a shimmer.
+    await markDetailedSummaryStatus(call, 'pending');
+
+    // An explicit tier wins ("Retry with …", or the requester's default seeding a
+    // never-generated call); otherwise the call keeps the tier that last wrote its
+    // summary, so the choice is sticky per call.
+    const resolvedModelType = modelType ?? this.resolveCallSummaryModel(call);
+
+    const generated = await callDocumentService.generateRecordingSummary(
+      numbered,
+      callId,
+      templateId,
+      undefined,
+      citationCtx.segments,
+      resolvedModelType,
+      actorUserId,
+    );
+    if (!generated) {
+      logDetailedSummaryFailed(callId, 'generation_failed');
+      await markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
+
+    const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
+    if (!xyneAutomaticBot) {
+      logDetailedSummaryFailed(callId, 'bot_not_found');
+      await markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
+
+    const { canvasId } = await callDocumentService.createOrUpdateDetailedSummaryCanvas(
+      callId,
+      generated.summary,
+      xyneAutomaticBot.id,
+      callMessage?.conversationId ?? null,
+      call.channelId,
+      call.startedAt,
+      call.createdByUserId,
+      call.title,
+      citationCtx,
+      workspaceId,
+    );
+    if (!canvasId) {
+      logDetailedSummaryFailed(callId, 'canvas_update_failed');
+      await markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
+
+    if (callMessage) {
+      // Re-stamped every run: normally a no-op rewrite of the same URL, but it is
+      // the repair when the pointer was never written (see above).
+      await callDocumentService.linkDetailedSummaryToCallMessage(
+        callMessage.conversationId,
+        callId,
+        getCanvasUrl(canvasId),
+      );
+    }
+
+    // Re-read after the LLM round trip; merging keeps anything already ticked off.
+    const current = await repositories.calls.findByExternalId(callId);
+    const markedItems = mergeRecordingSummaryMarkedItems(
+      current?.markedItems ?? call.markedItems,
+      generated.markedItems,
+    ) as Prisma.InputJsonValue[];
+    // One write for the whole completion, so the screen never sees 'ready' against
+    // the previous template's name.
+    await repositories.calls.update(call.id, {
+      summaryTemplateId: generated.template.id,
+      markedItems,
+      metadata: {
+        ...toMetadataRecord(current?.metadata ?? call.metadata),
+        detailedSummaryStatus: 'ready',
+        summaryModelUsed: resolvedModelType,
+      },
+    });
+
+    logger.info(`[${callId}] regenerate_call_summary_completed`, {
+      template_id: generated.template.id,
+    });
+    return { summaryTemplateId: generated.template.id, detailedSummaryCanvasId: canvasId };
+  }
+
+  /**
    * Extract the primary merchant/customer name from the transcript using the LLM.
    * Returns null if no merchant is clearly identified.
    */
@@ -1935,6 +2091,12 @@ Output ONLY the processed transcript, nothing else.`;
       // Start all five post-call LLM operations immediately. Detailed-summary
       // streaming remains unchanged; title, summary, and tickets persist their
       // own result as soon as it is ready rather than waiting on one another.
+
+      // 'pending' before the run, settled after: this path produces most call
+      // summaries, so without it the screen would offer to generate one already on
+      // its way. Only this op waits on the round trip — the other three are already
+      // in flight above.
+      await markDetailedSummaryStatus(call, 'pending');
       pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
         callId,
         formattedTranscript,
@@ -1946,6 +2108,11 @@ Output ONLY the processed transcript, nothing else.`;
         // here means it threw outside them, so this is the only record.
         logDetailedSummaryFailed(callId, 'unexpected_error', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }).then(async (result) => {
+        // Covers every exit, thrown or returned — the catch above already
+        // normalised a throw into success:false.
+        await markDetailedSummaryStatus(call, result.success ? 'ready' : 'failed');
+        return result;
       });
 
       const summaryUiPromise = summaryPromise.then(async (summary) => {

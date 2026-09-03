@@ -2263,6 +2263,20 @@ export const queries = defineQueries({
         .one(),
   ),
 
+  // Non-headless counterpart of oatsRecordingByExternalId: one call row by its
+  // public externalId. The detail screen is handed a frozen call snapshot in
+  // navigation state, so this keeps its summary state (detailedSummaryStatus,
+  // summaryTemplateId) live while a rewrite runs.
+  callByExternalId: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('workspaceId', ctx.workspaceId)
+        .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+        .where('externalId', callId)
+        .one(),
+  ),
+
   summaryTemplates: defineQuery(
     z.object({}),
     ({ ctx }) =>

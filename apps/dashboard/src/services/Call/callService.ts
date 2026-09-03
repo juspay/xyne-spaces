@@ -192,6 +192,22 @@ export class CallService {
     return response.data.labels;
   }
 
+  /**
+   * Start a rewrite of the call's detailed summary, reusing the same canvas.
+   * Resolves on acceptance (202) — generation continues after that, and the outcome
+   * arrives on the call row as `metadata.detailedSummaryStatus` over Zero.
+   */
+  async regenerateCallSummary(
+    callId: string,
+    summaryTemplateId: string,
+    modelType?: 'fast' | 'thinking',
+  ): Promise<void> {
+    await apiInstance.post<{ success: true; status: 'pending' }>(
+      `/calls/${callId}/regenerate-summary`,
+      { summaryTemplateId, ...(modelType ? { modelType } : {}) },
+    );
+  }
+
   async updateMeetingStatus(callId: string, data: UpdateRsvpRequest): Promise<void> {
     try {
       await apiInstance.post(`/calls/${callId}/rsvp`, data);

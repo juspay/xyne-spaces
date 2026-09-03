@@ -11,6 +11,7 @@ import type { SummaryModelType } from '@/services/callLlmRetry';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
+import { markDetailedSummaryStatus, toMetadataRecord } from '@/services/detailedSummaryStatus';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagRepository } from '@/database/repositories/tagRepository';
@@ -208,13 +209,13 @@ class NoteTakerTranscriptService {
     if (!formattedTranscript) {
       // No transcript at all is a terminal 'failed' state — the button offer
       // should still surface so the user isn't left staring at a stale 'ready'.
-      await this.markDetailedSummaryStatus(call, 'failed');
+      await markDetailedSummaryStatus(call, 'failed');
       return null;
     }
 
     // Publish 'pending' up front so the UI can shimmer while the LLM runs
     // (the underlying call already retries transient failures internally).
-    await this.markDetailedSummaryStatus(call, 'pending');
+    await markDetailedSummaryStatus(call, 'pending');
 
     // An explicit modelType (e.g. the "Try the thinking model" button) wins;
     // otherwise fall back to the creator's saved preference.
@@ -232,21 +233,16 @@ class NoteTakerTranscriptService {
       // generateDetailedSummaryCanvas swallows its own failures, so reaching
       // here means something outside it threw and nothing has logged yet.
       logDetailedSummaryFailed(call.externalId, 'unexpected_error', error);
-      await this.markDetailedSummaryStatus(call, 'failed');
+      await markDetailedSummaryStatus(call, 'failed');
       throw error;
     }
     if (!detailedSummary) {
-      await this.markDetailedSummaryStatus(call, 'failed');
+      await markDetailedSummaryStatus(call, 'failed');
       return null;
     }
 
     const current = await repositories.calls.findByExternalId(call.externalId);
-    const currentMetadata =
-      current?.metadata && typeof current.metadata === 'object' && !Array.isArray(current.metadata)
-        ? (current.metadata as Record<string, unknown>)
-        : call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
-          : {};
+    const currentMetadata = toMetadataRecord(current?.metadata ?? call.metadata);
     const markedItems = mergeRecordingSummaryMarkedItems(
       current?.markedItems ?? call.markedItems,
       detailedSummary.markedItems,
@@ -557,34 +553,6 @@ class NoteTakerTranscriptService {
       });
     } catch (error) {
       logger.error(`[${call.externalId}] metadata_update_failed`, { error, path: 'note_taker' });
-    }
-  }
-
-  /**
-   * Merge just the detailed-summary status onto Call.metadata. Used by the
-   * queue worker to publish 'pending'/'failed' transitions without touching
-   * detailedSummaryCanvasId or detailedSummaryReady — those are owned by the
-   * success paths in processFinalTranscript and regenerateSummary and must
-   * remain the source of truth for readers on older recordings.
-   */
-  async markDetailedSummaryStatus(
-    call: Pick<Call, 'id' | 'externalId'>,
-    status: 'pending' | 'ready' | 'failed',
-  ): Promise<void> {
-    try {
-      const current = await repositories.calls.findByExternalId(call.externalId);
-      const currentMetadata =
-        current?.metadata && typeof current.metadata === 'object' && !Array.isArray(current.metadata)
-          ? (current.metadata as Record<string, unknown>)
-          : {};
-      await repositories.calls.update(call.id, {
-        metadata: { ...currentMetadata, detailedSummaryStatus: status },
-      });
-    } catch (error) {
-      logger.error(`[${call.externalId}] detailed_summary_status_update_failed`, {
-        error: error instanceof Error ? error.message : String(error),
-        status,
-      });
     }
   }
 

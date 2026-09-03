@@ -1,10 +1,13 @@
 /**
- * Remembers which recordings the user has asked a summary for.
+ * Remembers which recordings and calls the user has asked a summary for.
  *
  * The summary is generated server-side and can take minutes, so the request has to
  * outlive the screen within the current browser session: leaving and coming back
  * must show the skeleton again rather than offering the button a second time.
  * Entries expire so a summary that never arrives cannot strand the skeleton forever.
+ *
+ * Both detail screens key by the call's externalId — one id space, so a single map
+ * serves both without collisions.
  */
 
 const STORAGE_KEY = 'xyne:recording-summary-requested';
