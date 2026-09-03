@@ -140,3 +140,37 @@ export async function fetchAgentPromptFiles(agentSlug: string, userId: string): 
     return [];
   }
 }
+
+/**
+ * Ask claw-auth whether `userId` (the human who triggered the run) may inspect
+ * or mutate this agent's memory bank via the inspect-memory / mutate-memory
+ * tools. Mirrors the requireAgentOwnerContributorOrAdmin decision: agent owner
+ * OR EDITOR/CONTRIBUTOR share OR CLAW_ADMIN.
+ *
+ * Resolved ONCE per session in run.ts and threaded into the tool builders. S2S.
+ * FAIL-CLOSED: any missing config, non-2xx, timeout, or parse error returns
+ * false so a claw-auth blip can never hand memory-management to an
+ * unauthorized caller. authServiceUrl is the same trust anchor used by
+ * fetchAgentPromptFiles / logRecallHits.
+ */
+export async function fetchMemoryAdminAccess(agentSlug: string, userId: string): Promise<boolean> {
+  if (!SERVER.authServiceUrl || !agentSlug || !userId) return false;
+  try {
+    const qs = new URLSearchParams({ userId });
+    const res = await fetch(
+      `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/memory/banks/${encodeURIComponent(agentSlug)}/admin-access?${qs.toString()}`,
+      {
+        headers: {
+          ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey, "x-user-id": userId } : {}),
+        },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!res.ok) return false;
+    const data = (await res.json()) as { data?: { allowed?: unknown } };
+    return data?.data?.allowed === true;
+  } catch (err) {
+    log.warn(`[memory] fetchMemoryAdminAccess failed agent=${agentSlug}: ${errMsg(err)}`);
+    return false;
+  }
+}

@@ -116,9 +116,11 @@ import {
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
-import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
+import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles, fetchMemoryAdminAccess } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
+import { buildInspectMemoryTool } from "../memory-inspect.js";
+import { buildMutateMemoryTool } from "../memory-mutate.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
@@ -2853,6 +2855,17 @@ export async function processTask(
         for (const t of buildMemoryFileTools(agentSlug, userId, sessionId)) allTools.push(t);
         allTools.push(buildMemoryWriteTool(agentSlug, userId, sessionId));
         log("Digital Twin — injected read/write memory-file tools + memory-write");
+      } else {
+        // inspect-memory / mutate-memory — agent-memory management for the
+        // shared bank. Authorization (agent owner / contributor / CLAW_ADMIN)
+        // is decided ONCE here via claw-auth over S2S, then threaded into the
+        // tools as `allowed`; each tool re-checks it and fails closed. The twin
+        // bank is excluded entirely (per-user private memories must not be
+        // browsed/mutated through a shared admin tool).
+        const memoryAdminAllowed = await fetchMemoryAdminAccess(agentSlug, userId);
+        allTools.push(buildInspectMemoryTool(agentSlug, userId, sessionId, memoryBankId, memoryAdminAllowed));
+        allTools.push(buildMutateMemoryTool(agentSlug, userId, sessionId, memoryBankId, memoryAdminAllowed));
+        log(`Memory management tools injected — inspect-memory + mutate-memory (allowed=${memoryAdminAllowed})`);
       }
     }
 
