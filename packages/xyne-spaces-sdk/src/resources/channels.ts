@@ -62,9 +62,9 @@ export class ChannelsResource extends Resource {
 
   /**
    * List public channels the user can join but has not joined, one page at a
-   * time. `browsableChannels` has no server-side cursor — it returns every
-   * matching channel in the workspace in one response — so this fetches that
-   * and windows it. Defaults to the first 100, which is also the cap.
+   * time. This read has no server-side cursor — it returns every matching
+   * channel in the workspace in one response — so the SDK fetches that and
+   * windows it. Defaults to the first 100, which is also the cap.
    *
    * @param options.limit - Page size. Defaults to 100, which is also the maximum.
    * @param options.offset - Where the page starts.

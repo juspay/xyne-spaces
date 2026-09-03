@@ -27,7 +27,7 @@ describe('direct API operations', () => {
     ).resolves.toEqual({ id: 'channel-1' });
 
     const request = requests[0];
-    expect(request?.url).toBe('https://spaces.example.com/api/sdk/channels');
+    expect(request?.url).toBe('https://spaces.example.com/api/sdk/v1/channels');
     expect(request?.init.method).toBe('POST');
     expect(request?.init.headers).toMatchObject({
       Authorization: 'Bearer xyne_sk_1',
@@ -82,7 +82,7 @@ describe('direct API operations', () => {
 
     const request = requests[0];
     expect(request?.url).toBe(
-      'https://spaces.example.com/api/sdk/channels/channel%2F1/conversations'
+      'https://spaces.example.com/api/sdk/v1/channels/channel%2F1/conversations'
     );
     const headers = request?.init.headers as Record<string, string>;
     expect(headers['Content-Type']).toBeUndefined();
@@ -118,31 +118,33 @@ describe('direct API operations', () => {
   });
 });
 
-describe('catalog operations', () => {
-  it('routes reads through the catalog with the API key', async () => {
+describe('versioned operations', () => {
+  it('sends the SDK operation id, never a server operation name, on a read', async () => {
     stubFetch({ data: [{ id: 'status-1', channel: { id: 'channel-1', name: 'general' } }] });
     const sdk = createClient({ baseUrl: 'http://localhost:3001', apiKey: 'xyne_sk_access' });
 
     await expect(sdk.channels.list()).resolves.toHaveLength(1);
 
     const request = requests[0];
-    expect(request?.url).toBe('http://localhost:3001/api/sdk/catalog/query');
+    expect(request?.url).toBe('http://localhost:3001/api/sdk/v1/query');
     expect(request?.init.headers).toMatchObject({ Authorization: 'Bearer xyne_sk_access' });
-    expect(JSON.parse(String(request?.init.body))).toEqual({ name: 'userVisibleChannelsV3' });
+    expect(JSON.parse(String(request?.init.body))).toEqual({ op: 'channels.list' });
   });
 
-  it('routes writes through the v1 catalog', async () => {
+  it('sends the SDK operation id, never a server operation name, on a write', async () => {
     stubFetch({ success: true });
     const sdk = createClient({ baseUrl: 'http://localhost:3001', apiKey: 'xyne_sk_access' });
 
     await sdk.channels.rename('channel-1', 'General');
 
     const request = requests[0];
-    expect(request?.url).toBe('http://localhost:3001/api/sdk/catalog/mutate');
-    expect(JSON.parse(String(request?.init.body))).toMatchObject({
-      name: 'channel.renameChannel',
+    expect(request?.url).toBe('http://localhost:3001/api/sdk/v1/mutate');
+    const body = JSON.parse(String(request?.init.body));
+    expect(body).toMatchObject({
+      op: 'channels.rename',
       args: { channelId: 'channel-1', name: 'General' },
     });
+    expect(body).not.toHaveProperty('name');
   });
 });
 

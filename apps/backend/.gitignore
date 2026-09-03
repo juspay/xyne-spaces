@@ -8,11 +8,10 @@ yarn-error.log*
 dist/
 build/
 *.tsbuildinfo
-zero-*
-# The public API deliberately centralizes its pinned Zero private imports in
-# these source files; they are not generated Zero build output.
-!src/api/sdk/engine/zero-internals.ts
-!src/api/sdk/engine/zero-internals.test.ts
+# Anchored to this directory: Zero's build artifacts land here, but an
+# unanchored `zero-*` also swallows source files such as
+# src/zero/zero-internals.test.ts.
+/zero-*
 
 # Environment variables
 .env

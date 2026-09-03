@@ -1,12 +1,11 @@
 /**
- * Client-side pagination for catalog operations with no server-side cursor.
+ * Client-side pagination for operations with no server-side cursor.
  *
- * Some Zero queries — `conversationMessagesV2`, `channelParticipants`,
- * `ticketActivities`, `getUsersV2`, and others — return every matching row in
- * one response; their schema takes no `limit`/`start` at all, so there is
- * nothing to ask the server for "the next page" with. That is fine for Zero's
- * own incremental sync, where a browser holds the live set and a component
- * renders a window of it, and wrong for a one-shot HTTP fetch: a caller that
+ * Some reads — thread messages, channel participants, ticket activities, the
+ * user directory, and others — return every matching row in one response and
+ * accept no `limit`/`start`, so there is nothing to ask the server for "the
+ * next page" with. That suits a live-syncing client that holds the whole set
+ * and renders a window of it, and suits a one-shot HTTP fetch poorly: a caller that
  * wants the last 20 messages of a long-running thread would otherwise pay
  * for, and receive, all of them.
  *

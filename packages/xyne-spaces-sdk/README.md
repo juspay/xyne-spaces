@@ -10,7 +10,6 @@ import { createClient } from '@xyne/spaces-sdk';
 
 const sdk = createClient({
   baseUrl: 'https://spaces.example.com',
-  useCookieAuth: true, // Uses existing Spaces session
 });
 
 const me = await sdk.users.me();
@@ -64,14 +63,26 @@ your bundle, and there are no transitive supply-chain surprises.
 
 ## Authentication
 
-The SDK uses cookie-based authentication, reusing your existing Spaces session:
+The SDK authenticates with your existing Spaces session. Every request is sent
+with `credentials: 'include'`, so the session cookie travels automatically and
+there is no option to set:
 
 ```typescript
 const sdk = createClient({
   baseUrl: 'https://spaces.example.com',
-  useCookieAuth: true,
 });
 ```
+
+This is why the browser is the SDK's native home: it is the context that holds
+the session. A headless process has no cookie jar, and must supply the session
+token itself:
+
+```typescript
+const sdk = createClient({ baseUrl, apiKey: token });
+// or later: sdk.setApiKey(token)
+```
+
+`apiKey` is sent as `Authorization: Bearer <token>`.
 
 This means the SDK acts as the currently logged-in user with exactly their
 permissions. Access is decided by the same per-table ACL the product runs behind.
@@ -328,33 +339,25 @@ support requests.
 
 ## Verified completeness
 
-Two build-time gates, both of which fail the build rather than warn:
+The claim at the top of this file — every read and write the product performs —
+is checked on every build of the Spaces repo, by two gates that fail rather than
+warn.
 
-```bash
-npm run coverage         # every catalog operation is exposed or excluded, with a reason
-npm run contract-check   # the SDK and the backend agree on names, values, and shapes
-```
+The first proves the surface is **complete**: every operation the product can
+perform is either reachable through a typed method here, or recorded as
+deliberately withheld with a written reason. A new backend operation fails that
+build until someone decides which. Completeness is a gate, not a claim.
 
-`coverage` verifies, across all 523 operations, that: the operation exists; every
-required argument is supplied; no undeclared argument is sent; enumerated values
-match exactly; and a query's single-row-vs-list shape matches the declared return
-type. None of that is something TypeScript can check, because operations are
-referenced by string on both sides of the wire.
+The second proves the two sides **agree**: that every argument this SDK sends is
+one the server accepts, that required arguments are always supplied, that
+enumerated values match exactly, that a method returning `T | null` sits on an
+operation that really returns one row, and that all 73 entity interfaces name
+real database columns.
 
-It checks in both directions: an operation id the SDK calls that the server does
-not define, and a server-side mapping that no SDK method reaches, are each an
-error.
-
-`contract-check` compares search parameters and their enumerated values against
-the server's request schema, all 73 entity interfaces against real database
-columns, and the error codes the SDK branches on against the ones the API defines.
-
-Of the 62 exclusions: 49 are superseded versions (`…V1` where `…V3` is exposed),
-11 are the SDLC subsystem (internal, driven by its own services), and 2 are
-backend-deprecated or scoped entirely to the caller's own id.
-
-Operations outside the catalog — creating channels and tickets, uploading files,
-search — are direct API calls. See [GAPS.md](./GAPS.md).
+None of that is something TypeScript can check on its own, because operations
+cross the wire as strings. Both gates run in the repo that builds this package,
+against the live server source — so a mismatch is caught before a release, not by
+you at runtime.
 
 ---
 
@@ -405,23 +408,29 @@ dependencies and must load in a browser, while those schemas depend on zod. The
 agreement is enforced at build time instead, by reading the server's source.
 
 That gate exists because its absence cost real bugs. The SDK once sent `sortBy`,
-`sortOrder`, and `channelId`, none of which the server accepts; because unknown
-query parameters are *rejected* rather than ignored, every call that set one
-failed, and sorting looked missing when it had shipped all along. The correct
-`orderBy` was there the whole time — nothing was comparing the two.
+`sortOrder`, and `channelId` — none of which the server accepts. The calls did
+not fail; the parameters were simply dropped, so sorting looked unimplemented
+when the correct `orderBy` had shipped all along. A silent no-op is the worst
+shape this failure could take, and nothing was comparing the two sides.
+
+Unknown search parameters are now **rejected** with a `validation_failed` 400
+naming the offending key, so a typo surfaces at the call rather than as absent
+behaviour. The gate still matters: a schema can only reject what is sent, and
+the original bug was the SDK sending the wrong name in the first place.
 
 ---
 
 ## Development
 
 ```bash
-npm run build           # compile to dist/
-npm run typecheck       # tsc --noEmit, strict
-npm run coverage        # catalog coverage gate
-npm run contract-check  # conformance with the API's own schemas
-npm test                # vitest
-npm run verify          # typecheck + coverage + contract-check
+npm run build      # compile to dist/
+npm run typecheck  # tsc --noEmit, strict
+npm test           # vitest
 ```
+
+The two conformance gates live in the Spaces repo rather than here, because they
+read the server's source and cannot run from an installed copy of this package.
+From the repo root: `pnpm run sdk:verify`.
 
 The SDK is browser-safe by construction: it imports no Node built-ins and
 declares no runtime dependencies. Both are checked — a stray `node:fs` import or a

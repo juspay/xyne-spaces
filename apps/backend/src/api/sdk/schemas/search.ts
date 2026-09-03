@@ -101,7 +101,7 @@ export const searchQuerySchema = z.object({
   includeBotMessages: boolish.optional(),
   onlyMyChannels: boolish.optional(),
   view: z.enum(['installed', 'org', 'marketplace']).optional(),
-});
+}).strict();
 
 
 /** Consumed by `searchSchemaQuerySchema` below; not part of the public surface. */
@@ -122,5 +122,5 @@ const VESPA_SCHEMAS = [
 
 export const searchSchemaQuerySchema = z.object({
   schema: z.enum(VESPA_SCHEMAS),
-});
+}).strict();
 

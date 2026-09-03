@@ -26,8 +26,8 @@ export class MessagesResource extends Resource {
   /**
    * List the messages in a thread, oldest first, one page at a time.
    *
-   * `conversationMessagesV2` has no server-side cursor — it returns the whole
-   * thread in one response — so this fetches that full result and windows it
+   * This read has no server-side cursor — it returns the whole thread in one
+   * response — so the SDK fetches that full result and windows it
    * before returning. The fetch itself is not cheaper for a long thread; what
    * this buys is that a caller processes one page rather than holding an
    * unbounded array. Defaults to the first 100 messages, which is also the cap.
@@ -74,9 +74,9 @@ export class MessagesResource extends Resource {
    * List a channel's messages, including thread replies that were also sent to
    * the channel, one page at a time.
    *
-   * Same shape as {@link listByConversation} and for the same reason:
-   * `channelAndThreadMessagesV2` has no server-side cursor, so a busy channel's
-   * full history comes back in one response and is windowed here.
+   * Same shape as {@link listByConversation} and for the same reason: this read
+   * has no server-side cursor, so a busy channel's full history comes back in
+   * one response and is windowed here.
    *
    * @param channelId - Channel to read.
    * @param options.limit - Page size. Defaults to 100, which is also the maximum.

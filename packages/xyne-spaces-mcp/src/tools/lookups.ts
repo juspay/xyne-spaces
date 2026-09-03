@@ -76,9 +76,9 @@ const projectsList: ToolDef = {
 // ── spaces_board_stages ─────────────────────────────────────────────────────
 
 /**
- * `boardsByProject` pulls stages through a Zero `.related()`, which the SDK's
- * `Board` does not declare — it types columns only. Intersecting keeps every
- * column checked against the real schema and hand-declares just the join.
+ * The board listing returns stages through a relation, which the SDK's `Board`
+ * does not declare — it types columns only. Intersecting keeps every column
+ * checked against the real schema and hand-declares just the join.
  */
 type BoardRow = Board & { stages?: Related<Stage> };
 
@@ -99,7 +99,7 @@ const boardStages: ToolDef = {
 		required: ["project_id"],
 		additionalProperties: false,
 	},
-	// `boardsByProject` already pulls stages through a relation, so boards and
+	// The board listing already returns stages through a relation, so boards and
 	// their stages arrive together rather than needing a call per board.
 	async handler(args, { sdk }) {
 		await users.prime(sdk);

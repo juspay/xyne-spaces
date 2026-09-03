@@ -194,8 +194,8 @@ const emailsList: ToolDef = {
 		required: ["channel_id"],
 		additionalProperties: false,
 	},
-	// Two calls: the thread ids first, then their emails. `getEmailsForConversationsV2`
-	// takes ids rather than a channel, so a caller with only a channel id would
+	// Two calls: the thread ids first, then their emails. The email read takes
+	// thread ids rather than a channel, so a caller with only a channel id would
 	// otherwise have to make the first call themselves.
 	async handler(args, { sdk }) {
 		await users.prime(sdk);

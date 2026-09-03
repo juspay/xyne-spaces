@@ -19,7 +19,7 @@ import type {
   FormField,
 } from '../types/index.js';
 
-/** A field as accepted by `form.update`, which replaces the whole field list. */
+/** A field as accepted by {@link formsOperations.update}, which replaces the whole field list. */
 export interface FormFieldInput {
   /** Omit to create a field; pass an existing id to keep it. */
   id?: string;

@@ -10,8 +10,7 @@ import type { CurrentUser, User, UserProfile } from '../types/index.js';
 /**
  * User operations registry.
  *
- * Most operations use Zero queries via /zero/query-fallback.
- * Each entry maps an SDK method to the corresponding backend operation.
+ * Each entry declares an SDK operation id and its argument and result types.
  */
 export const usersOperations = {
   /**

@@ -246,10 +246,24 @@ spend their own API budget.
 ## Extending it
 
 **A new Zero query or mutator** needs one entry in `v1/mapper.ts` to be
-reachable, plus one in `v1/parser.ts` if its arguments need shaping. The SDK's
-`npm run coverage` fails until it is either exposed as a typed method or excluded
-with a written reason — and it checks both directions, so a mapper entry no SDK
-method calls is an error too. That gate is what makes "complete" verifiable.
+reachable, plus one in `v1/parser.ts` if its arguments need shaping.
+`pnpm run sdk:coverage` fails until it is either mapped or listed in
+`v1/exclusions.json` with a written reason — and it checks both directions, so a
+mapper entry no SDK method calls is an error too. That gate is what makes
+"complete" verifiable.
+
+`v1/exclusions.json` is the other half of `v1/mapper.ts`: between them they
+partition the catalog, and every operation must be in exactly one. An entry
+carries a reason from a fixed grammar —
+`superseded-by:<name> | legacy-unused | internal | deferred:<why>` — so "not
+exposed" is always a recorded decision rather than an omission. It is
+**per-version**: it states what *this* version does not reach, so a `v2/` starts
+from a copy and shrinks as it exposes more.
+
+It lives here rather than in the SDK because it names catalog operations. Shipping
+it inside the published package would hand every consumer a list of internal
+operation names and the reasons each is withheld — which is the opposite of what
+the versioned surface is for.
 
 **A new direct route** is one entry in `ROUTES` in `direct.ts`, backed by either a
 `controller` (writes an Express response, gets captured) or a `service` (returns a

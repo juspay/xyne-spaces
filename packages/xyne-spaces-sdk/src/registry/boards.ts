@@ -23,7 +23,7 @@ import type {
   TicketStatusV2,
 } from '../types/index.js';
 
-/** A stage as accepted by `board.update`, which replaces the whole stage list. */
+/** A stage as accepted by {@link boardsOperations.update}, which replaces the whole stage list. */
 export interface StageInput {
   /** Omit to create a new stage; pass an existing id to update it. */
   id?: string;

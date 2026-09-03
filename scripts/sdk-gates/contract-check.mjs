@@ -7,9 +7,12 @@
  * bodies. The SDK cannot import any of it: it ships with zero runtime
  * dependencies and must load in a browser, while the server's schemas depend on
  * zod. That asymmetry is what let three broken search parameters ship — the SDK
- * sent `sortBy`, `sortOrder` and `channelId`, none of which exist, and the
- * server rejects unknown query parameters outright, so every call that set one
- * failed.
+ * sent `sortBy`, `sortOrder` and `channelId`, none of which exist. They were
+ * silently stripped, so the calls succeeded while quietly ignoring what was
+ * asked for: sorting looked unimplemented when it had shipped all along.
+ * `searchQuerySchema` is `.strict()` now, so an unknown parameter is a 400 —
+ * but a schema cannot catch a parameter the SDK never sends, which is what this
+ * gate is for.
  *
  * This closes the gap without adding a dependency: the server's source is read
  * here, at build time, and compared against what the SDK actually sends.
@@ -36,8 +39,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const sdkRoot = resolve(here, '..');
-const repoRoot = resolve(sdkRoot, '../..');
+const repoRoot = resolve(here, '../..');
+const sdkRoot = join(repoRoot, 'packages/xyne-spaces-sdk');
 const apiSrc = join(repoRoot, 'apps/backend/src/api/sdk');
 const REGISTRY_DIR = join(sdkRoot, 'src/registry');
 

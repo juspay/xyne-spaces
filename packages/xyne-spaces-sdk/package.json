@@ -14,21 +14,17 @@
   },
   "files": [
     "dist",
-    "README.md",
-    "src/exclusions.json"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc",
-    "prepare": "pnpm run build",
+    "prepare": "pnpm run clean && pnpm run build",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "coverage": "node scripts/coverage.mjs",
-    "verify": "npm run typecheck && npm run coverage && npm run contract-check",
-    "contract-check": "node scripts/contract-check.mjs"
+    "test:watch": "vitest"
   },
   "dependencies": {},
   "devDependencies": {

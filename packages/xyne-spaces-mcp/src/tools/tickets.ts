@@ -544,17 +544,15 @@ const ticketTransition: ToolDef = {
 		required: ["ticket_id", "to_stage_name"],
 		additionalProperties: false,
 	},
-	// Two paths, because the catalog has two. `nonLinear.transition` implements
-	// form gates, approvals and visit versioning, and refuses anything that is
-	// not a NON_LINEAR board — its own comment says DEFAULT and RELEASE boards
-	// must use the standard stage-update path instead. `ticket.update` is that
-	// path: it resolves the target stage on the board and reconciles statusV2
-	// against the stage's default. Picking wrong fails with a 400,
-	// so the board type is read first rather than guessed.
+	// Two paths, because the API has two. The transition path implements form
+	// gates, approvals and visit versioning, and refuses anything that is not a
+	// NON_LINEAR board — DEFAULT and RELEASE boards must use the standard
+	// stage-update path instead, which resolves the target stage on the board
+	// and reconciles statusV2 against the stage's default. Picking wrong fails
+	// with a 400, so the board type is read first rather than guessed.
 	//
-	// `now` and `updatedAt` are caller-supplied timestamps, and `formValuesJson`
-	// is an encoded string rather than an object — the mutator argument type
-	// cannot carry arbitrary nested JSON.
+	// `formValuesJson` is an encoded string rather than an object: the argument
+	// type cannot carry arbitrary nested JSON.
 	write: true,
 	async handler(args, { sdk }) {
 		const ticketId = requiredString(args, "ticket_id");
@@ -575,8 +573,8 @@ const ticketTransition: ToolDef = {
 				formValues && typeof formValues === "object" ? { formValuesJson: JSON.stringify(formValues) } : {},
 			);
 		} else {
-			// `nonLinear.transition` applies the target stage's `defaultTicketStatusV2`
-			// as part of the move. `ticket.update` does not derive it, so it is
+			// The transition path applies the target stage's `defaultTicketStatusV2`
+			// as part of the move. The stage-update path does not derive it, so it is
 			// resolved and passed explicitly — otherwise moving a ticket to Done
 			// would leave its status on TODO, and the two paths would disagree.
 			const stages = await sdk.boards.listStages(ticket.boardId);

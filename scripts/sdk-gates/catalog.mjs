@@ -21,7 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, '../../..');
+const repoRoot = resolve(here, '../..');
 
 const QUERIES = join(repoRoot, 'apps/backend/src/zero/queries.ts');
 const MUTATORS = join(repoRoot, 'apps/backend/src/zero/mutators.ts');

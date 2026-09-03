@@ -54,7 +54,6 @@ export type KanbanColumnType = 'stage' | 'status';
 /**
  * The kanban board's filter set.
  *
- * Mirrors `kanbanTicketPageV2FiltersSchema` in `apps/backend/src/zero/queries.ts`.
  * Ids are user, group, board, tag, and channel ids; `stages` and `ticketTypes` are
  * names.
  */
@@ -135,11 +134,8 @@ export const ticketsOperations = {
   /**
    * A page of tickets for the kanban board, with the board's filter set.
    *
-   * V3 takes exactly the same arguments as V2 — the schema is literally
-   * `kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageV2ArgsSchema`. What changed
-   * is the body: it reads the precomputed `isStageOverdue` column instead of
-   * joining `stageEtaEntries`, so kanban rows no longer carry that relation.
-   * Nothing read it off a kanban row; `list` (ticketsQueryV2) still relates it.
+   * Kanban rows carry a precomputed `isStageOverdue` flag and do not include the
+   * `stageEtaEntries` relation; `list` does relate it.
    *
    * `viewMode` and `stageName` are required by the query, not conveniences: the
    * query is written per board column, so it wants to know which scope and which
@@ -148,8 +144,8 @@ export const ticketsOperations = {
    *
    * Filters go inside `filters`. An earlier version of this entry accepted
    * `searchQuery` / `statusFilter` / `assignedToFilter` / `createdByFilter` /
-   * `workflowTypeFilter`, which belong to the unrelated `workflowsPaginated`
-   * query — zod stripped them silently, so those filters never did anything.
+   * `workflowTypeFilter`, which belong to an unrelated workflow listing — the
+   * server stripped them silently, so those filters never did anything.
    */
   listKanban: op<{
       viewMode: TicketViewMode;

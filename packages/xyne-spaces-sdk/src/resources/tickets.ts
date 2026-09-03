@@ -239,9 +239,8 @@ export class TicketsResource extends Resource {
   /**
    * List tickets in a project, one page at a time.
    *
-   * `ticketsByProjectV2` has no server-side cursor — a project with hundreds
-   * of tickets returns all of them in one response — so this fetches that and
-   * windows it. Defaults to the first 100, which is also the cap. For filtered, view-scoped listing
+   * This read has no server-side cursor — a project with hundreds of tickets
+   * returns all of them in one response — so the SDK fetches that and windows it. Defaults to the first 100, which is also the cap. For filtered, view-scoped listing
    * (by board, by assignee, by status) use {@link list} instead, which takes
    * those filters server-side.
    *
@@ -271,8 +270,8 @@ export class TicketsResource extends Resource {
   /**
    * List one ticket's activity timeline, one page at a time.
    *
-   * `ticketActivities` has no server-side cursor — a ticket's whole history
-   * comes back in one response — so this fetches that and windows it.
+   * This read has no server-side cursor — a ticket's whole history comes back
+   * in one response — so the SDK fetches that and windows it.
    * Defaults to the first 100 (also the cap), newest first. For several tickets
    * at once, with a real server-side cursor, use {@link listActivitiesForTickets}.
    *

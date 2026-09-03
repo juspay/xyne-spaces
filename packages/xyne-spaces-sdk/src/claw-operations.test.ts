@@ -61,7 +61,7 @@ describe('claw operations', () => {
 
     const agents = await client().claw.listAgents();
 
-    expect(requests[0]?.url).toBe('https://spaces.example.com/api/sdk/claw/agents');
+    expect(requests[0]?.url).toBe('https://spaces.example.com/api/sdk/v1/claw/agents');
     expect((requests[0]?.init.headers as Record<string, string>)['Authorization']).toBe(
       'Bearer xyne_sk_test'
     );
@@ -78,7 +78,7 @@ describe('claw operations', () => {
 
     const result = await client().claw.run({ agent: 'ask-ai', task: 'Summarise today' });
 
-    expect(requests[0]?.url).toBe('https://spaces.example.com/api/sdk/claw/runs');
+    expect(requests[0]?.url).toBe('https://spaces.example.com/api/sdk/v1/claw/runs');
     expect(requests[0]?.init.method).toBe('POST');
     expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
       agent: 'ask-ai',
@@ -102,7 +102,7 @@ describe('claw operations', () => {
 
     await client().claw.getRun('a/b');
 
-    expect(requests[0]?.url).toBe('https://spaces.example.com/api/sdk/claw/runs/a%2Fb');
+    expect(requests[0]?.url).toBe('https://spaces.example.com/api/sdk/v1/claw/runs/a%2Fb');
   });
 
   it('polls until the run reaches a terminal status', async () => {

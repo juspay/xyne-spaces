@@ -28,13 +28,14 @@ import { fileURLToPath } from 'node:url';
 import { matchBracket, readMutators, readQueries, skipTrivia } from './catalog.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const sdkRoot = resolve(here, '..');
+const repoRoot = resolve(here, '../..');
+const sdkRoot = join(repoRoot, 'packages/xyne-spaces-sdk');
+const apiV1 = join(repoRoot, 'apps/backend/src/api/sdk/v1');
 
 const REGISTRY_DIR = join(sdkRoot, 'src/registry');
-const repoRootDir = resolve(sdkRoot, '../..');
-const V1_MAPPER_FILE = join(repoRootDir, 'apps/backend/src/api/sdk/v1/mapper.ts');
-const V1_PARSER_FILE = join(repoRootDir, 'apps/backend/src/api/sdk/v1/parser.ts');
-const EXCLUSIONS = join(sdkRoot, 'src/exclusions.json');
+const V1_MAPPER_FILE = join(apiV1, 'mapper.ts');
+const V1_PARSER_FILE = join(apiV1, 'parser.ts');
+const EXCLUSIONS = join(apiV1, 'exclusions.json');
 
 /** The SDK's shared type aliases, where most literal unions are declared. */
 const sdkTypesSrc = readFileSync(join(sdkRoot, 'src/types/index.ts'), 'utf8');
@@ -326,9 +327,21 @@ function readV1Usage() {
           break;
         }
       }
+      // Two sets, because the two checks below need different ones. With no
+      // parser the arguments pass through exactly as the caller sent them, so
+      // only a *required* SDK field is guaranteed to arrive — an optional one
+      // may simply be absent. Counting optional fields as supplied is how a
+      // deleted parser entry slips through: the names are all declared, so the
+      // required-args check sees nothing missing while every call that omits
+      // them fails validation.
       const declared = new Set();
-      for (const k of input.matchAll(/([a-zA-Z][a-zA-Z0-9_]*)\s*\??\s*:/g)) declared.add(k[1]);
-      const supplied = parsed.has(opId) ? parsed.get(opId) : declared;
+      const required = new Set();
+      for (const k of input.matchAll(/([a-zA-Z][a-zA-Z0-9_]*)(\s*\?)?\s*:/g)) {
+        declared.add(k[1]);
+        if (!k[2]) required.add(k[1]);
+      }
+      const supplied = parsed.has(opId) ? parsed.get(opId) : required;
+      const suppliedAll = parsed.has(opId) ? parsed.get(opId) : declared;
 
       out.set(target.name, {
         file: `${file} -> v1:${opId}`,
@@ -339,6 +352,7 @@ function readV1Usage() {
         src,
         _v1: true,
         _supplied: supplied,
+        _suppliedAll: suppliedAll,
         _input: input.trim(),
         _result: result,
         // Bounded to this entry's own call. A fixed-size window reaches into the
@@ -403,6 +417,12 @@ for (const [name, info] of used) {
   }
 }
 
+/** Everything an entry may send, optional fields included — for check 2b. */
+function sendableArgs(info) {
+  if (info._v1) return info._suppliedAll;
+  return suppliedArgs(info);
+}
+
 // 2b. Nothing may send an argument the operation does not declare.
 //     Zod strips unknown keys silently, so a removed or renamed backend argument
 //     leaves the SDK sending a field that is quietly discarded — the call still
@@ -410,7 +430,7 @@ for (const [name, info] of used) {
 for (const [name, info] of used) {
   const accepts = declaredArgs.get(name);
   if (!accepts) continue;
-  const supplied = suppliedArgs(info);
+  const supplied = sendableArgs(info);
   if (!supplied) continue;
   const extra = [...supplied].filter((field) => !accepts.has(field));
   if (extra.length > 0) {
