@@ -8,7 +8,10 @@ yarn-error.log*
 dist/
 build/
 *.tsbuildinfo
-zero-*
+# Anchored to this directory: Zero's build artifacts land here, but an
+# unanchored `zero-*` also swallows source files such as
+# src/zero/zero-internals.test.ts.
+/zero-*
 
 # Environment variables
 .env

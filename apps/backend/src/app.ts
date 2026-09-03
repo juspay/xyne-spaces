@@ -200,6 +200,9 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
+import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
+import { sdkConfig } from '@/api/sdk/config';
 
 
 export class App {
@@ -351,6 +354,20 @@ export class App {
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     this.app.use(decryptRequestBodyMiddleware);
     this.app.use(encryptResponseBodyMiddleware);
+
+    // Public SDK API. Uses the same cookie-based auth as the dashboard via
+    // authMiddleware.authenticate. When disabled, nothing is mounted here
+    // and a request falls through to the app's own `notFoundHandler` further down.
+    //
+    // Two routers at the same prefix: the public one (version/health) is
+    // tried first and falls through on no match, then authMiddleware runs for
+    // everything else. The trailing `sdkErrorHandler` gives auth failures the
+    // SDK's own error envelope.
+    if (sdkConfig.enabled) {
+      this.app.use('/api/sdk', createSdkPublicRouter());
+      this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
+      logger.info('Public SDK API mounted at /api/sdk');
+    }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -753,14 +770,6 @@ export class App {
 
     this.app.use('/internal', internalRoutes);
 
-    // API versioning placeholder
-    this.app.use('/api/v1', (_req, res) => {
-      res.json({
-        success: true,
-        message: 'API v1 endpoint - ready for implementation',
-        timestamp: new Date().toISOString(),
-      });
-    });
   }
 
   private initializeErrorHandling(): void {
