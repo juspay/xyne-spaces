@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest } from '@/services/commitAnalysisService';
+import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest, countDistinctMigrationFiles } from '@/services/commitAnalysisService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
@@ -7,6 +7,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { conversationService } from '@/services/conversationService';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core/';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas, type CommitAnalysisRepoSlice } from '@/utils/commitAnalysisCanvas';
@@ -525,8 +526,9 @@ export class CommitAnalysisController {
 
       // One canvas per release: upsert the aggregated slices in place.
       let canvasUrl: string | undefined;
+      let canvasId: string | null | undefined;
       if (viewResults.length > 0) {
-        const canvasId = await upsertCommitAnalysisCanvas({
+        canvasId = await upsertCommitAnalysisCanvas({
           section: hotfixSync ? 'hotfix' : 'main',
           results: viewResults,
           affectedApplications,
@@ -543,7 +545,7 @@ export class CommitAnalysisController {
             deployedCommitId: primary.deployedCommitId,
             newCommitId: primary.newCommitId,
             affectedApplicationCount: affectedApplications.length,
-            migrationCount: migrationLinks.length,
+            migrationCount: countDistinctMigrationFiles(migrationLinks),
             envChangeCount: envChanges.length,
             workspaceId: params.workspaceId,
           },
@@ -611,6 +613,28 @@ export class CommitAnalysisController {
         },
       });
 
+      // The canvas updates in place, so a hotfix sync posts an activity line (via the
+      // canonical helper, for the right SYSTEM/isTicketActivity invariants) pointing at
+      // it. The workspace prefix is required — a bare /chat/canvas/:id route 404s.
+      if (hotfixSync) {
+        try {
+          const canvasLink = canvasId
+            ? ` ${config.slackFrontendUrl}/${params.workspaceId}/chat/canvas/${canvasId}`
+            : '';
+          await recordTicketTimelineEvent({
+            message: {
+              conversationId,
+              senderId: userId,
+              content: `Hotfix synced — release analysis canvas updated${canvasLink}`,
+              activityType: 'RELEASE_SYNC',
+              workspaceId: params.workspaceId,
+            },
+          });
+        } catch (noticeError) {
+          logger.warn(`[ReleaseTrigger] failed to post hotfix sync notice: ${noticeError instanceof Error ? noticeError.message : String(noticeError)}`);
+        }
+      }
+
       return {
         success: true,
         data: results,
@@ -667,7 +691,7 @@ export class CommitAnalysisController {
             deployedCommitId,
             newCommitId,
             affectedApplicationCount: affectedApplications.length,
-            migrationCount: migrationLinks?.length || 0,
+            migrationCount: countDistinctMigrationFiles(migrationLinks),
             envChangeCount: envChanges?.length || 0,
           },
           repoSlices,
