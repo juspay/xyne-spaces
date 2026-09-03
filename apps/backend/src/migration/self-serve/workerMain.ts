@@ -11,6 +11,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getStorageService } from '@/services/storage';
 import { vespaQueue, vespaBackfillQueue } from '@/queues/vespaQueue';
+import { superpositionClient } from '@/services/superpositionClient';
 import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
 import { SlackMigrationEngine } from './engine';
@@ -37,6 +38,9 @@ async function boot(): Promise<void> {
   // indexed. Initialise them (idempotent) BEFORE registering workers. Draining stays with the backfill worker pods.
   await vespaQueue.initialize();
   await vespaBackfillQueue.initialize();
+  await superpositionClient.initialize().catch((e: unknown) =>
+    logger.warn('[SlackMigration] Superposition init failed — migration config will use defaults', { error: e instanceof Error ? e.message : String(e) }),
+  );
 
   const store = new MigrationStore();
   const queues = new MigrationQueues();

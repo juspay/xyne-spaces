@@ -38,6 +38,7 @@ import { ExternalAttachmentService, ExternalAttachment, DownloadedAttachment } f
 import { SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
 import { encrypt } from '../../services/encryptionService';
 import { config } from '../../config/env';
+import { getMigrationRuntimeConfig } from '../self-serve/migrationRuntimeConfig';
 import { db } from '@/database/client';
 import { Prisma } from '@prisma/client';
 import { vespaQueue, vespaBackfillQueue } from '@/queues/vespaQueue';
@@ -82,7 +83,7 @@ function extractMentionedUserIds(content?: string | null): string[] {
 
 export async function bulkIngestConversationSlack(input: IngestConversationSlackInput): Promise<IngestConversationSlackResult> {
   const { slackMessages, externalSourceName, channelId, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false, onProgress } = input;
-  const BATCH = Math.max(1, config.slackMigration.ingestBulkBatchSize);
+  const BATCH = (await getMigrationRuntimeConfig()).bulkBatchSize; // live-tunable via Superposition; already clamped ≥50
   const errorDetails: string[] = [];
 
   const userRepo = new UserRepository();

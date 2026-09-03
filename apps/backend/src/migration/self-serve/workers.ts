@@ -4,11 +4,12 @@ import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
 import { SlackMigrationEngine, type CollectedConversation, type DirUser } from './engine';
 import { MigrationJob, MigrationStatus, MigrationType, QueueName } from './types';
+import { getMigrationRuntimeConfig } from './migrationRuntimeConfig';
 
 const HEARTBEAT_MS = 15_000;
 const RECONCILE_EVERY_MS = 60_000;
 const RECLAIM_STALE_MS = 90_000; // several missed heartbeats ⇒ the pod that owned the job is gone
-const STALL_LIMIT_MS = config.slackMigration.stallLimitMs; // live heartbeat but no forward progress ⇒ worker wedged
+// stallLimitMs (live heartbeat but no forward progress ⇒ worker wedged) is now live-tunable via Superposition — read per reconcile tick.
 
 /** Human-readable ingest duration for the completion log, e.g. "7m 12s". */
 function formatDuration(ms: number): string {
@@ -49,6 +50,7 @@ export class MigrationWorkers {
    *  or wedged/looping (fresh heartbeat, no progress) → fail resumably. */
   private async reconcile(): Promise<void> {
     const now = Date.now();
+    const { stallLimitMs } = await getMigrationRuntimeConfig();
     for (const job of await this.store.list(1000, 0)) {
       // Queued/submitted jobs live in Bull, not here — but recover one whose Bull entry was lost (e.g. a crash
       // between the store write and enqueue) so it can't sit stranded forever. Only re-enqueue if genuinely absent.
@@ -75,7 +77,7 @@ export class MigrationWorkers {
         // retrying. We can't preempt the locked Bull job, so surface it as FAILED (resumable) rather than let it
         // masquerade as "running" forever. Threshold is generous so normal Slack rate-limit backoffs don't trip it.
         const lastProgress = job.progressAt ?? job.createdAt;
-        if (now - lastProgress >= STALL_LIMIT_MS) {
+        if (now - lastProgress >= stallLimitMs) {
           const minutes = Math.round((now - lastProgress) / 60_000);
           logger.error('[SlackMigration] migration stalled — live heartbeat but no progress; marking failed (resumable)', {
             id: job.id, status: job.status, stalledForMin: minutes,
