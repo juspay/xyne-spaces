@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
+import { Search, X } from 'lucide-react';
 import { LayersTo, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -9,6 +10,8 @@ import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
+import Input from '../../components/ui/Input/Input';
+import { ShortcutHint } from '../../components/ui/ShortcutHint';
 import {
   refreshOatsRecordings,
   usePaginatedOatsRecordings,
@@ -17,10 +20,13 @@ import {
 import { recordingService } from '../../services/Recording/recordingService';
 import { logRecordingError } from '../../utils/recordingUtils';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
+import { useAllChannels } from '../../hooks/useChannels';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useSelf, useUsers } from '../../hooks/useUsers';
+import { useScope, useShortcutById } from '../../shortcuts/hooks';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { cn } from '../../utils/classNames';
 import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptyStateIllustration';
@@ -41,6 +47,7 @@ import {
   buildRecordingRows,
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
+  filterRecordingsBySearchQuery,
   findNearestVisibleRecording,
   formatRecordingParticipants,
   getRecordingDatePresetLabel,
@@ -48,6 +55,7 @@ import {
   LIST_TAB_CLASS_NAME,
   type RecordingDatePreset,
   type RecordingOwnershipTab,
+  type RecordingSearchContext,
 } from './utils/RecordingsV2.utils';
 import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
@@ -75,9 +83,21 @@ const RecordingsV2Screen = (): ReactElement => {
   const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
   const [shareRecording, setShareRecording] = useState<RecordingsV2PillRecording | null>(null);
   const [deleteRecording, setDeleteRecording] = useState<RecordingsV2PillRecording | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
   const showTemplatesModal = shouldOpenTemplatesFromUrl;
   const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } =
     useSummaryTemplates(showTemplatesModal);
+  const currentUser = useSelf();
+  const users = useUsers();
+  const allChannels = useAllChannels();
+  const usersById = useMemo(() => new Map(users.map(user => [user.id, user])), [users]);
+  const channelsById = useMemo(
+    () => new Map(allChannels.map(channel => [channel.id, channel])),
+    [allChannels],
+  );
+
   const {
     recordings,
     hasMoreRecordings,
@@ -87,9 +107,9 @@ const RecordingsV2Screen = (): ReactElement => {
     error,
     refreshRecordings,
   } = usePaginatedOatsRecordings(activeListTab, selectedCreatorId);
-  const currentUser = useSelf();
-  const users = useUsers();
-  const usersById = useMemo(() => new Map(users.map(user => [user.id, user])), [users]);
+
+  useScope('recordings');
+  useShortcutById('recordings.search', () => searchInputRef.current?.focus());
   const recordingStatus = useRecordingStore(context => context.status);
   const recordingStartTime = useRecordingStore(context => context.startTime);
   const recordingCallId = useRecordingStore(context => context.externalId);
@@ -191,18 +211,34 @@ const RecordingsV2Screen = (): ReactElement => {
   const hiddenLiveRecordingId =
     recordingCallId ?? (recordingStatus === 'starting' ? liveRecording?.externalId : null);
 
+  const recordingSearchContext = useMemo<RecordingSearchContext>(
+    () => ({ usersById, channelsById, resolveLabel, isResolved, isManualLabel }),
+    [usersById, channelsById, resolveLabel, isResolved, isManualLabel],
+  );
+
   const filteredRecordings = useMemo(
     () =>
       filterRecordingsByLabels(
-        ownershipFilteredRecordings.filter(
-          // Hide the local live row
-          recording =>
-            recording.externalId !== hiddenLiveRecordingId &&
-            isRecordingInDatePreset(recording.startedAt, selectedDatePreset),
+        filterRecordingsBySearchQuery(
+          ownershipFilteredRecordings.filter(
+            // Hide the local live row
+            recording =>
+              recording.externalId !== hiddenLiveRecordingId &&
+              isRecordingInDatePreset(recording.startedAt, selectedDatePreset),
+          ),
+          debouncedSearchQuery,
+          recordingSearchContext,
         ),
         selectedLabels,
       ),
-    [ownershipFilteredRecordings, hiddenLiveRecordingId, selectedDatePreset, selectedLabels],
+    [
+      ownershipFilteredRecordings,
+      hiddenLiveRecordingId,
+      selectedDatePreset,
+      selectedLabels,
+      debouncedSearchQuery,
+      recordingSearchContext,
+    ],
   );
   const recordingsCapturedThisWeek = useMemo(
     () =>
@@ -385,14 +421,60 @@ const RecordingsV2Screen = (): ReactElement => {
         <div className='flex min-h-full w-full flex-col items-center px-4'>
           <header className='max-w-[860px] w-full sticky top-0 bg-background z-20 pt-6 pb-6 sm:pb-3'>
             <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-y-6'>
-              <div className='col-start-1 row-start-1 min-w-0'>
-                <h1 id='xyne-scribe-heading' className='text-3xl font-semibold text-foreground'>
-                  Xyne Scribe
-                </h1>
-                <p className='mt-1 text-sm text-muted-foreground/70'>
-                  {ownershipFilteredRecordings.length} recordings · {recordingsCapturedThisWeek}{' '}
-                  captured this week
-                </p>
+              <div className='col-start-1 row-start-1 flex w-full min-w-0 flex-wrap items-end justify-between gap-3 sm:col-span-2'>
+                <div className='min-w-0'>
+                  <h1 id='xyne-scribe-heading' className='text-3xl font-semibold text-foreground'>
+                    Xyne Scribe
+                  </h1>
+                  <p className='mt-1 text-sm text-muted-foreground/70'>
+                    {ownershipFilteredRecordings.length} recordings · {recordingsCapturedThisWeek}{' '}
+                    captured this week
+                  </p>
+                </div>
+
+                <div className='relative w-full max-w-[320px]'>
+                  <Search
+                    className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground'
+                    strokeWidth={2}
+                  />
+                  <Input
+                    ref={searchInputRef}
+                    variant='flat'
+                    type='text'
+                    value={searchQuery}
+                    onChange={event => setSearchQuery(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key !== 'Escape') return;
+                      if (searchQuery) {
+                        setSearchQuery('');
+                      } else {
+                        searchInputRef.current?.blur();
+                      }
+                    }}
+                    placeholder='Search recordings'
+                    aria-label='Search recordings by title, participant, or channel'
+                    className='h-9 rounded-xl border-border/80 pl-9 pr-14 transition-colors hover:border-border'
+                    data-track-category='RecordingsV2'
+                    data-track-name='search_recordings'
+                  />
+                  {searchQuery ? (
+                    <button
+                      type='button'
+                      onClick={() => setSearchQuery('')}
+                      className='absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
+                      aria-label='Clear search'
+                      data-track-category='RecordingsV2'
+                      data-track-name='clear_search_recordings'
+                    >
+                      <X className='size-3.5' strokeWidth={2} />
+                    </button>
+                  ) : (
+                    <ShortcutHint
+                      shortcut='recordings.search'
+                      className='pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium leading-none text-muted-foreground'
+                    />
+                  )}
+                </div>
               </div>
 
               <div className='col-span-2 row-start-2 flex min-w-0 flex-wrap items-center gap-2 sm:col-span-1 sm:col-start-1 sm:gap-3'>
@@ -559,25 +641,29 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'>
                 <RecordingsEmptyStateIllustration />
                 <h2 className='text-base font-semibold text-foreground'>
-                  {selectedCreatorId !== null ||
-                  selectedSharerIds.length > 0 ||
-                  selectedLabels.length > 0 ||
-                  ownershipFilteredRecordings.length > 0
+                  {searchQuery.trim()
                     ? 'No matching recordings'
-                    : activeListTab === 'shared'
-                      ? 'No shared recordings yet'
-                      : 'Start your first recording'}
+                    : selectedCreatorId !== null ||
+                        selectedSharerIds.length > 0 ||
+                        selectedLabels.length > 0 ||
+                        ownershipFilteredRecordings.length > 0
+                      ? 'No matching recordings'
+                      : activeListTab === 'shared'
+                        ? 'No shared recordings yet'
+                        : 'Start your first recording'}
                 </h2>
                 <p className='mt-1 min-h-10 max-w-sm text-sm text-muted-foreground'>
-                  {selectedLabels.length > 0
-                    ? 'No recordings match the selected labels.'
-                    : ownershipFilteredRecordings.length > 0
-                      ? `No recordings found for ${getRecordingDatePresetLabel(selectedDatePreset).toLowerCase()}.`
-                      : selectedCreatorId
-                        ? 'Try another ownership tab or person.'
-                        : activeListTab === 'shared'
-                          ? 'Recordings shared with you by others will appear here.'
-                          : 'Capture a conversation and explore it with Ask AI.'}
+                  {searchQuery.trim()
+                    ? `No recordings match “${searchQuery.trim()}”.`
+                    : selectedLabels.length > 0
+                      ? 'No recordings match the selected labels.'
+                      : ownershipFilteredRecordings.length > 0
+                        ? `No recordings found for ${getRecordingDatePresetLabel(selectedDatePreset).toLowerCase()}.`
+                        : selectedCreatorId
+                          ? 'Try another ownership tab or person.'
+                          : activeListTab === 'shared'
+                            ? 'Recordings shared with you by others will appear here.'
+                            : 'Capture a conversation and explore it with Ask AI.'}
                 </p>
               </div>
             ) : filteredRecordings.length > 0 && scrollContainer ? (
