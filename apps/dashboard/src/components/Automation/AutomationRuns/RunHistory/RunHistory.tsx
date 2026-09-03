@@ -145,10 +145,9 @@ export function RunHistory({
         {isError ? (
           <div className='py-16 text-center text-sm text-red-600'>
             Failed to load runs.
-            <Button
-              variant='ghost'
+            <button
               type='button'
-              trackId='automation_run_history_retry'
+              data-ph-capture-attribute-track-id='automation_run_history_retry'
               data-track-category='automation-runs'
               data-track-name='run-history-retry'
               onClick={() => {
@@ -157,7 +156,7 @@ export function RunHistory({
               className='ml-2 underline hover:no-underline'
             >
               Retry
-            </Button>
+            </button>
           </div>
         ) : isLoading ? (
           <div className='flex flex-col'>

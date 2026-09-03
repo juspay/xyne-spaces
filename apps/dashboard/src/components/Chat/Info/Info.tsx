@@ -342,9 +342,7 @@ const Info = ({
 
       {/* HeaderLinkItems */}
       <div className='flex justify-between px-4 mb-4 gap-x-3 overflow-x-auto no-scrollbar'>
-        <Button
-          variant='ghost'
-          size='inline'
+        <button
           onClick={handleStarToggle}
           className={[
             headerLinkContainerStyle,
@@ -356,7 +354,7 @@ const Info = ({
             isStarred: channelUserStatus?.isStarred,
             channelId: channel.id,
           })}
-          trackId='toggle_channel_star'
+          data-ph-capture-attribute-track-id='toggle_channel_star'
         >
           {channelUserStatus?.isStarred ? (
             <LucideStar size={16} className='text-status-pending' fill='currentColor' />
@@ -368,7 +366,7 @@ const Info = ({
           >
             Starred
           </div>
-        </Button>
+        </button>
         {showAddPeopleButton && (
           <button
             onClick={handleAddPeopleClick}
@@ -420,19 +418,17 @@ const Info = ({
           </button>
         )}
         {isParticipant && !isDM && !isGroupDM && (
-          <Button
-            variant='ghost'
-            size='inline'
+          <button
             onClick={handleLeaveChannel}
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
-            trackId='leave_channel'
+            data-ph-capture-attribute-track-id='leave_channel'
           >
             <LucideLogOut size={16} className='text-destructive' />
             <div className='text-destructive text-[13px]'>Leave</div>
-          </Button>
+          </button>
         )}
       </div>
       <Tabs.Root
@@ -663,31 +659,29 @@ const ParticipantListItem = ({
               <div>
                 {canManageThisUser &&
                   (isAdmin ? (
-                    <Button
-                      variant='ghost'
+                    <button
                       className={popoverStyle}
                       onClick={() => onRemoveAdmin(participant.userId)}
                       data-track-category='CHAT_INFO'
                       data-track-name='REMOVE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
-                      trackId='remove_channel_admin'
+                      data-ph-capture-attribute-track-id='remove_channel_admin'
                     >
                       <LucideUserMinus size={14} />
                       <span className='text-[14px] text-foreground'>Remove admin</span>
-                    </Button>
+                    </button>
                   ) : (
-                    <Button
-                      variant='ghost'
+                    <button
                       className={popoverStyle}
                       onClick={() => onMakeAdmin(participant.userId)}
                       data-track-category='CHAT_INFO'
                       data-track-name='MAKE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
-                      trackId='make_channel_admin'
+                      data-ph-capture-attribute-track-id='make_channel_admin'
                     >
                       <LucideUser size={14} />
                       <span className='text-[14px] text-foreground'>Make admin</span>
-                    </Button>
+                    </button>
                   ))}
                 {canRemoveThisUser && (
                   <button

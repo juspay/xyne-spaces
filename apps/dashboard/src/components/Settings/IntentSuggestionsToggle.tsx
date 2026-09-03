@@ -1,6 +1,6 @@
 import { useEffect, type ReactElement } from 'react';
 import { Switch } from '../ui/Switch';
-import { Button } from '../ui/Button/Button';
+
 import { useIntentSuggestionsEnabled } from '../../hooks/useIntentSuggestionsEnabled';
 import { useIntentModelStatus } from '../../hooks/useIntentModelStatus';
 
@@ -97,17 +97,16 @@ function ModelStatusRow({
               Suggestions stay off until this succeeds. Nothing else is affected.
             </p>
           </div>
-          <Button
+          <button
             type='button'
-            variant='ghost'
             onClick={onRetry}
-            trackId='retry_intent_model_download'
+            data-ph-capture-attribute-track-id='retry_intent_model_download'
             data-track-category='Settings'
             data-track-name='Intent suggestions: retry model download'
             className='shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted'
           >
             Retry
-          </Button>
+          </button>
         </div>
       </div>
     );
