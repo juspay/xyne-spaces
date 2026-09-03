@@ -29,6 +29,12 @@ import type {
 } from '@blocknote/core';
 import { withCollaboration } from '@blocknote/core/yjs';
 import '@blocknote/core/fonts/inter.css';
+import { Extension } from '@tiptap/core';
+import {
+  createSuggestionDecorationsPlugin,
+  type InlineSuggestionRow,
+  type SuggestionPaintData,
+} from './suggestionDecorations';
 import '@blocknote/mantine/style.css';
 import { en } from '@blocknote/core/locales';
 import { PresentationModal, usePresentation } from 'blocknote-layout-extensions';
@@ -138,6 +144,8 @@ interface CollaborativeCanvasEditorProps {
   canvasCreatedBy?: string | undefined;
   /** Effective role of current user on this canvas */
   currentUserRole?: CanvasRole | null;
+  /** Pending agent suggestions, painted inline as decorations (never content). */
+  suggestions?: InlineSuggestionRow[];
 }
 
 export const CollaborativeCanvasEditor = forwardRef<
@@ -165,6 +173,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
+      suggestions,
     },
     ref,
   ) => {
@@ -220,13 +229,32 @@ export const CollaborativeCanvasEditor = forwardRef<
       [placeholder],
     );
 
+    const suggestionPaintRef = useRef<SuggestionPaintData>({ rows: [], canEdit: false });
+    suggestionPaintRef.current = {
+      rows: suggestions ?? [],
+      canEdit: editable && !isReadOnly,
+    };
+    const suggestionExtension = useMemo(
+      () =>
+        Extension.create({
+          name: 'canvasSuggestionDecorations',
+          addProseMirrorPlugins: () => [
+            createSuggestionDecorationsPlugin(() => suggestionPaintRef.current),
+          ],
+        }),
+      [],
+    );
+
     const baseEditorOptions = {
       schema: canvasSchema,
       dictionary,
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,
-      _tiptapOptions: canvasTiptapOptions,
+      _tiptapOptions: {
+        ...canvasTiptapOptions,
+        extensions: [...canvasTiptapOptions.extensions, suggestionExtension],
+      },
     };
 
     const editorOptions =
@@ -494,6 +522,16 @@ export const CollaborativeCanvasEditor = forwardRef<
       }
     }, [editor]);
 
+    useEffect(() => {
+      if (!isEditorReady) return;
+      const view = (
+        editor as unknown as {
+          _tiptapEditor?: { view?: { updateState: (s: unknown) => void; state: unknown } };
+        }
+      )._tiptapEditor?.view;
+      view?.updateState(view.state);
+    }, [editor, isEditorReady, suggestions, editable, isReadOnly]);
+
     const hasMigratedContentRef = useRef(false);
 
     useEffect(() => {
@@ -582,6 +620,14 @@ export const CollaborativeCanvasEditor = forwardRef<
             typeof editorTyped.replaceBlocks
           >[1];
           editorTyped.replaceBlocks(editorTyped.document, nextBlocks);
+        },
+        setTextCursorPosition: (blockId: string, placement: 'start' | 'end' = 'start') => {
+          const editorTyped = editor as unknown as BlockNoteEditor<
+            BlockSchema,
+            InlineContentSchema,
+            StyleSchema
+          >;
+          editorTyped.setTextCursorPosition(blockId, placement);
         },
         exportMarkdown: (title: string) =>
           exportCanvasAsMarkdown(

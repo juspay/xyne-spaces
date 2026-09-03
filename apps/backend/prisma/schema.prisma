@@ -2999,6 +2999,7 @@ model Canvas {
   userStatuses CanvasUserStatus[]
   versions     CanvasVersion[]
   commentThreads CanvasCommentThread[]
+  suggestionChanges CanvasSuggestionChange[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
   // SDLC kind/lifecycle + provenance live on the artifact row, keyed by canvas id.
@@ -3048,6 +3049,30 @@ model CanvasVersion {
   @@index([createdBy])
 
   @@map("canvas_versions")
+  @@schema("public")
+}
+
+model CanvasSuggestionChange {
+  workspaceId      String // denormalized tenant key (stamped on insert)
+  id               String   @id @default(cuid())
+  canvasId         String
+  batchId          String // one agent proposal session; grouping + accept-all scope
+  op               String // insert | replace | delete | move
+  blockId          String? // target block for replace/delete/move; null for insert
+  proposedAnchorId String? // insert/move: block it follows at proposal time; immutable; null = top of doc
+  currentAnchorId  String? // insert/move: forwarding address; deletion events update this only
+  orderIndex       Int // position in the agent's reply
+  beforeContent    Json? // replace/delete: block snapshot for diff display + conflict hash
+  afterContent     Json? // insert/replace: proposed content
+  status           String   @default("PENDING") // PENDING | ACCEPTED | REJECTED | CONFLICT | STALE | SUPERSEDED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  canvas Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+
+  @@index([canvasId, status])
+  @@index([batchId])
+  @@map("canvas_suggestion_changes")
   @@schema("public")
 }
 
