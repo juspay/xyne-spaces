@@ -19,6 +19,7 @@ import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
 import { FlowController } from '../controllers/flowController';
 import { PermissionController } from '../controllers/permissionController';
+import { AppResourceController } from '../controllers/appResourceController';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { PlatformAdapterRegistry } from '../platform-adapters/types';
 import { SlackAdapter } from '../platform-adapters/slack';
@@ -28,6 +29,7 @@ const appController = new AppController();
 const chatController = new ChatController();
 const flowController = new FlowController();
 const permissionController = new PermissionController();
+const appResourceController = new AppResourceController();
 const platformRegistry = new PlatformAdapterRegistry();
 
 platformRegistry.register(new SlackAdapter());
@@ -61,6 +63,8 @@ router.get('/installed/:installedAppId/permissions', authMiddleware.authenticate
 router.post('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.setInstalledPermissions);
 router.post('/installed/:installedAppId/permissions/activate', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.activateInstalledPermissions);
 router.get('/installed/:installedAppId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getInstalledCommands);
+router.get('/installed/:installedAppId/resources/:resourceType', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appResourceController.listAttached);
+router.patch('/installed/:installedAppId/resources/:resourceType', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appResourceController.setAttached);
 
 router.post('/incoming-webhooks', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.createWebhook);
 router.get('/incoming-webhooks/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), incomingWebhookController.listWebhooks);
