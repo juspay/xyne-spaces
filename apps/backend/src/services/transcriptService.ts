@@ -1124,7 +1124,7 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate a short AI title from transcript
    * @param transcript - The formatted transcript text
-   * @returns AI-generated title (max 50 chars) or null if generation fails
+   * @returns AI-generated title (length is governed by the prompt) or null if generation fails
    */
   /**
    * Generate a short AI title from transcript with explicit retry loop.
@@ -1148,7 +1148,7 @@ Output ONLY the processed transcript, nothing else.`;
       return null;
     }
 
-    return extracted.content.substring(0, 60);
+    return extracted.content;
   }
 
   /**
