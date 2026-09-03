@@ -10,7 +10,7 @@ import { createClient } from '@xyne/spaces-sdk';
 
 const sdk = createClient({
   baseUrl: 'https://spaces.example.com',
-  apiKey: process.env.XYNE_SPACES_API_KEY,
+  useCookieAuth: true, // Uses existing Spaces session
 });
 
 const me = await sdk.users.me();
@@ -64,75 +64,28 @@ your bundle, and there are no transitive supply-chain surprises.
 
 ## Authentication
 
-The SDK accepts two credentials, both as `Authorization: Bearer …`:
-
-| | For | |
-|---|---|---|
-| **API key** `xyne_sk_…` | Unattended work — servers, CI, cron, bots | Documented below |
-| **SSO token** `xyne_sso_…` | Interactive tools where a human is present at start-up | See **[SSO.md](./SSO.md)** |
-
-They are interchangeable everywhere `apiKey` is accepted. The rest of this section
-describes API keys; SSO trades revocability and lifetime for never making a user
-handle a secret, and [SSO.md](./SSO.md) opens with the comparison.
-
-Create an API key from **Apps → API Keys** in the Spaces dashboard. You will see the
-key once; store it in your secret manager and pass it in:
+The SDK uses cookie-based authentication, reusing your existing Spaces session:
 
 ```typescript
 const sdk = createClient({
-  // The Spaces origin. The SDK adds /api/sdk/v1 itself.
-  baseUrl: process.env.XYNE_SPACES_BASE_URL,
-  apiKey: process.env.XYNE_SPACES_API_KEY,
+  baseUrl: 'https://spaces.example.com',
+  useCookieAuth: true,
 });
 ```
 
-Rotating without recreating the client:
-
-```typescript
-sdk.setApiKey(next);      // e.g. after fetching a rotated key
-sdk.clearApiKey();        // subsequent calls throw AuthError
-sdk.hasApiKey();          // whether one is set (not whether it is valid)
-```
-
-### What a key can do
-
-A key **acts as the person who created it**, with exactly their permissions, in
-exactly their workspace. It is not a service account and grants no elevation.
-Access is decided by the same per-table ACL the product runs behind, so a key
-cannot read a channel its owner cannot read.
-
-Four properties worth knowing before you deploy:
-
-| | |
-|---|---|
-| **Short-lived** | 30, 60, or 90 days, chosen at creation. There is no refresh step |
-| **Revocable immediately** | Revoking a key in the dashboard stops it on its very next request. The server checks the key's stored status on every call, not just its signature |
-| **Live permissions** | Role changes take effect on the next request, not on rotation. Deactivate a user and their keys stop working |
-| **Single workspace** | Access to a second workspace requires a second key, minted there |
-
-A user may hold **2 live keys** at a time — enough to rotate without downtime.
-Neither an expired nor a revoked key occupies a slot.
+This means the SDK acts as the currently logged-in user with exactly their
+permissions. Access is decided by the same per-table ACL the product runs behind.
 
 ### Identity
 
 ```typescript
 const me = await sdk.users.me();
-// { id, email, name, displayName, workspaceId, orgId, memberId,
-//   role, orgRole, keyExpiresAt }
+// { id, email, name, displayName, workspaceId, orgId, memberId, role, orgRole }
 ```
 
 This is a request, not a local decode: `role` and `orgRole` are read from the
 database on every server-side request rather than carried in the credential, so
-this call is the only way to get a full picture. Cache it — the identity behind a
-credential does not change.
-
-`keyExpiresAt` is ISO 8601. Long-running services should check it at startup and
-rotate ahead of time rather than discovering the expiry mid-request:
-
-```typescript
-const daysLeft = (Date.parse(me.keyExpiresAt) - Date.now()) / 86_400_000;
-if (daysLeft < 5) logger.warn('Spaces API key expires soon', { daysLeft });
-```
+this call is the only way to get a full picture.
 
 A few operations take the acting user's id as an argument rather than inferring
 it. Pass `me.id`:
