@@ -20,7 +20,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { Button } from '../../ui/Button/Button';
+
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
   loadArtifactPayload,
@@ -346,9 +346,8 @@ export const ReactArtifactView = ({
             <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (
-            <Button
-              variant='ghost'
-              trackId='react_artifact_refresh_data'
+            <button
+              data-ph-capture-attribute-track-id='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -365,12 +364,11 @@ export const ReactArtifactView = ({
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
                 aria-hidden='true'
               />
-            </Button>
+            </button>
           )}
           {onSave && (
-            <Button
-              variant='ghost'
-              trackId='react_artifact_save'
+            <button
+              data-ph-capture-attribute-track-id='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
@@ -387,7 +385,7 @@ export const ReactArtifactView = ({
               ) : (
                 <Save className='h-3.5 w-3.5' aria-hidden='true' />
               )}
-            </Button>
+            </button>
           )}
           {onExpand && (
             <button

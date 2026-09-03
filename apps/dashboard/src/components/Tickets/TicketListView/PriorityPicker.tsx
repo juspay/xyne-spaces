@@ -6,7 +6,6 @@ import { mutators } from '../../../zero/mutators';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { cn } from '../../../utils/classNames';
-import { Button } from '../../ui/Button/Button';
 
 interface PriorityPickerProps {
   ticketId: string;
@@ -81,11 +80,10 @@ export function PriorityPicker({
     >
       <div className='flex flex-col'>
         {PRIORITIES.map(p => (
-          <Button
+          <button
             key={p}
-            variant='ghost'
             type='button'
-            trackId='ticket_set_priority_row'
+            data-ph-capture-attribute-track-id='ticket_set_priority_row'
             onClick={e => {
               e.stopPropagation();
               setPriority(p);
@@ -99,7 +97,7 @@ export function PriorityPicker({
           >
             {getPriorityIcon(p)}
             <span className='text-foreground'>{label(p)}</span>
-          </Button>
+          </button>
         ))}
       </div>
     </Popover>

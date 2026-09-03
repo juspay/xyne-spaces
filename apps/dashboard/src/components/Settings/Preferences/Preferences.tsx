@@ -276,18 +276,17 @@ const NotificationKeywordsCard: FC = () => {
           {keywords.map(keyword => (
             <Badge key={keyword} variant='primary' className='flex items-center gap-1.5 pr-1'>
               <span className='text-xs'>{keyword}</span>
-              <Button
+              <button
                 type='button'
-                variant='ghost'
                 onClick={() => removeKeyword(keyword)}
-                trackId='remove_notification_keyword'
+                data-ph-capture-attribute-track-id='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
                 data-track-name='RemoveNotificationKeyword'
               >
                 <X className='h-3 w-3' />
-              </Button>
+              </button>
             </Badge>
           ))}
         </div>
@@ -337,12 +336,11 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <Button
+              <button
                 key={level.value}
-                variant='ghost'
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
-                trackId='set_global_desktop_notification_level'
-                trackProps={{ level: level.value }}
+                data-ph-capture-attribute-track-id='set_global_desktop_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -353,7 +351,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </Button>
+              </button>
             ))}
           </div>
         </div>
@@ -366,12 +364,11 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <Button
+              <button
                 key={level.value}
-                variant='ghost'
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
-                trackId='set_global_mobile_notification_level'
-                trackProps={{ level: level.value }}
+                data-ph-capture-attribute-track-id='set_global_mobile_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -382,7 +379,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </Button>
+              </button>
             ))}
           </div>
         </div>
