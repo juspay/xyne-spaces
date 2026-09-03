@@ -7,6 +7,7 @@ import {
   useClawGlobalMetrics,
   useClawMetricsAgentSlugs,
 } from '@/hooks/useClawMetrics';
+import { useBotCommitAnalytics } from '@/hooks/usePrAnalytics';
 import { useIsClawAdmin } from '@/hooks/useIsClawAdmin';
 import type { AdminOrgScope, ClawMetricsDays } from '@/services/claw/clawMetricsTypes';
 import { cn } from '@/utils/classNames';
@@ -38,6 +39,7 @@ const ClawMetricsScreen = (): ReactElement => {
   const global = useClawGlobalMetrics(days, orgScope);
   const agent = useClawAgentMetrics(selectedAgent ?? undefined, days, orgScope);
   const { data: agentSlugs = [] } = useClawMetricsAgentSlugs(orgScope);
+  const prAnalytics = useBotCommitAnalytics(days);
   const data = selectedAgent ? agent.data : global.data;
   const loading = selectedAgent ? agent.isLoading : global.isLoading;
   const error = selectedAgent ? agent.error : global.error;
@@ -150,12 +152,14 @@ const ClawMetricsScreen = (): ReactElement => {
               >
                 <AgentLeaderboard rows={global.data.topAgents} onAgentClick={setSelectedAgent} />
               </MetricsCard>
-              <MetricsCard
-                title='Bot commit analytics'
-                description='Pull request outcomes by bot attribution type. Shows merge rates for bot-attributed vs human-attributed PRs.'
-              >
-                <BotCommitAnalyticsTable analytics={global.data.botCommitAnalytics} />
-              </MetricsCard>
+              {prAnalytics.data && (
+                <MetricsCard
+                  title='Bot commit analytics'
+                  description='Pull request outcomes by bot attribution type. Shows merge rates for bot-attributed vs human-attributed PRs.'
+                >
+                  <BotCommitAnalyticsTable analytics={prAnalytics.data} />
+                </MetricsCard>
+              )}
             </>
           )}
 

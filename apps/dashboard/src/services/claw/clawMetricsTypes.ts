@@ -100,7 +100,6 @@ export interface GlobalMetrics {
   topAgents: GlobalMetricsAgentRow[];
   byProvider: GlobalMetricsProviderRow[];
   slowSessions: SlowSession[];
-  botCommitAnalytics: BotCommitAnalytics;
 }
 
 export interface SentimentComment {

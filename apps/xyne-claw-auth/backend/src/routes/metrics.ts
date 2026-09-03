@@ -421,18 +421,6 @@ interface MetricsResponse {
   topAgents: AgentRow[];
   byProvider: ProviderRow[];
   slowSessions: SlowSession[];
-  botCommitAnalytics: {
-    rows: Array<{
-      category: 'bot-only' | 'human-only' | 'mixed';
-      totalPRs: number;
-      mergedPRs: number;
-      rejectedPRs: number;
-      mergeRate: number;
-    }>;
-    totalAnalyzed: number;
-    totalPending: number;
-    totalFailed: number;
-  };
 }
 
 /**
@@ -889,21 +877,6 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
         ${orgFilter}
     `;
 
-    // Bot commit analytics - TODO: Move to main backend endpoint
-    // The pull_requests table is in the main backend database, not claw-auth database
-    // Returning empty data for now - this will be implemented in a separate endpoint
-    const botCommitAnalyticsRaw: Array<{
-      category: 'bot-only' | 'human-only' | 'mixed';
-      total_prs: bigint;
-      merged_prs: bigint;
-      rejected_prs: bigint;
-    }> = [];
-
-    const prAnalysisStatusRaw: Array<{
-      commitAnalysisStatus: string | null;
-      count: bigint;
-    }> = [];
-
     const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
 
     const t = totalsRaw[0];
@@ -1029,28 +1002,6 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
         };
       }),
       slowSessions: await fetchSlowSessions({ windowStart, windowEnd, scopeUserId, scopeOrgId, limit: 20 }),
-      botCommitAnalytics: {
-        rows: botCommitAnalyticsRaw.map((r) => {
-          const totalPRs = Number(r.total_prs);
-          const mergedPRs = Number(r.merged_prs);
-          return {
-            category: r.category,
-            totalPRs,
-            mergedPRs,
-            rejectedPRs: Number(r.rejected_prs),
-            mergeRate: totalPRs > 0 ? mergedPRs / totalPRs : 0,
-          };
-        }),
-        totalAnalyzed: prAnalysisStatusRaw
-          .filter((r) => r.commitAnalysisStatus === 'COMPLETED')
-          .reduce((sum, r) => sum + Number(r.count), 0),
-        totalPending: prAnalysisStatusRaw
-          .filter((r) => r.commitAnalysisStatus === 'PENDING')
-          .reduce((sum, r) => sum + Number(r.count), 0),
-        totalFailed: prAnalysisStatusRaw
-          .filter((r) => r.commitAnalysisStatus === 'FAILED')
-          .reduce((sum, r) => sum + Number(r.count), 0),
-      },
     };
 
     res.json(response);

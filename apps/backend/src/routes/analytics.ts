@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { AnalyticsController } from '../controllers/analyticsController';
 import { MultiPullRequestController } from '../controllers/multiPullRequestController';
+import { PrAnalyticsController } from '../controllers/prAnalyticsController';
 import { authorize } from '../middleware/authorize';
 import { aclMiddleware } from '../middleware/acl';
 import { analyticsAuthMiddleware } from '../middleware/analyticsAuth';
@@ -9,6 +10,7 @@ import { analyticsAuthMiddleware } from '../middleware/analyticsAuth';
 const router = Router();
 const analyticsController = new AnalyticsController();
 const multiPullRequestController = new MultiPullRequestController();
+const prAnalyticsController = new PrAnalyticsController();
 
 // Apply ANALYTICS authorization to all routes - INDIVIDUAL USER ACCESS ONLY (no group access)
 const analyticsAuth = authorize('ANALYTICS', AccessType.ADMIN, false);
@@ -74,5 +76,8 @@ router.get('/top-users-by-messages', aclMiddleware.checkAccess, analyticsAuth, a
 
 // Multi-Repository Pull Request endpoints
 router.get('/multi-pull-requests', aclMiddleware.checkAccess, analyticsAuth, multiPullRequestController.getAllPullRequests);
+
+// Bot Commit Analytics endpoint
+router.get('/bot-commit-analytics', aclMiddleware.checkAccess, analyticsAuth, prAnalyticsController.getBotCommitAnalytics);
 
 export default router;
