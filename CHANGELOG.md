@@ -1,3 +1,10 @@
+## [1.269.3](https://github.com/juspay/xyne-spaces/compare/v1.269.2...v1.269.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* message deep-links land on wrong message for older messages ([#1393](https://github.com/juspay/xyne-spaces/issues/1393)) ([e34ac5c](https://github.com/juspay/xyne-spaces/commit/e34ac5c1388b0a7057230429798fb1b7f04cb9f7))
+
 ## [1.269.2](https://github.com/juspay/xyne-spaces/compare/v1.269.1...v1.269.2) (2026-09-03)
 
 
