@@ -137,7 +137,7 @@ function isBlockedHostname(host: string): boolean {
 
 export async function assertHostIsExternal(
   host: string,
-  allowPrivate: boolean = isAllowPrivate(),
+  allowPrivate: boolean = isAllowPrivate() && config.env === 'development',
 ): Promise<void> {
   if (allowPrivate) {
     logger.debug(
@@ -214,7 +214,7 @@ export interface PinnedHost {
  */
 export async function resolveExternalHostPinned(
   host: string,
-  allowPrivate: boolean = isAllowPrivate(),
+  allowPrivate: boolean = isAllowPrivate() && config.env === 'development',
 ): Promise<PinnedHost | null> {
   if (allowPrivate) return null;
 

@@ -217,6 +217,13 @@ describe('archive content screening', () => {
     expect(stored.equals(archive)).toBe(true);
   });
 
+  it('refuses a zip entry of a non-allowlisted type even without executable bytes (.jar/.hta/.vbs)', async () => {
+    const archive = await zipOf({ 'app.jar': 'not really a program', 'notes.txt': 'ok' });
+    await expect(
+      __screenArchiveContentForTest(streamOf(archive, 64), 'lib.zip'),
+    ).rejects.toThrow(/not permitted/i);
+  });
+
   it('opens a zip inside a zip and refuses what it finds there', async () => {
     const inner = await zipOf({ 'eicar.com': eicarTestFile });
     const outer = await zipOf({ 'readme.txt': 'see inside', 'inner.zip': inner });

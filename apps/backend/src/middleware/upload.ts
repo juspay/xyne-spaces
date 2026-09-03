@@ -335,8 +335,11 @@ function inspectZipEntries(
             await entry.autodrain().promise();
             return;
           }
-          if (classifyUpload(undefined, entry.path) === 'blocked') {
-            throw new ArchiveViolation('blocked file type', entry.path);
+          // Deny-by-default, same as a direct upload (uploadFileFilter refuses
+          // anything not 'allowed'): otherwise a non-allowlisted-but-dangerous type
+          // (.jar/.hta/.vbs — no executable magic bytes) would slip through inside a zip.
+          if (classifyUpload(undefined, entry.path) !== 'allowed') {
+            throw new ArchiveViolation('file type not allowed', entry.path);
           }
           if (extensionOf(entry.path) === 'zip') {
             if (depth >= MAX_ARCHIVE_DEPTH) {

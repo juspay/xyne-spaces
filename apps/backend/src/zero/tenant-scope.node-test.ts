@@ -37,6 +37,27 @@ describe('scopeQueryToTenant', () => {
     assert.match(where, /"name":"workspaceId"/);
   });
 
+  it('scopes a singular (.one()) query and preserves the singular result format', () => {
+    const q = scopeQueryToTenant(zql.invitations.one(), ctx, 'oneInvitation');
+    // the workspace filter chains on AFTER .one()
+    assert.match(whereOf(q), /"name":"workspaceId"/);
+    assert.match(whereOf(q), /"value":"ws-1"/);
+    // ...and the singular result shape survives the rewrite
+    // @ts-ignore - asQueryInternals works with any Query type at runtime
+    assert.equal(asQueryInternals(q).format.singular, true);
+  });
+
+  it('scopes the root of a .related() query and keeps the related subquery', () => {
+    const q = scopeQueryToTenant(zql.invitations.related('workspace'), ctx, 'invitationsWithWorkspace');
+    // root table is scoped to the caller workspace
+    assert.match(whereOf(q), /"name":"workspaceId"/);
+    assert.match(whereOf(q), /"value":"ws-1"/);
+    // the related subquery is not dropped by the rewrite
+    // @ts-ignore - asQueryInternals works with any Query type at runtime
+    const related = asQueryInternals(q).ast.related ?? [];
+    assert.ok(related.length >= 1, 'related subquery preserved');
+  });
+
   it('limits organisations to those the caller belongs to or is linked to', () => {
     const where = whereOf(scopeQueryToTenant(zql.organizations, ctx, 'availableOrganizations'));
     assert.match(where, /"type":"or"/);

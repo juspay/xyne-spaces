@@ -63,10 +63,20 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
   const scopable = query as unknown as ScopableQuery;
 
   if (zeroTables[table] && 'workspaceId' in zeroTables[table].columns) {
+    // Not expected on the read path — real callers carry a workspaceId. An absent
+    // one still fails closed (Zero compiles `.where('workspaceId', undefined)` to
+    // `workspaceId = null`, which matches no rows), but log it so an unexpected
+    // context is visible rather than silently returning empty.
+    if (!ctx.workspaceId) {
+      logger.warn('zero_query_missing_workspace', { query: queryName, table });
+    }
     return scopable.where('workspaceId', ctx.workspaceId) as unknown as T;
   }
   const customRule = CUSTOM_SCOPES[table];
   if (customRule) {
+    if (!ctx.memberId) {
+      logger.warn('zero_query_missing_member', { query: queryName, table });
+    }
     return customRule(scopable, ctx) as unknown as T;
   }
   if (GLOBAL_REFERENCE_TABLES.has(table)) {
