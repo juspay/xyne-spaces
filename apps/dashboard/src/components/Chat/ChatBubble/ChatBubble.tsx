@@ -95,6 +95,7 @@ import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUt
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
@@ -192,14 +193,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const sender = useUser(message.senderId);
 
   // Message shortcuts — fetched per channel, used by HoverActionsToolbar
-  const [messageShortcuts, setMessageShortcuts] = useState<AppShortcutWithApp[]>([]);
+  const messageShortcuts = useChannelShortcuts(channelId, 'MESSAGE');
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  useEffect(() => {
-    appsService
-      .getChannelShortcuts(channelId, { type: 'MESSAGE' })
-      .then(setMessageShortcuts)
-      .catch(() => undefined);
-  }, [channelId]);
 
   const messageConversationId = message.conversationId;
 
