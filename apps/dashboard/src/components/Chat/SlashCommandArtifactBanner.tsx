@@ -161,7 +161,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
             </button>
           </div>
 
-          <p className='mt-2 min-w-0 truncate text-sm text-foreground' title={item.messagePreview}>
+          <p className='mt-2 min-w-0 truncate text-sm text-orange-800 dark:text-orange-100' title={item.messagePreview}>
             {item.messagePreview}
           </p>
 
