@@ -119,4 +119,43 @@ export class EntityAccessRepository {
       where: { shareableEntityType, entityId },
     });
   }
+
+  /**
+   * Removals run first: if the process dies between the two statements the caller has lost
+   * access rather than kept access it was meant to lose. Deliberately not a transaction —
+   * the ACL extension passes straight through inside one (`tenant/acl-extension.ts:188`),
+   * so staying outside keeps its scoping.
+   */
+  async applyDeltaForUser(params: {
+    workspaceId: string;
+    shareableEntityType: string;
+    userId: string;
+    added: string[];
+    removed: string[];
+    entityUserAccess: string;
+    metadata?: Prisma.InputJsonValue;
+  }): Promise<void> {
+    const { workspaceId, shareableEntityType, userId, added, removed, entityUserAccess, metadata } =
+      params;
+    const scope = { workspaceId, shareableEntityType, userId };
+
+    if (removed.length) {
+      await this.db.entityAccess.deleteMany({
+        where: { ...scope, entityId: { in: removed } },
+      });
+    }
+
+    if (added.length) {
+      await this.db.entityAccess.createMany({
+        data: added.map(entityId => ({
+          ...scope,
+          entityId,
+          entityUserAccess,
+          updatedAt: new Date(),
+          ...(metadata !== undefined ? { metadata } : {}),
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
 }
