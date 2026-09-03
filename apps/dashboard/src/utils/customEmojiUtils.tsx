@@ -13,6 +13,8 @@ import {
 // Warm the lazily-loaded emoji-datasource cache once at module load so the
 // synchronous `findUnicodeEmoji` lookup below can resolve standard shortcodes
 // (e.g. `:white_check_mark:`) without every caller needing its own effect.
+// Components that render reaction emoji should ALSO call `useEmojiDataReady()`
+// so they re-render if they mount before this load lands.
 preloadEmojiData();
 
 // Helper to check if emojiName is a custom emoji
@@ -83,6 +85,77 @@ const convertCustomEmojiUrls = (htmlContent: string): string => {
   return doc.body.innerHTML;
 };
 
+/**
+ * The outcome of resolving an emoji key, independent of how it is rendered.
+ * Extracted as a pure, side-effect-free function so the resolution chain can be
+ * reasoned about (and unit-tested) without React:
+ *   - `empty`   → no key supplied
+ *   - `image`   → render an <img> (custom: stream, or workspace custom-by-name)
+ *   - `unicode` → render a standard unicode emoji character
+ *   - `literal` → the value is already a unicode emoji char; render as-is
+ *   - `fallback`→ unresolvable shortcode; render a neutral icon, never raw text
+ */
+type EmojiResolution =
+  | { kind: 'empty' }
+  | { kind: 'image'; src: string; name: string }
+  | { kind: 'unicode'; char: string }
+  | { kind: 'literal'; text: string }
+  | { kind: 'fallback'; key: string };
+
+/**
+ * Resolve an emoji key to a display decision. Pure — no JSX, no I/O.
+ *
+ * Resolution order (a `:shortcode:` never falls through to raw text):
+ *   1. `custom:{id}:{name}`        → workspace custom-emoji image stream
+ *   2. literal unicode emoji char  → rendered as-is
+ *   3. `:name:` in `customEmojis`  → that workspace emoji's image (Slack-migrated case)
+ *   4. `:name:` standard shortcode → unicode character
+ *   5. anything unresolvable       → neutral fallback
+ *
+ * `customEmojis` is optional so existing callers keep working; pass the list
+ * from `useCustomEmojis()` at reaction-display sites to resolve migrated custom
+ * emoji by name. The unicode branch depends on the emoji-datasource cache being
+ * warm (see `preloadEmojiData` / `useEmojiDataReady`).
+ */
+const resolveReactionEmoji = (
+  emojiName: string | null | undefined,
+  customEmojis?: EmojiPickerEmoji[] | null,
+): EmojiResolution => {
+  if (!emojiName) return { kind: 'empty' };
+
+  // 1. custom:{id}:{name} — resolve to the emoji stream image.
+  const customEmoji = parseCustomEmoji(emojiName);
+  if (customEmoji) {
+    return {
+      kind: 'image',
+      src: `${API_BASE_URL}/emojis/${customEmoji.emojiId}/stream`,
+      name: customEmoji.name,
+    };
+  }
+
+  // 2. A real unicode emoji character (not a shortcode) — render it directly.
+  if (!isShortcode(emojiName)) {
+    return { kind: 'literal', text: emojiName };
+  }
+
+  const key = normalizeEmojiKey(emojiName);
+
+  // 3. Workspace custom emoji looked up by name.
+  const workspaceEmoji = findCustomEmoji(key, customEmojis);
+  if (workspaceEmoji) {
+    return { kind: 'image', src: workspaceEmoji.imgUrl, name: key };
+  }
+
+  // 4. Standard unicode emoji shortcode (e.g. :arrow_up: → ⬆️).
+  const unicode = findUnicodeEmoji(key);
+  if (unicode) {
+    return { kind: 'unicode', char: unifiedToEmoji(unicode.unified) };
+  }
+
+  // 5. Unresolvable (e.g. custom emoji deleted after migration).
+  return { kind: 'fallback', key };
+};
+
 // Render an emoji image (custom-emoji stream) inside a sized wrapper, with a
 // hidden text fallback shown only if the image fails to load.
 const renderEmojiImage = (src: string, name: string, customSizeClass: string): ReactElement => (
@@ -112,65 +185,52 @@ const renderEmojiImage = (src: string, name: string, customSizeClass: string): R
   </span>
 );
 
+interface RenderEmojiOptions {
+  /**
+   * Workspace custom-emoji list from `useCustomEmojis()`. Enables resolving
+   * Slack-migrated `:name:` reactions to their custom-emoji image.
+   */
+  customEmojis?: EmojiPickerEmoji[] | null | undefined;
+}
+
 /**
- * Render an emoji key for display.
+ * Render an emoji key for display. Thin rendering wrapper over
+ * `resolveReactionEmoji`; all resolution precedence lives there.
  *
- * Resolution order (a `:shortcode:` never falls through to raw text):
- *   1. `custom:{id}:{name}`        → workspace custom-emoji image stream
- *   2. `:name:` in `customEmojis`  → that workspace emoji's image (Slack-migrated case)
- *   3. `:name:` standard shortcode → unicode character
- *   4. a literal unicode character → rendered as-is
- *   5. anything unresolvable       → a neutral icon (never overflowing raw text)
- *
- * `customEmojis` is optional so existing callers keep working; pass the list
- * from `useCustomEmojis()` at reaction-display sites to resolve migrated custom
- * emoji by name.
+ * The first three params stay positional for backward-compatibility with the
+ * ~30 existing call sites; new behaviour is passed via the `options` object so
+ * callers never have to supply positional `undefined` placeholders.
  */
 const renderEmoji = (
   emojiName: string | null | undefined,
   customSizeClass = 'w-5 h-5',
   unicodeSizeClass = 'text-base',
-  customEmojis?: EmojiPickerEmoji[] | null,
+  options?: RenderEmojiOptions,
 ): ReactElement => {
-  if (!emojiName) return <span className={`${unicodeSizeClass} leading-none`} />;
+  const resolved = resolveReactionEmoji(emojiName, options?.customEmojis);
 
-  // 1. custom:{id}:{name} — resolve to the emoji stream image.
-  const customEmoji = parseCustomEmoji(emojiName);
-  if (customEmoji) {
-    const imageUrl = `${API_BASE_URL}/emojis/${customEmoji.emojiId}/stream`;
-    return renderEmojiImage(imageUrl, customEmoji.name, customSizeClass);
+  if (resolved.kind === 'image') {
+    return renderEmojiImage(resolved.src, resolved.name, customSizeClass);
   }
-
-  // A real unicode emoji character (not a shortcode) — render it directly.
-  if (!isShortcode(emojiName)) {
-    return <span className={`${unicodeSizeClass} leading-none`}>{emojiName}</span>;
+  if (resolved.kind === 'unicode') {
+    return <span className={`${unicodeSizeClass} leading-none`}>{resolved.char}</span>;
   }
-
-  const key = normalizeEmojiKey(emojiName);
-
-  // 2. Workspace custom emoji looked up by name.
-  const workspaceEmoji = findCustomEmoji(key, customEmojis);
-  if (workspaceEmoji) {
-    return renderEmojiImage(workspaceEmoji.imgUrl, key, customSizeClass);
+  if (resolved.kind === 'literal') {
+    return <span className={`${unicodeSizeClass} leading-none`}>{resolved.text}</span>;
   }
-
-  // 3. Standard unicode emoji shortcode (e.g. :arrow_up: → ⬆️).
-  const unicode = findUnicodeEmoji(key);
-  if (unicode) {
-    return (
-      <span className={`${unicodeSizeClass} leading-none`}>{unifiedToEmoji(unicode.unified)}</span>
-    );
+  if (resolved.kind === 'fallback') {
+    return <SmilePlus className='text-muted-foreground' aria-label={resolved.key} />;
   }
-
-  // 4. Unresolvable (e.g. custom emoji deleted after migration) — neutral icon,
-  // never the raw shortcode text that would overflow neighbouring rows.
-  return <SmilePlus className='text-muted-foreground' aria-label={key} />;
+  // kind === 'empty'
+  return <span className={`${unicodeSizeClass} leading-none`} />;
 };
 
 export {
   getEmojiDisplayName,
   parseCustomEmoji,
   isCustomEmoji,
+  resolveReactionEmoji,
   renderEmoji,
   convertCustomEmojiUrls,
 };
+export type { EmojiResolution, RenderEmojiOptions };
