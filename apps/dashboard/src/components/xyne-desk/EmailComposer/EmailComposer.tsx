@@ -69,6 +69,7 @@ import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 
 import { DraftCard } from '../DraftCard/DraftCard';
 import { EmailEditor } from '../EmailEditor/EmailEditor';
+import { EmailBodyRenderer } from '../EmailBody/EmailBodyRenderer';
 import { AIComposerPanel, AIRefineDropdown } from '../AIComposerPanel/AIComposerPanel';
 import {
   appendCitationBlock,
@@ -91,6 +92,7 @@ import {
 } from './recipients';
 import { useComposerResize, COMPOSER_MAX_HEIGHT_PX } from './useComposerResize';
 import { useComposerDragDrop } from './useComposerDragDrop';
+import { buildQuotedTrailHtml } from './replyQuote';
 import {
   MAX_EMAIL_ATTACHMENT_FILES,
   MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES,
@@ -414,6 +416,25 @@ export const EmailComposer = ({
     recipientsHydratedRef.current = null;
     lastDerivedReplyModeRef.current = null;
   }, [conversationId]);
+
+  // Quoted trail for the reply, rendered via EmailBodyRenderer below (same
+  // sanitize + Gmail-style "…" collapse it already uses for received mail).
+  // Quote source mirrors backend's `replyToEmail` rule: replyToEmailId, else latest.
+  // `emails` is only ever populated in reply mode, so no separate isComposeMode guard needed.
+  const quotedTrail = useMemo(() => {
+    if (!emails || emails.length === 0) return null;
+    const latestEmail = [...emails].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    const source = replyToEmailId
+      ? emails.find(e => e.id === replyToEmailId) || latestEmail
+      : latestEmail;
+    if (!source?.body) return null;
+    const html = buildQuotedTrailHtml({
+      from: source.from ?? '',
+      body: source.body,
+      createdAt: source.createdAt,
+    });
+    return { id: source.id, html };
+  }, [emails, replyToEmailId]);
 
   const lastLoadedContentRef = React.useRef<string>('');
   const justLoadedDraftRef = React.useRef(false);
@@ -1934,6 +1955,11 @@ export const EmailComposer = ({
 
   const composerFooter = (
     <>
+      {!isComposeMode && quotedTrail && (
+        <div className='px-4 pb-2'>
+          <EmailBodyRenderer body={quotedTrail.html} emailId={quotedTrail.id} />
+        </div>
+      )}
       {attachments.length > 0 && (
         <div className='px-4 pb-3'>
           <div className='flex flex-wrap gap-2'>
