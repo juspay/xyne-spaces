@@ -950,6 +950,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     };
 
+    // Last text this editor reported to the parent, used to tell the parent's echo of the
+    // user's own typing apart from a deliberate write coming back down.
+    const lastReportedTextRef = useRef(inputValue);
+
     // TipTap editor setup
     const editor = useEditor({
       extensions: [
@@ -984,6 +988,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       content: '',
       onUpdate: ({ editor }) => {
         const text = editor.getText();
+        lastReportedTextRef.current = text;
         onInputChange(text);
       },
       editorProps: {
@@ -1151,12 +1156,19 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
     // Sync inputValue changes from parent to editor (skip during voice recording)
     useEffect(() => {
-      if (editor && !editor.isFocused) {
-        const currentText = editor.getText();
-        if (currentText !== inputValue) {
-          editor.commands.setContent(inputValue);
-        }
-      }
+      if (!editor) return;
+
+      const currentText = editor.getText();
+      if (currentText === inputValue) return;
+
+      // Only echoes of the user's own typing are ignored — comparing against the last text
+      // this editor reported upward. Anything else is a deliberate write from the parent
+      // (Ask AI seeding a selection, a cleared composer) and must land even while focused,
+      // which the previous plain `!editor.isFocused` check silently dropped.
+      if (inputValue === lastReportedTextRef.current) return;
+
+      lastReportedTextRef.current = inputValue;
+      editor.commands.setContent(inputValue);
     }, [inputValue, editor]);
 
     // Clear editor content and attachments when inputValue is empty (after submit)

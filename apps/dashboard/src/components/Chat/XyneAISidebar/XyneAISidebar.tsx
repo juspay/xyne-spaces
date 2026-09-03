@@ -525,6 +525,14 @@ const XyneAISidebar = ({
         // Add new selections to existing ones
         if (newSelections.length > 0) {
           setActiveSelectionInfos(prev => [...prev, ...newSelections]);
+
+          // Drop the selected text into the composer so it can be edited or sent as-is.
+          // Replaces whatever was there — a new selection starts a new prompt.
+          const selectedText = newSelections
+            .map(selection => selection.text)
+            .filter(Boolean)
+            .join('\n\n');
+          if (selectedText) setInputValue(selectedText);
         }
       }
     };
