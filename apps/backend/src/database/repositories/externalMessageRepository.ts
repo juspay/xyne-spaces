@@ -64,6 +64,24 @@ export class ExternalMessageRepository {
     });
   }
 
+  /**
+   * Any link on these emails owned by a source OTHER than the given one — i.e.
+   * "does another integration already own this conversation?". Used to stop the
+   * channel-scoped thread fallback from adopting a thread that belongs to a
+   * different app, mailbox, or Slack desk on the same channel.
+   */
+  async findForeignLinkByEmailIds(emailIds: string[], excludeExternalSourceId: string) {
+    if (emailIds.length === 0) return null;
+    return await this.db.externalMessage.findFirst({
+      where: {
+        entityType: ExternalEntityType.EMAIL,
+        entityId: { in: emailIds },
+        externalSourceId: { not: excludeExternalSourceId },
+      },
+      select: { id: true, externalSourceId: true },
+    });
+  }
+
   /** Find the newest app-desk link for the given email (entity) IDs, scoped to the given app-desk source IDs (ExternalMessage has no FK relation to filter by sourceType). */
   async findLatestAppDeskLinkByEmailIds(emailIds: string[], externalSourceIds: string[]) {
     if (emailIds.length === 0 || externalSourceIds.length === 0) return null;

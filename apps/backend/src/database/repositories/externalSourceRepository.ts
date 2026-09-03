@@ -5,7 +5,7 @@
 
 import { DatabaseClient } from '../client';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
-import { buildAppDeskSourceName, resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
+import { buildChannelAppSourceName, resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import type { ExternalSource } from '@prisma/client';
@@ -302,7 +302,7 @@ export class ExternalSourceRepository {
     }
 
     const source = await this.create({
-      name: buildAppDeskSourceName(channelId),
+      name: buildChannelAppSourceName(installedAppId, channelId),
       sourceType: 'app-desk',
       displayName,
       channelId,

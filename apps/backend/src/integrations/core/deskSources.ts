@@ -3,8 +3,8 @@ export const DESK_SOURCE_PREFIXES = {
   SLACK: 'slack-desk-',
 } as const;
 
-export const buildAppDeskSourceName = (channelId: string): string =>
-  `${DESK_SOURCE_PREFIXES.APP}${channelId}`;
+export const buildChannelAppSourceName = (installedAppId: string, channelId: string): string =>
+  `${DESK_SOURCE_PREFIXES.APP}${installedAppId}-${channelId}`;
 
 /**
  * Namespace an app-supplied message id by its source.
@@ -34,11 +34,26 @@ export const buildSlackDeskSourceName = (slackChannelId: string): string =>
 
 export const resolveAppDeskInstalledAppId = (
   source: { externalIdentifier: string | null; name: string },
-): string | null =>
-  source.externalIdentifier ||
-  (source.name.startsWith(DESK_SOURCE_PREFIXES.APP)
-    ? source.name.slice(DESK_SOURCE_PREFIXES.APP.length) || null
-    : null);
+): string | null => {
+  if (source.externalIdentifier) {
+    return source.externalIdentifier;
+  }
+  if (!source.name.startsWith(DESK_SOURCE_PREFIXES.APP)) {
+    return null;
+  }
+  const suffix = source.name.slice(DESK_SOURCE_PREFIXES.APP.length);
+  if (!suffix) {
+    return null;
+  }
+  // New shape: app-desk-<installedAppId>-<channelId>. Both ids are cuid()s and
+  // never contain '-', so exactly two segments identifies the new shape.
+  const segments = suffix.split('-');
+  if (segments.length === 2 && segments[0] && segments[1]) {
+    return segments[0];
+  }
+  // Legacy shape: app-desk-<channelId> (pre-externalIdentifier rows).
+  return suffix;
+};
 
 export const extractSlackChannelId = (sourceName: string): string | null =>
   sourceName.startsWith(DESK_SOURCE_PREFIXES.SLACK)
