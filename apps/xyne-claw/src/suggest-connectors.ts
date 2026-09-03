@@ -23,6 +23,7 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "./logger.js";
+import { SERVER } from "./config.js";
 
 const log = createLogger("suggest-connectors");
 
@@ -42,8 +43,47 @@ export interface SuggestConnectorsRef {
 }
 
 const MAX_SUGGESTIONS = 6;
+const AVAILABILITY_TIMEOUT_MS = 2000;
 
-export function buildSuggestConnectorsTool(ref: SuggestConnectorsRef): ToolDefinition {
+interface ConnectorAvailability {
+  connected: string[];
+  known: boolean;
+}
+
+const UNKNOWN_AVAILABILITY: ConnectorAvailability = { connected: [], known: false };
+
+async function fetchAvailability(
+  userId: string | undefined,
+  serverTypes: string[],
+): Promise<ConnectorAvailability> {
+  if (!userId || !SERVER.s2sKey || serverTypes.length === 0) return UNKNOWN_AVAILABILITY;
+  try {
+    const base = SERVER.authServiceUrl.replace(/\/$/, "");
+    const res = await fetch(`${base}/claw/api/v1/internal/connectors/available`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
+      body: JSON.stringify({ userId, serverTypes }),
+      signal: AbortSignal.timeout(AVAILABILITY_TIMEOUT_MS),
+    });
+    if (!res.ok) return UNKNOWN_AVAILABILITY;
+    const body = (await res.json()) as { connected?: unknown; known?: unknown };
+    if (body.known !== true || !Array.isArray(body.connected)) return UNKNOWN_AVAILABILITY;
+    return {
+      connected: body.connected.filter((t): t is string => typeof t === "string"),
+      known: true,
+    };
+  } catch (err) {
+    log.warn(
+      `[suggest-connectors] availability lookup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return UNKNOWN_AVAILABILITY;
+  }
+}
+
+export function buildSuggestConnectorsTool(
+  ref: SuggestConnectorsRef,
+  userId?: string,
+): ToolDefinition {
   return {
     name: SUGGEST_CONNECTORS_TOOL_NAME,
     label: "Suggest Connectors",
@@ -148,16 +188,27 @@ export function buildSuggestConnectorsTool(ref: SuggestConnectorsRef): ToolDefin
           : `[suggest-connectors] queued ${serverTypes.length}: ${serverTypes.join(", ")}`,
       );
 
+      const availability = listAll
+        ? UNKNOWN_AVAILABILITY
+        : await fetchAvailability(userId, serverTypes);
+      const connected = availability.connected.filter((t) => serverTypes.includes(t));
+
+      const stateNote = connected.length
+        ? ` ${connected.join(", ")} ${connected.length === 1 ? "is" : "are"} ALREADY CONNECTED and the card shows it that way — do NOT tell the user to press Connect or link an account for ${connected.length === 1 ? "it" : "them"}; say what you can already do with ${connected.length === 1 ? "it" : "them"}.`
+        : availability.known
+          ? " None of them are connected yet, so each card carries a Connect button."
+          : "";
+
       return {
         content: [
           {
             type: "text" as const,
             text: listAll
               ? "A connector list with a Browse button will be shown with your reply. Do NOT list the connectors in your text — say at most one short line."
-              : `Connector cards for ${serverTypes.join(", ")} will be shown with your reply, each with a Connect button. Do NOT list or describe these connectors in your text — say at most one short line about why they help.`,
+              : `Connector cards for ${serverTypes.join(", ")} will be shown with your reply. Do NOT list or describe these connectors in your text — say at most one short line about why they help.${stateNote}`,
           },
         ],
-        details: { serverTypes, listAll },
+        details: { serverTypes, listAll, ...(availability.known ? { connected } : {}) },
       };
     },
   };

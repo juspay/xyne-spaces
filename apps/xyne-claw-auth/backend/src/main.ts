@@ -11,6 +11,7 @@ import { errorMiddleware } from "./lib/http.js";
 import { serversRouter } from "./routes/servers.js";
 import { connectionsRouter } from "./routes/connections.js";
 import { mcpRouter } from "./routes/mcp.js";
+import { connectorsInternalRouter } from "./routes/connectors-internal.js";
 import { awakeningRouter } from "./routes/awakening.js";
 import { ensureTickScheduler, closeAwakeningQueues } from "./queue/awakening-queue.js";
 import { initAwakeningTickWorker, closeAwakeningTickWorker } from "./queue/awakening-tick-worker.js";
@@ -233,6 +234,7 @@ app.use(`${BASE}/internal/artifact-apps`, requireStrictS2S, artifactAppsInternal
 app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
 app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
 app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
+app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
 // Generic live OAuth-token read for every connector — GET /users/:userId/oauth/:provider/token.
 // Mounted before the per-provider routers (which now only serve authorize/callback)
 // so it owns the `/token` path. Same requireAuth guard; the handler additionally
