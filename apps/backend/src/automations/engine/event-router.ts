@@ -13,14 +13,13 @@ import {
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import { triggerRegistry } from '../triggers/trigger-registry';
-import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
 import type { AutomationEvent } from '../types/automation-events';
+import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
 
-// Filter keys this event's matcher honours as scope, mapped to the id the event carries.
-// Only honoured keys may appear: judging a key the matcher ignores (a stray boardIds on an
-// email config) would drop runs that should have fired. Returning null means never
-// pre-filtered — EMAIL_SENT because its wire payload is { emailId } only and hydrating it
-// would add queries to the awaited reply-send path, WEBHOOK because it has no scope.
+// Filter keys this event's matcher honours as scope, mapped to the id the event carries. A key
+// the matcher ignores must never appear — judging it would drop runs that should have fired.
+// null = never pre-filtered: EMAIL_SENT's wire payload is { emailId } only and hydrating it
+// would add queries to the awaited reply-send path; WEBHOOK has no scope.
 function eventScope(
   eventType: string,
   payload: Record<string, unknown>,
@@ -51,9 +50,8 @@ function configuredIds(filter: Record<string, unknown>, key: string): string[] {
   return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string' && !!v.trim()) : [];
 }
 
-// True only when matchFilters is guaranteed to reject: some honoured key is configured and
-// the event's actual id is known and absent from it. An unset filter or an id we cannot read
-// yields false — the pre-filter never guesses, and the worker decides.
+// True only when matchFilters is guaranteed to reject. An unset filter or an id we cannot
+// read yields false — the pre-filter never guesses, the worker decides.
 function isDefiniteScopeMismatch(
   scope: Record<string, unknown>,
   filter: Record<string, unknown>,
@@ -61,8 +59,7 @@ function isDefiniteScopeMismatch(
   return Object.entries(scope).some(([key, actual]) => {
     const wanted = configuredIds(filter, key);
     if (wanted.length === 0 || typeof actual !== 'string' || !actual) return false;
-    // Raw and trimmed: the ticket/message matchers trim configured ids, the email/tag
-    // asStringArray does not. Comparing both ways can only keep a candidate, never drop one.
+    // Raw and trimmed: ticket/message matchers trim configured ids, email/tag ones do not.
     return !wanted.some(v => v === actual || v.trim() === actual);
   });
 }
@@ -81,8 +78,7 @@ class EventRouter {
       return;
     }
 
-    // Skip creating a row + queue job for candidates whose scope cannot match this event.
-    // Does NOT replace the worker's matchFilters — that stays the correctness backstop.
+    // Skip candidates whose scope cannot match; the worker's matchFilters stays the backstop.
     const skipIds = await this.scopeMismatches(
       eventType,
       payload as unknown as Record<string, unknown>,
@@ -101,7 +97,6 @@ class EventRouter {
         preFiltered += 1;
         continue;
       }
-
       try {
         const metadata = parseAutomationMetadata(workflow.metadata);
         const initialContext = {
@@ -153,11 +148,7 @@ class EventRouter {
     );
   }
 
-  /**
-   * Ids of candidates whose configured scope cannot match this event. Fails open at every
-   * step — an event with no scope, a config that does not parse into this trigger's shape,
-   * nothing scoped, a failed hydration — so an unjudged candidate still gets its row.
-   */
+  /** Ids of candidates whose configured scope cannot match. Fails open at every step. */
   private async scopeMismatches(
     eventType: string,
     payload: Record<string, unknown>,
@@ -168,9 +159,8 @@ class EventRouter {
     const keys = Object.keys(eventScope(eventType, {}) ?? {});
     if (keys.length === 0) return skip;
 
-    // Only a candidate whose stored trigger is this event can be judged with this event's
-    // scope semantics. parseAutomationConfig is an unvalidated JSON.parse ("null" and "{}"
-    // both parse fine), so read defensively — an unreadable config is simply not judged.
+    // parseAutomationConfig is an unvalidated JSON.parse ("null" and "{}" both parse fine),
+    // so read defensively — a config that is not this event's trigger is left to the worker.
     const scoped: Array<[string, Record<string, unknown>]> = [];
     for (const workflow of candidates) {
       const config = parseAutomationConfig(workflow.context) as {
@@ -183,9 +173,8 @@ class EventRouter {
     if (scoped.length === 0) return skip; // nothing to judge — never hydrate
 
     let scope = eventScope(eventType, payload);
-    // Ticket events are exactly the events carrying boardIds, and exactly the events whose
-    // wire payload has only ticketId — so hydrate once for the batch. Everything else is
-    // judged on wire data alone and never hydrates.
+    // Ticket events are exactly the events carrying boardIds, and the only ones whose wire
+    // payload lacks the ids — everything else is judged on wire data and never hydrates.
     if (scope && 'boardIds' in scope) {
       const impl = triggerRegistry.has(eventType) ? triggerRegistry.get(eventType) : null;
       const hydrate = impl?.hydratePayload?.bind(impl);
