@@ -770,6 +770,14 @@ export class App {
 
     this.app.use('/internal', internalRoutes);
 
+    // API versioning placeholder
+    this.app.use('/api/v1', (_req, res) => {
+      res.json({
+        success: true,
+        message: 'API v1 endpoint - ready for implementation',
+        timestamp: new Date().toISOString(),
+      });
+    });
   }
 
   private initializeErrorHandling(): void {
