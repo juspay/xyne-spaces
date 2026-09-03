@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -195,15 +196,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
 
-  // Message shortcuts — fetched per channel, used by HoverActionsToolbar
-  const [messageShortcuts, setMessageShortcuts] = useState<AppShortcutWithApp[]>([]);
+  // Message shortcuts are channel-level data. React Query shares this request across every
+  // mounted ChatBubble instead of issuing one request per visible message.
+  const { data: messageShortcuts = [] } = useQuery({
+    queryKey: ['channel-shortcuts', channelId, 'MESSAGE'],
+    queryFn: () => appsService.getChannelShortcuts(channelId, { type: 'MESSAGE' }),
+  });
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  useEffect(() => {
-    appsService
-      .getChannelShortcuts(channelId, { type: 'MESSAGE' })
-      .then(setMessageShortcuts)
-      .catch(() => undefined);
-  }, [channelId]);
 
   const messageConversationId = message.conversationId;
 
