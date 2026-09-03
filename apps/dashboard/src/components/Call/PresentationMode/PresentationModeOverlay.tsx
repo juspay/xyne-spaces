@@ -105,6 +105,8 @@ export function PresentationModeOverlay({
           transition={{ duration: 0.25, ease: 'easeInOut' }}
           // Fallback: click anywhere to exit when fullscreen API is unavailable
           onClick={fullscreenFailed ? onExit : undefined}
+          data-track-category='CALLS'
+          data-track-name='EXIT_PRESENTATION_MODE'
         >
           {participant ? (
             <ParticipantTile
@@ -113,6 +115,10 @@ export function PresentationModeOverlay({
               avatarSize='large'
               aiController={aiController}
               requestedAiController={requestedAiController}
+              // Presentation mode is a clean full-bleed view: no name label and no
+              // speaking/raised-hand ring (a coloured frame around the whole screen).
+              hideNameLabel={true}
+              hideSpeakingIndicator={true}
             />
           ) : (
             <p className='text-white/40 text-sm'>Waiting for remote participant…</p>

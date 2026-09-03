@@ -17,13 +17,9 @@ import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
 import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
-import { ActivityClassification } from '@xyne/shared';
+import { ActivityClassification, UserType } from '@xyne/shared';
+import { Bot, UserUser02 } from '@xyne/icons';
 import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
 import { useShortcut } from '../../../shortcuts';
@@ -64,6 +60,7 @@ import {
   NotificationBellOn,
 } from '@xyne/icons';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { Button } from '../../ui/Button/Button';
 
 type ActivityTab =
   | 'all'
@@ -119,6 +116,27 @@ export const isDirectUserMention = (messageContent: string, userId: string): boo
   const userMentions = extractUserMentions(messageContent);
   return userMentions.includes(userId);
 };
+
+type ActorFilter = 'all' | 'user' | 'agent';
+
+// Agent covers both automated actor kinds; only USER is a human. `all` maps to
+// undefined so the query drops the actor filter entirely rather than matching
+// every type — the three orphan rows have an actorId that resolves to no user.
+const ACTOR_FILTER_TYPES: Record<ActorFilter, UserType[] | undefined> = {
+  all: undefined,
+  user: [UserType.USER],
+  agent: [UserType.BOT, UserType.APP],
+};
+
+const ACTOR_FILTER_OPTIONS: Array<{
+  value: ActorFilter;
+  label: string;
+  icon?: ComponentType<{ size?: number; className?: string }>;
+}> = [
+  { value: 'all', label: 'All' },
+  { value: 'user', label: 'User', icon: UserUser02 },
+  { value: 'agent', label: 'Agent', icon: Bot },
+];
 
 const TABS: TabConfig[] = [
   { value: 'all', label: 'All', filter: isAllVisibleActivity },
@@ -213,6 +231,11 @@ const ActivityListView = (): ReactElement => {
 
   // All hooks must be called before any conditional returns
   const [activeTab, setActiveTab] = useState<ActivityTab>('all');
+  const [actorFilter, setActorFilter] = useState<ActorFilter>(() => {
+    const stored = window.localStorage.getItem('activity_actor_filter');
+    return stored === 'all' || stored === 'user' || stored === 'agent' ? stored : 'all';
+  });
+
   const [showUnreadOnly, setShowUnreadOnly] = useState<boolean>(() => {
     const unread = window.localStorage.getItem('activity_unread_toggle');
     return unread === 'true';
@@ -266,23 +289,20 @@ const ActivityListView = (): ReactElement => {
 
   const handleTabChange = useCallback(
     (value: string): void => {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_TAB_CHANGED,
-        tab: value as ActivityTab,
-        showUnreadOnly: showUnreadOnly,
-      });
       setActiveTab(value as ActivityTab);
     },
     [showUnreadOnly],
   );
 
   const handleUnreadToggle = useCallback((checked: boolean): void => {
-    mixpanelService.track(EVENTS.INITIATE_ACTION, {
-      type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_UNREAD_TOGGLED,
-    });
     setShowUnreadOnly(checked);
     window.localStorage.setItem('activity_unread_toggle', String(checked));
     activityVirtuosoRef.current?.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
+  }, []);
+
+  const handleActorFilterChange = useCallback((next: ActorFilter): void => {
+    setActorFilter(next);
+    window.localStorage.setItem('activity_actor_filter', next);
   }, []);
 
   const handleActionableToggle = useCallback((checked: boolean): void => {
@@ -331,6 +351,11 @@ const ActivityListView = (): ReactElement => {
           'ticket_pr_declined',
           'ticket_pr_reviewer_assigned',
           'ticket_qa_assigned',
+          'ticket_release_started',
+          'ticket_release_completed',
+          'ticket_release_cancelled',
+          'ticket_release_paused',
+          'ticket_release_planning',
           'ticket_priority',
           'ticket_user_group',
           'ticket_title',
@@ -373,7 +398,7 @@ const ActivityListView = (): ReactElement => {
     setHasMore(true);
     setIsLoading(true);
     activityLoadStartTimeRef.current = Date.now();
-  }, [activeTab, showUnreadOnly]);
+  }, [activeTab, showUnreadOnly, actorFilter]);
 
   const getClassificationFilter = (tab: ActivityTab): ActivityClassification[] | undefined => {
     switch (tab) {
@@ -397,8 +422,9 @@ const ActivityListView = (): ReactElement => {
         types: currentTypes,
         classification: classificationFilter,
         ...(showUnreadOnly ? { isRead: false } : {}),
+        ...(ACTOR_FILTER_TYPES[actorFilter] ? { actorTypes: ACTOR_FILTER_TYPES[actorFilter] } : {}),
       }),
-    [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter, showUnreadOnly],
+    [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter, showUnreadOnly, actorFilter],
   );
 
   const [activitiesPage, activitiesDetails, activitiesMeta] = useCachedQuery(activitiesQuery, {
@@ -880,7 +906,7 @@ const ActivityListView = (): ReactElement => {
             {/* Unread-only filter */}
             <label
               htmlFor='activity-unread-toggle'
-              className='flex h-7 items-center gap-2 px-2 rounded-[10px] cursor-pointer select-none transition-colors hover:bg-sidebar-accent'
+              className='flex h-7 items-center gap-2 px-2 rounded-[10px] cursor-pointer select-none transition-colors hover:bg-foreground/[6%]'
             >
               <span className='text-sm font-medium text-muted-foreground'>Unread</span>
               <Switch.Root
@@ -908,6 +934,57 @@ const ActivityListView = (): ReactElement => {
               </Switch.Root>
             </label>
 
+            {/* Agent / User actor filter */}
+            <div
+              role='radiogroup'
+              aria-label='Filter activity by actor'
+              className='flex items-center gap-0.5 rounded-xl bg-foreground/[6%] p-0.5'
+            >
+              {ACTOR_FILTER_OPTIONS.map(option => {
+                const isActive = option.value === actorFilter;
+                const Icon = option.icon;
+                const showLabel = isActive || !Icon;
+
+                return (
+                  <button
+                    key={option.value}
+                    type='button'
+                    role='radio'
+                    aria-checked={isActive}
+                    aria-label={option.label}
+                    onClick={() => handleActorFilterChange(option.value)}
+                    className={cn(
+                      'flex items-center rounded-[10px] pl-2 pr-2.5 py-1',
+                      'transition-[background-color,color,box-shadow] duration-300 ease-in-out',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                      isActive
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                    data-track-category='ACTIVITY'
+                    data-track-name='ACTOR_FILTER_TOGGLE'
+                    data-track-metadata={JSON.stringify({ filter_value: option.value })}
+                    data-testid={`activity-actor-filter-${option.value}`}
+                  >
+                    {Icon && <Icon size={14} className='shrink-0' />}
+                    <span
+                      className={cn(
+                        'grid overflow-hidden transition-[grid-template-columns,opacity,margin] duration-300 ease-in-out',
+                        Icon ? 'ml-1' : null,
+                        showLabel
+                          ? 'grid-cols-[1fr] opacity-100'
+                          : 'grid-cols-[0fr] opacity-0 ml-0',
+                      )}
+                    >
+                      <span className='min-w-0 overflow-hidden whitespace-nowrap text-xs font-medium tracking-[-0.28px]'>
+                        {option.label}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
             {/* 3-dot menu with Actionable Toggle and View Toggle (Desktop & Mobile) */}
             <div className='relative' ref={mobileMenuRef}>
               <button
@@ -925,12 +1002,15 @@ const ActivityListView = (): ReactElement => {
               {showMobileMenu && (
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                   {/* Mark as Read */}
-                  <button
+                  <Button
+                    variant='ghost'
+                    trackId='mark_tab_as_read'
+                    trackProps={{ tab: activeTab }}
                     onClick={() => {
                       markActiveTabUnread();
                       setShowMobileMenu(false);
                     }}
-                    className='w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
+                    className='w-full px-4 py-2 flex items-center justify-start gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors h-auto'
                     data-track-category='ACTIVITY'
                     data-track-name={`MARK_TAB_READ`}
                     data-track-metadata={JSON.stringify({
@@ -941,7 +1021,7 @@ const ActivityListView = (): ReactElement => {
                   >
                     <MarkAsRead size={16} />
                     <span>Mark as read</span>
-                  </button>
+                  </Button>
 
                   {/* Divider */}
                   <div className='border-t border-border my-1'></div>

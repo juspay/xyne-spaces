@@ -1,5 +1,5 @@
 import { ReactElement, useRef, useEffect } from 'react';
-import { Search, X } from 'lucide-react';
+import { SearchDefault as Search, MultipleCrossCancelDefault as X } from '@xyne/icons';
 
 interface SearchInputProps {
   value: string;

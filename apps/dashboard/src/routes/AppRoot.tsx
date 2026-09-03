@@ -8,6 +8,7 @@ import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
+import IntentPlaygroundScreen from './IntentPlaygroundScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
@@ -50,6 +51,7 @@ import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
 import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
+import SdlcWindow from './SdlcScreen/SdlcWindow';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
@@ -109,6 +111,7 @@ import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
 import { RecapPanel } from '../components/RecapPanel';
+import { RadarPanel } from '../components/RadarPanel';
 import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
@@ -205,6 +208,7 @@ import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationMo
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
+import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
@@ -236,6 +240,7 @@ import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
 import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
+import ArtifactAppScreen from './AIScreen/library/apps/ArtifactAppScreen';
 import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
 import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
 import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
@@ -243,6 +248,7 @@ import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
+import AIDigitalTwinScreen from './AIScreen/screens/AIDigitalTwinScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
@@ -477,20 +483,20 @@ const AppRoot = (): ReactElement => {
 
   // Get current location to check if we're on onboarding
   const location = useLocation();
-  const sdlcRepoId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
+  const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
   // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
   // must not also render one (that would double it).
   const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
-  const previousSdlcRepoIdRef = useRef<string | null>(null);
+  const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const previousRepoId = previousSdlcRepoIdRef.current;
-    if (previousRepoId && previousRepoId !== sdlcRepoId) {
+    const previousChannelId = previousSdlcChannelIdRef.current;
+    if (previousChannelId && previousChannelId !== sdlcChannelId) {
       useExternalDebuggerStore.getState().close();
       setIsXyneDebuggerOpen(false);
     }
-    previousSdlcRepoIdRef.current = sdlcRepoId;
-  }, [sdlcRepoId]);
+    previousSdlcChannelIdRef.current = sdlcChannelId;
+  }, [sdlcChannelId]);
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
@@ -536,12 +542,9 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
-  // The external SDLC debugger takes the right panel over Ask AI. On an
-  // /sdlc/<repoId> route SdlcScreen renders its own assistant + debugger, so
-  // neither app-shell panel should appear there.
-  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcRepoId === null;
+  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcChannelId === null;
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
-  // so the host must not also show one (covers both /sdlc and /sdlc/<repoId>).
+  // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
     isXyneAIDrawerOpen &&
     !isMobile &&
@@ -1084,7 +1087,17 @@ export const router = createBrowserRouter(
                   ),
                   children: [
                     { index: true, element: <Navigate to='chat/new' replace /> },
-                    { path: 'chat/new', element: <AIScreen /> },
+                    // ONE route, with `new` as an ordinary value of :sessionId.
+                    //
+                    // Declaring `chat/new` separately looks harmless but makes two
+                    // DISTINCT routes out of the same component, so moving between
+                    // them unmounts and remounts AIScreen — wiping activeSessionId,
+                    // chatKey and showChatView. The remount re-seeds from
+                    // sessionStorage, which can still hold the previous thread, so
+                    // the URL effect navigates back to it and remounts again: the
+                    // screen visibly bounces between routes on every thread switch.
+                    // With a single route, changing the param re-renders in place.
+                    { path: 'chat/:sessionId', element: <AIScreen /> },
                     { path: 'daily-brief', element: <AIDailyBriefScreen /> },
                     { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                     { path: 'library', element: <AILibraryScreen /> },
@@ -1105,6 +1118,7 @@ export const router = createBrowserRouter(
                     { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
                     { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                     { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+                    { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
                     {
                       path: 'knowledge',
                       element: <AIKnowledgeScreen />,
@@ -1127,22 +1141,10 @@ export const router = createBrowserRouter(
                         </RequireOrgManager>
                       ),
                     },
+                    { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
                     {
                       element: <AISectionLayout />,
                       children: [
-                        {
-                          path: 'digital-twin',
-                          element: <ClawDigitalTwinScreen />,
-                          children: [
-                            { index: true, element: <DigitalTwinMemoriesTab /> },
-                            { path: 'hot', element: <DigitalTwinHotTab /> },
-                            { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                            { path: 'recall', element: <DigitalTwinRecallTab /> },
-                            { path: 'graph', element: <DigitalTwinGraphTab /> },
-                            { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                            { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                          ],
-                        },
                         { path: 'metrics', element: <ClawMetricsScreen /> },
                         { path: 'settings', element: <ClawSettingsScreen /> },
                       ],
@@ -1152,6 +1154,13 @@ export const router = createBrowserRouter(
                 {
                   path: 'onboarding',
                   element: <QuestionnaireScreen />,
+                },
+                {
+                  // Dev-only surface for the on-device intent classifier. Bypasses the
+                  // public-channel eligibility gate, so it is intentionally not linked
+                  // from product UI. See docs/ON_DEVICE_INTENT.md
+                  path: 'intent-playground',
+                  element: <IntentPlaygroundScreen />,
                 },
                 {
                   path: 'rca',
@@ -1215,6 +1224,28 @@ export const router = createBrowserRouter(
                             {
                               path: ':channelId',
                               element: <RecapPanel />,
+                              children: [
+                                {
+                                  path: ':conversationId',
+                                  element: <ThreadMessages />,
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                        // Radar (must come before :channelId). The route stays
+                        // registered because the router is built at module scope;
+                        // the CAC rollout gate lives inside RadarPanel itself.
+                        {
+                          path: 'radar',
+                          children: [
+                            {
+                              index: true,
+                              element: <RadarPanel />,
+                            },
+                            {
+                              path: ':channelId',
+                              element: <RadarPanel />,
                               children: [
                                 {
                                   path: ':conversationId',
@@ -1535,7 +1566,7 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'sdlc/:repoId',
+                  path: 'sdlc/:channelId',
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
@@ -1543,7 +1574,7 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'sdlc/:repoId/:section',
+                  path: 'sdlc/:channelId/:section',
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
@@ -1801,6 +1832,14 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
+                  path: 'tag-review',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKSPACE'>
+                      <TagReviewView />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
                   path: 'jira-migration',
                   element: (
                     <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
@@ -1902,6 +1941,24 @@ export const router = createBrowserRouter(
               element: <ThreadMessages />,
             },
           ],
+        },
+        {
+          path: '/newWindow/sdlc/:workspaceId/:channelId/:section',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <ZeroFallbackProvider>
+                  <InitialStateLoader>
+                    <div className='h-full bg-background'>
+                      <SdlcWindow />
+                    </div>
+                    {/* roomActor is a module singleton, so this window needs its own. */}
+                    <GlobalCallOverlay autoJoinOnAccept={false} />
+                  </InitialStateLoader>
+                </ZeroFallbackProvider>
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
         },
         {
           path: '/newWindow/create-ticket',

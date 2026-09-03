@@ -1,5 +1,11 @@
 import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, ExternalLink, GitBranch, Lock, RefreshCw } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckTickCircle as CheckCircle2,
+  GitBranch,
+  LockClose as Lock,
+  Refresh as RefreshCw,
+} from '@xyne/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
@@ -81,7 +87,13 @@ export function ProjectRepositoriesSection(props: {
     return (
       <div className='rounded-lg border border-destructive/30 p-6 text-center'>
         <p className='text-sm text-destructive'>{error}</p>
-        <Button className='mt-3' variant='outline' onClick={() => void load()}>
+        <Button
+          className='mt-3'
+          variant='outline'
+          onClick={() => void load()}
+          data-track-category='ProjectRepos'
+          data-track-name='RetryLoadRepositories'
+        >
           Retry
         </Button>
       </div>
@@ -95,7 +107,12 @@ export function ProjectRepositoriesSection(props: {
         <p className='mt-1 text-sm text-muted-foreground'>
           Attach a public or private GitHub.com repository.
         </p>
-        <Button className='mt-4' onClick={props.onAdd}>
+        <Button
+          className='mt-4'
+          onClick={props.onAdd}
+          data-track-category='ProjectRepos'
+          data-track-name='AddRepositoryClicked'
+        >
           Add Repository
         </Button>
       </div>
@@ -110,7 +127,6 @@ export function ProjectRepositoriesSection(props: {
           repository={repo}
           checking={checking === repo.id}
           onCheck={() => void check(repo.id)}
-          onOpen={() => void navigate(`/sdlc/${repo.id}/overview`)}
           onSettings={() =>
             void navigate(
               workspaceId
@@ -128,7 +144,6 @@ function RepositoryCard(props: {
   repository: ProjectRepository;
   checking: boolean;
   onCheck: () => void;
-  onOpen: () => void;
   onSettings: () => void;
 }): ReactElement {
   const repo = props.repository;
@@ -160,11 +175,14 @@ function RepositoryCard(props: {
           </p>
         </div>
         <div className='flex flex-wrap gap-2'>
-          <Button variant='outline' loading={props.checking} onClick={props.onCheck}>
+          <Button
+            variant='outline'
+            loading={props.checking}
+            onClick={props.onCheck}
+            data-track-category='ProjectRepos'
+            data-track-name='RunAccessCheck'
+          >
             <RefreshCw className='h-4 w-4' /> Refresh now
-          </Button>
-          <Button onClick={props.onOpen}>
-            <ExternalLink className='h-4 w-4' /> Open SDLC
           </Button>
         </div>
       </div>

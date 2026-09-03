@@ -18,13 +18,8 @@ import { useZero } from '../../../hooks/useZero';
 import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
-import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
+import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -65,7 +60,7 @@ const ChatView = (): ReactElement => {
 
   // Query channel data to check if it's a DM and if user's participation is closed
   const channel = useChannel(channelId || '');
-  const channelUserStatus = useGetChannelUserStatus(channelId || '');
+  const channelUserStatus = useChannelParticipation(channelId || '');
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
@@ -94,36 +89,35 @@ const ChatView = (): ReactElement => {
   const { groupId } = useParams<{ groupId?: string }>();
   const isGroupPanelOpen = !!groupId;
 
-  // Reopen DM if user navigates to a closed DM (only on navigation, not on data updates)
+  // Track conversation-opened once per navigation (gated on the channelId change ref).
   useEffect(() => {
-    // Only run when channelId changes (navigation), not on data updates
     if (prevChannelIdRef.current === channelId) return;
     prevChannelIdRef.current = channelId;
 
     if (!channel || !channelId) return;
+  }, [channel, channelId, context.userID, zero]);
+
+  // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.
+  const reopenAttemptedForRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!channel || !channelId) return;
 
     const isDM =
       channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
-
-    // Track conversation opened (no sensitive data - only conversation type)
-    const conversationType =
-      channel.scopeType === ChannelScopeType.DM
-        ? EVENT_PROPERTIES.CONVERSATION_TYPES.DM
-        : channel.scopeType === ChannelScopeType.GROUP_DM
-          ? EVENT_PROPERTIES.CONVERSATION_TYPES.GROUP_DM
-          : EVENT_PROPERTIES.CONVERSATION_TYPES.CHANNEL;
-
-    mixpanelService.track(EVENTS.CONVERSATION_OPENED, {
-      type: conversationType,
-    });
-
     if (!isDM) return;
 
-    // If user's participation is closed, reopen it
-    if (channelUserStatus?.isClosed) {
+    // Already handled this channel this visit.
+    if (reopenAttemptedForRef.current === channelId) return;
+
+    // Status not resolved yet (closed DMs load via a fallback query); this effect re-runs when it changes.
+    if (channelUserStatus === undefined) return;
+
+    reopenAttemptedForRef.current = channelId;
+
+    if (channelUserStatus.isClosed) {
       zero.mutate(mutators.channel.reopenDm({ channelId, updatedAt: Date.now() }));
     }
-  }, [channel, channelId, context.userID, zero]);
+  }, [channel, channelId, channelUserStatus, zero]);
 
   // Save the current channelId as the last visited channel.
   useEffect(() => {

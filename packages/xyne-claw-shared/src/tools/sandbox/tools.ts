@@ -359,8 +359,20 @@ function isSessionOwnedByContext(session: Session, lookupKey: string | undefined
     SESSION_OWNER.get(session.id);
   const caller = ownerFromContext(context);
   if (!owner || !caller) return false;
-  return owner.userId === caller.userId &&
-    owner.conversationId === caller.conversationId &&
+  // Match the SAME identity buildSandboxStoreKey uses, or the two disagree.
+  // That key deliberately EXCLUDES userId (a thread's sandbox is shared by every
+  // user in that thread for the same agent), so comparing userId here locked out
+  // every participant except whoever happened to create the session: the lookup
+  // hands you a thread-shared session and this check then refuses it.
+  // Observed 2026-08-25 on credit-doctor — a second user in the thread could not
+  // run, destroy, or recreate the sandbox; every recovery path returned
+  // "not authorized for this user/conversation", including sandbox-destroy, so
+  // the thread could not be unwedged by anyone but the original caller.
+  // userId is part of the identity only for PER_USER_SESSION_AGENTS, which are
+  // exactly the agents whose store key folds userId in.
+  const perUserAgent = !!caller.agentSlug && PER_USER_SESSION_AGENTS.has(caller.agentSlug);
+  if (perUserAgent && owner.userId !== caller.userId) return false;
+  return owner.conversationId === caller.conversationId &&
     owner.agentSlug === caller.agentSlug;
 }
 
@@ -644,7 +656,18 @@ export const sandboxCreate: ToolDefinition = {
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
-    const template = pinnedTemplate ?? (params["template"] as string | undefined);
+    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    // ROTATE, exactly as the repo-setup path does. Without this, every
+    // sandbox-create on a pinned agent clones the BASE template's single
+    // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,
+    // which is deliberately the base name (ROTATION_SETS is KEYED by it), so
+    // skipping rotation concentrates every claim on one GCP snapshot and trips
+    // its per-source op-rate limit. Measured 2026-08-25: agent-workspace and
+    // xyne-cli both stormed with RESOURCE_OPERATION_RATE_EXCEEDED and ~35
+    // Pending pods cluster-wide, while the four a/b/c/d rotation pools sat
+    // absorbing nothing. rotateTemplate() returns non-rotated templates
+    // unchanged, so this is a no-op for every template without a rotation set.
+    const template = requestedTemplate ? rotateTemplate(requestedTemplate) : requestedTemplate;
 
     const existing = SESSION_STORE.get(storeKey);
     if (existing) {
@@ -774,7 +797,11 @@ export const sandboxRun: ToolDefinition = {
     // never the legacy kata default.
     try {
       const pinnedTemplate = await pinnedTemplateForContext(context);
-      const client = makeClient(context.config, pinnedTemplate);
+      // Rotate here too — a one-shot exec still provisions a VM from the
+      // template's snapshot, so an un-rotated base name concentrates clones
+      // the same way sandbox-create did.
+      const oneShotTemplate = pinnedTemplate ? rotateTemplate(pinnedTemplate) : pinnedTemplate;
+      const client = makeClient(context.config, oneShotTemplate);
       const result = await client.exec(cmd, { timeoutMs });
       return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
     } catch (err) {

@@ -224,6 +224,8 @@ export const FileViewerPanel: React.FC<{
             onClick={() => {
               handleBackNavigation();
             }}
+            data-track-category='knowledge-base'
+            data-track-name='BACK_FROM_FILE_VIEWER'
           >
             <ArrowLeft size={16} />
             Back to Collections
@@ -257,6 +259,8 @@ export const FileViewerPanel: React.FC<{
               onClick={() => {
                 handleBackNavigation();
               }}
+              data-track-category='knowledge-base'
+              data-track-name='BACK_FROM_FILE_VIEWER'
             >
               <ArrowLeft size={16} />
               Back
@@ -369,11 +373,13 @@ export const FileViewerPanel: React.FC<{
           </button>
         </Tooltip>
 
-        <button
+        <Button
+          variant='ghost'
           type='button'
           onClick={() => {
             void handleDownload();
           }}
+          trackId='download_document'
           aria-label='Download'
           title='Download'
           className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
@@ -381,7 +387,7 @@ export const FileViewerPanel: React.FC<{
           data-track-name='file-viewer-download'
         >
           <Download className='h-4 w-4' strokeWidth={1.75} />
-        </button>
+        </Button>
       </div>
 
       <div className='flex min-w-0 items-center gap-2 px-5 py-2.5'>

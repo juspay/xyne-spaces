@@ -10,13 +10,19 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuth } from '../../../hooks/useAuth';
 import { useGlobalAutoJoinOnAccept } from '../../../hooks/useCallJoinState';
 
-export function GlobalCallOverlay(): React.ReactElement | null {
+interface GlobalCallOverlayProps {
+  autoJoinOnAccept?: boolean;
+}
+
+export function GlobalCallOverlay({
+  autoJoinOnAccept = true,
+}: GlobalCallOverlayProps = {}): React.ReactElement | null {
   const zero = useZero();
   const { user } = useAuth();
 
   // Query active calls and sync to roomActor
   const [calls] = useCachedQuery(queries.userActiveCalls());
-  useGlobalAutoJoinOnAccept(user?.id);
+  useGlobalAutoJoinOnAccept(autoJoinOnAccept ? user?.id : undefined);
 
   // Sync active calls to the machine
   useEffect(() => {

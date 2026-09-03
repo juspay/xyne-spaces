@@ -59,12 +59,15 @@ model User {
   digitalTwinPipelineEvents            DigitalTwinPipelineEvent[]
   agentMemoryFiles                     AgentMemoryFile[]
   twinBehaviorSignals                  TwinBehaviorSignal[]
+  localHarnessDevices                  LocalHarnessDevice[]
+  localHarnessRuns                     LocalHarnessRun[]
+  localHarnessDefaultProvider          String?
 
   /// Daily Brief opt-in (morning digest). When true, the leader-locked daily
   /// cron enqueues a brief-generation job for this user; when false the cron
   /// simply skips them (no per-user scheduler to tear down). Mirrors the
   /// digitalTwinEnabled opt-in pattern.
-  dailyBriefEnabled   Boolean   @default(false)
+  dailyBriefEnabled   Boolean                @default(false)
   dailyBriefEnabledAt DateTime?
   dailyBriefActivity  DailyBriefActivity[]
   /// Per-user, per-agent custom instructions (injected into every agent run for
@@ -90,7 +93,7 @@ model User {
 /// memories (semantic recall), these are named documents fetched deterministically
 /// by key — e.g. the Digital Twin's `soul.md` (always-loaded persona), `people.md`,
 /// `projects.md`. Up to 3 per (agent,user) may be flagged loadInPrompt, each
-/// ≤ 10k chars, and are injected verbatim into the agent's system prompt so it
+/// ≤ 20k chars, and are injected verbatim into the agent's system prompt so it
 /// works well with zero tool calls. For the twin these are compiled by the soul
 /// synthesizer from approved facts, editable by the user, and writable by the
 /// agent mid-chat. userId NULL = shared across all users of that agent.
@@ -104,7 +107,7 @@ model AgentMemoryFile {
   user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// Stable name / key, unique per (agent, user). Ends in `.md` by convention.
   name         String
-  /// Verbatim document content (≤ 10k chars, enforced in the app layer).
+  /// Verbatim document content (≤ 20k chars, enforced in the app layer).
   content      String   @default("")
   /// User-toggleable: inject this file into the agent's system prompt. At most
   /// 3 per (agent, user) may be true (enforced in the app layer).
@@ -180,31 +183,31 @@ model TwinBehaviorSignal {
 /// `learnedAt` so the twin's memory learns what got accepted vs edited vs
 /// declined vs ignored — the feedback loop, moved OFF the immediate accept path.
 model TwinResponseFeedback {
-  id               String   @id @default(cuid())
-  userId           String
-  conversationId   String
-  channelId        String?
-  channelName      String?
+  id              String    @id @default(cuid())
+  userId          String
+  conversationId  String
+  channelId       String?
+  channelName     String?
   /// The inbound message that triggered the twin (dedup + link key).
-  sourceMessageId  String?
+  sourceMessageId String?
   /// The incoming message text the twin was responding to.
-  incomingTask     String?
+  incomingTask    String?
   /// The twin's proposed delivery. "react" | "reply" | "react_and_reply".
-  deliveryAction   String   @default("reply")
-  deliveryEmoji    String?
+  deliveryAction  String    @default("reply")
+  deliveryEmoji   String?
   /// "origin_thread" | "origin_channel" | "channel" | "thread".
-  destinationKind  String?
+  destinationKind String?
   /// The twin's proposed reply text (the draft shown for approval).
-  draftMessage     String?
+  draftMessage    String?
   /// What the user actually approved (may be edited); null on decline/ignore.
-  finalMessage     String?
+  finalMessage    String?
   /// "pending" | "accepted" | "accepted_edited" | "declined" | "ignored".
-  status           String   @default("pending")
-  proposedAt       DateTime @default(now())
-  decidedAt        DateTime?
+  status          String    @default("pending")
+  proposedAt      DateTime  @default(now())
+  decidedAt       DateTime?
   /// Set once the daily learning loop has consumed this row.
-  learnedAt        DateTime?
-  createdAt        DateTime @default(now())
+  learnedAt       DateTime?
+  createdAt       DateTime  @default(now())
 
   @@unique([userId, sourceMessageId])
   @@index([userId, status])
@@ -239,18 +242,18 @@ enum SurfaceStatus {
 }
 
 model Organization {
-  id          String    @id @default(cuid())
-  name        String    @unique
-  description String?
-  createdBy   String
-  status      OrgStatus @default(ACTIVE)
-  metadata    Json?
+  id                  String    @id @default(cuid())
+  name                String    @unique
+  description         String?
+  createdBy           String
+  status              OrgStatus @default(ACTIVE)
+  metadata            Json?
   /// Which agent (by slug) executes this org's Daily Brief. NULL ⇒ fall back to
   /// the deployment default (CONFIG.dailyBriefAgentSlug / env, default "ask-ai").
   /// Changed at runtime via the daily-brief settings API (org-admin only).
   dailyBriefAgentSlug String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   members             OrgMember[]
   users               User[]
@@ -320,39 +323,39 @@ model UserSurfaceIdentity {
 }
 
 model SurfaceAgent {
-  id               String   @id @default(cuid())
-  agentId          String
-  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  surfaceId        String
-  surface          Surface  @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
-  surfaceTenantId  String   @default("")
-  surfaceChannelId String?
+  id                        String                @id @default(cuid())
+  agentId                   String
+  agent                     Agent                 @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  surfaceId                 String
+  surface                   Surface               @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
+  surfaceTenantId           String                @default("")
+  surfaceChannelId          String?
   /// The surface-side application identity (Slack app id, Teams bot id).
   /// Events arrive tagged with this; unique per surface so the reverse
   /// lookup (app -> agent) is guaranteed single-owner.
-  externalAppId    String?
+  externalAppId             String?
   /// Non-secret OAuth client identifier of the surface app.
-  clientId         String?
+  clientId                  String?
   /// AES-GCM `ciphertext:iv:authTag` — never stored plaintext.
-  encryptedClientSecret String? @db.Text
-  signingSecret    String?  @db.Text
+  encryptedClientSecret     String?               @db.Text
+  signingSecret             String?               @db.Text
   /// Slash-command name bound to this agent (e.g. "/euler-doctor").
-  commandName      String?
+  commandName               String?
   /// ConnectedSurface row whose bot token answers this agent's slash
   /// commands (the umbrella app's team connection). Read at dispatch time.
   commandConnectedSurfaceId String?
   /// Registration lifecycle: "created" (app minted) | "installed".
-  status           String?
+  status                    String?
   /// sha256 of the manifest template last pushed to the surface app —
   /// compared against the current template to detect drift.
-  manifestHash     String?
-  manifestSyncedAt DateTime?
+  manifestHash              String?
+  manifestSyncedAt          DateTime?
   /// Surface-idiosyncratic residue ONLY (validated by the surface's schema);
   /// anything the core queries must be a real column above.
-  config           Json?
-  installs         SurfaceAgentInstall[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  config                    Json?
+  installs                  SurfaceAgentInstall[]
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
 
   @@unique([agentId, surfaceId, surfaceTenantId])
   @@unique([surfaceId, externalAppId])
@@ -803,6 +806,52 @@ model UserProviderCredentials {
   @@map("user_provider_credentials")
 }
 
+model LocalHarnessDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId      String
+  deviceName String
+  platform   String
+  tokenHash  String   @unique
+  installations Json  @default("[]")
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  runs       LocalHarnessRun[]
+
+  @@index([userId, revokedAt])
+  @@map("local_harness_devices")
+}
+
+model LocalHarnessRun {
+  id            String   @id @default(cuid())
+  sessionId     String   @unique
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId         String
+  agentSlug     String
+  provider      String
+  model         String?
+  deviceId      String?
+  device        LocalHarnessDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  status        String   @default("queued")
+  envelope      Json
+  progressUrl   String   @db.Text
+  callbackUrl   String   @db.Text
+  error         String?  @db.Text
+  claimedAt     DateTime?
+  finishedAt    DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([status, expiresAt])
+  @@map("local_harness_runs")
+}
+
 model UserSubagentConfig {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -957,6 +1006,7 @@ model AgentDelegationGrant {
   approvedByUserId String?
   approvedAt       DateTime?
   createdByUserId  String?
+  requestReason    String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1130,6 +1180,13 @@ model ChatMessage {
   /// The UI projects one selected path; siblings are reachable via the pager.
   parentId       String?
 
+  /// The context the user attached to THIS turn (channels, tickets, canvases,
+  /// calls, collections, files) as a normalized AttachedContextRef[] — the same
+  /// list that drove the run. Persisted so the pills can be shown read-only
+  /// above the message when a chat is reloaded. Null on assistant rows and on
+  /// legacy rows written before this column existed.
+  attachedContext Json?
+
   attachments ChatAttachment[]
   orgId       String
 
@@ -1154,7 +1211,7 @@ model ChatAttachment {
   metadata         Json?
   createdAt        DateTime @default(now())
 
-  chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
+  chatMessage  ChatMessage?          @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
   designShares DesignArtifactShare[]
 
   @@index([chatMessageId])
@@ -1162,13 +1219,185 @@ model ChatAttachment {
   @@map("chat_attachments")
 }
 
+/// A chat artifact the user chose to keep: a generated React project promoted out
+/// of a throwaway `ChatAttachment` into something with its own id, title and URL.
+/// Lives here rather than in the Spaces DB because the attachment it derives from
+/// and the GCS bucket holding its bytes are both owned by this service, and
+/// claw-auth's Spaces connection is read-only by Postgres grant.
+model ArtifactApp {
+  id                 String    @id @default(cuid())
+  /// Spaces workspace, resolved from the owner at save time. Scopes who may see
+  /// this once published — claw-auth's own tenant key (orgId) is a different
+  /// identifier space and is not interchangeable with it.
+  workspaceId        String
+  ownerUserId        String
+  /// The chat thread that owns this app. A conversation has exactly ONE app —
+  /// the unique index IS that rule, enforced by the database rather than by
+  /// convention, so a race between two generations cannot create a sibling.
+  /// Null for apps saved before session-scoping, and for apps created outside a
+  /// conversation; Postgres allows many NULLs under a unique index.
+  conversationId     String?   @unique
+  /// The version the owner and the agent currently see. Moves forward on every
+  /// generation and backward on restore. Distinct from `publishedVersionId`,
+  /// which is what everyone ELSE sees and only moves when the owner publishes.
+  /// A pointer rather than a copy because @@unique([appId, contentHash]) makes
+  /// re-inserting an old version impossible by design.
+  headVersionId      String?
+  title              String
+  description        String?
+  /// "PRIVATE" | "WORKSPACE". Follows the Spaces `Canvas.visibility` convention
+  /// of a plain string column rather than a Postgres enum.
+  visibility         String    @default("PRIVATE")
+  /// The single version served to everyone else. Null means unpublished; the
+  /// pin is what stops a published app changing under its viewers when the
+  /// author saves a new build.
+  publishedVersionId String?
+  publishedAt        DateTime?
+  isArchived         Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  versions  ArtifactAppVersion[]
+  agentRuns ArtifactAppAgentRun[]
+  restores  ArtifactAppRestore[]
+
+  @@index([workspaceId, visibility])
+  @@index([ownerUserId])
+  @@map("artifact_apps")
+}
+
+/// One saved build of an ArtifactApp. Only the small manifest lives in the row;
+/// the project files ride GCS at `storagePath`, mirroring how the chat attachment
+/// splits manifest from bytes.
+model ArtifactAppVersion {
+  id            String   @id @default(cuid())
+  /// Denormalized tenant key, stamped from the parent app on insert. Scope is
+  /// already implied by appId, but every table carries its own key here (see
+  /// CanvasVersion in the Spaces schema) so a query that forgets to join the
+  /// parent still cannot cross tenants.
+  workspaceId   String
+  appId         String
+  versionNumber Int
+  /// Small descriptor — title, entry, file paths, dependency names. Enough to
+  /// render a gallery card without fetching the project.
+  manifest      Json
+  /// GCS object path (bucket-relative), copied at save so deleting the
+  /// originating conversation cannot break a published app.
+  storagePath   String
+  contentHash   String
+  sizeBytes     Int
+  createdBy     String
+  createdAt     DateTime @default(now())
+
+  app ArtifactApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  /// Re-saving a byte-identical build reuses the existing version instead of
+  /// piling up duplicates — the agent regenerates the same app readily.
+  @@unique([appId, contentHash])
+  @@unique([appId, versionNumber])
+  @@index([appId, createdAt])
+  @@index([workspaceId])
+  @@map("artifact_app_versions")
+}
+
+/// One "head moved backward" event — the durable record of a restore.
+///
+/// A restore leaves no trace in the data it touches: `headVersionId` is a
+/// pointer, so after the move the app looks exactly as it would have if that
+/// version had always been current. Nothing in `artifact_app_versions` changed
+/// and no chat message was written. Without this table, "why is the thread's
+/// newest build not the one on screen?" is unanswerable an hour later.
+///
+/// Deliberately NOT a `chat_messages` row. Those form the branching tree the
+/// transcript projects (parentId, sibling pagers, regenerate), so injecting a
+/// non-conversational node would make a restore a selectable branch and put a
+/// third value into a role column the client models as user|assistant. This is
+/// an event stream the thread merges in by time instead.
+model ArtifactAppRestore {
+  id          String @id @default(cuid())
+  /// Denormalized tenant key, stamped from the parent app on insert — same
+  /// discipline as ArtifactAppVersion.
+  workspaceId String
+  appId       String
+  /// The version head moved TO.
+  versionId     String
+  versionNumber Int
+  /// The version head moved FROM. Null only for an app that had no head yet,
+  /// which is why this column — not the pointer — is the record of what was
+  /// left behind.
+  fromVersionId     String?
+  fromVersionNumber Int?
+  /// Who restored. Owner-only today; kept because Step 4 opens apps to a group.
+  userId    String
+  createdAt DateTime @default(now())
+
+  app ArtifactApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, createdAt])
+  @@index([workspaceId])
+  @@map("artifact_app_restores")
+}
+
+/// One agent run triggered from inside an artifact app.
+///
+/// This is an INDEX, not a second source of truth. The answer, tool calls and
+/// token counts live on `AgentRun` (keyed by the same `sessionId`) and on the
+/// assistant `ChatMessage`, which are already the durable writers on the
+/// callback path. What this table adds is the app-shaped lookup those tables
+/// cannot serve: "which run belongs to this app, for this viewer, under this
+/// key" — the query a reopened app makes to resync work it started earlier.
+model ArtifactAppAgentRun {
+  id             String   @id @default(cuid())
+  /// Denormalized tenant key, stamped at dispatch. Every table carries its own
+  /// (see ArtifactAppVersion) so a query that forgets to join cannot cross
+  /// tenants.
+  workspaceId    String
+  /// claw-auth's own tenant key. Not interchangeable with workspaceId — it is
+  /// what scopes the agent lookup.
+  orgId          String
+  /// Null while the app is still an unsaved chat artifact; `attachmentId` then
+  /// identifies it. Set once the app has been saved.
+  appId          String?
+  attachmentId   String?
+  /// The viewer who triggered the run. Runs are never shared between viewers of
+  /// a published app.
+  userId         String
+  /// App-chosen thread name, "default" when the app does not pass one. The
+  /// (appId, userId, runKey) triple is what makes a run findable on reopen.
+  runKey         String   @default("default")
+  /// Stable per (app, viewer, runKey), so repeat runs continue one thread and
+  /// /live + /messages both attach to it.
+  conversationId String
+  agentSlug      String
+  /// claw's run id. Null only in the window between row creation and a
+  /// successful dispatch.
+  sessionId      String?  @unique
+  prompt         String   @db.Text
+  /// "pending" | "running" | "completed" | "failed" | "cancelled". Mirrors
+  /// AgentRun.status; kept here so the in-flight check for a key is one indexed
+  /// read rather than a join.
+  status         String   @default("pending")
+  /// Set only for dispatch-time failures. Run-time errors live on AgentRun.
+  error          String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  app ArtifactApp? @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, userId, runKey])
+  @@index([userId, status])
+  @@index([conversationId])
+  @@index([workspaceId])
+  @@map("artifact_app_agent_runs")
+}
+
 /// A stable, revocable public link to the latest published HTML attachment in
 /// one Design Studio conversation. Only the bearer token hash is used for
 /// verification; its encrypted copy exists so
 /// the owner can reopen the Share dialog without rotating a live link.
 model DesignArtifactShare {
-  id              String   @id @default(cuid())
-  tokenHash       String   @unique
+  id              String    @id @default(cuid())
+  tokenHash       String    @unique
   tokenCiphertext String
   tokenIv         String
   tokenAuthTag    String
@@ -1179,10 +1408,10 @@ model DesignArtifactShare {
   title           String
   expiresAt       DateTime?
   revokedAt       DateTime?
-  viewCount       Int      @default(0)
+  viewCount       Int       @default(0)
   lastViewedAt    DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   attachment ChatAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
 
@@ -1283,6 +1512,12 @@ enum AgentAuditEvent {
   PROVIDER_CREDENTIAL_UNBOUND
   PROVIDER_CREDENTIAL_ADOPTED
   PROVIDER_CREDENTIAL_DELETED
+  // Agent-authoring tools (create/update-subagent, create-mcp). Added by
+  // migration 20260818090000_agent_authoring_audit_events (ALTER TYPE ADD
+  // VALUE) — kept here so a fresh `prisma generate` accepts them.
+  SUBAGENT_CREATED
+  SUBAGENT_UPDATED
+  MCP_SERVER_CREATED
 }
 
 model AgentAuditLog {
@@ -1448,6 +1683,8 @@ model McpServer {
   healthcheckSpec      Json?
   writeToolPolicy      Json?
   connectorMeta        Json?
+  /// Explicitly marks if this connector requires an OAuth browser flow.
+  isOauth              Boolean                   @default(false)
   /// Whether this server type can fall back to admin-managed global
   /// credentials when a user has no personal connection. Off by default —
   /// admins must opt-in per server (e.g. enable it for shared infra creds
@@ -1873,43 +2110,43 @@ model ActiveGoal {
 }
 
 model ExperimentRun {
-  id                String              @id @default(cuid())
-  conversationId    String
-  channelId         String
-  agentSlug         String
-  userId            String
-  orgId             String
-  focus             String?
+  id                 String              @id @default(cuid())
+  conversationId     String
+  channelId          String
+  agentSlug          String
+  userId             String
+  orgId              String
+  focus              String?
   /// Per-experiment LLM pin, forwarded as providerOverride on every epoch
   /// dispatch. NULL = the agent's normal provider resolution.
-  provider          String?
-  modelId           String?
+  provider           String?
+  modelId            String?
   /// "experiment" (default proof-reward loop) or "understanding" (coverage-gated:
   /// end-experiment stays locked until the open-conjecture frontier is exhausted).
   /// Persisted per-run so EVERY epoch dispatch forwards it, not just the first.
-  kind              String              @default("experiment")
-  status            String              @default("running") /// running | finishing | done | aborted
-  epoch             Int                 @default(1)
-  deadlineAt        DateTime
-  currentHypothesis String?             @db.Text
-  currentSessionId  String?
-  lastEpochEndedAt  DateTime?
-  sandboxNote       String?
+  kind               String              @default("experiment")
+  status             String              @default("running") /// running | finishing | done | aborted
+  epoch              Int                 @default(1)
+  deadlineAt         DateTime
+  currentHypothesis  String?             @db.Text
+  currentSessionId   String?
+  lastEpochEndedAt   DateTime?
+  sandboxNote        String?
   /// Basenames of files the agent actually delivered to the thread via
   /// sandbox-deliver-files. A finding may only be marked `proved` if its
   /// proofArtifactPath resolves to one of these — proof left behind in a
   /// sandbox dies with the sandbox and is worthless to a human reader.
-  deliveredArtifacts String[]           @default([])
+  deliveredArtifacts String[]            @default([])
   /// Sessions of in-flight CHECKER runs. Checkers deliberately never claim
   /// currentSessionId (that would make the epoch handoff chain off their
   /// completion), which also meant `/experiment stop` could not reach them —
   /// a stopped run kept emitting checker output into the thread.
-  checkerSessionIds  String[]           @default([])
-  finalReport       String?             @db.Text
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  findings          ExperimentFinding[]
-  reviews           ExperimentReview[]
+  checkerSessionIds  String[]            @default([])
+  finalReport        String?             @db.Text
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  findings           ExperimentFinding[]
+  reviews            ExperimentReview[]
 
   @@index([conversationId, status])
   @@map("experiment_runs")
@@ -1917,17 +2154,17 @@ model ExperimentRun {
 
 // workspace-check:ignore — tenant scope inherited via experimentId -> ExperimentRun.orgId (FK, onDelete: Cascade); never queried cross-tenant.
 model ExperimentFinding {
-  id                String        @id @default(cuid())
+  id                String             @id @default(cuid())
   experimentId      String
-  experiment        ExperimentRun @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  experiment        ExperimentRun      @relation(fields: [experimentId], references: [id], onDelete: Cascade)
   epoch             Int
   status            String /// conjecture | proved | refuted
   title             String
-  hypothesis        String        @db.Text
-  note              String?       @db.Text
+  hypothesis        String             @db.Text
+  note              String?            @db.Text
   proofArtifactPath String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   reviews           ExperimentReview[]
 
   @@index([experimentId])
@@ -2224,37 +2461,37 @@ model SearchEvalQuery {
 /// creation time (fixed there, not chosen per run) — kept denormalized here so
 /// each run's historical display is accurate even if read long after.
 model SearchEvalRun {
-  id             String             @id @default(cuid())
-  sheetId        String
-  sheet          SearchEvalSheet    @relation(fields: [sheetId], references: [id], onDelete: Cascade)
-  queryType      String[] /// entity types searched; empty = all types
-  rankProfile    String? /// null = let the backend auto-pick (default_native for scored text)
+  id                String             @id @default(cuid())
+  sheetId           String
+  sheet             SearchEvalSheet    @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  queryType         String[] /// entity types searched; empty = all types
+  rankProfile       String? /// null = let the backend auto-pick (default_native for scored text)
   /// Overrides for the active rank profile's `input.query(<name>)` params —
   /// only meaningful when rankProfile is a real per-schema "tunable" profile
   /// (see TUNABLE_INPUTS_BY_AREA in SearchEvalsPageV3.tsx / the tunable
   /// rank-profile inputs {} block per Vespa schema); null otherwise.
   rankProfileInputs Json?
-  permissionMode String /// "with" | "without" — copied from the sheet at run creation
-  asOfTimestamp  DateTime?
-  status         String             @default("running") /// "running" | "completed" | "failed"
-  createdBy      String?
-  orgId          String
-  startedAt      DateTime           @default(now())
-  completedAt    DateTime?
+  permissionMode    String /// "with" | "without" — copied from the sheet at run creation
+  asOfTimestamp     DateTime?
+  status            String             @default("running") /// "running" | "completed" | "failed"
+  createdBy         String?
+  orgId             String
+  startedAt         DateTime           @default(now())
+  completedAt       DateTime?
   /// Top1/Top3/Top10 count+% and Mean Reciprocal Rank — written by the worker
   /// alongside completedAt when the run finishes (null while "running", or for
   /// runs from before this existed — the API falls back to live computation
   /// from `results` in that case). `completedAt` is the "with timestamp" this
   /// was asked to be stored with.
-  queriesScored  Int?
-  top1Count      Int?
-  top1Pct        Float?
-  top3Count      Int?
-  top3Pct        Float?
-  top10Count     Int?
-  top10Pct       Float?
-  mrr            Float?
-  results        SearchEvalResult[]
+  queriesScored     Int?
+  top1Count         Int?
+  top1Pct           Float?
+  top3Count         Int?
+  top3Pct           Float?
+  top10Count        Int?
+  top10Pct          Float?
+  mrr               Float?
+  results           SearchEvalResult[]
 
   @@index([sheetId, startedAt])
   @@index([orgId])
@@ -2383,4 +2620,113 @@ model EntityExtractionRun {
   @@index([workspaceId, channelId, status])
   @@index([workspaceId, status])
   @@map("entity_extraction_runs")
+}
+
+/// Scheduler state for an awakened agent — an agent that wakes on its own
+/// (periodic heartbeat, or a reflex fired by accumulated events) instead of
+/// waiting for a human to trigger it.
+///
+/// This table holds ONLY what the tick loop must index-scan. Every tunable
+/// knob lives in `agents.config.awakening` (JSON) instead, so the existing
+/// PUT /agents/:slug write path, its ACL and its audit diff keep working
+/// unchanged. The split matters: Postgres cannot index-scan JSON, and the
+/// claim query below runs every tick for every org.
+///
+/// `watermarkAt` is the exactly-once seam. It advances only after a window is
+/// successfully sealed, never rewinds (see awakening/cursor.ts), and is the
+/// sole source of truth for "what has this agent already seen".
+model AgentAwakeningState {
+  id      String @id @default(cuid())
+  agentId String @unique
+  orgId   String
+
+  enabled    Boolean   @default(false)
+  /// Wall-clock the tick loop compares against. Claimed with FOR UPDATE SKIP
+  /// LOCKED so N pods can run the same tick without double-firing an agent.
+  nextDueAt  DateTime
+  lastTickAt DateTime?
+
+  /// Exclusive upper bound of the last sealed window. The next window is
+  /// (watermarkAt, now - replicaSafetyMs].
+  watermarkAt        DateTime
+  /// Tie-breaker for events sharing watermarkAt to the millisecond.
+  watermarkMessageId String?
+
+  /// Backoff state. A failed window increments this and pushes nextDueAt out
+  /// exponentially; the first success resets it. This is the whole circuit
+  /// breaker — no separate state machine.
+  consecutiveFailures Int     @default(0)
+  consecutiveSkips    Int     @default(0)
+  lastError           String? @db.Text
+
+  /// Reflex cadence, tracked separately from the heartbeat.
+  ///
+  /// A reflex checks far more often than a heartbeat (a cheap COUNT, not a
+  /// window collect) and fires only once enough events have piled up. It keeps
+  /// its OWN watermark on purpose: the two wake kinds are meant to see the same
+  /// events for different reasons — the reflex reacts fast and shallow, the
+  /// heartbeat later synthesises the whole period AND reads what the reflexes
+  /// already did (requirement 7). Sharing one watermark would let a reflex
+  /// consume events the heartbeat then never sees.
+  reflexNextCheckAt  DateTime?
+  reflexWatermarkAt  DateTime?
+  /// Last time a reflex actually dispatched — enforces the minimum gap between
+  /// reflex runs so a busy channel cannot fire one every check.
+  reflexLastRunAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The only hot query: the per-tick claim scan.
+  @@index([enabled, nextDueAt])
+  /// The reflex claim scan — same shape, different cadence.
+  @@index([enabled, reflexNextCheckAt])
+  @@index([orgId])
+  @@map("agent_awakening_state")
+}
+
+/// One row per wake attempt, whether or not it dispatched a run.
+///
+/// Serves three jobs at once: the idempotency guard (`idempotencyKey`), the
+/// admin health view (outcome/skipReason/signals), and requirement 7 — a
+/// heartbeat reads the reflex runs whose window OVERLAPS its own so it does
+/// not redo work that already happened. Overlap, not containment: a reflex
+/// that started before the window and ran into it consumed events this
+/// heartbeat is about to see.
+model AgentAwakeningRun {
+  id      String @id @default(cuid())
+  agentId String
+  orgId   String
+
+  /// "heartbeat" | "reflex". Plain String — Postgres enums are frozen
+  /// repo-wide (scripts/validate-no-new-enums.sh).
+  kind String
+
+  /// Window bounds as epoch millis. BigInt so a JS Date round-trip cannot
+  /// silently lose precision on the overlap query.
+  windowStartMs BigInt
+  windowEndMs   BigInt
+
+  /// "ran" | "skipped" | "failed" | "shadow"
+  outcome    String
+  /// Populated when outcome = "skipped": which gate rule fired.
+  skipReason String?
+
+  eventCount Int   @default(0)
+  /// Denormalized signal counts the gate decided on — what an operator needs
+  /// to answer "why did/didn't it wake" without re-deriving the window.
+  signals    Json?
+
+  sessionId      String?
+  idempotencyKey String  @unique
+  artifactUri    String?
+  injectionsUsed Int     @default(0)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  /// Requirement 7: overlap lookup for a heartbeat reading prior reflexes.
+  @@index([agentId, windowStartMs])
+  @@index([orgId, startedAt])
+  @@map("agent_awakening_runs")
 }

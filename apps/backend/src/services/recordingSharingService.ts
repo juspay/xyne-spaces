@@ -9,7 +9,9 @@ import {
   ShareableEntityType,
   type GrantableEntityUserAccess,
   CallType,
+  CallVisibility,
   CanvasRole,
+  CanvasVisibility,
   ConversationParticipation,
   MessageType,
 } from '@xyne/shared';
@@ -37,7 +39,8 @@ export type RecordingSharingCommand =
     }
   | { action: 'revoke'; targets: RecordingShareTarget[] }
   | { action: 'link_ticket'; ticketId: string }
-  | { action: 'unlink_ticket' };
+  | { action: 'unlink_ticket' }
+  | { action: 'set_visibility'; visibility: CallVisibility };
 
 export interface RecordingSharingActor {
   userId: string;
@@ -49,6 +52,7 @@ export interface RecordingSharingResult {
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
   shares?: Array<{ id: string; target: RecordingShareTarget; access: string }>;
+  visibility?: CallVisibility;
 }
 
 interface LoadedRecording {
@@ -153,7 +157,38 @@ export class RecordingSharingService {
         return this.linkTicket(callId, actor, command.ticketId);
       case 'unlink_ticket':
         return this.unlinkTicket(callId, actor);
+      case 'set_visibility':
+        return this.setVisibility(callId, actor, command.visibility);
     }
+  }
+
+  private async setVisibility(
+    callId: string,
+    actor: RecordingSharingActor,
+    visibility: CallVisibility,
+  ): Promise<RecordingSharingResult> {
+    await this.runTransaction(async tx => {
+      const recording = await this.loadManageableRecording(tx, callId, actor);
+      if (recording.createdByUserId !== actor.userId) {
+        throw new RecordingSharingError(
+          'Only the recording creator can change link access',
+          403,
+        );
+      }
+      await tx.call.update({
+        where: { id: recording.id },
+        data: { visibility },
+      });
+      const canvasVisibility =
+        visibility === CallVisibility.PUBLIC
+          ? CanvasVisibility.PUBLIC
+          : CanvasVisibility.PRIVATE;
+      await tx.canvas.updateMany({
+        where: { id: { in: this.getShareCanvasIds(recording) } },
+        data: { visibility: canvasVisibility },
+      });
+    });
+    return { action: 'set_visibility', visibility };
   }
 
   private async grant(

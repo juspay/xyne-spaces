@@ -3,6 +3,7 @@ import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
 import { Edit2, Trash2, Plus, Eye, X } from 'lucide-react';
 import { usePlatform } from '../../../../hooks/usePlatform';
+import { Button } from '../../../ui/Button/Button';
 
 interface Skill {
   name: string;
@@ -329,7 +330,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                     ? 'bg-background text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
-                data-track-category='XYNE_AI'
+                data-track-category='XyneAI'
                 data-track-name='SwitchToCustomInstructionsTab'
               >
                 Custom Instructions
@@ -345,7 +346,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                     ? 'bg-background text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
-                data-track-category='XYNE_AI'
+                data-track-category='XyneAI'
                 data-track-name='SwitchToSkillsTab'
               >
                 Skills
@@ -356,7 +357,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
             onClick={onClose}
             className='p-2 rounded-lg hover:bg-accent transition-colors'
             disabled={isSaving}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='CloseSettingsModal'
           >
             <X size={16} className='text-current' />
@@ -404,7 +405,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   }
                   className='w-full h-48 bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingInstruction || isLoadingInstruction}
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='EditCustomInstructions'
                 />
                 <div className='flex justify-end mt-1'>
@@ -435,7 +436,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   value={previewingSkill.name}
                   readOnly
                   className='w-full px-3 py-2 border border-border rounded-lg text-sm bg-muted text-muted-foreground cursor-default'
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='PreviewSkillName'
                 />
               </div>
@@ -452,7 +453,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   readOnly
                   rows={3}
                   className='w-full px-3 py-2 border border-border rounded-lg resize-none text-sm bg-muted text-muted-foreground cursor-default'
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='PreviewSkillDescription'
                 />
               </div>
@@ -469,7 +470,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   readOnly
                   rows={10}
                   className='w-full px-3 py-2 border border-border rounded-lg resize-none text-sm bg-muted text-muted-foreground cursor-default'
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='PreviewSkillInstructions'
                 />
               </div>
@@ -499,7 +500,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   }`}
                   disabled={isSavingSkill || !!editingSkillName}
                   title={editingSkillName ? 'Skill name cannot be changed after creation' : ''}
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='EditSkillName'
                 />
                 {nameError && <p className='text-xs text-destructive mt-1'>{nameError}</p>}
@@ -535,7 +536,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   rows={3}
                   className='w-full bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingSkill}
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='EditSkillDescription'
                 />
                 <div className='flex justify-end mt-1'>
@@ -565,7 +566,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   rows={6}
                   className='w-full bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingSkill}
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='EditSkillInstructions'
                 />
                 <div className='flex justify-end mt-1'>
@@ -586,7 +587,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   onClick={() => handleAddNewSkill()}
                   className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
                   disabled={isLoadingSkills}
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='AddNewSkill'
                 >
                   <Plus size={16} />
@@ -623,7 +624,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                             onClick={() => setPreviewingSkill(skill)}
                             className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
                             title='View'
-                            data-track-category='XYNE_AI'
+                            data-track-category='XyneAI'
                             data-track-name='PreviewSystemSkill'
                           >
                             <Eye size={16} />
@@ -633,7 +634,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                         <div className='flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity'>
                           <label
                             className='relative inline-flex items-center cursor-pointer'
-                            data-track-category='XYNE_AI'
+                            data-track-category='XyneAI'
                             data-track-name='ToggleSkillEnabled'
                           >
                             <input
@@ -643,7 +644,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                                 void handleToggleEnableSkill(skill.name, skill.enabled);
                               }}
                               className='sr-only peer'
-                              data-track-category='XYNE_AI'
+                              data-track-category='XyneAI'
                               data-track-name='ToggleSkillCheckbox'
                             />
                             <div className="w-9 h-5 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-background after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-action-primary"></div>
@@ -655,22 +656,24 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                             onClick={() => handleEditSkill(skill)}
                             className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
                             title='Edit'
-                            data-track-category='XYNE_AI'
+                            data-track-category='XyneAI'
                             data-track-name='EditSkill'
                           >
                             <Edit2 size={16} />
                           </button>
-                          <button
+                          <Button
+                            variant='ghost'
                             onClick={() => {
                               void handleDeleteSkill(skill.name);
                             }}
+                            trackId='delete_skill'
                             className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
                             title='Delete'
-                            data-track-category='XYNE_AI'
+                            data-track-category='XyneAI'
                             data-track-name='DeleteSkill'
                           >
                             <Trash2 size={16} />
-                          </button>
+                          </Button>
                         </div>
                       )}
                     </div>
@@ -686,38 +689,42 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
           {activeTab === 'custom' ? (
             // Custom Instructions Footer
             <>
-              <button
+              <Button
+                variant='ghost'
                 onClick={() => void handleClearInstruction()}
+                trackId='clear_custom_instructions'
                 className='px-4 py-2 text-sm font-medium text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors'
                 disabled={isSavingInstruction || isLoadingInstruction || !instruction}
-                data-track-category='XYNE_AI'
+                data-track-category='XyneAI'
                 data-track-name='ClearCustomInstructions'
               >
                 Clear
-              </button>
+              </Button>
               <div className='flex gap-2'>
                 <button
                   onClick={onClose}
                   className='px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent rounded-lg transition-colors'
                   disabled={isSaving}
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='CancelCustomInstructions'
                 >
                   Cancel
                 </button>
-                <button
+                <Button
+                  variant='ghost'
                   onClick={() => void handleSaveInstruction()}
+                  trackId='save_custom_instructions'
                   className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                   disabled={
                     isSavingInstruction ||
                     isLoadingInstruction ||
                     instruction.trim() === originalInstruction.trim()
                   }
-                  data-track-category='XYNE_AI'
+                  data-track-category='XyneAI'
                   data-track-name='SaveCustomInstructions'
                 >
                   {isSavingInstruction ? 'Saving...' : 'Save'}
-                </button>
+                </Button>
               </div>
             </>
           ) : previewingSkill ? (
@@ -727,7 +734,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               <button
                 onClick={() => setPreviewingSkill(null)}
                 className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
-                data-track-category='XYNE_AI'
+                data-track-category='XyneAI'
                 data-track-name='CloseSystemSkillPreview'
               >
                 Close
@@ -740,20 +747,22 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                 onClick={() => resetSkillForm()}
                 className='px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent rounded-lg transition-colors'
                 disabled={isSavingSkill}
-                data-track-category='XYNE_AI'
+                data-track-category='XyneAI'
                 data-track-name='CancelSkillForm'
               >
                 Cancel
               </button>
-              <button
+              <Button
+                variant='ghost'
                 onClick={() => void handleSaveSkill()}
+                trackId={editingSkillName ? 'update_skill' : 'create_skill'}
                 className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 disabled={isSavingSkill || !skillName.trim() || !!nameError}
-                data-track-category='XYNE_AI'
+                data-track-category='XyneAI'
                 data-track-name={editingSkillName ? 'UpdateSkill' : 'CreateSkill'}
               >
                 {isSavingSkill ? 'Saving...' : editingSkillName ? 'Update' : 'Save'}
-              </button>
+              </Button>
             </>
           ) : (
             // Skills List Footer
@@ -762,7 +771,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               <button
                 onClick={onClose}
                 className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
-                data-track-category='XYNE_AI'
+                data-track-category='XyneAI'
                 data-track-name='CloseSettingsModal'
               >
                 Done

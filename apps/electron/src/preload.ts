@@ -144,6 +144,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('open-xyne-ai-with-context', listener);
   },
 
+  onAppWindowLimitReached: (callback: (limit: number) => void) => {
+    const listener = (_event: unknown, limit: number) => callback(limit);
+    ipcRenderer.on('app-window-limit-reached', listener);
+    return () => ipcRenderer.removeListener('app-window-limit-reached', listener);
+  },
+
   onOpenInBrowserPanel: (callback: (url: string) => void) => {
     const listener = (_event: unknown, url: string) => callback(url);
     ipcRenderer.on('open-in-browser-panel', listener);
@@ -438,6 +444,15 @@ const electronAPI = {
       ipcRenderer.on('claw:enabled-changed', listener);
       return () => ipcRenderer.removeListener('claw:enabled-changed', listener);
     },
+  },
+
+  localHarness: {
+    getStatus: () => ipcRenderer.invoke('local-harness:status'),
+    detect: () => ipcRenderer.invoke('local-harness:detect'),
+    connect: () => ipcRenderer.invoke('local-harness:connect'),
+    disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+    setProviderEnabled: (provider: string, enabled: boolean) =>
+      ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
   },
 };
 

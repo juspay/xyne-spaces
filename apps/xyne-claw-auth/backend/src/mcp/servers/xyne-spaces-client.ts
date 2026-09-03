@@ -11,6 +11,8 @@
  * Callers can override auth per request for user-scoped routes.
  */
 
+import { errMsg } from "../../lib/errors.js";
+
 export interface SpacesAuthContext {
   token?: string;
   sessionId?: string;
@@ -19,12 +21,46 @@ export interface SpacesAuthContext {
   s2sKey?: string;
 }
 
-function resolveBaseUrl(override?: string): string {
-  const raw = override
-    ?? process.env["XYNE_SPACES_URL"]
-    ?? process.env["SPACES_BACKEND_URL"]
-    ?? "";
-  return raw.replace(/\/+$/, "");
+/**
+ * Thrown by every Spaces client fetch on a non-2xx response, carrying the HTTP
+ * `status` as a NUMBER so callers can branch on `err.status === 403` instead of
+ * regex-matching the message. `status` is 0 for a network-level failure (no
+ * response). The message keeps the historical `Spaces API <status>: …` /
+ * `Spaces app API <status>: …` shape so older string-matching callers still work.
+ */
+export class SpacesApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SpacesApiError";
+  }
+}
+
+/**
+ * True when a Spaces `/chat/postMessage` rejected a FlowUI card because it used
+ * a component type the deployed backend doesn't recognize — a 400 whose body is
+ * an "Invalid flowJSON" discriminator error. The signal to retry with a card
+ * built only from universally-supported components. Deliberately narrow: any
+ * other 400 (channel validation, empty conversation) or status returns false.
+ */
+export function isFlowSchemaRejection(err: unknown): boolean {
+  return (
+    err instanceof SpacesApiError &&
+    err.status === 400 &&
+    /invalid\s*flowjson|flowjson|discriminator/i.test(err.message)
+  );
+}
+
+// `??` alone is not enough here: the adapter always writes XYNE_SPACES_URL into
+// the child's env, so a credential set without a `url` leaves it defined-but-
+// empty, which shadows SPACES_BACKEND_URL and takes the whole server down with
+// "Spaces base URL is not configured". Treat blank as unset at every level.
+export function resolveBaseUrl(override?: string): string {
+  const candidates = [override, process.env["XYNE_SPACES_URL"], process.env["SPACES_BACKEND_URL"]];
+  const raw = candidates.find((value) => typeof value === "string" && value.trim().length > 0) ?? "";
+  return raw.trim().replace(/\/+$/, "");
 }
 
 // Extract Spaces userId from the JWT token's `sub` claim (user tokens)
@@ -109,7 +145,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
       return { ok: true, json: await response.json() };
     } catch (err) {
       // Network error / timeout — the endpoint is unreachable.
-      return { ok: false, status: null, text: err instanceof Error ? err.message : String(err) };
+      return { ok: false, status: null, text: errMsg(err) };
     }
   };
 
@@ -148,7 +184,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   }
 
   if (!res.ok) {
-    throw new Error(`Spaces API ${res.status ?? "network error"}: ${res.text.slice(0, 500)}`);
+    throw new SpacesApiError(res.status ?? 0, `Spaces API ${res.status ?? "network error"}: ${res.text.slice(0, 500)}`);
   }
   return res.json;
 }
@@ -189,7 +225,7 @@ export async function spacesFetchBuffer(
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Spaces API ${response.status}: ${text.slice(0, 300)}`);
+    throw new SpacesApiError(response.status, `Spaces API ${response.status}: ${text.slice(0, 300)}`);
   }
   const buffer = Buffer.from(await response.arrayBuffer());
   return { buffer, contentType: response.headers.get("content-type") ?? "application/octet-stream" };
@@ -225,7 +261,7 @@ export async function spacesFetchText(path: string, auth?: SpacesAuthContext): P
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Spaces API ${response.status}: ${text.slice(0, 300)}`);
+    throw new SpacesApiError(response.status, `Spaces API ${response.status}: ${text.slice(0, 300)}`);
   }
   return response.text();
 }
@@ -258,9 +294,38 @@ export async function appFetch(path: string, init?: RequestInit, auth?: SpacesAu
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Spaces app API ${response.status}: ${text.slice(0, 500)}`);
+    throw new SpacesApiError(response.status, `Spaces app API ${response.status}: ${text.slice(0, 500)}`);
   }
   return response.json();
+}
+
+/**
+ * Binary download over the APP-token surface (`/api/apps/*`). The app twin of
+ * spacesFetchBuffer: authenticates with the agent's app token (Bearer) instead
+ * of a user session, so it works in headless/automation runs where there is no
+ * user JWT. Used by tools that must pull raw bytes (e.g. attachment download)
+ * through an app endpoint such as `/api/apps/files/download/:attachmentId`.
+ */
+export async function appFetchBuffer(
+  path: string,
+  auth?: SpacesAuthContext,
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
+  const baseUrl = resolveBaseUrl(auth?.baseUrl);
+  if (!baseUrl) throw new Error("Spaces base URL is not configured.");
+  if (!token) throw new Error("Spaces app token is missing for this request.");
+
+  const url = `${baseUrl}/api/apps${path}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new SpacesApiError(response.status, `Spaces app API ${response.status}: ${text.slice(0, 300)}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { buffer, contentType: response.headers.get("content-type") ?? "application/octet-stream" };
 }
 
 export interface QueryAST {
@@ -274,9 +339,16 @@ export interface QueryAST {
   select?: Record<string, unknown>;
 }
 
+// Opt-in outbound-query tracing. Off by default so the hot path is silent; set
+// SPACES_CLIENT_DEBUG=1 to see model/operation per query when diagnosing a
+// specific run. Never logs where/param/body VALUES (PII) — shape only.
+const SPACES_CLIENT_DEBUG = process.env["SPACES_CLIENT_DEBUG"] === "1";
+
 export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(ast);
-  console.error(`[spaces-client] POST /api/query/claw ${payload}`);
+  if (SPACES_CLIENT_DEBUG) {
+    console.error(`[spaces-client] POST /api/query/claw model=${ast.model} op=${ast.operation}`);
+  }
   const result = (await spacesFetch("/api/query/claw", {
     method: "POST",
     body: payload,
@@ -286,13 +358,11 @@ export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise
 
 export async function search(params: Record<string, string>, auth?: SpacesAuthContext): Promise<unknown> {
   const qs = new URLSearchParams(params).toString();
-  console.error(`[spaces-client] GET /api/vespaSearch/claw?${qs}`);
   return spacesFetch(`/api/vespaSearch/claw?${qs}`, undefined, auth);
 }
 
 export async function memorySearch(body: Record<string, unknown>, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(body);
-  console.error(`[spaces-client] POST /api/memory/claw/search ${payload}`);
   return spacesFetch("/api/memory/claw/search", {
     method: "POST",
     body: payload,

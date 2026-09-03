@@ -65,6 +65,7 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     libssl-dev \
     ca-certificates \
+    libreoffice \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate

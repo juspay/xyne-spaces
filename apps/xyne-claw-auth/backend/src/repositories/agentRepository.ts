@@ -47,7 +47,49 @@ const INCLUDE_TOOLS_SKILLS = {
   collections: true,
 } as const;
 
+/**
+ * The one definition of "this user may use this agent": org-global, owned, or
+ * explicitly shared. Kept beside `listVisible`, which applies the same rule to
+ * the agent list, so a change to what "visible" means cannot drift between the
+ * list a user is shown and the agents they can actually address.
+ *
+ * Org scoping is applied separately by the caller — it is a different question
+ * (which tenant) from this one (which agent within it).
+ */
+export function agentVisibleToUser(userId: string): Prisma.AgentWhereInput {
+  return {
+    OR: [{ scope: "global" }, { ownerUserId: userId }, { shares: { some: { userId } } }],
+  };
+}
+
 export const agentRepository = {
+  /**
+   * Resolve a slug to an agent the caller is actually allowed to use.
+   *
+   * `findBySlug` scopes by org only, which makes every agent in an org
+   * addressable by slug regardless of whether it is private to another user.
+   * Execution paths — chatting, regenerating, forking — must use this instead:
+   * the slug is caller-supplied, so org scoping alone is tenant isolation, not
+   * authorization.
+   *
+   * Returns null both when the agent does not exist and when it exists but is
+   * not visible, so callers 404 either way. That is deliberate: a distinct 403
+   * would confirm the slug to someone probing for other users' private agents.
+   */
+  findBySlugVisibleTo: (slug: string, orgId: string | null | undefined, userId: string | null | undefined) => {
+    if (!orgId) {
+      log.error("[agentRepository.findBySlugVisibleTo] missing orgId; refusing global slug lookup", { slug });
+      return Promise.resolve(null);
+    }
+    if (!userId) {
+      log.error("[agentRepository.findBySlugVisibleTo] missing userId; refusing unscoped slug lookup", { slug });
+      return Promise.resolve(null);
+    }
+    return prisma.agent.findFirst({
+      where: { AND: [{ orgId, slug }, agentVisibleToUser(userId)] },
+    });
+  },
+
   findBySlug: (slug: string, orgId?: string | null) => {
     if (!orgId) {
       log.error("[agentRepository.findBySlug] missing orgId; refusing global slug lookup", { slug });
@@ -154,16 +196,46 @@ export const agentRepository = {
   /**
    * Clone an agent into a NEW personal agent owned by `newOwnerId`.
    *
-   * Deliberately narrow copy scope (product decision): only the three fields
-   * that define the agent's *behaviour* are carried over —
-   *   1. systemPrompt (also seeded as prompt version v1)
-   *   2. tools        (AgentTool rows, including each tool's `permission`)
-   *   3. skills       (AgentSkill junction links)
-   * Everything else resets to defaults: no description, default color,
-   * empty modelId/config, COLLECTIONS kbScope with NO KB grants, no Spaces
-   * app identity / signing secret, no shares, no provider credentials, no MCP
-   * connections. This is an allow-list copy — we NEVER spread the source row,
-   * so a future secret-bearing column can't silently leak into clones.
+   * The clone is meant to be a WORKING replica, so everything that defines
+   * what the agent is and does comes across —
+   *   1. systemPrompt   (also seeded as prompt version v1)
+   *   2. description / color / modelId / enabled — a paused agent yields a
+   *                        paused copy, so cloning never silently puts a
+   *                        withdrawn agent back in service
+   *   3. config          — the ENTIRE json blob. This is the one that matters:
+   *                        `config.tools` is the real tool palette every read
+   *                        path uses (mcp.ts parseToolsConfig, the agent-config
+   *                        editor), so a clone without it runs tool-less.
+   *                        Carries subagents, skillTriggers, planMode,
+   *                        promptInjection, sandbox repos, outputFormat, …
+   *   4. tools           — AgentTool rows, including each tool's `permission`
+   *   5. skills          — AgentSkill junction links
+   *   6. knowledge base  — kbScope + every AgentCollection grant
+   *   7. MCP connections — ONLY when the cloner already owns the source, since
+   *                        the rows carry credential blobs (see below)
+   *
+   * Everything past that point stays OUT, each for its own reason:
+   *   • MCP connections when cloning SOMEONE ELSE's agent — the row's encrypted
+   *     credentials are decrypted per-agent at tool-execution time, so a copy
+   *     is a standing grant on the source owner's third-party account that
+   *     survives share revocation and deletion of the source connection.
+   *   • `delegationTier` — admin-only on the update route ("Only claw admins
+   *     can change delegationTier") and not settable on create, so copying it
+   *     would make cloning the one non-admin path to an elevated tier.
+   *   • Spaces app identity (`spacesAppId` is @unique, plus `spacesAppToken` /
+   *     `signingSecret`) and SurfaceAgent registrations — these are WHO the
+   *     agent is on an external surface. A copy would receive the source's
+   *     webhooks and sign as it.
+   *   • `scope` / `isDefault` / `ownerUserId` / `orgId` — the clone is a
+   *     PERSONAL agent belonging to the caller; inheriting `scope: "global"`
+   *     would publish it org-wide on creation.
+   *   • AgentShare rows — the source's ACL. Copying would hand third parties
+   *     access to someone else's brand-new private agent.
+   *   • Provider credentials, A2A delegation grants, prompt-version history and
+   *     per-user agent config — left to the clone's owner to (re)establish.
+   *
+   * Still an explicit allow-list — we never spread the source row, so a future
+   * secret-bearing column can't silently leak into clones.
    *
    * Returns the fully-hydrated clone (tools + skills + collections), or null
    * if the source agent no longer exists.
@@ -175,7 +247,12 @@ export const agentRepository = {
   ) => {
     const source = await prisma.agent.findUnique({
       where: { id: sourceId },
-      include: { tools: true, skills: true },
+      include: {
+        tools: true,
+        skills: true,
+        collections: true,
+        mcpConnections: true,
+      },
     });
     if (!source) return null;
 
@@ -196,6 +273,12 @@ export const agentRepository = {
           slug,
           name,
           systemPrompt,
+          description: source.description,
+          color: source.color,
+          modelId: source.modelId,
+          enabled: source.enabled,
+          kbScope: source.kbScope,
+          config: source.config as Prisma.InputJsonValue,
           scope: "personal",
           owner: { connect: { id: newOwnerId } },
           ...(owner?.orgId ? { org: { connect: { id: owner.orgId } } } : {}),
@@ -218,8 +301,50 @@ export const agentRepository = {
         });
       }
 
+      // KB grants. Safe to copy verbatim: stored grants are only ever an
+      // ALLOW-LIST, intersected at runtime with the tree spaces returns for the
+      // CALLING user (kb-handlers.ts fileAllowed/collectionAllowed), so a grant
+      // can never widen what the clone's owner may read — only narrow it.
+      if (source.collections.length > 0) {
+        await tx.agentCollection.createMany({
+          data: source.collections.map((c) => ({
+            agentId: clone.id,
+            collectionId: c.collectionId,
+            fileId: c.fileId,
+          })),
+        });
+      }
+
+      // MCP instances — SELF-CLONES ONLY. The row carries the credential blob
+      // (encryptedCreds/iv/authTag is NOT NULL, so there is no credential-less
+      // copy to make), and the runtime decrypts it per-agent, meaning the
+      // clone's tool calls authenticate as whoever pasted the secret. Copying
+      // that to an agent owned by SOMEONE ELSE hands them a standing grant on
+      // the source owner's third-party account which outlives both revoking
+      // their share and deleting the connection on the source — nothing ever
+      // rotates or back-references a copied blob. When the cloner is already
+      // the owner no trust boundary is crossed, so their own credentials
+      // travel and cloning your own agent still produces a working replica.
+      const selfClone = source.ownerUserId !== null && source.ownerUserId === newOwnerId;
+      if (selfClone && source.mcpConnections.length > 0) {
+        await tx.agentMcpConnection.createMany({
+          data: source.mcpConnections.map((c) => ({
+            agentId: clone.id,
+            mcpServerId: c.mcpServerId,
+            slug: c.slug,
+            displayName: c.displayName,
+            encryptedCreds: c.encryptedCreds,
+            iv: c.iv,
+            authTag: c.authTag,
+            createdByUserId: c.createdByUserId,
+          })),
+        });
+      }
+
       // Seed prompt history so the clone's version list isn't empty and the
-      // denormalized active-pointer fields are consistent with a real row.
+      // denormalized active-pointer fields are consistent with a real row. The
+      // source's own history stays with the source — the clone's lineage starts
+      // here, and the note records where it came from.
       const pv = await tx.agentPromptVersion.create({
         data: {
           agentId: clone.id,

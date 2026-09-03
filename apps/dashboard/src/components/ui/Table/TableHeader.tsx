@@ -53,6 +53,9 @@ export function TableHeader<TData extends Record<string, unknown>>({
                 col.headerClassName,
               )}
               onClick={isSortable ? () => onSortChange(col.field) : undefined}
+              data-track-category='TABLE'
+              data-track-name='SORT_COLUMN'
+              data-track-metadata={JSON.stringify({ field: col.field })}
             >
               <div className='flex items-center justify-between gap-1.5'>
                 <span>{col.renderHeader ? col.renderHeader() : col.header}</span>

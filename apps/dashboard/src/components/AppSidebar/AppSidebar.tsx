@@ -1,10 +1,12 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { XyneAIQuickMenu } from './XyneAIQuickMenu';
+import { ChatQuickMenu } from './ChatQuickMenu';
+import { RailQuickNavEntry } from './RailQuickNav';
 import { ShortcutHint } from '../ui/ShortcutHint';
 import { useShortcutById } from '../../shortcuts';
 import { useAuth } from '../../hooks/useAuth';
-import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
 import {
   GraphTrendLine,
@@ -45,6 +47,7 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { usePinnedArtifactApps } from '../../hooks/usePinnedArtifactApps';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -56,13 +59,18 @@ import {
 } from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
 import { cn } from '../../utils/classNames';
-import { APP_DRAG_STYLE, isElectronApp } from '../../utils/electronApp';
+import { APP_DRAG_STYLE, isElectronApp, openInAppWindow } from '../../utils/electronApp';
+import { toast } from 'sonner';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 import WorkspaceInviteDialog from './WorkspaceInviteDialog';
+import {
+  CallsRailHoverCard,
+  useRailActiveCalls,
+} from '../Call/CallsRailHoverCard/CallsRailHoverCard';
 
 const mobileNavigationItems = [
   {
@@ -137,6 +145,18 @@ const mobileNavigationItems = [
   },
 ];
 
+type QuickMenuProps = {
+  prefixWs: (path: string) => string;
+  onNavigate: (label: string) => void;
+  onDismiss: () => void;
+};
+
+const quickMenuFor = (path: string): ((props: QuickMenuProps) => ReactElement) | null => {
+  if (path === '/ai') return XyneAIQuickMenu;
+  if (path === '/chat/dir') return ChatQuickMenu;
+  return null;
+};
+
 const SUPPORT_HOME_ROUTES = ['/support'];
 const SUPPORT_REUSED_ROUTES = [
   '/ai',
@@ -156,7 +176,9 @@ const AppSidebar = (): ReactElement => {
   const currentUser = useSelf();
   const visibleNavigationItems = useVisibleNavigationItems();
   const { toolbarPaths } = useToolbarItems();
+  const { pinnedApps } = usePinnedArtifactApps();
   const missedCallCount = useMissedCallCount();
+  const hasOngoingCall = useRailActiveCalls().length > 0;
   const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
@@ -183,11 +205,17 @@ const AppSidebar = (): ReactElement => {
     return '/' + (pathname.split('/')[1] || '');
   };
 
-  const activeRoute = getActiveRoute(
+  const relativePath =
     workspaceId && location.pathname.startsWith(`/${workspaceId}`)
       ? location.pathname.slice(`/${workspaceId}`.length) || '/'
-      : location.pathname,
-  );
+      : location.pathname;
+
+  // Release Manager reuses the /listProjects/:id URL family; keep it highlighted there.
+  const inReleaseManager =
+    relativePath.startsWith('/listProjects/') &&
+    (relativePath.includes('/releases/') ||
+      (location.state as { from?: string } | null)?.from === 'releaseManager');
+  const activeRoute = inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
 
   const isSupportHome = SUPPORT_HOME_ROUTES.includes(activeRoute);
   const isSupportReused = SUPPORT_REUSED_ROUTES.includes(activeRoute);
@@ -204,6 +232,7 @@ const AppSidebar = (): ReactElement => {
   const isSupportContext = isSupportHome || (supportMode && isSupportReused);
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [openQuickMenu, setOpenQuickMenu] = useState<string | null>(null);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
@@ -297,9 +326,7 @@ const AppSidebar = (): ReactElement => {
     );
   }, [visibleChannels, unreadCounts]);
 
-  const handleNavigationClick = (label: string): void => {
-    mixpanelService.track(EVENTS.NAVIGATION, { item: label });
-  };
+  const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {};
 
   const railShortcuts = railShortcutsAvailable();
 
@@ -314,15 +341,22 @@ const AppSidebar = (): ReactElement => {
     { enabled: railShortcuts && !isSupportContext },
   );
 
-  const handleMoreNavigate = (label: string): void => {
+  const handleMoreNavigate = (label: string, openedInNewWindow = false): void => {
     setIsMoreOpen(false);
-    handleNavigationClick(label);
+    handleNavigationClick(label, openedInNewWindow);
   };
 
   // Keep focus on the trigger when the menu opens so no item shows a focus ring.
   const handleMorePopoverAutoFocus = (e: Event): void => {
     e.preventDefault();
   };
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onAppWindowLimitReached?.(limit => {
+      toast.info(`You can have up to ${limit} extra windows open. Close one to open another.`);
+    });
+    return (): void => unsubscribe?.();
+  }, []);
 
   useEffect(() => {
     const handleResize = (): void => {
@@ -371,6 +405,8 @@ const AppSidebar = (): ReactElement => {
                     railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
                   const isActive = activeRoute === item.path;
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
+                  const showOngoingCallDot =
+                    item.path === '/calls' && hasOngoingCall && !showMissedCallBadge;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
                   const showActivityBadge =
                     item.path === '/chat/activity' && unreadActivityCount > 0;
@@ -378,60 +414,120 @@ const AppSidebar = (): ReactElement => {
 
                   const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
 
+                  const tooltipContent = shortcutIndex ? (
+                    <span className='flex items-center gap-2'>
+                      {item.label}
+                      <ShortcutHint keys={`mod+${shortcutIndex}`} />
+                    </span>
+                  ) : (
+                    item.label
+                  );
+
+                  const QuickMenu = quickMenuFor(item.path);
+
+                  const navLink = (
+                    <Link
+                      to={prefixWs(item.path)}
+                      onClick={event => {
+                        const openedInNewWindow =
+                          !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                        handleNavigationClick(item.label, openedInNewWindow);
+                        if (openedInNewWindow) {
+                          event.preventDefault();
+                        }
+                      }}
+                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      data-testid={testId}
+                      data-track-category='App_Sidebar'
+                      data-track-name='Sidebar_Nav_Item'
+                      data-track-metadata={JSON.stringify({
+                        path: item.path,
+                        label: item.label,
+                      })}
+                      className={cn(
+                        'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                        isActive
+                          ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                          : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                      )}
+                    >
+                      <Icon size={item.iconSize ?? 16} variant={isActive ? 'Solid' : 'Stroke'} />
+                      {showPendingDmDot && (
+                        <span
+                          aria-hidden='true'
+                          className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
+                        />
+                      )}
+                      {showMissedCallBadge && (
+                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
+                          {missedCallCount > 99 ? '99+' : missedCallCount}
+                        </span>
+                      )}
+                      {showActivityBadge && (
+                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
+                          {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
+                        </span>
+                      )}
+                      {showOngoingCallDot && (
+                        <span
+                          aria-hidden='true'
+                          className='absolute -top-1 -right-1 size-[9px] rounded-full bg-status-success border border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] animate-live-pulse motion-reduce:animate-none'
+                        />
+                      )}
+                    </Link>
+                  );
+
                   return (
                     <li key={item.path} className='relative'>
-                      <Tooltip
-                        content={
-                          shortcutIndex ? (
-                            <span className='flex items-center gap-2'>
-                              {item.label}
-                              <ShortcutHint keys={`mod+${shortcutIndex}`} />
-                            </span>
-                          ) : (
-                            item.label
-                          )
-                        }
-                        side='right'
-                        delayDuration={0}
-                      >
+                      {item.path === '/calls' ? (
+                        <CallsRailHoverCard tooltip={tooltipContent}>{navLink}</CallsRailHoverCard>
+                      ) : (
+                        <RailQuickNavEntry
+                          tooltip={tooltipContent}
+                          showQuickMenu={!!QuickMenu && !isActive}
+                          open={openQuickMenu === item.path}
+                          onOpenChange={next => setOpenQuickMenu(next ? item.path : null)}
+                          menu={
+                            QuickMenu ? (
+                              <QuickMenu
+                                prefixWs={prefixWs}
+                                onNavigate={handleNavigationClick}
+                                onDismiss={() => setOpenQuickMenu(null)}
+                              />
+                            ) : null
+                          }
+                          trigger={navLink}
+                        />
+                      )}
+                    </li>
+                  );
+                })}
+
+                {/* Pinned artifact apps — user-generated apps promoted to the
+                    rail from the AI Library. Stored per-device in localStorage. */}
+                {pinnedApps.map(app => {
+                  const path = `/ai/library/app/${app.id}`;
+                  const isActive = activeRoute === path;
+                  const initial = app.title.trim().charAt(0).toUpperCase() || '?';
+                  return (
+                    <li key={app.id} className='relative'>
+                      <Tooltip content={app.title} side='right' delayDuration={0}>
                         <Link
-                          to={prefixWs(item.path)}
-                          onClick={() => handleNavigationClick(item.label)}
-                          aria-label={showPendingDmDot ? 'DMs unread' : item.label}
-                          data-testid={testId}
+                          to={prefixWs(path)}
+                          onClick={() => handleNavigationClick(app.title)}
+                          aria-label={app.title}
+                          data-testid={`nav-artifact-app-${app.id}`}
                           data-track-category='App_Sidebar'
-                          data-track-name='Sidebar_Nav_Item'
-                          data-track-metadata={JSON.stringify({
-                            path: item.path,
-                            label: item.label,
-                          })}
+                          data-track-name='Sidebar_Pinned_App'
+                          data-track-metadata={JSON.stringify({ appId: app.id })}
                           className={cn(
-                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
                             isActive
                               ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                               : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                           )}
                         >
-                          <Icon
-                            size={item.iconSize ?? 16}
-                            variant={isActive ? 'Solid' : 'Stroke'}
-                          />
-                          {showPendingDmDot && (
-                            <span
-                              aria-hidden='true'
-                              className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
-                            />
-                          )}
-                          {showMissedCallBadge && (
-                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
-                              {missedCallCount > 99 ? '99+' : missedCallCount}
-                            </span>
-                          )}
-                          {showActivityBadge && (
-                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
-                              {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
-                            </span>
-                          )}
+                          {initial}
                         </Link>
                       </Tooltip>
                     </li>
@@ -553,11 +649,12 @@ const AppSidebar = (): ReactElement => {
               hasValidStatus ? (
                 <div
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
-                  style={{ backgroundColor: 'var(--sidebar-border)' }}
                   data-testid='profile-icon'
                 >
+                  <div className='absolute inset-x-0 top-0 bottom-2 rounded-lg bg-sidebar-border' />
+
                   {/* Status Emoji at Top Center */}
-                  <div className='absolute top-0 left-1/2 -translate-x-1/2'>
+                  <div className='absolute top-0 left-1/2 -translate-x-1/2 z-10'>
                     <StatusIndicator
                       statusEmoji={currentUser?.statusEmoji}
                       statusContent={currentUser?.statusContent}
@@ -568,7 +665,7 @@ const AppSidebar = (): ReactElement => {
                   </div>
 
                   {/* Avatar at Bottom - overlaps container slightly */}
-                  <div className='relative flex'>
+                  <div className='relative z-10 flex'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-lg' />
                     ) : (
@@ -666,7 +763,7 @@ const SidebarMoreMenu = ({
   items: NavigationItem[];
   activeRoute: string;
   prefixWs: (path: string) => string;
-  onNavigate: (label: string) => void;
+  onNavigate: (label: string, openedInNewWindow?: boolean) => void;
   onCustomize: () => void;
 }): ReactElement => {
   return (
@@ -681,7 +778,14 @@ const SidebarMoreMenu = ({
               <li key={item.path}>
                 <Link
                   to={prefixWs(item.path)}
-                  onClick={() => onNavigate(item.label)}
+                  onClick={event => {
+                    const openedInNewWindow =
+                      !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                    onNavigate(item.label, openedInNewWindow);
+                    if (openedInNewWindow) {
+                      event.preventDefault();
+                    }
+                  }}
                   data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                   data-track-category='App_Sidebar'
                   data-track-name='Sidebar_More_Item'

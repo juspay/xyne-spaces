@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { Skeleton } from '../../ui/Skeleton';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';

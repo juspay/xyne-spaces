@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDefault as Calendar } from '@xyne/icons';
 import { format } from 'date-fns';
 import type { CalendarViewMode } from '../CalendarView/types';
 import type { CalendarToolbarProps } from './types';

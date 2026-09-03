@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import Input from '../../../../ui/Input/Input';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 
@@ -93,7 +93,7 @@ export const TicketTypeSubmenu = ({
                     ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
                     focus-visible:ring-2 focus-visible:ring-ring
                   `}
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='ToggleTicketTypeFilter'
                   data-track-metadata={JSON.stringify({ type, selected: !isSelected })}
                 >

@@ -1,6 +1,6 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import { CallType, EntityUserAccess, ShareableEntityType } from '../../schema';
+import { CallType, CallVisibility, EntityUserAccess, ShareableEntityType } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
@@ -30,6 +30,11 @@ export class CallsACL extends BaseQueryACL<'calls'> {
                 ),
             ),
           ),
+          and(
+            cmp('workspaceId', this.ctx.workspaceId),
+            cmp('callType', CallType.HEADLESS),
+            cmp('visibility', CallVisibility.PUBLIC),
+          ),
           exists('participants', (p) => p.where('userId', this.ctx.userID)),
           exists('channel', (ch) =>
             ch
@@ -58,6 +63,11 @@ export class CallsACL extends BaseQueryACL<'calls'> {
                 ),
               ),
           ),
+        ),
+        and(
+          cmp('workspaceId', this.ctx.workspaceId),
+          cmp('callType', CallType.HEADLESS),
+          cmp('visibility', CallVisibility.PUBLIC),
         ),
         exists('participants', (p) => p.where('userId', this.ctx.userID)),
         exists('channel', (ch) =>

@@ -1,4 +1,5 @@
 import { experimentRepository, agentRunRepository } from "../repositories/index.js";
+import { errMsg } from "../lib/errors.js";
 import { dispatchExperimentEpoch, postExperimentNotice } from "../lib/experiment.js";
 import { createLogger } from "../logger.js";
 
@@ -28,7 +29,7 @@ async function tickOnce(): Promise<void> {
           finalReport: run.finalReport ?? "(experiment ended without final report)",
         });
         await postExperimentNotice({ ...run, finalReport: run.finalReport ?? "(experiment ended without final report)" }).catch((err) => {
-          log.warn(`[experiment] force-done notice failed id=${run.id}: ${err instanceof Error ? err.message : String(err)}`);
+          log.warn(`[experiment] force-done notice failed id=${run.id}: ${errMsg(err)}`);
         });
         continue;
       }
@@ -60,7 +61,7 @@ async function tickOnce(): Promise<void> {
         await dispatchExperimentEpoch(finishing);
       }
     } catch (err) {
-      log.warn(`[experiment] supervisor tick failed id=${run.id}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[experiment] supervisor tick failed id=${run.id}: ${errMsg(err)}`);
     }
   }
 }

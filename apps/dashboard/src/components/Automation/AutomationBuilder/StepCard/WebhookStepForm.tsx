@@ -687,7 +687,14 @@ function HeadersEditor({
           </div>
         ))
       )}
-      <Button variant='outline' size='sm' onClick={addRow} className='self-start'>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={addRow}
+        data-track-category='automation-builder'
+        data-track-name='ADD_WEBHOOK_ROW'
+        className='self-start'
+      >
         <Plus className='size-4' />
         Add header
       </Button>

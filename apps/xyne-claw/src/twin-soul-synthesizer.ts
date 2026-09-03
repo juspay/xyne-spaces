@@ -109,7 +109,10 @@ export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<
   const facts = selected.facts;
   if (facts.length === 0) return { content: null, error: "no-facts" };
 
-  const maxChars = Math.max(200, Math.min(20_000, req.maxChars || 10_000));
+  // Sanity ceiling on the S2S input, deliberately ABOVE claw-auth's MAX_FILE_CHARS
+  // (20k) so the authoritative cap stays there and this guard never silently
+  // trims a legitimate request at the boundary.
+  const maxChars = Math.max(200, Math.min(40_000, req.maxChars || 20_000));
 
   const system = [
     "You compile ONE persona file for a user's Digital Twin — an AI that replies to chats AS the user.",
@@ -178,7 +181,9 @@ export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<
           temperature: 0.3,
           // The file is character-capped below; this token cap prevents a
           // disobedient model from consuming the rest of its context on output.
-          max_tokens: Math.max(256, Math.min(8_192, Math.ceil(maxChars / 3))),
+          // The ceiling tracks the maxChars ceiling above (~3 chars/token) so a
+          // full-length file always fits in the output budget.
+          max_tokens: Math.max(256, Math.min(16_384, Math.ceil(maxChars / 3))),
         }),
       },
       { timeoutMs: SYNTH_TIMEOUT_MS, label: `twin-soul-synth:${req.fileName}` },

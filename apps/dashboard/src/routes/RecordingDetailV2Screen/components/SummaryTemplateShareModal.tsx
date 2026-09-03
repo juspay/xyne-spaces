@@ -9,11 +9,10 @@ import {
   UserTwo,
 } from '@xyne/icons';
 import { toast } from 'sonner';
-import { useChannelSearch, useUserGroupSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
+import { UnifiedParticipantSearch } from '../../../components/ui/UnifiedParticipantSearch/UnifiedParticipantSearch';
 import { useAuth } from '../../../hooks/useAuth';
-import { useActiveUsers } from '../../../hooks/useUsers';
 import {
   recordingService,
   type SummaryTemplate,
@@ -24,7 +23,6 @@ import {
 } from '../../../services/Recording/recordingService';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
 
 interface SummaryTemplateShareModalProps {
   template: SummaryTemplate;
@@ -39,13 +37,22 @@ const SECTION_LABEL_CLASS =
 /** Row action sized for the popover rather than the old full-width dialog. */
 const INLINE_ACTION_CLASS = 'h-7 gap-1.5 rounded-lg px-2.5 text-xs font-medium';
 
+/** Success copy per publication action; keyed so the union stays exhaustive. */
+const PUBLICATION_TOAST: Record<SummaryTemplatePublicationAction, string> = {
+  request: 'Sent to Scribe admins for review',
+  publish: 'Template published',
+  withdraw: 'Publication request withdrawn',
+  approve: 'Template published',
+  deny: 'Publication request denied',
+  unpublish: 'Template is now private',
+};
+
 export function SummaryTemplateShareModal({
   template,
   onTemplateChange,
   onSharesChange,
 }: SummaryTemplateShareModalProps): ReactElement {
   const { user: currentUser } = useAuth();
-  const activeUsers = useActiveUsers();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
   const [shares, setShares] = useState<SummaryTemplateShare[]>([]);
@@ -57,8 +64,6 @@ export function SummaryTemplateShareModal({
   const [publicationAction, setPublicationAction] =
     useState<SummaryTemplatePublicationAction | null>(null);
   const [showAdmins, setShowAdmins] = useState(true);
-  const userGroups = useUserGroupSearch(searchQuery, 10);
-  const channels = useChannelSearch(searchQuery, 10);
   const isOwner = currentUser?.id === template.createdBy && template.canEdit;
 
   useEffect(() => {
@@ -106,41 +111,10 @@ export function SummaryTemplateShareModal({
     [shares],
   );
 
-  const options = useMemo(() => {
-    const userOptions = activeUsers
-      .filter(user => user.id !== template.createdBy && !sharedUserIds.has(user.id))
-      .map(user => ({
-        label: getUserDisplayName(user),
-        subtitle: user.email ?? '',
-        value: `user:${user.id}`,
-        icon: <Avatar userId={user.id} size='sm' showActiveStatus={false} />,
-      }));
-    const groupOptions = userGroups
-      .filter(group => !sharedUserGroupIds.has(group.id))
-      .map(group => ({
-        label: group.name,
-        subtitle: 'Group',
-        value: `user_group:${group.id}`,
-        icon: <UserTwo className='size-3.5 text-muted-foreground' />,
-      }));
-    const channelOptions = channels
-      .filter(channel => !sharedChannelIds.has(channel.id))
-      .map(channel => ({
-        label: channel.name,
-        subtitle: 'Channel',
-        value: `channel:${channel.id}`,
-        icon: <Hashtag className='size-3.5 text-muted-foreground' />,
-      }));
-    return [...userOptions, ...groupOptions, ...channelOptions];
-  }, [
-    activeUsers,
-    channels,
-    sharedChannelIds,
-    sharedUserGroupIds,
-    sharedUserIds,
-    template.createdBy,
-    userGroups,
-  ]);
+  const excludedUserIds = useMemo(
+    () => new Set([template.createdBy, ...sharedUserIds]),
+    [sharedUserIds, template.createdBy],
+  );
 
   const toTarget = (value: string): SummaryTemplateShareTarget =>
     value.startsWith('user_group:')
@@ -200,17 +174,7 @@ export function SummaryTemplateShareModal({
     try {
       const updated = await recordingService.manageSummaryTemplatePublication(template.id, action);
       onTemplateChange?.(updated);
-      toast.success(
-        action === 'request'
-          ? 'Sent to Scribe admins for review'
-          : action === 'publish'
-            ? 'Template published'
-            : action === 'withdraw'
-              ? 'Publication request withdrawn'
-              : action === 'approve'
-                ? 'Template published'
-                : 'Publication request denied',
-      );
+      toast.success(PUBLICATION_TOAST[action]);
     } catch (error) {
       toast.error('Unable to update publication status', {
         description: getApiErrorMessage(error, 'Please try again.'),
@@ -221,8 +185,9 @@ export function SummaryTemplateShareModal({
   };
 
   const canReview = isAdmin && template.visibility === 'WAITING_FOR_APPROVAL';
+  const canUnpublish = template.visibility === 'PUBLIC' && (isOwner || isAdmin);
 
-  if (!currentUser || (!isOwner && !canReview)) {
+  if (!currentUser || (!isOwner && !canReview && !canUnpublish)) {
     return (
       <p className='px-0.5 py-1 text-xs text-muted-foreground'>
         Only the template creator or a Scribe admin can manage this template.
@@ -236,12 +201,14 @@ export function SummaryTemplateShareModal({
 
       {isOwner && (
         <>
-          <SearchParticipants
-            options={options}
+          <UnifiedParticipantSearch
             selectedValues={selectedValues}
             onMultiSelect={setSelectedValues}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            excludedUserIds={excludedUserIds}
+            excludedUserGroupIds={sharedUserGroupIds}
+            excludedChannelIds={sharedChannelIds}
             exclusiveSelection={false}
           />
           {selectedValues.length > 0 && (
@@ -388,6 +355,8 @@ export function SummaryTemplateShareModal({
                   variant='outline'
                   size='sm'
                   onClick={() => setShowAdmins(value => !value)}
+                  data-track-category='SummaryTemplates'
+                  data-track-name='ToggleTemplateAdmins'
                   className={`${INLINE_ACTION_CLASS} text-muted-foreground`}
                 >
                   {showAdmins ? 'Hide admins' : 'Show admins'}
@@ -449,6 +418,26 @@ export function SummaryTemplateShareModal({
             <p className='mt-px text-xs leading-normal text-muted-foreground'>
               Anyone in this workspace can see and use this template.
             </p>
+            {canUnpublish && (
+              <>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  className={`mt-2 ${INLINE_ACTION_CLASS} text-muted-foreground`}
+                  loading={publicationAction === 'unpublish'}
+                  disabled={loading}
+                  onClick={() => void handlePublication('unpublish')}
+                  data-track-category='SummaryTemplates'
+                  data-track-name='UnpublishTemplate'
+                >
+                  Make private
+                </Button>
+                <p className='mt-1.5 text-xs text-muted-foreground'>
+                  The owner and anyone it is explicitly shared with keep access.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}

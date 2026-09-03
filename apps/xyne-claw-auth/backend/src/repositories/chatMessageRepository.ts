@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 
 export const chatMessageRepository = {
@@ -11,8 +12,22 @@ export const chatMessageRepository = {
     reasoning?: string | null;
     parentId?: string | null;
     orgId: string;
-  }) =>
-    prisma.chatMessage.create({ data }),
+    /** Normalized AttachedContextRef[] the user attached to this turn. Stored on
+     *  user messages only; shown read-only in the transcript on reload. Typed as
+     *  unknown so callers can pass the domain array without a Prisma import; the
+     *  JSON cast is localized here. */
+    attachedContext?: unknown;
+  }) => {
+    const { attachedContext, ...rest } = data;
+    return prisma.chatMessage.create({
+      data: {
+        ...rest,
+        ...(attachedContext !== undefined
+          ? { attachedContext: attachedContext as Prisma.InputJsonValue }
+          : {}),
+      },
+    });
+  },
 
   /** Update a message's content, status, reasoning, or parent. Used by the
    *  chat callback to finalize the pre-created assistant placeholder once the

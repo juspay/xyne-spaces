@@ -28,6 +28,7 @@ import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Tooltip from '../../ui/Tooltip';
+import { Button } from '../../ui/Button/Button';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -275,6 +276,8 @@ const ChannelItemV2 = memo(
                             e.stopPropagation();
                             onMoveToSection?.(channel.id, section.id);
                           }}
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='MOVE_CHANNEL_TO_SECTION'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -298,6 +301,8 @@ const ChannelItemV2 = memo(
                         e.stopPropagation();
                         onMoveToSection?.(channel.id, null);
                       }}
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='REMOVE_CHANNEL_FROM_SECTION'
                     >
                       <FolderRemove size={14} className='shrink-0' />
                       <span className='flex-1'>Remove from section</span>
@@ -308,10 +313,12 @@ const ChannelItemV2 = memo(
             </DropdownMenu>
           )}
           {shouldShowCloseButton && (
-            <button
+            <Button
+              variant='ghost'
               type='button'
               className='group-hover:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
+              trackId='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
               data-track-metadata={JSON.stringify({
@@ -320,7 +327,7 @@ const ChannelItemV2 = memo(
               })}
             >
               <MultipleCrossCancelDefault size={14} className='shrink-0' />
-            </button>
+            </Button>
           )}
         </div>
       </Link>

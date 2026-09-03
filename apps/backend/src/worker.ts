@@ -38,9 +38,12 @@ import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
+import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
+import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { sdlcWorker } from '@/workers/sdlcWorker';
@@ -290,6 +293,19 @@ class WorkerService {
         await emailFetchWorker.start();
       }
 
+      // Calendar sync consumers. The API owns the Google/Microsoft webhook
+      // endpoints and only enqueues; the paging, upserts and cursor bookkeeping
+      // run here so a webhook burst never lands on the request path.
+      if (appConfig.enableCalendarSyncWorker) {
+        logger.info('Starting Google Calendar sync worker...');
+        await googleCalendarSyncQueue.startProcessing();
+
+        logger.info('Starting Microsoft Calendar sync worker...');
+        await microsoftCalendarSyncQueue.startProcessing();
+      } else {
+        logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
+      }
+
       if (appConfig.enableTeamIntelligenceWorker) {
         logger.info('Starting team intelligence worker...');
         await teamIntelligenceWorker.start();
@@ -298,6 +314,21 @@ class WorkerService {
       if (appConfig.enableEmailClassificationWorker) {
         logger.info('Starting email classification worker...');
         await emailClassificationWorker.start();
+      }
+
+      if (appConfig.radar.enabled) {
+        logger.info('Starting radar execution worker...');
+        // Guarded, unlike its neighbours: an unguarded throw reaches the outer
+        // catch, which exits the process — taking unrelated workers down with
+        // a dark-launched feature none of them depend on.
+        try {
+          await radarExecutionWorker.start();
+        } catch (error) {
+          logger.error(
+            '[RADAR-EXECUTION-WORKER] Failed to start; continuing without it',
+            error,
+          );
+        }
       }
 
       if (appConfig.enableAiProvisioningWorker) {
@@ -496,12 +527,21 @@ class WorkerService {
         await emailFetchWorker.shutdown();
       }
 
+      if (appConfig.enableCalendarSyncWorker) {
+        await googleCalendarSyncQueue.close();
+        await microsoftCalendarSyncQueue.close();
+      }
+
       if (appConfig.enableTeamIntelligenceWorker) {
         await teamIntelligenceWorker.shutdown();
       }
 
       if (appConfig.enableEmailClassificationWorker) {
         await emailClassificationWorker.shutdown();
+      }
+
+      if (appConfig.radar.enabled) {
+        await radarExecutionWorker.shutdown();
       }
 
       if (appConfig.enableAiProvisioningWorker) {

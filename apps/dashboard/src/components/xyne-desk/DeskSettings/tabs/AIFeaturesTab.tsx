@@ -11,6 +11,7 @@ import { TagGenerationConfig } from '../TagGenerationConfig';
 import { useClawAgentDetail } from '../../../../hooks/useClawAgentDetail';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { apiInstance } from '../../../../services/clients/apiClient';
+import { Button } from '../../../ui/Button/Button';
 import KnowledgeTab from '../../../../routes/ClawAgentsScreen/tabs/KnowledgeTab';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import type { AIFeaturesSubTabId } from '../DeskSettings';
@@ -31,6 +32,12 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
     setAutoAIDraft,
     autoDraftAgentSlug,
     setAutoDraftAgentSlug,
+    deskReportEnabled,
+    setDeskReportEnabled,
+    deskReportAgentSlug,
+    setDeskReportAgentSlug,
+    deskReportRangeDays,
+    setDeskReportRangeDays,
     classificationEnabledDraft,
     classificationEnabledSaved,
     setClassificationEnabled,
@@ -181,6 +188,102 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
             autoDraftAgentSlug={autoDraftAgentSlug}
             clawAgents={clawAgents}
           />
+        )}
+      </div>
+    );
+  }
+
+  if (section === 'desk-report') {
+    return (
+      <div className='flex flex-col gap-[20px]'>
+        <div className='flex shrink-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6'>
+          <div className='min-w-0 flex-1'>
+            <div className='flex items-center gap-1.5'>
+              <div className='text-desk-label text-[15px] font-semibold'>Desk report</div>
+              <Tooltip
+                content={
+                  <div className='flex max-w-[260px] flex-col gap-1'>
+                    <span>
+                      Uses the built-in Desk Report Generator agent by default — pick a different
+                      Claw agent here if you want another one to generate the report instead.
+                    </span>
+                  </div>
+                }
+              >
+                <button
+                  type='button'
+                  className='text-desk-muted hover:text-foreground'
+                  aria-label='About the desk report'
+                >
+                  <CircleHelp size={14} />
+                </button>
+              </Tooltip>
+            </div>
+            <div className='text-desk-helper w-full max-w-[400px]'>
+              Get a detailed desk insights report every day — ticket volume, recurring issues,
+              priority mix, and workload — viewable right in the desk report panel or downloaded as
+              a file.
+            </div>
+          </div>
+          <div className='flex shrink-0 items-center gap-3'>
+            {deskReportEnabled && (
+              <AutoDraftAgentPicker
+                compact
+                value={deskReportAgentSlug}
+                onChange={setDeskReportAgentSlug}
+                clawAgents={clawAgents}
+                disabled={!canManage}
+                defaultLabel='Report Generator'
+                emptyStateHelperText='Uses the built-in Report Generator agent. Add a Claw agent to this channel to use a different one instead.'
+              />
+            )}
+            <Switch
+              variant='desk'
+              checked={deskReportEnabled}
+              onCheckedChange={setDeskReportEnabled}
+              disabled={!canManage}
+            />
+          </div>
+        </div>
+
+        {deskReportEnabled && (
+          <div className='flex flex-col gap-1.5'>
+            <div className='text-desk-label text-sm'>Report window</div>
+            <div className='flex items-center gap-2'>
+              <button
+                type='button'
+                onClick={() => setDeskReportRangeDays(1)}
+                disabled={!canManage}
+                className={
+                  deskReportRangeDays === 1
+                    ? 'rounded-[8px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white'
+                    : 'rounded-[8px] border border-border px-3 py-1.5 text-sm text-desk-muted hover:bg-accent/50'
+                }
+                data-track-category='DeskSettings'
+                data-track-name='SelectDeskReportRangeLastDay'
+              >
+                Last 1 day
+              </button>
+              <button
+                type='button'
+                onClick={() => setDeskReportRangeDays(7)}
+                disabled={!canManage}
+                className={
+                  deskReportRangeDays === 7
+                    ? 'rounded-[8px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white'
+                    : 'rounded-[8px] border border-border px-3 py-1.5 text-sm text-desk-muted hover:bg-accent/50'
+                }
+                data-track-category='DeskSettings'
+                data-track-name='SelectDeskReportRangeLastWeek'
+              >
+                Last 1 week
+              </button>
+            </div>
+            <p className='text-desk-helper'>
+              How much history the report covers each time it regenerates. Defaults to the last 1
+              day.
+            </p>
+          </div>
         )}
       </div>
     );
@@ -563,9 +666,11 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
 
       <MaybeTooltip side='bottom'>
         <span className='inline-flex self-start'>
-          <button
+          <Button
             type='button'
-            className='inline-flex items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+            variant='ghost'
+            trackId='run_ai_sync'
+            className='inline-flex h-auto items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
             onClick={() => {
               void handleRunSync();
             }}
@@ -575,7 +680,7 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
           >
             {syncLoading ? <Loader2 size={14} className='animate-spin' /> : <Sparkles size={14} />}
             {inCooldown ? 'AI Sync ran recently — wait a few minutes' : 'Run AI Sync'}
-          </button>
+          </Button>
         </span>
       </MaybeTooltip>
     </div>

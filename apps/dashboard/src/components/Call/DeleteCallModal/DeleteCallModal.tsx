@@ -43,7 +43,7 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            data-track-category='calls'
+            data-track-category='CALLS'
             data-track-name='close-delete-modal'
             className='w-7 h-7 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
           >
@@ -80,12 +80,16 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
               variant='outline'
               className='h-9 rounded-[8px] px-5 py-2.5 gap-2'
               onClick={onClose}
+              data-track-category='CALLS'
+              data-track-name='CANCEL_DELETE_CALL'
             >
               Cancel
             </Button>
             <Button
               className='h-9 rounded-[8px] px-5 py-2.5 gap-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground border-0'
               onClick={handleConfirm}
+              data-track-category='CALLS'
+              data-track-name='CONFIRM_DELETE_CALL'
             >
               Delete
             </Button>

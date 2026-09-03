@@ -4,8 +4,16 @@ import path from 'path';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import packageJson from './package.json';
 import { readFileSync } from 'fs';
+import { createRequire } from 'module';
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
+
+const require = createRequire(import.meta.url);
+const ortDistDir = path.dirname(
+  require.resolve('onnxruntime-web', {
+    paths: [path.dirname(require.resolve('@huggingface/transformers'))],
+  })
+);
 
 export default defineConfig(({ mode }) => {
   // Vite puts .env values on import.meta.env, not process.env, so this file
@@ -82,7 +90,16 @@ export default defineConfig(({ mode }) => {
             src: 'node_modules/pdfjs-dist/wasm/*',
             dest: 'pdfjs/wasm',
           },
-        ],
+          {
+          src: [
+            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.wasm`,
+            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.mjs`,
+            `${ortDistDir}/ort-wasm-simd-threaded.wasm`,
+            `${ortDistDir}/ort-wasm-simd-threaded.mjs`,
+          ],
+          dest: 'onnx',
+        },
+      ],
       }),
     ],
     build: {
@@ -187,7 +204,6 @@ export default defineConfig(({ mode }) => {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
       'process.env.VITE_API_URL': JSON.stringify(env.VITE_API_URL),
       'process.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(env.VITE_GOOGLE_CLIENT_ID),
-      'process.env.VITE_MIXPANEL_TOKEN': JSON.stringify(env.VITE_MIXPANEL_TOKEN),
       __APP_VERSION__: JSON.stringify(packageJson.version),
     },
   };

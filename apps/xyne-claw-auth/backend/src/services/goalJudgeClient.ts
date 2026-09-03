@@ -10,6 +10,7 @@
  * goal in an infinite loop.
  */
 import { CONFIG } from "../config.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
 
 const logger = createLogger("goal-judge-client", createTraceId());
@@ -70,7 +71,7 @@ export async function judgeGoalViaClaw(req: GoalJudgeRequest): Promise<GoalJudge
     return { done: data.done, reason: data.reason };
   } catch (err) {
     logger.error("[goal-judge-client] call failed", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return { done: false, reason: "judge_unavailable" };
   }

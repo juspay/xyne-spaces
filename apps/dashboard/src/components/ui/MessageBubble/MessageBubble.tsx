@@ -62,6 +62,7 @@ import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
+import { RunOriginChip } from './RunOriginChip';
 import HuddleIcon from '../../icons/HuddleIcon';
 import { MicOn } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
@@ -96,6 +97,7 @@ import { isPreviewableDocument } from '../../../services/documentThumbnailServic
 import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
+import { InlineVideoPreview } from './InlineVideoPreview';
 import { loadEmojiData } from '../../../utils/emojiLookup';
 import { RecordingShareContent } from './RecordingShareContent';
 import { useRecordingShareMessage } from './recordingShareMessage';
@@ -129,50 +131,6 @@ const hasDocumentThumbnail = (attachment: AttachmentType): boolean => {
 const isHtmlAttachment = (attachment: AttachmentType): boolean => {
   return attachment.mimetype === 'text/html' || /\.html?$/i.test(attachment.originalFilename);
 };
-
-function InlineVideoPreview({
-  callId,
-  recordingId,
-}: {
-  callId: string;
-  recordingId?: string;
-}): React.ReactElement {
-  const [blobUrl, setBlobUrl] = React.useState<string | null>(null);
-  const blobUrlRef = React.useRef<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    // Per-recording download when we have a recordingId; fall back to the legacy
-    // latest-recording path for older messages that predate the field.
-    const fetchBlob = recordingId
-      ? recordingService.downloadCallRecordingBlob(callId, recordingId)
-      : recordingService.downloadRecordingBlob(callId);
-    fetchBlob
-      .then(blob => {
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        blobUrlRef.current = url;
-        setBlobUrl(url);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    };
-  }, [callId, recordingId]);
-
-  if (!blobUrl) return <></>;
-  return (
-    <video
-      src={blobUrl}
-      controls
-      className='mt-2 rounded-md max-w-sm w-full'
-      style={{ maxHeight: '240px' }}
-    >
-      <track kind='captions' />
-    </video>
-  );
-}
 
 /**
  * AttachmentsBlock renders message attachments with expand/collapse functionality.
@@ -283,7 +241,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 ? `${activeAttachments.length} files`
                 : activeAttachments[0]?.originalFilename}
             </span>
-            <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
+            <button
+              type='button'
+              onClick={() => setIsExpanded(!isExpanded)}
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_ATTACHMENT_LIST'
+            >
               {isExpanded ? (
                 <ChevronDown className='w-4 h-4 text-muted-foreground' />
               ) : (
@@ -302,6 +265,8 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                     void downloadAttachment(attachment.id, attachment.originalFilename);
                   });
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='DOWNLOAD_ALL_ATTACHMENTS'
                 className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
               >
                 <span>Download all</span>
@@ -621,6 +586,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'transcript' ||
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'identified_transcript',
   );
+  // The recording message carries its own attachment row (filtered out of the
+  // attachments block below). Its id lets InlineVideoPreview stream the file
+  // through the range-request endpoint instead of downloading it whole.
+  const recordingAttachmentId =
+    metadata?.messageSubtype === 'recording'
+      ? attachments.find(a => {
+          const attMeta = a.metadata as { type?: string; recordingId?: string } | null;
+          if (attMeta?.type !== 'recording' || !a.mimetype.startsWith('video/')) return false;
+          // Older messages predate recordingId on the metadata — match on type alone there.
+          return !metadata?.recordingId || attMeta.recordingId === String(metadata.recordingId);
+        })?.id
+      : undefined;
   const isCallNoTranscript =
     isCallMessage && !isActiveCall && !isForwardedMessage && !hasTranscript;
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
@@ -843,6 +820,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         data-component='MessageBubble'
         className={messageBubbleClassName}
         onClick={onClick}
+        {...(onClick
+          ? {
+              'data-track-category': 'MESSAGE',
+              'data-track-name': 'OPEN_MESSAGE_BUBBLE',
+              // Static label: the auto-label would capture message content.
+              'data-track-label': 'message_bubble',
+            }
+          : {})}
         onKeyDown={
           onClick
             ? (e): void => {
@@ -895,6 +880,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ) : showAvatar && sender?.userType === UserType.APP ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -997,6 +984,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ) : showAvatar && sender ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -1092,6 +1081,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <Button
                       variant='ghost'
                       onClick={() => handleUserClick(sender.id)}
+                      data-track-category='MESSAGE'
+                      data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                       className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
                       aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                     >
@@ -1112,6 +1103,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <Button
                           variant='ghost'
                           onClick={() => handleUserClick(sender.id)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                           className='text-sm font-semibold text-foreground hover:underline p-0 h-auto min-w-0'
                           aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                         >
@@ -1153,6 +1146,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <Tooltip content={formatFullTimestamp(message.createdAt)} side='top'>
                 <h3
                   onClick={searchItemView ? undefined : handleTimestampClick}
+                  data-track-category='MESSAGE'
+                  data-track-name='OPEN_THREAD_FROM_TIMESTAMP'
                   onKeyDown={
                     searchItemView
                       ? undefined
@@ -1170,6 +1165,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {metadata?.['clawRunOrigin'] ? (
+                <RunOriginChip origin={metadata['clawRunOrigin']} />
+              ) : null}
               {headerContent}
             </div>
           )}
@@ -1287,6 +1285,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         {...(metadata?.recordingId
                           ? { recordingId: String(metadata.recordingId) }
                           : {})}
+                        {...(recordingAttachmentId ? { attachmentId: recordingAttachmentId } : {})}
                       />
                     ) : (
                       <div className='mt-2'>
@@ -1372,6 +1371,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <button
                           type='button'
                           onClick={() => handleUserClick(forwardedMessageData.originalSenderId)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_ORIGINAL_SENDER_PROFILE'
                           className='text-xs font-medium text-foreground hover:underline cursor-pointer bg-transparent border-0 p-0'
                         >
                           {getUserDisplayName(originalSender) ||
@@ -1813,6 +1814,8 @@ export const ReactionView = ({
                   });
                   e.stopPropagation();
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='TOGGLE_REACTION'
                 onTouchStart={e => {
                   if (isMobile) {
                     e.stopPropagation();
@@ -1873,6 +1876,8 @@ export const ReactionView = ({
                 type='button'
                 className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
                 onClick={e => e.stopPropagation()}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_EMOJI_PICKER'
               >
                 <span className='text-sm font-medium'>+</span>
               </button>

@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { ChevronUp, ChevronDown } from 'lucide-react';
+import { ChevronUp, ChevronDown } from '@xyne/icons';
 import { useBoardTicketNav } from '../../hooks/useBoardTicketNav';
 
 interface BoardTicketNavProps {

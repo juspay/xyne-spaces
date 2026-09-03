@@ -9,6 +9,7 @@
  */
 
 import { Worker, type Job } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { redisService } from "../redis.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { backfillBatches } from "../services/memoryCronService.js";
@@ -38,7 +39,7 @@ export function initAgentBackfillWorker(): Worker<AgentBackfillJobData> {
     logger.error("[agent-backfill] job failed", {
       jobId: job?.id,
       agentSlug: job?.data?.agentSlug,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   });
 

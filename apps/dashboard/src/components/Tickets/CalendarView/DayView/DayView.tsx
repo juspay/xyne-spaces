@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { format } from 'date-fns';
 import { CompactTicketBadge } from '../CompactTicketBadge';
 import { groupTicketsByDate } from './utils';
-import { Calendar, Clock } from 'lucide-react';
+import { CalendarDefault as Calendar, ClockDefault as Clock } from '@xyne/icons';
 import type { DayViewProps } from './types';
 
 export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): React.ReactElement {

@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Dialog } from '../ui/Dialog';
+import { Button } from '../ui/Button/Button';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
@@ -144,7 +145,8 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
           </button>
 
           {canToggleStar && (
-            <button
+            <Button
+              variant='ghost'
               className={cn(
                 'items-center justify-center p-1 rounded-md shrink-0 hover:bg-sidebar-accent',
                 // Display (not opacity) so a hidden control reserves no width and
@@ -156,6 +158,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 onToggleStar?.(canvas);
               }}
               title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
+              trackId='toggle_canvas_star'
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_STAR'
             >
@@ -164,7 +167,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 variant={canvas.isStarred ? 'Solid' : 'Stroke'}
                 {...(canvas.isStarred ? { className: 'text-status-pending' } : {})}
               />
-            </button>
+            </Button>
           )}
 
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -183,12 +186,22 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end' className='w-44'>
               {onDuplicate && (
-                <DropdownMenuItem className='gap-2' onClick={() => onDuplicate(canvas)}>
+                <DropdownMenuItem
+                  className='gap-2'
+                  onClick={() => onDuplicate(canvas)}
+                  data-track-category='CANVAS'
+                  data-track-name='DUPLICATE_CANVAS'
+                >
                   <CopyDefault size={14} className='shrink-0' />
                   <span className='flex-1'>Duplicate</span>
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem className='gap-2' onClick={() => setShareOpen(true)}>
+              <DropdownMenuItem
+                className='gap-2'
+                onClick={() => setShareOpen(true)}
+                data-track-category='CANVAS'
+                data-track-name='OPEN_SHARE_CANVAS'
+              >
                 <Share01 size={14} className='shrink-0' />
                 <span className='flex-1'>Share</span>
               </DropdownMenuItem>
@@ -213,6 +226,8 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                   {onDelete && (
                     <DropdownMenuItem
                       onClick={() => onDelete(canvas.id)}
+                      data-track-category='CANVAS'
+                      data-track-name='DELETE_CANVAS'
                       className='gap-2 text-destructive focus:text-destructive'
                     >
                       <DeleteDustbin01 size={14} className='shrink-0' />

@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import z from 'zod';
-import { EntityUserAccess } from '@xyne/shared';
+import { CallVisibility, EntityUserAccess } from '@xyne/shared';
 import {
   recordingSharingService,
   RecordingSharingError,
@@ -32,6 +32,10 @@ const RecordingSharingCommandSchema = z.discriminatedUnion('action', [
     ticketId: z.string().min(1),
   }),
   z.object({ action: z.literal('unlink_ticket') }),
+  z.object({
+    action: z.literal('set_visibility'),
+    visibility: z.enum([CallVisibility.PUBLIC, CallVisibility.PRIVATE]),
+  }),
 ]);
 
 export class RecordingSharingController {

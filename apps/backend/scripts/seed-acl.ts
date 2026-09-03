@@ -57,6 +57,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
   { name: 'XYNE-APPS', description: 'Admin access to Xyne Apps management (webhooks, bot configuration, signing secrets)'},
   { name: 'ROLES', description: 'Role creation and management UI' },
+  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
   {
     name: 'AUTOMATIONS',
     description:
@@ -66,6 +67,11 @@ const ESSENTIAL_RESOURCES = [
     name: 'VESPA',
     description:
       'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*). WRITE or ADMIN access lets a user trigger and manage backfill jobs.',
+  },
+  {
+    name: 'RELEASE-MANAGER',
+    description:
+      'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.',
   },
 ];
 
@@ -103,6 +109,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'WORKSPACE', accessType: AccessType.WRITE },
       { resourceName: 'ORGANIZATIONS', accessType: AccessType.READ },
       { resourceName: 'AUTOMATIONS', accessType: AccessType.WRITE },
+      { resourceName: 'SDLC', accessType: AccessType.WRITE },
     ]
   },
   {
@@ -127,6 +134,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'DASHBOARDS', accessType: AccessType.READ },
       { resourceName: 'WORKSPACE', accessType: AccessType.READ },
       { resourceName: 'AUTOMATIONS', accessType: AccessType.READ },
+      { resourceName: 'SDLC', accessType: AccessType.READ },
     ]
   }
 ];
