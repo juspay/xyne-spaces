@@ -1,3 +1,16 @@
+## [1.251.0-release-20260901.10](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.9...v1.251.0-release-20260901.10) (2026-09-03)
+
+
+### Features
+
+* one canvas upload item instead of four ([#1454](https://github.com/juspay/xyne-spaces/issues/1454)) ([c8ddfd8](https://github.com/juspay/xyne-spaces/commit/c8ddfd87abeab9ac6f9515f50c61191c0cd9eab2))
+* ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([#1471](https://github.com/juspay/xyne-spaces/issues/1471)) ([650cb76](https://github.com/juspay/xyne-spaces/commit/650cb763f624430669436b46c0c5b6c3eb6fa299)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
+
+
+### Bug Fixes
+
+* open the discussion with a newly created artifact ([#1455](https://github.com/juspay/xyne-spaces/issues/1455)) ([78bdefc](https://github.com/juspay/xyne-spaces/commit/78bdefc883cb3e45aad5e3b1fee02bcd38bd45b2))
+
 ## [1.251.0-release-20260901.9](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.8...v1.251.0-release-20260901.9) (2026-09-03)
 
 
