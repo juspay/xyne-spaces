@@ -1,6 +1,47 @@
+import { en } from '@blocknote/core/locales';
 import type { DefaultReactSuggestionItem } from '@blocknote/react';
 
 const HEADING_TITLE = /^Heading (\d)$/;
+
+/**
+ * One Upload item in place of Image, Video, Audio and File: the file item is
+ * relabelled and the other three dropped. CanvasFilePanel picks the real type.
+ */
+export function withUnifiedUpload(
+  items: DefaultReactSuggestionItem[],
+): DefaultReactSuggestionItem[] {
+  const droppedTitles = new Set(
+    [en.slash_menu.image, en.slash_menu.video, en.slash_menu.audio].map(entry => entry.title),
+  );
+
+  return items.flatMap(item => {
+    if (droppedTitles.has(item.title)) return [];
+    if (item.title !== en.slash_menu.file.title) return [item];
+
+    return [
+      {
+        ...item,
+        title: 'Upload',
+        subtext: 'Image, video, audio or any other file',
+        // Replacing rather than extending the defaults: those still carry 'embed'
+        // and 'url' from the embed-by-url flow, which this item cannot do.
+        aliases: [
+          'upload',
+          'file',
+          'attachment',
+          'image',
+          'img',
+          'photo',
+          'picture',
+          'video',
+          'audio',
+          'sound',
+          'media',
+        ],
+      },
+    ];
+  });
+}
 
 const headingLevel = (item: DefaultReactSuggestionItem): number =>
   Number(HEADING_TITLE.exec(item.title)?.[1] ?? 0);
