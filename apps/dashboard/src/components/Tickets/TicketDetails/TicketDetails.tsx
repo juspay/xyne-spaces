@@ -700,7 +700,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // assigned users. `role` may be undefined if the backend hasn't been
   // updated yet — fall back to a generic label in that case.
   const roleGroups = useMemo(() => {
-    const groups = new Map<string, { label: string; userIds: string[] }>();
+    const groups = new Map<
+      string,
+      { label: string; entries: { assignmentId: string; userId: string }[] }
+    >();
     for (const a of ticketAssignments) {
       const userId = a.userId;
       if (!userId) continue;
@@ -710,11 +713,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         (a.roleId && (a as { role?: { name?: string } | null }).role?.name) ||
         a.userResponsibility ||
         'Role';
+      // Keep the assignment row id alongside each user so the role can be
+      // reassigned in place (the row is keyed by its own id, not by userId).
+      const entry = { assignmentId: a.id, userId };
       const existing = groups.get(key);
       if (existing) {
-        existing.userIds.push(userId);
+        existing.entries.push(entry);
       } else {
-        groups.set(key, { label, userIds: [userId] });
+        groups.set(key, { label, entries: [entry] });
       }
     }
     return Array.from(groups.values());
@@ -2194,6 +2200,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
+  // Reassign (or clear) a role slot on the ticket. Each role assignment row is
+  // addressed by its own id, so changing the user re-points that single slot
+  // without touching the ticket's primary assignee.
+  const handleRoleReassign = (assignmentId: string, userId: string | null): void => {
+    void (async (): Promise<void> => {
+      try {
+        const result = await zero.mutate(
+          mutators.ticket.reassignRole({ id: assignmentId, userId }),
+        ).server;
+        if (result.type === 'error') {
+          toast.error(result.error.message || 'Failed to update role assignment');
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(message || 'Failed to update role assignment');
+      }
+    })();
+  };
+
   const handleTicketTypeChange = (type: string): void => {
     void applyTicketUpdate(
       {
@@ -3542,30 +3567,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             {roleGroups.map(group => (
               <TicketKeyValuePair
                 key={group.label}
-                ticketKey={group.userIds.length > 1 ? `${group.label}s` : group.label}
+                ticketKey={group.entries.length > 1 ? `${group.label}s` : group.label}
                 value={
                   <div
                     className={
-                      group.userIds.length > 1 ? 'flex flex-col gap-2' : 'flex items-center gap-2'
+                      group.entries.length > 1 ? 'flex flex-col gap-2' : 'flex items-center gap-2'
                     }
                   >
-                    {group.userIds.map(userId => {
-                      const user = users?.find(
-                        (u: { id: string; name: string; displayName?: string | null }) =>
-                          u.id === userId,
-                      );
-                      return (
-                        <div key={userId} className='flex items-center gap-2'>
-                          <UserAvatar
-                            userId={userId}
-                            size={AvatarSize.SM}
-                            shape={AvatarShape.CIRCULAR}
-                            showActiveStatus={false}
-                          />
-                          {getUserDisplayName(user) || 'Unknown'}
-                        </div>
-                      );
-                    })}
+                    {group.entries.map(entry => (
+                      <UserSelector
+                        key={entry.assignmentId}
+                        selectedUserId={entry.userId}
+                        onUserSelect={newUserId =>
+                          handleRoleReassign(entry.assignmentId, newUserId)
+                        }
+                        channelId={ticket.channelId ?? undefined}
+                        noBorder={true}
+                      />
+                    ))}
                   </div>
                 }
               />

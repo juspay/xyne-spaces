@@ -4378,6 +4378,34 @@ export const mutators = defineMutators({
         await updateTicketMdFromZero(tx, zql, ticketId);
       },
     ),
+    // Re-point an existing role assignment (Manager / Reviewer / QA / any custom
+    // role) at a different user, or clear the slot. The assignment row is keyed
+    // by its own id; membership on the ticket's channel is the authorization
+    // boundary (enforced by TicketAssignmentsACL). createdBy is stamped with the
+    // acting user so the ticket_assignments side-effect attributes the resulting
+    // activity + notification to whoever performed the reassignment.
+    reassignRole: defineMutator(
+      z.object({
+        id: z.string(),
+        userId: z.string().nullable(),
+      }),
+      async ({ tx, ctx, args: { id, userId } }) => {
+        const assignment = await tx.run(zql.ticket_assignments.where('id', id).one());
+        if (!assignment) throw new Error('Ticket assignment not found');
+
+        if (userId === null) {
+          await tx.mutate.ticket_assignments.delete({ id });
+        } else {
+          await tx.mutate.ticket_assignments.update({
+            id,
+            userId,
+            createdBy: ctx.userID,
+          });
+        }
+
+        await updateTicketMdFromZero(tx, zql, assignment.ticketId);
+      },
+    ),
   },
   ticketStageEta: {
     update: defineMutator(

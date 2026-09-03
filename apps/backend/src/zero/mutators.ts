@@ -6759,6 +6759,58 @@ export function createMutators(
           }
         },
       ),
+      // Re-point an existing role assignment (Manager / Reviewer / QA / any
+      // custom role) at a different user, or clear the slot. Authoritative
+      // server counterpart of the shared client mutator
+      // (packages/shared/src/zero/mutators.ts → ticket.reassignRole) — KEEP IN
+      // SYNC. Authorization is enforced by TicketAssignmentsACL; the
+      // ticket_assignments side-effect (fired on the wrapped tx.mutate write)
+      // creates the activity + notification. createdBy is stamped with the actor
+      // so the notification is attributed to whoever performed the reassignment.
+      reassignRole: defineMutator(
+        z.object({
+          id: z.string(),
+          userId: z.string().nullable(),
+        }),
+        async ({ tx, args: { id, userId } }) => {
+          const assignment = await tx.run(zql.ticket_assignments.where('id', id).one());
+          if (!assignment) throw new Error('Ticket assignment not found');
+
+          const previousUserId = assignment.userId;
+
+          if (userId === null) {
+            await tx.mutate.ticket_assignments.delete({ id });
+          } else {
+            await tx.mutate.ticket_assignments.update({
+              id,
+              userId,
+              createdBy: authData.sub,
+            });
+          }
+
+          // Role assignments count toward per-user workload (see
+          // ticketAssignmentService persist -> syncUserWorkload), so keep both
+          // the user losing the slot and the user gaining it in sync.
+          const ticket = await tx.run(zql.tickets.where('id', assignment.ticketId).one());
+          if (ticket?.userGroupId && ticket.boardId) {
+            const usersToSync = [
+              ...new Set([previousUserId, userId].filter(Boolean) as string[]),
+            ];
+            for (const uid of usersToSync) {
+              asyncTasks.push(async () => {
+                try {
+                  await syncUserWorkload(uid, ticket.userGroupId!, ticket.boardId!, authData.sub);
+                } catch (error) {
+                  logger.error(
+                    `[Workload Sync] Failed for user ${uid} in role reassignment:`,
+                    error,
+                  );
+                }
+              });
+            }
+          }
+        },
+      ),
     },
     ticketStageEta: {
       update: defineMutator(
