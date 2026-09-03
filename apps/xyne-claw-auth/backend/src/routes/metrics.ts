@@ -889,52 +889,20 @@ metricsRouter.get("/global", async (req: Request, res: Response) => {
         ${orgFilter}
     `;
 
-    // Bot commit analytics - PR outcomes by bot attribution
-    const botCommitAnalyticsRaw = await prisma.$queryRaw<Array<{
+    // Bot commit analytics - TODO: Move to main backend endpoint
+    // The pull_requests table is in the main backend database, not claw-auth database
+    // Returning empty data for now - this will be implemented in a separate endpoint
+    const botCommitAnalyticsRaw: Array<{
       category: 'bot-only' | 'human-only' | 'mixed';
       total_prs: bigint;
       merged_prs: bigint;
       rejected_prs: bigint;
-    }>>`
-      WITH categorized_prs AS (
-        SELECT
-          id,
-          status,
-          CASE
-            WHEN "botCommitCount" > 0 AND "humanCommitCount" = 0 THEN 'bot-only'
-            WHEN "botCommitCount" = 0 AND "humanCommitCount" > 0 THEN 'human-only'
-            WHEN "botCommitCount" > 0 AND "humanCommitCount" > 0 THEN 'mixed'
-          END as category
-        FROM "pull_requests"
-        WHERE "commitAnalysisStatus" = 'COMPLETED'
-          AND "date" >= ${windowStart}
-          AND "date" < ${windowEnd}
-          ${orgFilter}
-      )
-      SELECT
-        category,
-        COUNT(*)::bigint as total_prs,
-        SUM(CASE WHEN status = 'MERGED' THEN 1 ELSE 0 END)::bigint as merged_prs,
-        SUM(CASE WHEN status IN ('DECLINED', 'CLOSED') THEN 1 ELSE 0 END)::bigint as rejected_prs
-      FROM categorized_prs
-      WHERE category IS NOT NULL
-      GROUP BY category
-    `;
+    }> = [];
 
-    // Get PR analysis status counts
-    const prAnalysisStatusRaw = await prisma.$queryRaw<Array<{
+    const prAnalysisStatusRaw: Array<{
       commitAnalysisStatus: string | null;
       count: bigint;
-    }>>`
-      SELECT
-        "commitAnalysisStatus",
-        COUNT(*)::bigint as count
-      FROM "pull_requests"
-      WHERE "date" >= ${windowStart}
-        AND "date" < ${windowEnd}
-        ${orgFilter}
-      GROUP BY "commitAnalysisStatus"
-    `;
+    }> = [];
 
     const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
 
