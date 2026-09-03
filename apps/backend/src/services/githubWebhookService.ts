@@ -498,10 +498,10 @@ export class GitHubWebhookService {
           vcsProvider: 'github',
         });
 
-        logger.info(`[GitHub-Webhook] Enqueued commit analysis for PR #${context.prId}`);
+        logger.info(`[GitHub-Webhook] Enqueued commit analysis for PR #${String(context.prId).replace(/[\r\n]/g, '')}`);
       } catch (error) {
         // Log but don't fail webhook - analysis can be retried
-        logger.error(`[GitHub-Webhook] Failed to enqueue commit analysis for PR #${context.prId}:`, error);
+        logger.error(`[GitHub-Webhook] Failed to enqueue commit analysis for PR #${String(context.prId).replace(/[\r\n]/g, '')}:`, error);
       }
     }
 
