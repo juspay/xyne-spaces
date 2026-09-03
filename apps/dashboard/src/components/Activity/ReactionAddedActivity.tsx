@@ -7,7 +7,8 @@ import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { ResolvedEmoji } from './ResolvedEmoji';
+import { renderEmoji } from '../../utils/customEmojiUtils';
+import { useCustomEmojis } from '../../hooks/useCustomEmojis';
 import { getReactionMessagePreview } from './reactionMessagePreview';
 
 export const ReactionAddedActivity = ({
@@ -21,6 +22,7 @@ export const ReactionAddedActivity = ({
   const message = activity.message;
   const actorUser = useUser(reaction?.userId ?? '');
   const { baseRoute } = useRouteContext();
+  const { data: customEmojis } = useCustomEmojis();
 
   if (!reaction || !message || !reaction.userId || !message.conversation) return null;
 
@@ -35,7 +37,7 @@ export const ReactionAddedActivity = ({
       actorId={reaction.userId}
       actorName={getUserDisplayName(actorUser)}
       channelId={message.conversation?.channelId}
-      badgeIcon={<ResolvedEmoji emojiName={reaction.emojiName} />}
+      badgeIcon={renderEmoji(reaction.emojiName, undefined, undefined, customEmojis)}
       badgeColorClass='bg-muted'
       description={
         <>
