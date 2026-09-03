@@ -23,6 +23,14 @@ export interface UserQuestionOption {
   description?: string;
 }
 
+/** A single feedback button: visible label + captured machine value, with an
+ * optional mapping onto the run's up/down rating. */
+export interface FeedbackOption {
+  label: string;
+  value: string;
+  sentiment?: "up" | "down";
+}
+
 export interface UserQuestion {
   id: string;
   label?: string;
@@ -68,6 +76,11 @@ export type UiWidget =
       type: "chart";
       operation: "create";
       payload: ChartArtifact;
+    })
+  | (UiWidgetBase & {
+      type: "feedback";
+      operation: "create";
+      payload: { feedbackId: string; sessionId: string; prompt: string; options: FeedbackOption[] };
     });
 
 export type UiWidgetType = UiWidget["type"];
@@ -213,6 +226,31 @@ export function uiWidgetValidationError(value: unknown): string | null {
       const id = (questions[i] as Record<string, unknown>)["id"] as string;
       if (ids.has(id)) return `duplicate question id ${JSON.stringify(id)}`;
       ids.add(id);
+    }
+    return null;
+  }
+
+  if (candidate["type"] === "feedback") {
+    if (!isNonEmptyString(payload["feedbackId"])) return "feedback payload needs a feedbackId";
+    if (!isNonEmptyString(payload["sessionId"])) return "feedback payload needs a sessionId";
+    if (!isNonEmptyString(payload["prompt"])) return "feedback payload needs a prompt";
+    const options = payload["options"];
+    if (!Array.isArray(options) || options.length < 2 || options.length > 6) {
+      return "feedback payload needs 2-6 options";
+    }
+    const values = new Set<string>();
+    for (let i = 0; i < options.length; i += 1) {
+      const option = options[i];
+      if (!isRecord(option) || !isNonEmptyString(option["label"]) || !isNonEmptyString(option["value"])) {
+        return `feedback option ${i + 1} needs a non-empty label and value`;
+      }
+      const sentiment = option["sentiment"];
+      if (sentiment !== undefined && sentiment !== "up" && sentiment !== "down") {
+        return `feedback option ${i + 1} sentiment must be "up" or "down" when present`;
+      }
+      const value = option["value"] as string;
+      if (values.has(value)) return `duplicate feedback option value ${JSON.stringify(value)}`;
+      values.add(value);
     }
     return null;
   }

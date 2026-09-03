@@ -55,6 +55,7 @@ import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
 import { dailyBriefRouter } from "../routes/daily-brief.js";
 import { pendingQuestionsRouter } from "../routes/pending-questions.js";
+import { pendingFeedbackRouter } from "../routes/pending-feedback.js";
 import { ttsRouter } from "../routes/tts.js";
 import { settingsRouter } from "../routes/settings.js";
 import { runsRouter } from "../routes/runs.js";
@@ -247,6 +248,7 @@ function mountRunAndWebhooks(app: Express): void {
   // Strict S2S: the ask-question tool stores questions here with the S2S key;
   // flow-action consumes them through the module's atomic Redis helper.
   app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
+  app.use(`${BASE}/pending-feedback`, requireStrictS2S, pendingFeedbackRouter);
 }
 
 function mountWorkspace(app: Express): void {

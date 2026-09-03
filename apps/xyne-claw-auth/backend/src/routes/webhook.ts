@@ -136,6 +136,7 @@ import {
   buildCodeFlow,
   buildDiffFlow,
   buildChartFlow,
+  buildFeedbackFlow,
   hashSkillContent,
   buildPrFlow,
   prScreenId,
@@ -6809,6 +6810,33 @@ async function renderUiWidget(
       case "chart":
         flow = withSpacesAppId(buildChartFlow(widget.payload), ctx.spacesAppId);
         break;
+      case "feedback": {
+        const { feedbackId, sessionId, prompt, options } = widget.payload;
+        if (!feedbackId || !prompt || options.length < 2) return false;
+        const { signAction } = await import("./mcp.js");
+        flow = withSpacesAppId(buildFeedbackFlow(prompt, options, {
+          feedbackId,
+          sessionId,
+          agentSlug: ctx.agentSlug ?? "",
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+        }), ctx.spacesAppId);
+        flow.data = {
+          ...(flow.data ?? {}),
+          signature: signAction({
+            actionType: "collect-feedback",
+            feedbackId,
+            sessionId,
+            userId: ctx.senderId,
+            agentSlug: ctx.agentSlug ?? "",
+            spacesAppId: ctx.spacesAppId ?? "",
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+          }),
+        };
+        break;
+      }
     }
 
     await spacesAppFetch("/chat/postMessage", {
