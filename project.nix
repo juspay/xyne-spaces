@@ -118,6 +118,9 @@
         
         cd "$BACKEND_DIR"
         echo "Changed to backend directory"
+
+        # Ensure Node.js and pnpm are on PATH (writeShellScript does not inherit the dev-shell PATH)
+        export PATH="${pkgs.nodejs}/bin:${pkgs.pnpm}/bin:$PATH"
         
         # Check if users table exists
         echo "Checking if users table exists..."
@@ -133,22 +136,22 @@
           ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db;" 2>/dev/null || true
           
           # Push schema
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
+          pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
           
           # Seed ACL system
           echo "Seeding ACL system..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
+          pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
           echo "✓ ACL system seeded"
           
           # Auto-create admin user from DEFAULT_ADMIN_EMAIL
           echo ""
           echo "Creating default admin user..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-admin-user.ts
+          pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-admin-user.ts
           echo ""
           echo "✓ Database setup complete"
         else
           echo "Syncing database schema..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
+          pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
           echo "✓ Database schema is up to date"
         fi
         

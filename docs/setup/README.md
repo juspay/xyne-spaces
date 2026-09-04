@@ -10,6 +10,7 @@ matches what you are doing.
 | Set up a machine that has nothing installed | [Local Setup](local-setup.md) |
 | Check I have the right tooling | [Prerequisites](prerequisites.md) |
 | Get a full local environment running | [Local Development](local-development.md) |
+| Use Nix for a reproducible toolchain and services | [Nix](nix.md) |
 | Make the AI features actually respond | [AI Providers](ai-providers.md) |
 | Understand what each background service does | [Services](services.md) |
 | Fix something that broke | [Troubleshooting](troubleshooting.md) |
