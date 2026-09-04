@@ -570,6 +570,11 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+  // When true (default), the webhook SSRF guard allows private / internal
+  // destinations but still refuses loopback and link-local / cloud-metadata
+  // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
+  // are unaffected either way (always strict).
+  WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
 
 }).unknown();
 
@@ -1194,5 +1199,8 @@ export const config = {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
+  },
+  webhooks: {
+    allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
   },
 };
