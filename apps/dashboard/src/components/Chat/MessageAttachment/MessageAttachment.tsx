@@ -1371,7 +1371,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     <>
       <div
         className={cn(
-          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition-shadow duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
           compact
             ? 'w-16 h-16 '
             : isInGrid
@@ -1432,7 +1432,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         </div>
 
         {/* Hover overlay for better UX feedback */}
-        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition-all duration-200 pointer-events-none' />
+        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition-colors duration-200 pointer-events-none' />
       </div>
     </>
   );
