@@ -4,6 +4,7 @@ import type {
   InlineContentSchema,
   StyleSchema,
 } from '@blocknote/core';
+import { NodeSelection } from '@tiptap/pm/state';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 
@@ -40,15 +41,36 @@ export type CanvasInlineCommentThreadState =
     }
   | null;
 
+/** The selected node, on the selections that have one (ProseMirror's NodeSelection). */
+interface SelectedNodeLike {
+  textContent: string;
+  attrs: Record<string, unknown>;
+  type: { name: string };
+}
+
 interface TiptapEditorLike {
   state: {
-    selection: { from: number; to: number; empty?: boolean };
+    selection: { from: number; to: number; empty?: boolean; node?: SelectedNodeLike };
     doc: { textBetween: (from: number, to: number, blockSeparator?: string) => string };
   };
   commands: {
     setTextSelection: (range: { from: number; to: number }) => boolean;
   };
 }
+
+/**
+ * What a comment on a block with no text is anchored to.
+ *
+ * An embed is a whole block that holds no characters, so there is no quoted
+ * text to hang the thread on — and the thread is refused without one. The link
+ * it shows is what the reader means by "this", so that is the quote.
+ */
+const anchorTextForNode = (node: SelectedNodeLike | undefined): string => {
+  if (!node) return '';
+  if (node.textContent.trim().length > 0) return node.textContent.trim();
+  const url: unknown = node.attrs['url'];
+  return typeof url === 'string' && url.length > 0 ? url : node.type.name;
+};
 
 const getTiptapEditor = (editor: CanvasEditorLike): TiptapEditorLike | null =>
   ((editor as unknown as { _tiptapEditor?: unknown })._tiptapEditor as
@@ -66,22 +88,47 @@ const closeFormattingToolbar = (editor: CanvasEditorLike): void => {
   }
 };
 
-const getSelectionRect = (container: HTMLElement | null, blockId: string): DOMRect | null => {
-  const selection = window.getSelection();
-  if (selection && selection.rangeCount > 0) {
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    if (rect.width > 0 || rect.height > 0) return rect;
-  }
-
+const getSelectionRect = (
+  container: HTMLElement | null,
+  blockId: string,
+  preferBlockRect = false,
+): DOMRect | null => {
   const escapedBlockId =
     typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
       ? CSS.escape(blockId)
       : blockId.replace(/["\\]/g, '\\$&');
-  return (
-    container
-      ?.querySelector<HTMLElement>(`[data-id="${escapedBlockId}"]`)
-      ?.getBoundingClientRect() ?? null
-  );
+  const blockElement =
+    container?.querySelector<HTMLElement>(`[data-id="${escapedBlockId}"]`) ?? null;
+
+  // A whole-block selection has no text range to measure, and the browser's own
+  // selection stays wherever the caret last was — which put the thread there
+  // instead of on the block. Pressing the button moves it again, so the block's
+  // own rect is the only stable answer.
+  if (!preferBlockRect) {
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      // The range has to be in the document, not merely inside the one block the
+      // cursor is in: a selection spanning two paragraphs has the editor itself
+      // as its common ancestor, and requiring the block would throw such a
+      // selection back onto the whole block's rect — a long way from the text
+      // that was highlighted.
+      const container = blockElement?.closest('.bn-editor') ?? blockElement;
+      const insideEditor = container?.contains(range.commonAncestorContainer) ?? false;
+      if (insideEditor && (rect.width > 0 || rect.height > 0)) return rect;
+    }
+  }
+
+  const blockRect = blockElement?.getBoundingClientRect() ?? null;
+  if (!blockRect) return null;
+
+  // The card opens beside the anchor, so a diagram's full height put it a
+  // screen away from the Ask AI / Comment pill that was just pressed. The pill
+  // sits on the block's top edge; collapsing the anchor to that edge is what
+  // brings the two together.
+  if (preferBlockRect) return new DOMRect(blockRect.left, blockRect.top, blockRect.width, 0);
+  return blockRect;
 };
 
 const escapeSelectorValue = (value: string): string =>
@@ -269,7 +316,9 @@ export function useCanvasCommentEditorBridge({
       if (!blockId || !tiptapEditor || tiptapEditor.state.selection.empty) return null;
 
       const { from, to } = tiptapEditor.state.selection;
-      const anchorText = tiptapEditor.state.doc.textBetween(from, to, ' ').trim();
+      const anchorText =
+        tiptapEditor.state.doc.textBetween(from, to, ' ').trim() ||
+        anchorTextForNode(tiptapEditor.state.selection.node);
       if (!anchorText) return null;
 
       return {
@@ -296,6 +345,13 @@ export function useCanvasCommentEditorBridge({
       try {
         const tiptapEditor = getTiptapEditor(editor);
         if (!tiptapEditor) return false;
+        // A block with no characters — an embed — has nothing to highlight.
+        // The thread still belongs to it through its block id, so this reports
+        // success rather than refusing the comment outright.
+        const highlightable = tiptapEditor.state.doc
+          .textBetween(anchor.selectionFrom, anchor.selectionTo, ' ')
+          .trim();
+        if (!highlightable) return true;
         tiptapEditor.commands.setTextSelection({
           from: anchor.selectionFrom,
           to: anchor.selectionTo,
@@ -351,7 +407,14 @@ export function useCanvasCommentEditorBridge({
     setActiveCommentBlockId(blockId);
     setActiveCommentThreadId(null);
     if (anchor?.blockId === blockId) {
-      const rect = getSelectionRect(containerRef.current, blockId);
+      const currentEditor = getEditor();
+      const tiptapEditor = currentEditor ? getTiptapEditor(currentEditor) : null;
+      const selection = tiptapEditor?.state.selection;
+      // instanceof, not the constructor's name: minification renames the class,
+      // so a name test is always false in a production build — which silently
+      // put this back on the caret, the very thing it exists to avoid.
+      const wholeBlockSelected = selection instanceof NodeSelection;
+      const rect = getSelectionRect(containerRef.current, blockId, wholeBlockSelected);
       setIsCommentsOpen(false);
       setActiveCommentAnchor(anchor);
       if (rect) {
@@ -395,6 +458,19 @@ export function useCanvasCommentEditorBridge({
     setActiveCommentThreadId(null);
   }, []);
 
+  /**
+   * The draft card has done its job the moment the comment exists.
+   *
+   * It used to stay open showing the thread it had just created, so every
+   * comment left a card sitting over the document until something else was
+   * clicked. The comment is on the block, in the highlight and in the panel —
+   * there is nothing left for the card to say.
+   */
+  const finishInlineCommentDraft = useCallback((): void => {
+    clearActiveCommentAnchor();
+    setInlineCommentThread(null);
+  }, [clearActiveCommentAnchor]);
+
   const closeInlineCommentThread = useCallback((): void => {
     setInlineCommentThread(null);
     setActiveCommentThreadId(null);
@@ -411,6 +487,7 @@ export function useCanvasCommentEditorBridge({
     openCommentsForCurrentBlock,
     focusCommentBlock,
     clearActiveCommentAnchor,
+    finishInlineCommentDraft,
     closeInlineCommentThread,
     applyCommentAnchorStyle,
     removeCommentAnchorStyle,

@@ -65,7 +65,11 @@ import {
   toAttachedContext,
   attachedContextToSelections,
 } from './components/ContextPickerPanel';
-import { MessageItem, ConversationToolInvocationsContext } from './components/MessageItem';
+import {
+  MessageItem,
+  ConversationToolInvocationsContext,
+  type EditedMessageContext,
+} from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
 import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
@@ -1643,7 +1647,11 @@ const XyneAISidebar = ({
   // follow-up before reload, flattens after). The JAF v1 path infers the
   // same intent from `parentMessageId`, so the extra params are no-ops there.
   const handleEditMessage = useCallback(
-    async (messageId: string, newContent: string): Promise<void> => {
+    async (
+      messageId: string,
+      newContent: string,
+      editedContext?: EditedMessageContext,
+    ): Promise<void> => {
       if (isActiveSessionStreaming) return;
 
       const messageToEdit = messages.find((m: Message) => m.id === messageId);
@@ -1653,11 +1661,21 @@ const XyneAISidebar = ({
 
       const editedParentAssistant = messageToEdit.parentId ?? undefined;
 
+      // An edit that dropped a context card must re-run without it. `undefined`
+      // means the editor never offered the choice (mobile), so the original
+      // still stands; an empty list means the reader removed everything.
+      const editedAttachments = editedContext
+        ? (editedContext.attachments ?? [])
+        : (messageToEdit.attachments ?? []);
+      const editedSelectionContexts = editedContext
+        ? editedContext.selectionContexts
+        : messageToEdit.selectionContexts;
+
       // Submit with new content, parentId = original message's parent (creates sibling branch)
       await submitQuery(
         newContent,
-        messageToEdit.attachments ?? [],
-        messageToEdit.selectionContexts,
+        editedAttachments,
+        editedSelectionContexts,
         newContent,
         undefined, // userTags — not needed for edit
         editedParentAssistant,
@@ -1830,14 +1848,36 @@ const XyneAISidebar = ({
     const userTagsForMessage =
       Object.keys(currentUserTags).length > 0 ? currentUserTags : undefined;
 
-    await submitQuery(
-      query,
-      messageAttachments,
-      selectionContexts,
-      displayContent,
-      userTagsForMessage,
-      parentMessageId,
-    );
+    try {
+      await submitQuery(
+        query,
+        messageAttachments,
+        selectionContexts,
+        displayContent,
+        userTagsForMessage,
+        parentMessageId,
+      );
+    } finally {
+      // The attachment belongs to the message it was sent with, not to the
+      // conversation: the sent message carries its own copy of attachedContext
+      // (persisted server-side — it is what the history pills and
+      // edit/regenerate read), so clearing the composer changes nothing already
+      // said. Left in place it silently steered every later answer, and nothing
+      // ever removed it.
+      //
+      // In a finally: a send that throws is exactly when the context must not
+      // be left behind, since the turn it belonged to never happened.
+      setSelectedChannels([]);
+      setSelectedTickets([]);
+      setSelectedCanvases([]);
+      setSelectedTranscripts([]);
+      setSelectedRecordings([]);
+      setActiveSelectionInfos([]);
+      processedSelectionKeysRef.current.clear();
+      // The machine holds the canvas selections that feed the list above;
+      // without this its next update would put them straight back.
+      xyneAIActor.send({ type: 'CLEAR_SELECTIONS' });
+    }
   }, [
     inputValue,
     attachments,
@@ -2266,8 +2306,8 @@ const XyneAISidebar = ({
                                   }
                                   onEditSubmit={
                                     !isLegacyConversation && isLatestUserMessage
-                                      ? (newContent: string) =>
-                                          void handleEditMessage(message.id, newContent)
+                                      ? (newContent: string, context?: EditedMessageContext) =>
+                                          void handleEditMessage(message.id, newContent, context)
                                       : undefined
                                   }
                                   onEditMobile={

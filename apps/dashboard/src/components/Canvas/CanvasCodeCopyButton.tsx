@@ -5,7 +5,7 @@ import type {
   StyleSchema,
 } from '@blocknote/core';
 import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useClipboard } from '../../hooks/useClipboard';
 import { CANVAS_CODE_LANGUAGES } from './CanvasCodeBlockSpec';
@@ -130,6 +130,17 @@ export const CanvasCodeCopyButton = ({
     [editor],
   );
 
+  // The same action the diagram, equation and embed blocks carry. The toolbar
+  // is hover-positioned rather than part of the block, so the block it belongs
+  // to is the one under the pointer, not the one holding the cursor.
+  const handleDelete = useCallback(() => {
+    const blockId = hoveredBlockRef.current?.closest<HTMLElement>('[data-id]')?.dataset['id'];
+    if (!blockId) return;
+    hoveredBlockRef.current = null;
+    setPosition(prev => ({ ...prev, show: false }));
+    editor.removeBlocks([blockId]);
+  }, [editor]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -154,25 +165,29 @@ export const CanvasCodeCopyButton = ({
   return (
     <div
       ref={toolbarRef}
-      className='fixed z-50 flex -translate-x-full items-center gap-1 rounded-md border border-border bg-card p-1 shadow-sm'
+      className='canvas-code-toolbar fixed z-50 flex -translate-x-full items-center gap-1 rounded-md border border-border bg-card p-1 shadow-sm'
       style={{ top: position.top, left: position.left }}
     >
-      <select
-        value={language}
-        onChange={event => handleLanguageChange(event.target.value)}
-        onMouseDown={event => event.stopPropagation()}
-        aria-label='Code language'
-        title='Code language'
-        data-track-category='CANVAS'
-        data-track-name='Change_Code_Block_Language'
-        className='h-[26px] max-w-32 rounded px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground'
-      >
-        {CANVAS_CODE_LANGUAGES.map(option => (
-          <option key={option.value || 'auto'} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      {/* updateBlock writes through the API too, so a reader could otherwise
+          re-language someone else's code block. Copy stays: it takes nothing. */}
+      {editor.isEditable && (
+        <select
+          value={language}
+          onChange={event => handleLanguageChange(event.target.value)}
+          onMouseDown={event => event.stopPropagation()}
+          aria-label='Code language'
+          title='Code language'
+          data-track-category='CANVAS'
+          data-track-name='Change_Code_Block_Language'
+          className='h-[26px] max-w-32 rounded px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground'
+        >
+          {CANVAS_CODE_LANGUAGES.map(option => (
+            <option key={option.value || 'auto'} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      )}
       <button
         type='button'
         onMouseDown={event => event.preventDefault()}
@@ -185,6 +200,22 @@ export const CanvasCodeCopyButton = ({
       >
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </button>
+      {/* removeBlocks writes to the document whatever the editor's editable
+          state, which only stops input handlers. */}
+      {editor.isEditable && (
+        <button
+          type='button'
+          onMouseDown={event => event.preventDefault()}
+          onClick={handleDelete}
+          title='Delete'
+          aria-label='Delete'
+          className='flex h-[26px] w-[26px] items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+          data-track-category='CANVAS'
+          data-track-name='Delete_Code_Block'
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
     </div>
   );
 };
