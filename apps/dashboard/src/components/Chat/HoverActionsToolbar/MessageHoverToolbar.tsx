@@ -90,6 +90,16 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     const container = containerRef.current;
     if (!container) return;
 
+    // The container's viewport rect only shifts on scroll/resize/layout, not
+    // per hovered row. Reading it on every pointerover forced a second
+    // synchronous layout flush per event; cache it and recompute lazily after
+    // a scroll/resize instead.
+    let containerTop = 0;
+    let containerTopDirty = true;
+    const markContainerDirty = (): void => {
+      containerTopDirty = true;
+    };
+
     const handlePointerOver = (event: MouseEvent): void => {
       // While a picker/dropdown is pinned open, freeze the toolbar in place.
       if (pinnedOpenRef.current) return;
@@ -117,6 +127,15 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       const hoverKey = row.getAttribute('data-hover-key');
       if (!messageId || !hoverKey) return;
 
+      // Read layout geometry BEFORE stamping data-hovered so this
+      // getBoundingClientRect read does not flush the style invalidation we are
+      // about to create. The container rect is cached across rows.
+      if (containerTopDirty) {
+        containerTop = container.getBoundingClientRect().top;
+        containerTopDirty = false;
+      }
+      const top = Math.round(row.getBoundingClientRect().top - containerTop);
+
       setHighlightedRow(row);
       const actions = getMessageHoverActions(hoverKey);
       hoveredMessage.current = {
@@ -124,9 +143,6 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
         ...(actions?.conversationId !== undefined && { conversationId: actions.conversationId }),
       };
 
-      const top = Math.round(
-        row.getBoundingClientRect().top - container.getBoundingClientRect().top,
-      );
       const prev = activeRowRef.current;
       if (prev && prev.hoverKey === hoverKey && prev.top === top) return;
       setActiveRow({ hoverKey, messageId, top });
@@ -138,6 +154,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     };
 
     const handleScroll = (): void => {
+      markContainerDirty();
       if (pinnedOpenRef.current) return;
       hide();
     };
@@ -148,6 +165,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     container.addEventListener('mouseleave', handlePointerLeave);
     // The (Virtuoso) scroller lives inside the container — capture catches it.
     container.addEventListener('scroll', handleScroll, { capture: true, passive: true });
+    window.addEventListener('resize', markContainerDirty);
     return (): void => {
       cancelPendingClear();
       container.removeEventListener('pointerover', handlePointerOver);
@@ -155,6 +173,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       container.removeEventListener('mouseover', handlePointerOver);
       container.removeEventListener('mouseleave', handlePointerLeave);
       container.removeEventListener('scroll', handleScroll, { capture: true });
+      window.removeEventListener('resize', markContainerDirty);
     };
   }, [cancelPendingClear, containerRef, hide, setHighlightedRow]);
 
