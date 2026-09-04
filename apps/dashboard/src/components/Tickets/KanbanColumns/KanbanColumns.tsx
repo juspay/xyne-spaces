@@ -438,6 +438,8 @@ interface KanbanColumnsProps {
   stageCounts?: Record<string, number>;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   keyPrefix?: string;
+  /** Scopes the saved layout: status columns carry the same ids on every board. */
+  layoutScope?: string;
   availableTags?: string[];
   containerClassName?: string;
   visibleColumns?: Set<string> | undefined;
@@ -492,6 +494,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   stageCounts,
   onTicketClick,
   keyPrefix = '',
+  layoutScope = '',
   containerClassName,
   availableTags = [],
   visibleColumns,
@@ -542,10 +545,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
   const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
 
-  const layoutKey = stages
-    .map(stage => stage.id)
-    .sort()
-    .join('|');
+  const layoutKey = [layoutScope, ...stages.map(stage => stage.id).sort()].join('|');
   const seededLayoutKeyRef = React.useRef('');
   if (seededLayoutKeyRef.current !== layoutKey) {
     // First render, or the board switched to a different set of stages.
@@ -578,8 +578,10 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     const stageIds = orderedStages.map(stage => stage.id);
     // Target index taken before the removal, so the column lands after the target
     // when dragged rightwards and before it when dragged leftwards.
+    const fromIndex = stageIds.indexOf(draggedStageId);
     const toIndex = stageIds.indexOf(targetStageId);
-    stageIds.splice(stageIds.indexOf(draggedStageId), 1);
+    if (fromIndex === -1 || toIndex === -1) return; // A -1 would splice off the last column.
+    stageIds.splice(fromIndex, 1);
     stageIds.splice(toIndex, 0, draggedStageId);
     setColumnOrder(stageIds);
     writeColumnLayout(layoutKey, { order: stageIds });
