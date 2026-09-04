@@ -15,6 +15,12 @@ export interface StatusEntityOption extends EntityOption {
   textColor: string;
 }
 
+export interface StageOptionSource {
+  id: string;
+  name: string;
+  defaultTicketStatusV2?: string | null;
+}
+
 export interface GenericCellEditorProps {
   value: string | null;
   onValueChange: (value: string | null) => void;
@@ -48,7 +54,7 @@ export interface StageCellEditorProps {
   value: string;
   onValueChange: (value: string) => void;
   stopEditing?: () => void;
-  stages?: Array<{ id: string; name: string }>;
+  stages?: StageOptionSource[];
   data?: { boardId?: string | null } | undefined;
 }
 
