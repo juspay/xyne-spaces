@@ -47,7 +47,7 @@ export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
 export type { PrProvider, PrStatus, PrCardInput, PrIdentity } from "./flow/pr-flow.js";
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
-export * from "./tools/sdlc-registry.js";
+export * from "./sdlc/index.js";
 // The sandbox_unavailable wire contract — shared by the emitting tool, the
 // xyne-claw runtime, and claw-auth run-recovery so the token can't drift.
 export {

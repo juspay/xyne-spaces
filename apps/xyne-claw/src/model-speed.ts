@@ -91,13 +91,13 @@ type StreamFn = (
 
 type StreamAgent = { streamFn: StreamFn };
 
-function isOAuthApiKey(apiKey: string | undefined): boolean {
+function isOAuthApiKey(apiKey: string | null | undefined): boolean {
   return typeof apiKey === "string" && apiKey.includes("sk-ant-oat");
 }
 
 /** Build the `anthropic-beta` value: extend whatever the caller already set,
  *  otherwise re-state pi-ai's OAuth betas when the key is an OAuth token. */
-export function fastModeBetaHeader(existing: string | undefined, apiKey: string | undefined): string {
+export function fastModeBetaHeader(existing: string | null | undefined, apiKey: string | null | undefined): string {
   const base = existing
     ? existing.split(",").map((s) => s.trim()).filter(Boolean)
     : isOAuthApiKey(apiKey) ? [...OAUTH_BETAS] : [];

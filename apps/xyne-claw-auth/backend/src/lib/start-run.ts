@@ -27,10 +27,11 @@ import {
   resolveOrchestratorCallableAgentsForRun,
 } from "./callable-agent-resolver.js";
 import {
-  buildSdlcAgentToolProfile,
+  sdlcAgentToolProfile,
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
+  SDLC_AGENT_SLUG,
 } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { mintSessionToken } from "./session-tokens.js";
@@ -59,7 +60,7 @@ import type { SessionContext } from "../routes/webhook.js";
 
 const log = createLogger("run");
 
-const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
   xyneSpacesTools.map((tool) => tool.name),
 );
 
@@ -899,7 +900,7 @@ export async function prepareRun(
       ...agent.agentConfig,
       ...((body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
     });
-    if (agentSlug === "sdlc-agent") {
+    if (agentSlug === SDLC_AGENT_SLUG) {
       const configuredTools = (mergedAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
       const configuredPermissions =
         (mergedAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {};
