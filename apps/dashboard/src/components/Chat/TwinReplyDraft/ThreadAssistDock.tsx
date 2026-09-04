@@ -827,18 +827,17 @@ function ReplyCard({
               />
             )}
             <Tooltip content='Discard draft' side='top'>
-              <Button
-                variant='ghost'
+              <button
                 onClick={() => void decline()}
                 disabled={loading}
-                trackId='twin_decline_draft'
+                data-ph-capture-attribute-track-id='twin_decline_draft'
                 aria-label='Discard draft'
                 data-track-category='twin-dock'
                 data-track-name='decline'
                 className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
               >
                 <ChatCancel size={14} />
-              </Button>
+              </button>
             </Tooltip>
             {hasReply && (
               <Tooltip content={editing ? 'Cancel edit' : 'Edit draft'} side='top'>
