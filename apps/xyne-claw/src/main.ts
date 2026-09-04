@@ -19,6 +19,7 @@ import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js"
 import { beginDraining, isDraining } from "./drain.js";
 import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker.js";
 import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
+import { stopRunControlSubscriber } from "./run-control.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("main");
 
@@ -119,6 +120,9 @@ async function shutdown(signal: string): Promise<void> {
       log.error("[xyne-claw] run queue worker close failed:", err);
     });
   }
+  await stopRunControlSubscriber().catch((err) => {
+    log.error("[xyne-claw] run control subscriber close failed:", err);
+  });
   stopLoopWatchdog();
   server.close(() => process.exit(0));
 }

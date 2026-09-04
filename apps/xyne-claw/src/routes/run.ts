@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { isFencedSession } from "../run-ownership.js";
+import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import {
+  decideRunControl,
+  publishRunControl,
+  registerRunControlApplier,
+  type RunControlMessage,
+} from "../run-control.js";
 import { buildPublishReviewRoomTool } from "../pr-review-room.js";
 import {
   runTask,
@@ -1164,20 +1170,33 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
-router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
     return;
   }
 
+  const callerUserId = req.headers["x-user-id"];
   const active = activeRuns.get(sessionId);
   if (!active) {
+    if (typeof callerUserId !== "string" || !callerUserId) {
+      res.json({ success: true, sessionId, status: "not_running" });
+      return;
+    }
+    const decision = await decideRunControl(
+      { type: "interrupt", sessionId, requestedBy: callerUserId },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] interrupt forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
     res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
 
-  const callerUserId = req.headers["x-user-id"];
   if (typeof callerUserId !== "string" || !callerUserId) {
     res
       .status(403)
@@ -1190,14 +1209,19 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
     );
   }
 
-  // This is intentionally NOT userCancelled. /cancel suppresses output; a
-  // follow-up in the thread wants the active turn to summarize/post what it has,
-  // then let claw-auth drain the queued follow-up as the next user turn. The
-  // follow-up may come from ANY user in the conversation, not just the run's
-  // owner — claw-auth decides who may interrupt; this endpoint is S2S-only and
-  // just needs a caller identity for the audit line above. Prefer a
-  // model-generated summary via steering, but keep a bounded hard-abort fallback
-  // so a stuck tool/provider cannot block the new prompt forever.
+  applyGracefulInterrupt(sessionId, active);
+  res.json({ success: true, sessionId, status: "interrupt_requested" });
+});
+
+// This is intentionally NOT userCancelled. /cancel suppresses output; a
+// follow-up in the thread wants the active turn to summarize/post what it has,
+// then let claw-auth drain the queued follow-up as the next user turn. The
+// follow-up may come from ANY user in the conversation, not just the run's
+// owner — claw-auth decides who may interrupt; this endpoint is S2S-only and
+// just needs a caller identity for the audit line above. Prefer a
+// model-generated summary via steering, but keep a bounded hard-abort fallback
+// so a stuck tool/provider cannot block the new prompt forever.
+function applyGracefulInterrupt(sessionId: string, active: ActiveRunControl): void {
   active.gracefulInterruptRequested = true;
   if (!active.gracefulInterruptSummaryTimer) {
     const timeoutMs = Number(process.env["CLAW_INTERRUPT_SUMMARY_TIMEOUT_MS"] ?? 15_000);
@@ -1215,10 +1239,9 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
       active.abortController.abort();
     }
   });
-  res.json({ success: true, sessionId, status: "interrupt_requested" });
-});
+}
 
-router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/cancel", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
@@ -1227,6 +1250,20 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
 
   const active = activeRuns.get(sessionId);
   if (!active) {
+    const callerId = req.headers["x-user-id"];
+    const decision = await decideRunControl(
+      {
+        type: "cancel",
+        sessionId,
+        ...(typeof callerId === "string" && callerId ? { userId: callerId } : {}),
+      },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] cancel forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
     res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
@@ -1255,6 +1292,30 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
   active.userCancelled = true;
   active.abortController.abort();
   res.json({ success: true, sessionId, status: "cancelled" });
+});
+
+registerRunControlApplier((msg: RunControlMessage): boolean => {
+  const active = activeRuns.get(msg.sessionId);
+  if (!active) return false;
+  if (msg.type === "cancel") {
+    if (!msg.userId || msg.userId !== active.userId) {
+      clog.warn(
+        `[run-control] refusing cancel session=${msg.sessionId} owner=${active.userId} by=${msg.userId ?? "?"}`,
+      );
+      return false;
+    }
+    active.userCancelled = true;
+    active.abortController.abort();
+    return true;
+  }
+  if (!msg.requestedBy) return false;
+  if (msg.requestedBy !== active.userId) {
+    clog.info(
+      `[run] cross-user interrupt session=${msg.sessionId} owner=${active.userId} by=${msg.requestedBy}`,
+    );
+  }
+  applyGracefulInterrupt(msg.sessionId, active);
+  return true;
 });
 
 // POST /clone-session — branch a persistent session to a new conversationId

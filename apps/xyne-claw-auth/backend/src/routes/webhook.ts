@@ -2362,10 +2362,15 @@ async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: s
         continue;
       }
 
-      const body = (await res.json().catch(() => ({}))) as { status?: string };
+      const body = (await res.json().catch(() => ({}))) as { status?: string; ownerPod?: string };
       if (body.status === "cancelled") {
         summary.stopped++;
         clog.info(`[stop] cancelled run ${run.sessionId} for conv ${conversationId}`);
+        continue;
+      }
+      if (body.status === "forwarded") {
+        summary.stopped++;
+        clog.info(`[stop] run ${run.sessionId} cancel forwarded to pod ${body.ownerPod ?? "unknown"}`);
         continue;
       }
 

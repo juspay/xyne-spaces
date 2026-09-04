@@ -15,6 +15,7 @@ import {
   unfenceSession,
   warmOwnershipClient,
 } from "./run-ownership.js";
+import { startRunControlSubscriber } from "./run-control.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { SERVER } from "./config.js";
@@ -198,6 +199,8 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
       maxStalledCount: 2,
     },
   );
+
+  startRunControlSubscriber();
 
   worker.on("error", (err: Error) => {
     clog.warn(`[run-queue] worker error: ${err.message}`);

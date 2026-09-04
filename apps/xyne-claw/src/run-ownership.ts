@@ -97,6 +97,10 @@ function getClient(): Redis | null {
   return client;
 }
 
+export function ownershipClient(): Redis | null {
+  return getClient();
+}
+
 export function warmOwnershipClient(): void {
   getClient();
 }

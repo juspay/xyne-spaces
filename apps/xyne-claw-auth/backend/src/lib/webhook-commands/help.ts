@@ -32,6 +32,7 @@ export async function handleHelp(ctx: WebhookCommandCtx): Promise<void> {
     "- `/queue` — show messages waiting behind the current run · `/queue <message>` — run it after the current run without interrupting · `/queue clear` — drop waiting messages",
     "- `/fast [task]` / `/fast off` — fast mode: the agent calls tools directly instead of delegating to subagents (quicker for short asks; use normal mode for deep investigations)",
     "- `/status` — debug panel for this thread's current run: what it's doing now, tool activity in the last 5 minutes, and whether it's stuck or just slow",
+    "- `/debug` — one HTML file with the full execution trace of this thread's current run: every tool call and LLM turn with timings (no tool outputs)",
     "- `/help` — show this list",
   ].join("\n"), "Failed to post /help reply");
 }

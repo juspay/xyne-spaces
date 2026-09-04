@@ -36,6 +36,8 @@ export type SlashCommand =
   // `/help` — list the available slash commands.
   | { kind: "help" }
   | { kind: "status" }
+  // `/debug` — attach one HTML file with this thread's full execution trace.
+  | { kind: "debug" }
   // `/fast` / `/fast off` — thread-scoped fast-mode toggle. Start-anchored only.
   | { kind: "fastMode"; enabled: boolean }
   | { kind: "fastModeUsage" };
@@ -91,6 +93,9 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   }
   if (lower === "/status") {
     return { kind: "status" };
+  }
+  if (lower === "/debug") {
+    return { kind: "debug" };
   }
   if (lower === "/fast" || lower === "/fast on") {
     return { kind: "fastMode", enabled: true };

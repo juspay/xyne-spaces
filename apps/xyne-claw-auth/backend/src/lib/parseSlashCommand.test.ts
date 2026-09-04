@@ -24,3 +24,19 @@ describe("parseSlashCommand queue commands", () => {
     });
   });
 });
+
+describe("parseSlashCommand /debug", () => {
+  it("parses /debug as an exact match", () => {
+    expect(parseSlashCommand("/debug")).toEqual({ kind: "debug" });
+  });
+
+  it("strips a leading agent mention before /debug", () => {
+    expect(parseSlashCommand("@Xyne Doctor /debug")).toEqual({ kind: "debug" });
+  });
+
+  it("does not hijack prose or suffixed tokens", () => {
+    expect(parseSlashCommand("/debugfoo")).toBeNull();
+    expect(parseSlashCommand("/debug this for me")).toBeNull();
+    expect(parseSlashCommand("can you check the /debug endpoint")).toBeNull();
+  });
+});
