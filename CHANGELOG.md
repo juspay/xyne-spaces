@@ -1,3 +1,10 @@
+## [1.277.1](https://github.com/juspay/xyne-spaces/compare/v1.277.0...v1.277.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* ADDED WORKSPACEID COLUMN FOR THE CANVASCOMMENTTHREAD … ([#1423](https://github.com/juspay/xyne-spaces/issues/1423)) ([35c2ac6](https://github.com/juspay/xyne-spaces/commit/35c2ac657f424536aaab07e4655ac28a2f73e234))
+
 ## [1.277.0](https://github.com/juspay/xyne-spaces/compare/v1.276.1...v1.277.0) (2026-09-04)
 
 
