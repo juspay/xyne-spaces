@@ -42,11 +42,18 @@ export async function handleCertificateError(
     errorDescription: errorDetails.errorDescription,
   });
   try {
-    // Clear the invalid certificate from keychain
+    // Clear the invalid certificate from keychain. A failure here (locked keychain, user
+    // cancels the keychain auth prompt, ACL denial) must NOT prevent loading the
+    // re-enrollment page — that page hosts the only "Re-enroll Device" recovery action,
+    // so aborting into the catch below would trap the user in a permanent dead-end loop.
     log.info('[CertificateErrorHandler] Clearing invalid certificate from keychain');
-    await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
-    log.info('[CertificateErrorHandler] Certificate cleared successfully');
-    
+    try {
+      await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
+      log.info('[CertificateErrorHandler] Certificate cleared successfully');
+    } catch (deleteError) {
+      log.error('[CertificateErrorHandler] Failed to clear certificate; continuing to re-enrollment page anyway:', deleteError);
+    }
+
     const mainWindow = getMainWindow();
 
     if (mainWindow) {
@@ -60,7 +67,7 @@ export async function handleCertificateError(
 
   } catch (error) {
     log.error('[CertificateErrorHandler] Failed to handle certificate error:', error);
-    
+
     // Show error dialog to user
     const { dialog } = require('electron');
     dialog.showErrorBox(

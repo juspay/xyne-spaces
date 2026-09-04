@@ -86,12 +86,8 @@ const envSchema = Joi.object({
   MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
   MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
   RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
-  MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(250),       // pause between paged Slack calls during collection (SDK still honors Retry-After on 429)
-  MIGRATION_SLACK_LIST_DELAY_MS: Joi.number().default(3000),      // pause between Tier-2 list pages (conversations.list/users.list ≈ 20/min) to stay under the limit
-  MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(600000),  // per-attachment download timeout (~10 min: enough for Slack's 1GB max at ~3MB/s)
-  MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
-  MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
-  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
+  MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
+  MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -564,6 +560,7 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+  SDK_API_ENABLED: Joi.boolean().default(false),
 
 }).unknown();
 
@@ -620,6 +617,18 @@ export const config = {
     url: envVars.DATABASE_URL,
     readReplicaPoolUrl: envVars.DATABASE_READ_REPLICA_POOL_URL,
   },
+  sdk: {
+    /** Master switch. The router is not mounted at all when false. */
+    enabled: envVars.SDK_API_ENABLED,
+    /**
+     * Development escape hatch: run reads against the primary pool when no read
+     * replica is configured. Tied to `NODE_ENV` rather than its own flag — the
+     * replica exists to keep SDK read traffic off the write path, and that
+     * matters precisely in production, so there is nothing a separate switch
+     * would let a deployment opt out of that `NODE_ENV` does not already decide.
+     */
+    allowPrimaryForReads: envVars.NODE_ENV !== 'production',
+  },
   commonDatabase: {
     url: envVars.COMMON_DATABASE_URL,
     poolSize: envVars.COMMON_DATABASE_POOL_SIZE,
@@ -674,12 +683,8 @@ export const config = {
   },
   runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
   slackMigration: {
-    pageDelayMs: envVars.MIGRATION_SLACK_PAGE_DELAY_MS,
-    listDelayMs: envVars.MIGRATION_SLACK_LIST_DELAY_MS,
-    fileTimeoutMs: envVars.MIGRATION_SLACK_FILE_TIMEOUT_MS,
-    requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
-    stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
-    ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
+    ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
+    workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)
   },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,

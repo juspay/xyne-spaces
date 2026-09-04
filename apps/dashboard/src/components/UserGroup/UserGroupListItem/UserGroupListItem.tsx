@@ -7,7 +7,7 @@ import { Tooltip } from '../../ui/Tooltip';
 import type { UserGroup, User } from '@xyne/shared';
 import { useUsers } from '../../../hooks/useUsers';
 import { useNavigate } from 'react-router-dom';
-import { CopyCopied, CopyDefault, DeleteDustbin02, PencilEditBox, Refresh } from '@xyne/icons';
+import { CopyCopied, CopyDefault, PauseCircle, PencilEditBox, PlayCircle } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
@@ -161,7 +161,7 @@ export const UserGroupListItem = ({
               <Button
                 variant='ghost'
                 size='iconSm'
-                className='size-6 rounded-md p-1 text-muted-foreground hover:text-destructive'
+                className='size-6 rounded-md p-1 text-muted-foreground hover:text-foreground'
                 onClick={() => void onDeactivate(userGroup.id)}
                 aria-label='Deactivate user group'
                 data-track-category='UserGroups'
@@ -171,7 +171,7 @@ export const UserGroupListItem = ({
                   groupName: userGroup.name,
                 })}
               >
-                <DeleteDustbin02 size={16} />
+                <PauseCircle size={16} />
               </Button>
             </Tooltip>
           </>
@@ -187,7 +187,7 @@ export const UserGroupListItem = ({
               groupName: userGroup.name,
             })}
           >
-            <Refresh size={14} />
+            <PlayCircle size={14} />
             Reactivate
           </Button>
         )}

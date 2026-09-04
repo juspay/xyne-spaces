@@ -71,7 +71,19 @@ export interface StreamState {
   version?: 'v1' | 'v2';
   agentSlug?: string;
   showInSidebar: boolean;
+  /** Started from the full-screen /ai experience rather than the sidebar —
+   *  decides where the completion toast's "View" button takes the user. */
+  startedOnAIPage?: boolean;
 }
+
+/** Where a completion toast's "View" button should land the user. */
+export interface CompletionToastTarget {
+  sessionId: string;
+  /** Stream began on the /ai page, so reopen it there instead of the sidebar. */
+  fromAIPage: boolean;
+}
+
+export type CompletionToastNavigator = (target: CompletionToastTarget) => void;
 
 export interface StreamRequest {
   query: string;
@@ -194,6 +206,12 @@ function parseAttachmentDimensions(data: string): { width?: number; height?: num
   return {};
 }
 
+/** Single-line, length-capped text for a toast title or description. */
+function truncateForToast(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max).trimEnd()}…` : flat;
+}
+
 class XyneAIStreamManager {
   private static instance: XyneAIStreamManager;
 
@@ -222,6 +240,9 @@ class XyneAIStreamManager {
 
   /** Which conversation the user is currently viewing (drives completion-toast targeting) */
   private visibleConversationId: string | null = null;
+
+  /** Router-aware handler registered by AppRoot for the toast's "View" button */
+  private completionToastNavigator: CompletionToastNavigator | null = null;
 
   // Web Worker instance
   private worker: Worker;
@@ -766,6 +787,14 @@ class XyneAIStreamManager {
   }
 
   /**
+   * Register the handler the completion toast's "View" button calls. Lives in
+   * the router tree (AppRoot) since this manager has no navigation of its own.
+   */
+  public setCompletionToastNavigator(navigator: CompletionToastNavigator | null): void {
+    this.completionToastNavigator = navigator;
+  }
+
+  /**
    * Which conversation the user is viewing (for completion toasts when backgrounded or on another session).
    */
   public setVisibleConversationId(sessionId: string | null): void {
@@ -993,6 +1022,7 @@ class XyneAIStreamManager {
       debugArtifactsReadyVersion: 0,
       startedAt: Date.now(),
       showInSidebar: request.showInSidebar ?? true,
+      startedOnAIPage: this.isOnAIPage,
       ...(request.version && { version: request.version }),
       ...(request.agentSlug && { agentSlug: request.agentSlug }),
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
@@ -1789,7 +1819,7 @@ class XyneAIStreamManager {
 
     if (shouldNotify) {
       this.pendingCompletionNotifications.add(notifyKey);
-      this.showCompletionToast(notifyKey, finalResponse);
+      this.showCompletionToast(notifyKey, finalResponse, currentState);
     }
 
     // Cleanup after a delay — only if this stream is still the active one for
@@ -2497,17 +2527,51 @@ class XyneAIStreamManager {
   }
 
   /**
-   * Show toast notification for completed stream
+   * Toast for a stream that finished while the user was elsewhere. Shaped like
+   * the chat-notification toast (title + preview + a "View" button) so the
+   * answer is identifiable and one click away — the bare snippet it replaced
+   * said neither which thread had replied nor how to get back to it.
    */
-  private showCompletionToast(notifyKey: string, response: string): void {
-    const preview = response.length > 100 ? response.substring(0, 100) + '...' : response;
+  private showCompletionToast(notifyKey: string, response: string, state: StreamState): void {
+    const question = [...state.messages].reverse().find(m => m.type === 'user')?.content ?? '';
+    const title = question
+      ? `Ask AI · ${truncateForToast(question, 60)}`
+      : 'Ask AI finished replying';
+    const preview = truncateForToast(response, 140);
 
-    toast(preview, {
+    const sessionId = state.sessionId?.trim() ?? '';
+    const openThread = this.completionToastNavigator;
+    const clear = (): void => {
+      this.pendingCompletionNotifications.delete(notifyKey);
+    };
+
+    toast(title, {
       id: `xyne-ai-completion-${notifyKey}`,
-      duration: 3000,
-      dismissible: false,
-      closeButton: false,
-      onAutoClose: () => this.pendingCompletionNotifications.delete(notifyKey),
+      description: preview,
+      duration: 8000,
+      closeButton: true,
+      ...(sessionId && openThread
+        ? {
+            action: {
+              label: 'View',
+              onClick: (): void => {
+                clear();
+                openThread({ sessionId, fromAIPage: state.startedOnAIPage === true });
+              },
+            },
+          }
+        : {}),
+      // Sonner lays the toast out as a row, so the action button sits beside
+      // the text by default. Wrapping the card and giving the title/description
+      // block the full basis drops the button onto its own line under the
+      // preview. Spacing goes through actionButtonStyle rather than a class:
+      // per-toast classNames are appended to the Toaster-level ones (App.tsx
+      // sets `!mt-8`), and between two equally-specific utilities CSS source
+      // order decides — an inline style is the only reliable override.
+      classNames: { toast: '!flex-wrap', content: '!basis-full' },
+      actionButtonStyle: { marginTop: 8, marginLeft: 'auto' },
+      onAutoClose: clear,
+      onDismiss: clear,
     });
   }
 

@@ -28,9 +28,20 @@ export type IncomingCallContextKind =
 /** Icon slot in the context line. Mapped to lucide components by the presenter. */
 export type IncomingCallContextIcon = 'user' | 'users' | 'thread' | 'calendar' | 'hash';
 
+/**
+ * Where the call lives, as data. `text` below is the modal's sentence; copy
+ * that has to name the place in its own words (the OS notification) reads this
+ * instead of parsing that sentence back apart.
+ */
+export type IncomingCallPlace =
+  | { kind: 'channel'; name: string } // rendered as `#name`
+  | { kind: 'group-dm' }
+  | null;
+
 export interface IncomingCallContextVM {
   kind: IncomingCallContextKind;
   icon: IncomingCallContextIcon;
+  place: IncomingCallPlace;
   /**
    * Full context line, already assembled — e.g. `Thread call in #engineering`.
    * Place names are static text by product decision, so there is nothing to

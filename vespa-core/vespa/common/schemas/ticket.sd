@@ -438,6 +438,7 @@ schema ticket {
     }
     summary description {}
     summary status {}
+    summary priority {}
     summary stage {}
     summary xyneId {}
     summary assignedTo {}
@@ -451,6 +452,7 @@ schema ticket {
     summary formFields {}
     # imported from channelRef
     summary channelId {}
+    summary channelName {}
   }
 
 }

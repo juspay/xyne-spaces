@@ -26,6 +26,8 @@ export interface AppCreationModeSignal {
   /** The build that IS the app right now — what the agent's next update builds
    *  on. A card offers Restore precisely when it is not this. */
   headVersionId: string | null;
+  /** The app's icon id, so transcript cards draw the same mark as the pane. */
+  icon: string | null;
   /** Recorded restores, oldest first, so the transcript can show them in place.
    *  Available whether or not the pane is open: closing a panel must not erase
    *  history from the thread. */
@@ -60,6 +62,7 @@ const AppCreationModeContext = createContext<AppCreationModeSignal>({
   appId: null,
   viewingVersionId: null,
   headVersionId: null,
+  icon: null,
   restores: [],
   viewVersion: () => undefined,
   restoreVersion: () => undefined,

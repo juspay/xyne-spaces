@@ -116,6 +116,7 @@ export const ProjectForm = ({
         </label>
         <Input
           id='project-name'
+          className='[[data-theme=midnight]_&]:bg-input/30'
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder='Enter project name'
@@ -132,6 +133,7 @@ export const ProjectForm = ({
           </label>
           <Input
             id='project-code'
+            className='[[data-theme=midnight]_&]:bg-input/30'
             value={code}
             onChange={e => setCode(sanitizeProjectCode(e.target.value))}
             placeholder='e.g., EUL, PROJ, PRO1, XY2'
@@ -151,6 +153,7 @@ export const ProjectForm = ({
         </label>
         <Textarea
           id='project-description'
+          className='[[data-theme=midnight]_&]:bg-input/30'
           value={description}
           onChange={e => setDescription(e.target.value)}
           placeholder='Enter project description (optional)'

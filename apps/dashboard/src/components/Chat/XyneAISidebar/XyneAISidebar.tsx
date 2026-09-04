@@ -2288,7 +2288,7 @@ const XyneAISidebar = ({
                                       : undefined
                                   }
                                   onDebug={
-                                    isV2 && message.type === 'bot'
+                                    isV2 && !isAgentForced && message.type === 'bot'
                                       ? () => {
                                           setDebugTurnIndex(botTurnIndex);
                                           // Prefer sessionId pinning when the
@@ -2303,7 +2303,7 @@ const XyneAISidebar = ({
                                       : undefined
                                   }
                                   onOpenToolDebug={
-                                    isV2 && message.type === 'bot'
+                                    isV2 && !isAgentForced && message.type === 'bot'
                                       ? (toolCallId: string) => {
                                           setDebugTurnIndex(botTurnIndex);
                                           setDebugSessionId(message.debugSessionId ?? null);
