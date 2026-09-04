@@ -59,6 +59,7 @@ import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes'
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
+import { SharedTranscriptCard } from '../../Chat/ShareAgentConversationModal/SharedTranscriptCard';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
@@ -749,7 +750,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // For mobile "my" messages, use the specialized mobile component
   const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
 
-  if (isMobile && isMe && !isSlashCommandArtifact) {
+  const isSharedAgentTranscript = metadata?.['sharedAgentTranscript'] === true;
+
+  if (isMobile && isMe && !isSlashCommandArtifact && !isSharedAgentTranscript) {
     return (
       <MobileMessageMyBubble
         message={message}
@@ -1252,6 +1255,50 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   emailId={message.messageId}
                   attachments={attachments}
                 />
+              ) : isSharedAgentTranscript ? (
+                <div className='flex flex-col gap-2'>
+                  {typeof metadata?.['shareNote'] === 'string' && metadata['shareNote'] ? (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
+                          message={metadata['shareNote']}
+                          showEdited={message.edited}
+                          maxHeight={500}
+                        />
+                      ) : (
+                        <div className='jp-message-html inline-block'>
+                          <RenderMessageWithHTML
+                            message={DOMPurify.sanitize(metadata['shareNote'])}
+                            showEdited={message.edited}
+                            preserveThreadRoute={context === 'thread'}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  <SharedTranscriptCard
+                    content={citationContent}
+                    agentName={
+                      typeof metadata?.['agentName'] === 'string'
+                        ? metadata['agentName']
+                        : typeof metadata?.['agentSlug'] === 'string'
+                          ? metadata['agentSlug']
+                          : 'agent'
+                    }
+                    {...(typeof metadata?.['messageCount'] === 'number'
+                      ? { messageCount: metadata['messageCount'] }
+                      : {})}
+                    defaultCollapsed
+                    renderBody={content => (
+                      <MarkdownMessageRenderer
+                        content={content}
+                        markdownComponents={markdownComponents}
+                      />
+                    )}
+                  />
+                </div>
               ) : recordingShare && !isForwardedMessage ? (
                 <RecordingShareContent
                   recordingShare={recordingShare}

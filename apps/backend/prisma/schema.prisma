@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "AgentConversationShare"]
 }
 
 datasource db {
@@ -1943,6 +1943,27 @@ model ChannelSection {
 
   @@index([userId, workspaceId, isDeleted]) // Fast lookup of a user's sections in a workspace
   @@map("channel_sections")
+  @@schema("public")
+}
+
+model AgentConversationShare {
+  id                   String   @id @default(cuid())
+  workspaceId          String
+  sourceConversationId String
+  sourceTipMessageId   String
+  agentSlug            String
+  targetChannelId      String
+  targetConversationId String   @unique
+  targetMessageId      String   @unique
+  sharedBy             String
+  shareOperationId     String
+  sharedMessageCount   Int
+  agentAdded           Boolean  @default(false)
+  createdAt            DateTime @default(now())
+
+  @@unique([workspaceId, targetChannelId, sharedBy, shareOperationId])
+  @@index([workspaceId, sourceConversationId, targetChannelId, createdAt(sort: Desc)])
+  @@map("agent_conversation_shares")
   @@schema("public")
 }
 
