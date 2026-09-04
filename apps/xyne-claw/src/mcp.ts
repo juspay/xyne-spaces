@@ -399,11 +399,14 @@ export async function loadMcpToolsForUser(
           // result, return a small preview. Without this, MCP tools that
           // return tens-of-MB blobs (iswitch_list_resources, etc.) blow
           // through the LLM's context window in a single turn.
+          // forceFile: always keep the raw MCP result on disk so the agent can forward the whole file to a sandbox instead of retyping it.
           const promotedText = await promoteIfOversized(
             toolOutputDir,
             server.serverType,
             mcpTool.name,
             persistedAttachmentText ?? renderedContent,
+            undefined,
+            true,
           );
           return {
             content: [{ type: "text" as const, text: promotedText }],

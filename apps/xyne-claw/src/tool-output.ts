@@ -198,11 +198,28 @@ export async function promoteIfOversized(
   // retrieval tools keep their full result inline while bulk/file tools spill at
   // the small cap. Callers may pass an explicit value to override.
   inlineCapBytes?: number,
+  // When true, persist the raw result to a file even when it fits inline, and
+  // hand the model the path — so it can forward the whole file into a sandbox
+  // byte-for-byte (sandbox-copy-in contextPath) instead of retyping it.
+  forceFile = false,
 ): Promise<string> {
   const cap = inlineCapBytes ?? inlineCapForTool(toolName);
   const clean = stripControlChars(rawContent);
   if (clean.length <= cap) {
-    return clean;
+    if (!forceFile) return clean;
+    const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const absPath = joinPath(
+      dir,
+      `${category.replace(/[^a-zA-Z0-9_-]/g, "_")}-${toolName.replace(/[^a-zA-Z0-9_-]/g, "_")}-${stamp}.json`,
+    );
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(absPath, clean, { encoding: "utf8" });
+    } catch {
+      return clean;
+    }
+    return `${clean}\n\n[Full raw result also saved to ${absPath} — to use it in a sandbox, forward the whole file with sandbox-copy-in (contextPath) instead of pasting its content.]`;
   }
   // Reflow to line-structured form so the spilled file is readable/greppable by
   // the line-oriented read/grep tools (a minified single-line JSON payload is

@@ -1155,9 +1155,10 @@ export const sandboxCopyIn: ToolDefinition = {
   slug: "sandbox-copy-in",
   name: "Sandbox Copy Skill File",
   description:
-    "Copy a companion file bundled with a loaded skill (a script or asset in the skill's folder) directly into a sandbox session, WITHOUT pasting its content. " +
-    "Prefer this over sandbox-write-file when a skill ships a script/binary you need to run in the sandbox: the file is streamed server-side, so large or binary files stay intact and don't bloat context. " +
-    "`skillPath` is relative to the skill directory shown in the skill's <location> (e.g. 'sandbox-record-video/scripts/recorder.mjs').",
+    "Copy a file directly into a sandbox session WITHOUT pasting its content — the bytes stream server-side, so large/binary files stay intact and don't bloat context. " +
+    "Pass EITHER `skillPath` (a companion file bundled with a loaded skill, relative to the skill's <location>, e.g. 'sandbox-record-video/scripts/recorder.mjs') " +
+    "OR `contextPath` (a spilled tool-result / attachment file under this run's .context, e.g. 'tool-results/<file>.json'). " +
+    "Prefer contextPath to forward a whole MCP result file into the sandbox byte-for-byte instead of retyping it with sandbox-write-file.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1172,35 +1173,48 @@ export const sandboxCopyIn: ToolDefinition = {
         description:
           "Path of the skill companion file RELATIVE to this run's session-skills root, e.g. '<skill-slug>/scripts/run.sh'. Leading '/' and '..' are rejected.",
       },
+      contextPath: {
+        type: "string",
+        description:
+          "Path of a spilled tool-result / attachment file RELATIVE to this run's .context root, e.g. 'tool-results/<file>.json'. Use this to forward a whole MCP result file into the sandbox. Leading '/' and '..' are rejected.",
+      },
       destPath: {
         type: "string",
-        description: "Absolute destination path inside the sandbox (default: /workspace/<basename of skillPath>).",
+        description: "Absolute destination path inside the sandbox (default: /workspace/<basename of source path>).",
       },
     },
-    required: ["sessionId", "skillPath"],
+    required: ["sessionId"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
     const sessionId = params["sessionId"] as string;
-    const skillPathRaw = params["skillPath"] as string;
+    const skillPathRaw = params["skillPath"] as string | undefined;
+    const contextPathRaw = params["contextPath"] as string | undefined;
     const destPathRaw = params["destPath"] as string | undefined;
 
-    const skillsRoot = context.meta?.["skillsRoot"];
-    if (!skillsRoot) {
-      return "Error: No skills are materialized for this run (context.meta.skillsRoot is unset), so there is nothing to copy in. Use sandbox-write-file for ad-hoc content.";
+    // Exactly one source: a skill companion file (skillsRoot) or a spilled
+    // tool-result file (.context root). Each is confined to its own root.
+    const hasSkill = typeof skillPathRaw === "string" && skillPathRaw.trim().length > 0;
+    const hasContext = typeof contextPathRaw === "string" && contextPathRaw.trim().length > 0;
+    if (hasSkill === hasContext) {
+      return "Error: pass exactly one of skillPath (a loaded skill's companion file) or contextPath (a spilled tool-result file under .context).";
     }
-    if (typeof skillPathRaw !== "string" || skillPathRaw.trim().length === 0) {
-      return "Error: skillPath must be a non-empty path relative to the skill directory.";
+    const rootRaw = hasSkill ? context.meta?.["skillsRoot"] : context.meta?.["contextRoot"];
+    if (!rootRaw) {
+      return hasSkill
+        ? "Error: No skills are materialized for this run (context.meta.skillsRoot is unset). Use sandbox-write-file for ad-hoc content."
+        : "Error: No .context root for this run (context.meta.contextRoot is unset), so there is no tool-result file to copy in.";
     }
+    const relPath = (hasSkill ? skillPathRaw! : contextPathRaw!).trim();
 
-    // Confine the source to THIS run's session-skills root. Reject absolute
-    // inputs and any '..' traversal that escapes the root — otherwise this
-    // becomes an arbitrary pod-file / cross-session read primitive.
-    const rootAbs = resolve(skillsRoot);
-    const sourceAbs = resolve(join(rootAbs, skillPathRaw));
+    // Confine the source to its root. Reject absolute inputs and any '..'
+    // traversal that escapes it — otherwise this becomes an arbitrary
+    // pod-file / cross-session read primitive.
+    const rootAbs = resolve(rootRaw);
+    const sourceAbs = resolve(join(rootAbs, relPath));
     if (sourceAbs !== rootAbs && !sourceAbs.startsWith(rootAbs + sep)) {
-      return "Error: skillPath escapes the skill directory. Pass a path relative to the skill folder (no leading '/' and no '..').";
+      return "Error: path escapes its root. Pass a relative path (no leading '/' and no '..').";
     }
     if (isCredentialPath(sourceAbs)) {
       return JSON.stringify({ error: "Refused: path looks like a credential file" });
@@ -1222,14 +1236,14 @@ export const sandboxCopyIn: ToolDefinition = {
     try {
       const buf = await readFile(sourceAbs);
       await session.files.write(destPath, buf);
-      return JSON.stringify({ skillPath: skillPathRaw, destPath, bytes: buf.length, copied: true });
+      return JSON.stringify({ sourcePath: relPath, destPath, bytes: buf.length, copied: true });
     } catch (err) {
       if (isStaleSessionError(err)) {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
       }
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-        return `Error: Skill file not found at '${skillPathRaw}'. Check the path relative to the skill's <location> directory.`;
+        return `Error: file not found at '${relPath}'. Check the path is relative to the ${hasSkill ? "skill's <location> directory" : "run's .context root"}.`;
       }
       return sandboxErr(err);
     }
