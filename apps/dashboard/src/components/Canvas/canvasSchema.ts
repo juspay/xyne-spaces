@@ -13,7 +13,12 @@ import { knownBlockTypesOf } from '../../utils/canvasUtils';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
 import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
 import { CANVAS_EMBED_TYPE, canvasEmbedSpec } from './CanvasEmbedSpec';
-import { canvasFileBlockSpec } from './CanvasFileBlockSpec';
+import {
+  canvasAudioBlockSpec,
+  canvasFileBlockSpec,
+  canvasImageBlockSpec,
+  canvasVideoBlockSpec,
+} from './CanvasFileBlockSpec';
 import { canvasLinkShortcutsExtension } from './canvasLinkShortcuts';
 import { canvasPastedLinkExtension } from './canvasPastedLink';
 import { canvasTableShortcutsExtension } from './canvasTableShortcuts';
@@ -31,6 +36,9 @@ function createCanvasSchema() {
       codeBlock: canvasCodeBlockSpec,
       [CANVAS_EMBED_TYPE]: canvasEmbedSpec,
       file: canvasFileBlockSpec,
+      image: canvasImageBlockSpec,
+      video: canvasVideoBlockSpec,
+      audio: canvasAudioBlockSpec,
     }),
   } as Parameters<typeof BlockNoteSchema.create>[0]).extend({
     inlineContentSpecs: {
