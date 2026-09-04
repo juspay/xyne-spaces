@@ -19,7 +19,7 @@ export const ProjectSectionSuggestionCard = ({
       <div className='flex items-start justify-between gap-2'>
         <div className='flex items-center gap-1.5 text-xs font-medium text-sidebar-foreground'>
           <FolderAi size={14} className='shrink-0 text-sidebar-primary' />
-          <span>Organize your channels/DM</span>
+          <span>Organize your sidebar</span>
         </div>
         <button
           type='button'
