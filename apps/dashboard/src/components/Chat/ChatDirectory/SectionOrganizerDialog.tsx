@@ -44,6 +44,7 @@ const AUTO_EXPAND_MAX_CHANNELS = 25;
 const MODE_OPTIONS: SegmentedToggleOption<OrganizerMode>[] = [
   { label: 'By project', value: 'project' },
   { label: 'By activity', value: 'activity' },
+  { label: 'By DMs', value: 'dms' },
 ];
 const TIP_INDEX_KEY = 'xyne:section-organizer-tip-index';
 
@@ -65,7 +66,7 @@ export interface OrganizerGroup {
   expanded: boolean;
 }
 
-export type OrganizerMode = 'project' | 'activity';
+export type OrganizerMode = 'project' | 'activity' | 'dms';
 
 interface SectionOrganizerDialogProps {
   suggestions: readonly SectionSuggestion[];
@@ -380,9 +381,13 @@ export const SectionOrganizerDialog = ({
 
           {visibleGroups.length === 0 && (
             <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-              {query || mode !== 'activity'
+              {query
                 ? 'No channels found'
-                : `Everything falls on one side of ${activeWindowDays} days. Try a shorter window.`}
+                : mode === 'activity'
+                  ? `Everything falls on one side of ${activeWindowDays} days. Try a shorter window.`
+                  : mode === 'dms'
+                    ? 'No app, bot or group DMs to group.'
+                    : 'No channels found'}
             </div>
           )}
         </div>

@@ -507,3 +507,116 @@ test('clamps the activity window to the supported range', () => {
   assert.equal(clampActiveWindowDays(Number.NaN), 30);
   assert.equal(clampActiveWindowDays(45.4), 45);
 });
+
+import { computeDmSectionSuggestions } from '../dist/channelSectionSuggestions.js';
+
+const botDm = id => channel(id, 'dmProject', { scopeType: 'DM', isBotDm: true });
+const humanDm = id => channel(id, 'dmProject', { scopeType: 'DM' });
+const groupDm = id => channel(id, 'dmProject', { scopeType: 'GROUP_DM' });
+
+const computeDm = ({ channels, statuses, existingSectionNames = [], ...rest }) =>
+  computeDmSectionSuggestions({ channels, statuses, existingSectionNames, ...rest });
+
+test('suggests Apps & Bots and Group DMs, leaving human DMs alone', () => {
+  const result = computeDm({
+    channels: [
+      botDm('b1'),
+      botDm('b2'),
+      groupDm('g1'),
+      groupDm('g2'),
+      humanDm('h1'),
+      humanDm('h2'),
+    ],
+    statuses: ['b1', 'b2', 'g1', 'g2', 'h1', 'h2'].map(id => status(id)),
+  });
+
+  assert.deepEqual(
+    result.map(s => s.kind),
+    ['bots', 'groupDms'],
+  );
+  assert.equal(result[0].name, 'Apps & Bots');
+  assert.equal(result[1].name, 'Group DMs');
+  assert.deepEqual(result[0].channelIds, ['b1', 'b2']);
+  assert.deepEqual(result[1].channelIds, ['g1', 'g2']);
+
+  const filed = result.flatMap(s => s.channelIds);
+  assert.equal(filed.includes('h1'), false);
+  assert.equal(filed.includes('h2'), false);
+});
+
+test('a group DM is never counted as a bot DM', () => {
+  const result = computeDm({
+    channels: [
+      channel('g1', 'dmProject', { scopeType: 'GROUP_DM', isBotDm: true }),
+      channel('g2', 'dmProject', { scopeType: 'GROUP_DM', isBotDm: true }),
+      humanDm('h1'),
+      humanDm('h2'),
+    ],
+    statuses: ['g1', 'g2', 'h1', 'h2'].map(id => status(id)),
+  });
+
+  assert.deepEqual(
+    result.map(s => s.kind),
+    ['groupDms'],
+  );
+  assert.deepEqual(result[0].channelIds, ['g1', 'g2']);
+});
+
+test('ignores regular channels in DM mode', () => {
+  const result = computeDm({
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      botDm('b1'),
+      botDm('b2'),
+      groupDm('g1'),
+      groupDm('g2'),
+    ],
+    statuses: ['c1', 'c2', 'b1', 'b2', 'g1', 'g2'].map(id => status(id)),
+  });
+
+  const filed = result.flatMap(s => s.channelIds);
+  assert.equal(filed.includes('c1'), false);
+  assert.equal(filed.includes('c2'), false);
+  assert.deepEqual(filed, ['b1', 'b2', 'g1', 'g2']);
+});
+
+test('excludes starred, deleted and already sectioned DMs', () => {
+  const result = computeDm({
+    channels: [botDm('b1'), botDm('b2'), botDm('b3'), groupDm('g1'), groupDm('g2')],
+    statuses: [
+      status('b1'),
+      status('b2', { isStarred: true }),
+      status('b3', { sectionId: 'existing' }),
+      status('g1'),
+      status('g2'),
+    ],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.kind),
+    ['groupDms'],
+  );
+});
+
+test('skips a DM bucket whose name is already taken', () => {
+  const result = computeDm({
+    channels: [botDm('b1'), botDm('b2'), groupDm('g1'), groupDm('g2')],
+    statuses: ['b1', 'b2', 'g1', 'g2'].map(id => status(id)),
+    existingSectionNames: ['apps & bots'],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.kind),
+    ['groupDms'],
+  );
+});
+
+test('suppresses a lone DM bucket that covers every DM candidate', () => {
+  const result = computeDm({
+    channels: [botDm('b1'), botDm('b2')],
+    statuses: ['b1', 'b2'].map(id => status(id)),
+  });
+
+  assert.deepEqual(result, []);
+});

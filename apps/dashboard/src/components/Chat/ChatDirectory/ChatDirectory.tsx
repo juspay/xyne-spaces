@@ -43,7 +43,7 @@ import {
 } from '../../ui/dropdown-menu';
 import { useAuthContextValues, useAuth } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
-import { keyBetween } from './ChatDirectory.utils';
+import { keyBetween, parseDMParticipantIds } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useAllMentionCount } from '../../../hooks/useMentionCount';
@@ -72,6 +72,7 @@ import Dialog, { cn } from '../../ui/Dialog';
 import { Button } from '../../ui/Button';
 
 import { useZero } from '../../../hooks/useZero';
+import { useUsersById } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -94,8 +95,10 @@ import {
   isDeskChannelType,
   NotificationLevel,
   DEFAULT_ACTIVE_WINDOW_DAYS,
+  UserType,
   computeProjectSectionSuggestions,
   computeActivitySectionSuggestions,
+  computeDmSectionSuggestions,
   getCandidateProjectIds,
 } from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
@@ -308,6 +311,20 @@ const ChatDirectory = ({
   const [activeWindowDays, setActiveWindowDays] = useState(DEFAULT_ACTIVE_WINDOW_DAYS);
   const [suggestionsNowMs, setSuggestionsNowMs] = useState(() => Date.now());
 
+  const usersById = useUsersById();
+
+  const isBotDmChannel = useCallback(
+    (channel: VisibleChannel): boolean => {
+      if (channel.scopeType !== ChannelScopeType.DM) return false;
+      const others = parseDMParticipantIds(channel).filter(id => id !== context.userID);
+      const [onlyOther] = others;
+      if (others.length !== 1 || !onlyOther) return false;
+      const userType = usersById.get(onlyOther)?.userType;
+      return userType === UserType.BOT || userType === UserType.APP;
+    },
+    [usersById, context.userID],
+  );
+
   const suggestionChannels = useMemo(
     () =>
       suggestionDismissed
@@ -318,8 +335,9 @@ const ChatDirectory = ({
             scopeType: channel.scopeType,
             type: channel.type,
             lastActivityAt: channel.channelStats?.lastActivityAt ?? channel.lastActivityAt ?? null,
+            isBotDm: isBotDmChannel(channel),
           })),
-    [channelData, suggestionDismissed],
+    [channelData, suggestionDismissed, isBotDmChannel],
   );
 
   const candidateProjectIdsKey = useMemo(
@@ -375,11 +393,26 @@ const ChatDirectory = ({
     ],
   );
 
+  const dmSuggestions = useMemo(
+    () =>
+      computeDmSectionSuggestions({
+        channels: suggestionChannels,
+        statuses: allChannelsUserStatus ?? [],
+        existingSectionNames,
+      }),
+    [suggestionChannels, allChannelsUserStatus, existingSectionNames],
+  );
+
   const sectionSuggestions =
-    organizerMode === 'activity' ? activitySuggestions : projectSuggestions;
+    organizerMode === 'activity'
+      ? activitySuggestions
+      : organizerMode === 'dms'
+        ? dmSuggestions
+        : projectSuggestions;
 
   const showSuggestionCard =
-    !suggestionDismissed && (projectSuggestions.length > 0 || activitySuggestions.length > 0);
+    !suggestionDismissed &&
+    (projectSuggestions.length > 0 || activitySuggestions.length > 0 || dmSuggestions.length > 0);
 
   const channelsById = useMemo(
     () => new Map((channelData ?? []).map(channel => [channel.id, channel])),
@@ -1027,7 +1060,13 @@ const ChatDirectory = ({
             <ProjectSectionSuggestionCard
               onAccept={() => {
                 setSuggestionsNowMs(Date.now());
-                setOrganizerMode(projectSuggestions.length > 0 ? 'project' : 'activity');
+                setOrganizerMode(
+                  projectSuggestions.length > 0
+                    ? 'project'
+                    : activitySuggestions.length > 0
+                      ? 'activity'
+                      : 'dms',
+                );
                 setShowOrganizer(true);
               }}
               onDismiss={handleDismissSuggestion}
