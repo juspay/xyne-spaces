@@ -26,7 +26,7 @@ export async function resolveSdlcRepositoryForUser(
   conversationId: string,
 ): Promise<SdlcRepositoryResolution> {
   if (researchContext?.type !== "repository" || typeof researchContext.id !== "string" || !researchContext.id.trim()) {
-    return { ok: false, status: 400, error: "Select an SDLC repository before messaging the SDLC Assistant" };
+    return { ok: true };
   }
 
   const auth = await getSpacesAuthForUser(userId, "agent-chat");
