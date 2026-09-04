@@ -11,6 +11,7 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
+import { encryptionDiagnosticContextMiddleware } from '@/services/encryptionDiagnosticContext';
 import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
@@ -284,6 +285,7 @@ export class App {
       this.app.use(morgan('combined', { stream }));
     }
     this.app.use(requestLogger);
+    this.app.use(encryptionDiagnosticContextMiddleware);
 
     // Open a request-backed tenant scope for every route, once, here. Auth-agnostic:
     // resolves req.user lazily at DB-call time so the workspaceId stamper can read it.
