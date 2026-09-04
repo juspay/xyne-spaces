@@ -15,7 +15,7 @@ const DEFAULT_MODEL = 'glm-latest';
 // very long recordings), so the streaming client uses a generous per-request
 // timeout rather than the global default. Retries are bounded separately by
 // MAX_ATTEMPTS / backoff above.
-const STREAMING_REQUEST_TIMEOUT_MS = 600_000; // 10 minutes
+const STREAMING_REQUEST_TIMEOUT_MS = 900_000; // 15 minutes
 
 type ExtractedContent = ReturnType<typeof extractAgentContent>;
 
