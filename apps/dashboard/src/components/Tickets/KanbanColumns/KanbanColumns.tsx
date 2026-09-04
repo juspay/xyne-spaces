@@ -1,5 +1,5 @@
 import React from 'react';
-import { Circle, PlusDefault as Plus } from '@xyne/icons';
+import { Circle, DragableSixDots, PlusDefault as Plus } from '@xyne/icons';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -28,6 +28,64 @@ import { StatusOptions } from '../TicketTable/TicketTableHelper';
 
 const VIRTUAL_ROW_HEIGHT = 130;
 const VIRTUAL_OVERSCAN = 25;
+
+/**
+ * Column order and hand-collapsed columns, per device. Keyed by the stage ids
+ * themselves, so every board keeps its own order without the caller passing an
+ * identity in, and a board whose stages changed falls back to its natural order.
+ */
+const COLUMN_LAYOUT_PREFIX = 'xyne:kanban-column-layout:';
+const COLUMN_LAYOUT_CHANGE_EVENT = 'xyne:kanban-column-layout-change';
+
+interface ColumnLayout {
+  order: string[];
+  collapsed: string[];
+  /** Collapsed or expanded by hand — exempt from the auto-collapse below. */
+  userToggled: string[];
+}
+
+/** A factory, not a constant: callers keep these arrays in state. */
+const emptyColumnLayout = (): ColumnLayout => ({ order: [], collapsed: [], userToggled: [] });
+
+const readColumnLayout = (key: string): ColumnLayout => {
+  try {
+    const raw = localStorage.getItem(COLUMN_LAYOUT_PREFIX + key);
+    return { ...emptyColumnLayout(), ...(raw ? (JSON.parse(raw) as Partial<ColumnLayout>) : {}) };
+  } catch {
+    return emptyColumnLayout();
+  }
+};
+
+const writeColumnLayout = (key: string, patch: Partial<ColumnLayout>): void => {
+  try {
+    const next = { ...readColumnLayout(key), ...patch };
+    localStorage.setItem(COLUMN_LAYOUT_PREFIX + key, JSON.stringify(next));
+    // Grouped boards render one instance per group; they share a key and follow.
+    // Only on success: otherwise the re-read would undo what the drag just did.
+    window.dispatchEvent(new Event(COLUMN_LAYOUT_CHANGE_EVENT));
+  } catch {
+    // Storage blocked or full — the layout lives for this session only.
+  }
+};
+
+/** Visible grip — the only part of a column that starts a reorder drag. */
+const ColumnDragHandle: React.FC<{
+  stageId: string;
+  onDraggedStageChange: (stageId: string | null) => void;
+}> = ({ stageId, onDraggedStageChange }) => (
+  <div
+    draggable
+    onDragStart={event => {
+      event.dataTransfer.setData('text/plain', stageId); // Firefox needs data to start a drag.
+      onDraggedStageChange(stageId);
+    }}
+    onDragEnd={() => onDraggedStageChange(null)}
+    title='Drag to reorder column'
+    className='cursor-grab text-muted-foreground active:cursor-grabbing'
+  >
+    <DragableSixDots className='size-4' />
+  </div>
+);
 
 const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   ticket,
@@ -481,6 +539,51 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   );
   const userToggledCollapsedStageIdsRef = React.useRef<Set<string>>(new Set());
   const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>([]);
+  const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
+  const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
+
+  const layoutKey = stages
+    .map(stage => stage.id)
+    .sort()
+    .join('|');
+  const seededLayoutKeyRef = React.useRef('');
+  if (seededLayoutKeyRef.current !== layoutKey) {
+    // First render, or the board switched to a different set of stages.
+    const saved = readColumnLayout(layoutKey);
+    seededLayoutKeyRef.current = layoutKey;
+    setColumnOrder(saved.order);
+    setCollapsedStageIds(saved.collapsed);
+    userToggledCollapsedStageIdsRef.current = new Set(saved.userToggled);
+  }
+
+  React.useEffect(() => {
+    // Only the order follows other instances: re-seeding collapse on every write
+    // would throw away what auto-collapse has worked out since.
+    const syncOrder = (): void => setColumnOrder(readColumnLayout(layoutKey).order);
+    window.addEventListener(COLUMN_LAYOUT_CHANGE_EVENT, syncOrder);
+    return (): void => window.removeEventListener(COLUMN_LAYOUT_CHANGE_EVENT, syncOrder);
+  }, [layoutKey]);
+
+  const orderPositionById = new Map(columnOrder.map((stageId, index) => [stageId, index]));
+  const orderedStages = columnOrder.length
+    ? [...stages].sort(
+        (a, b) => (orderPositionById.get(a.id) ?? 0) - (orderPositionById.get(b.id) ?? 0),
+      )
+    : stages;
+
+  const moveColumnTo = (targetStageId: string): void => {
+    setDraggedStageId(null);
+    if (!draggedStageId || draggedStageId === targetStageId) return;
+
+    const stageIds = orderedStages.map(stage => stage.id);
+    // Target index taken before the removal, so the column lands after the target
+    // when dragged rightwards and before it when dragged leftwards.
+    const toIndex = stageIds.indexOf(targetStageId);
+    stageIds.splice(stageIds.indexOf(draggedStageId), 1);
+    stageIds.splice(toIndex, 0, draggedStageId);
+    setColumnOrder(stageIds);
+    writeColumnLayout(layoutKey, { order: stageIds });
+  };
 
   React.useEffect(() => {
     // While counts cannot be trusted, release everything the user did not collapse
@@ -517,11 +620,16 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     });
   }, [stageCollapseSignature, stages, stageCountById, countsAreReliable]);
 
-  const toggleCollapse = (stageId: string) => {
+  const toggleCollapse = (stageId: string): void => {
     userToggledCollapsedStageIdsRef.current.add(stageId);
-    setCollapsedStageIds(prev =>
-      prev.includes(stageId) ? prev.filter(id => id !== stageId) : [...prev, stageId],
-    );
+    const next = collapsedStageIds.includes(stageId)
+      ? collapsedStageIds.filter(id => id !== stageId)
+      : [...collapsedStageIds, stageId];
+    setCollapsedStageIds(next);
+    writeColumnLayout(layoutKey, {
+      collapsed: next,
+      userToggled: [...userToggledCollapsedStageIdsRef.current],
+    });
   };
 
   return (
@@ -531,7 +639,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         containerClassName,
       )}
     >
-      {stages.map(stage => {
+      {orderedStages.map(stage => {
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const stageCount = stageCountById[stage.id] ?? stageTickets.length;
@@ -548,9 +656,12 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         return (
           <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
             <div
+              onDragOver={event => event.preventDefault()}
+              onDrop={() => moveColumnTo(stage.id)}
               className={cn(
                 'group/kanbancol flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
                 isCollapsed ? 'w-12 sm:w-14' : 'w-72 sm:w-96',
+                draggedStageId === stage.id && 'opacity-40',
               )}
             >
               <div
@@ -573,6 +684,10 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     </div>
 
                     <div className='flex items-center gap-1'>
+                      <ColumnDragHandle
+                        stageId={stage.id}
+                        onDraggedStageChange={setDraggedStageId}
+                      />
                       <Button
                         variant='ghost'
                         onClick={() => toggleCollapse(stage.id)}
@@ -609,6 +724,10 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     })}
                   >
                     <div className='flex flex-col items-center gap-2 w-full h-full'>
+                      <ColumnDragHandle
+                        stageId={stage.id}
+                        onDraggedStageChange={setDraggedStageId}
+                      />
                       <KanbanIcon status={stage.defaultTicketStatusV2} />
                       <h3
                         className={cn(
