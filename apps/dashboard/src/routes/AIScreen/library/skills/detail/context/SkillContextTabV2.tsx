@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawSkillFiles } from '@/hooks/useClawSkills';
 import type { Skill } from '@/services/claw/clawSkillsTypes';
+import { readSkillBundleFromFileList } from '@/services/claw/clawSkillFileUtils';
 import { ProseBox } from '../../../shared/primitives/ProseBox';
 import {
   DetailCard,
@@ -84,14 +85,21 @@ export function SkillContextTabV2({
   const { canEdit, busy } = actions;
 
   const readAll = async (list: FileList): Promise<void> => {
-    const entries = await Promise.all(
-      Array.from(list).map(async file => ({
-        relativePath: file.name,
-        content: await file.text(),
-        ...(file.type ? { contentType: file.type } : {}),
+    // Split the pick the same way create does: the SKILL.md body is the skill's
+    // instructions (Skill.content), everything else is a sibling file. Sending
+    // SKILL.md to the files endpoint would be rejected as a reserved path, so
+    // route it to saveContent and only replace the siblings.
+    const { files: pending, mainContent } = await readSkillBundleFromFileList(list);
+    if (mainContent !== null) {
+      await actions.saveContent(mainContent);
+    }
+    await actions.uploadFiles(
+      pending.map(({ relativePath, content, contentType }) => ({
+        relativePath,
+        content,
+        ...(contentType ? { contentType } : {}),
       })),
     );
-    await actions.uploadFiles(entries);
   };
 
   const readMarkdown = async (list: FileList): Promise<void> => {

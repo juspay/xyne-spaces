@@ -16,7 +16,7 @@ import {
   replaceSkillFiles,
   submitSkillRequest,
 } from '@/services/claw/clawSkillsService';
-import { readSkillFilesFromFileList } from '@/services/claw/clawSkillFileUtils';
+import { readSkillBundleFromFileList } from '@/services/claw/clawSkillFileUtils';
 import { ClawApiError } from '@/services/claw/clawAuthAgentsService';
 import type { Skill } from '@/services/claw/clawSkillsTypes';
 
@@ -422,7 +422,13 @@ const ClawSkillDetailScreen = (): ReactElement => {
     if (!skill || !userId || !fileList || fileList.length === 0) return;
     setUploading(true);
     try {
-      const pending = await readSkillFilesFromFileList(fileList);
+      const { files: pending, mainContent } = await readSkillBundleFromFileList(fileList);
+      // A folder upload carries the SKILL.md body in `mainContent`; that maps to
+      // Skill.content (the files endpoint rejects "SKILL.md"). Write it first so the
+      // canonical instructions are never left stale, then replace the sibling files.
+      if (mainContent !== null) {
+        await updateSkill(skill.slug, { content: mainContent }, userId);
+      }
       await replaceSkillFiles(
         skill.slug,
         pending.map(({ relativePath, content, contentType }) => ({
@@ -432,7 +438,7 @@ const ClawSkillDetailScreen = (): ReactElement => {
         })),
         userId,
       );
-      toast.success('Files uploaded');
+      toast.success(mainContent !== null ? 'Skill updated' : 'Files uploaded');
       await refreshFiles(skill.slug);
     } catch (err) {
       toast.error(

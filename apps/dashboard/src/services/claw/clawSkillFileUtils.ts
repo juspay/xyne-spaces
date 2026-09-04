@@ -9,7 +9,7 @@ export interface PendingSkillFile {
   sizeBytes: number;
 }
 
-interface SkillBundle {
+export interface SkillBundle {
   /** Sibling files (everything except SKILL.md). */
   files: PendingSkillFile[];
   /** SKILL.md body, if the picker included one. */
@@ -80,7 +80,7 @@ async function fileToBase64(f: File): Promise<string> {
   return btoa(bin);
 }
 
-async function readSkillBundleFromFileList(files: FileList): Promise<SkillBundle> {
+export async function readSkillBundleFromFileList(files: FileList): Promise<SkillBundle> {
   const out: PendingSkillFile[] = [];
   let mainContent: string | null = null;
   let folderSlug: string | null = null;
