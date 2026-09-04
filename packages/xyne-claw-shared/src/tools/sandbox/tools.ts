@@ -1,7 +1,8 @@
 import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
-import { SDLC_TOOL_NAMES } from "../sdlc-registry.js";
+import { SDLC_AGENT_SLUG, SDLC_TOOL_NAMES } from "../../sdlc/registry.js";
+import { resolveSdlcRepositoryIntoMeta } from "../../sdlc/resolve.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
@@ -2752,6 +2753,12 @@ export const sandboxRepoSetup: ToolDefinition = {
         type: "string",
         description: "Repository name (e.g. 'xyne-spaces', 'hyperswitch'). Must match a key in REPO_CONFIGS.",
       },
+      repoId: {
+        type: "string",
+        description:
+          "SDLC repository id, when the run did not start with one pinned. Get it from " +
+          "spaces-sdlc-list-repositories; never guess or retype it. Ignored once a repository is already pinned.",
+      },
       write: {
         type: "boolean",
         description:
@@ -2778,18 +2785,27 @@ export const sandboxRepoSetup: ToolDefinition = {
     // ignore whatever repoName the LLM passed. This is what makes the setup
     // deterministic — the operator picks the repo in the agent UI, not the model.
     const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
-    const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
     const hasSdlcRepositoryMetadata = [
       "sdlcRepositoryId",
       "sdlcRepositoryName",
       "sdlcRepositoryUrl",
       "sdlcRepositoryBaseBranch",
     ].some((key) => context.meta?.[key] !== undefined);
-    if (
-      !dynamicRepo &&
-      (hasSdlcRepositoryMetadata || context.meta?.["requireSdlcRepository"] === "true")
-    ) {
-      return "Error: Valid SDLC repository context is required; refusing to fall back to a static repository.";
+    const sdlcRequired =
+      hasSdlcRepositoryMetadata || context.meta?.["requireSdlcRepository"] === "true";
+    const selectedRepoId = String(params["repoId"] ?? "").trim();
+    if (sdlcRequired && !hasSdlcRepositoryMetadata && selectedRepoId && context.meta) {
+      try {
+        await resolveSdlcRepositoryIntoMeta(context.meta as Record<string, string>, selectedRepoId);
+      } catch (error) {
+        return `Error: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+    const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
+    if (!dynamicRepo && sdlcRequired) {
+      return hasSdlcRepositoryMetadata || selectedRepoId
+        ? "Error: Valid SDLC repository context is required; refusing to fall back to a static repository."
+        : "Error: No SDLC repository selected. Call spaces-sdlc-list-repositories with this conversation's channelId, then pass the chosen repoId to sandbox-repo-setup.";
     }
     const repoName = dynamicRepo?.name || pinnedRepo || (params["repoName"] as string);
     const wantWrite = Boolean(dynamicRepo) || params["write"] === true;
@@ -2842,7 +2858,7 @@ export const sandboxRepoSetup: ToolDefinition = {
       const conversationId = context.meta?.["sdlcConversationId"]?.trim();
       const interactiveGrant = context.meta?.["sdlcInteractiveGrant"]?.trim();
       const agentSlug = context.meta?.["agentSlug"]?.trim();
-      if (agentSlug !== "sdlc-agent") {
+      if (agentSlug !== SDLC_AGENT_SLUG) {
         return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
       }
       if (

@@ -2,6 +2,7 @@ export type SdlcToolTransport = "direct" | "custom" | "subagent";
 export type SdlcMutationLevel = "read" | "write";
 export type SdlcTrustedBinding =
   | "none"
+  | "hub"
   | "repository"
   | "execution"
   | "execution_or_interactive"
@@ -31,16 +32,17 @@ export const SDLC_TOOL_NAMES = {
   listTracks: "spaces-sdlc-list-tracks",
   createTrack: "spaces-sdlc-create-track",
   listArtifactTypes: "spaces-sdlc-list-artifact-types",
+  listRepositories: "spaces-sdlc-list-repositories",
 } as const;
 
 export type SdlcToolName = (typeof SDLC_TOOL_NAMES)[keyof typeof SDLC_TOOL_NAMES];
 
 export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
-  { name: SDLC_TOOL_NAMES.listArtifacts, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.readArtifact, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
+  { name: SDLC_TOOL_NAMES.listArtifacts, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
+  { name: SDLC_TOOL_NAMES.readArtifact, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
   { name: SDLC_TOOL_NAMES.mutateArtifact, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.listArtifactVersions, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.readArtifactVersion, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
+  { name: SDLC_TOOL_NAMES.listArtifactVersions, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
+  { name: SDLC_TOOL_NAMES.readArtifactVersion, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
   { name: SDLC_TOOL_NAMES.beginWikiCheckpoint, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "wiki_execution" },
   { name: SDLC_TOOL_NAMES.verifyWikiSources, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "wiki_execution" },
   { name: SDLC_TOOL_NAMES.finalizeWikiCommit, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "wiki_execution" },
@@ -49,6 +51,7 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
   { name: SDLC_TOOL_NAMES.listTracks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.createTrack, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.listArtifactTypes, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
+  { name: SDLC_TOOL_NAMES.listRepositories, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "none" },
 ] as const;
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
@@ -67,7 +70,7 @@ export const SDLC_GENERIC_SANDBOX_TOOLS = [
 ] as const;
 
 export const SDLC_PLANNING_TOOLS = ["todo-read", "todo-write", "web-search"] as const;
-export const SDLC_SUBAGENTS = ["spaces", "github", "bitbucket", "context7"] as const;
+export const SDLC_SUBAGENTS = ["github", "bitbucket", "context7"] as const;
 
 export const SDLC_GENERIC_SPACES_WRITE_TOOLS = [
   "spaces-create-ticket",
@@ -79,11 +82,6 @@ export const SDLC_GENERIC_SPACES_WRITE_TOOLS = [
   "user-send-message",
   "spaces-upload-to-kb",
 ] as const;
-
-const SDLC_HIDDEN_GENERIC_SPACES_TOOLS = new Set([
-  "spaces-create-canvas",
-  "spaces-edit-canvas",
-]);
 
 export const SDLC_RETIRED_TOOL_NAMES = [
   "spaces-sdlc-create-artifact",
@@ -120,7 +118,7 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   if (retired.length > 0) {
     throw new Error(`Retired SDLC tools remain exported: ${retired.join(", ")}`);
   }
-  const direct = uniqueToolNames.filter((name) => !SDLC_HIDDEN_GENERIC_SPACES_TOOLS.has(name));
+  const direct = [...uniqueToolNames];
   const missing = SDLC_DIRECT_TOOL_NAMES.filter((name) => !direct.includes(name));
   if (missing.length > 0) {
     throw new Error(`SDLC MCP tools missing from Xyne Spaces server: ${missing.join(", ")}`);
@@ -154,3 +152,11 @@ export const SDLC_REQUIRED_TOOLS = {
 export function sdlcTrustedBindingFor(toolName: string): SdlcTrustedBinding {
   return SDLC_TOOL_CAPABILITIES.find((tool) => tool.name === toolName)?.trustedBinding ?? "none";
 }
+
+let cachedProfile: SdlcAgentToolProfile | undefined;
+
+export function sdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): SdlcAgentToolProfile {
+  cachedProfile ??= buildSdlcAgentToolProfile(spacesMcpToolNames);
+  return cachedProfile;
+}
+

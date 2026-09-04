@@ -29,7 +29,11 @@ import type {
   Todo,
   UiWidget,
 } from "xyne-claw-shared";
-import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
+import { type ThinkingLevel } from "@earendil-works/pi-ai";
+import {
+  getBuiltinModels as getModels,
+  getBuiltinProviders as getProviders,
+} from "@earendil-works/pi-ai/providers/all";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
 import {
   hasSession,

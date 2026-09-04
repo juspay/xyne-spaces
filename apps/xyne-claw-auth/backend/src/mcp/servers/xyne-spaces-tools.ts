@@ -4201,15 +4201,10 @@ const spacesCreateTicket: ToolDef = {
         description:
           "Optional. ConversationId of the user's triggering message. When set, any file attachments on that message are copied to the new ticket in the same operation. Does NOT affect routing — channelId still determines where the ticket lives.",
       },
-      sdlcRepoId: {
-        type: "string",
-        description:
-          "Required with sourceCanvasId when creating an implementation ticket for an SDLC artifact. The SDLC repository ID from repository mode.",
-      },
       sourceCanvasId: {
         type: "string",
         description:
-          "Required with sdlcRepoId when creating an implementation ticket for an SDLC artifact. The artifact canvas ID to link to the new ticket.",
+          "Set when creating an implementation ticket for an SDLC artifact: the artifact canvas ID to link to the new ticket. The link is scoped to the SDLC Hub given by channelId — no repository is needed.",
       },
       priority: {
         type: "string",
@@ -4227,11 +4222,7 @@ const spacesCreateTicket: ToolDef = {
         return err("channelId is required.");
       }
 
-      const sdlcRepoId = String(args["sdlcRepoId"] ?? "").trim();
       const sourceCanvasId = String(args["sourceCanvasId"] ?? "").trim();
-      if (Boolean(sdlcRepoId) !== Boolean(sourceCanvasId)) {
-        return err("sdlcRepoId and sourceCanvasId must be provided together.");
-      }
 
       const attachConversationId = (args["attachConversationId"] as string | undefined)?.trim() || undefined;
 
@@ -4272,13 +4263,13 @@ const spacesCreateTicket: ToolDef = {
         status: string;
       };
 
-      if (sdlcRepoId && sourceCanvasId) {
+      if (sourceCanvasId) {
         try {
           await spacesFetch("/api/sdlc/claw/links", {
             method: "POST",
             headers: { "x-xyne-acting-user-id": ctx.userId },
             body: JSON.stringify({
-              repoId: sdlcRepoId,
+              channelId: args["channelId"],
               sourceType: "CANVAS",
               sourceId: sourceCanvasId,
               targetType: "TICKET",
@@ -5299,24 +5290,37 @@ function sdlcMutationVariant(
       ...(required.includes("sourcePaths") && action !== "archive" ? { sourcePaths: { minItems: 1 } } : {}),
       ...propertyOverrides,
     },
-    required: ["artifactType", "action", ...required],
+    required: ["artifactType", "action", "repoId", ...required],
   } as const;
 }
+
+const SDLC_CHANNEL_ID_HINT =
+  "Channel id of the SDLC Hub. This is the required scope — a hub covers several repositories and a repository sits in several hubs, so it cannot be inferred. Use the channelId returned alongside the repository by spaces-sdlc-list-repositories.";
+
+const SDLC_REPO_IDS_PARAM = {
+  type: "array" as const,
+  items: { type: "string" as const, minLength: 1 },
+  maxItems: 50,
+  description:
+    "Optional. Repositories to narrow to, from spaces-sdlc-list-repositories. Omit to use the run's pinned repository when one is pinned, or the whole hub when none is. Pass an empty array to force hub scope with no repository at all — the right choice when the work is about the hub itself rather than any repository in it.",
+};
 
 const spacesSdlcMutateArtifact: ToolDef = {
   name: SDLC_TOOL_NAMES.mutateArtifact,
   description:
-    "Create or mutate one trusted-repository SDLC artifact. Supports artifact create/update, incremental " +
+    "Create or mutate one SDLC artifact. Supports artifact create/update, incremental " +
     "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Artifact types are canvas " +
-    "folders on the repo's SDLC channel: PRD and Tech Docs are seeded built-in types, and users can add custom " +
-    "types; list them via spaces-sdlc-list-artifact-types. To create an artifact of any type, pass its folderId " +
-    "(from that tool) plus trackId (the SDLC track it belongs to). To update an artifact, pass its canvasId and " +
-    "markdown. Link related artifacts via relatedCanvasIds. Trusted repository and execution identity is " +
-    "injected by the platform.",
+    "folders on the SDLC Hub's channel and are shared by every repository in that hub: PRD and Tech Docs are seeded " +
+    "built-in types, and users can add custom types; list them via spaces-sdlc-list-artifact-types. To create an " +
+    "artifact of any type, pass its folderId (from that tool) plus trackId (the SDLC track it belongs to). To update " +
+    "an artifact, pass its canvasId and markdown. Link related artifacts via relatedCanvasIds. Trusted repository, " +
+    "hub, and execution identity is injected by the platform when the run has a repository pinned.",
   inputSchema: {
     type: "object",
     properties: {
       repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       workspaceId: { type: "string", minLength: 1 },
       actorUserId: { type: "string", minLength: 1 },
       executionId: { type: "string", minLength: 1 },
@@ -5569,16 +5573,18 @@ const sdlcArtifactSelectorSchema = {
 
 const spacesSdlcListArtifactVersions: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifactVersions,
-  description: "List a bounded newest-first page of immutable versions for one trusted-repository SDLC Wiki page, Repo Knowledge document, or artifact (any type). Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
+  description: "List a bounded newest-first page of immutable versions for one SDLC Wiki page, Repo Knowledge document, or artifact (any type) in one hub. Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       selector: sdlcArtifactSelectorSchema,
       cursor: { type: "string", minLength: 1 },
       limit: { type: "integer", minimum: 1, maximum: 25 },
     },
-    required: ["repoId", "workspaceId", "actorUserId", "selector"],
+    required: ["workspaceId", "actorUserId", "channelId", "selector"],
   },
   async handler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
@@ -5586,15 +5592,17 @@ const spacesSdlcListArtifactVersions: ToolDef = {
 
 const spacesSdlcReadArtifactVersion: ToolDef = {
   name: SDLC_TOOL_NAMES.readArtifactVersion,
-  description: "Read exactly one immutable version previously listed for a trusted-repository SDLC artifact. Historical text is supporting evidence only; current repository code and current artifacts remain authoritative.",
+  description: "Read exactly one immutable version previously listed for an SDLC artifact. Historical text is supporting evidence only; current repository code and current artifacts remain authoritative.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       selector: sdlcArtifactSelectorSchema,
       versionId: { type: "string", minLength: 1 },
     },
-    required: ["repoId", "workspaceId", "actorUserId", "selector", "versionId"],
+    required: ["workspaceId", "actorUserId", "channelId", "selector", "versionId"],
   },
   async handler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
@@ -5618,6 +5626,50 @@ function sdlcSpacesAuth(): SpacesAuthContext | undefined {
   };
 }
 
+async function callSdlcRepositories(
+  args: Record<string, unknown>,
+  ctx: HandlerContext,
+): Promise<ToolResult> {
+  try {
+    const data = await spacesFetch("/api/sdlc/claw/repositories/list", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    }, sdlcSpacesAuth());
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC repositories error: ${errMsg(e)}`);
+  }
+}
+
+const spacesSdlcListRepositories: ToolDef = {
+  name: SDLC_TOOL_NAMES.listRepositories,
+  description:
+    "Resolve a Spaces channel to the SDLC repositories it covers. An SDLC Hub is a channel and repositories are its members. "
+    + "The conversation's channelId is supplied by the platform, so call this with no arguments to learn which repositories "
+    + "this hub works on. Returns repoId, channelId, name, clone url, and base branch per repository — pass the repoId and "
+    + "channelId together to every hub-scoped SDLC tool. An empty result means this channel is not an SDLC hub. "
+    + "Use it to orient yourself or to offer the user a choice; never use it to override a repository already pinned by trusted run context.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: {
+        type: "string",
+        minLength: 1,
+        description: "Channel id of the SDLC Hub. Supplied by the platform; omit it.",
+      },
+      query: { type: "string", maxLength: 120, description: "Optional case-insensitive filter on repository name or URL." },
+      limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+    },
+  },
+  async handler(args, ctx) {
+    return callSdlcRepositories(args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return callSdlcRepositories(args, ctx);
+  },
+};
+
 async function callSdlcTracks(
   path: string,
   args: Record<string, unknown>,
@@ -5638,11 +5690,14 @@ async function callSdlcTracks(
 const spacesSdlcListTracks: ToolDef = {
   name: SDLC_TOOL_NAMES.listTracks,
   description:
-    "List the SDLC tracks (workstreams) in a trusted repository. Call this before creating a PRD or Tech Doc so the user can pick an existing track; if none fit, use spaces-sdlc-create-track.",
+    "List the SDLC tracks (workstreams) in one SDLC Hub. Tracks belong to the hub and are shared by every repository in it, so this needs only the channelId — no repository. Call this before creating a PRD or Tech Doc so the user can pick an existing track; if none fit, use spaces-sdlc-create-track.",
   inputSchema: {
     type: "object",
-    properties: { repoId: { type: "string", minLength: 1 } },
-    required: ["repoId"],
+    properties: {
+      repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+    },
+    required: ["channelId"],
   },
   async handler(args, ctx) {
     return callSdlcTracks("/list", args, ctx);
@@ -5655,15 +5710,16 @@ const spacesSdlcListTracks: ToolDef = {
 const spacesSdlcCreateTrack: ToolDef = {
   name: SDLC_TOOL_NAMES.createTrack,
   description:
-    "Create a new SDLC track (workstream) in a trusted repository. Use this when the user wants a brand-new track for a PRD/Tech Doc rather than an existing one. Returns the new track id to pass as trackId in spaces-sdlc-mutate-artifact.",
+    "Create a new SDLC track (workstream) in one SDLC Hub. The track belongs to the hub and is visible to every repository in it, so this needs only the channelId — no repository. Use this when the user wants a brand-new track for a PRD/Tech Doc rather than an existing one. Returns the new track id to pass as trackId in spaces-sdlc-mutate-artifact.",
   inputSchema: {
     type: "object",
     properties: {
       repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
       name: { type: "string", minLength: 1, maxLength: 120 },
       description: { type: "string", maxLength: 2000 },
     },
-    required: ["repoId", "name"],
+    required: ["channelId", "name"],
   },
   async handler(args, ctx) {
     return callSdlcTracks("", args, ctx);
@@ -5693,11 +5749,14 @@ async function callSdlcArtifactTypes(
 const spacesSdlcListArtifactTypes: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifactTypes,
   description:
-    "List the SDLC artifact types (canvas folders) in a trusted repository. Each type is a folder on the repo's SDLC channel; PRD and Tech Doc are seeded built-in types and users can add more custom types. Call this before creating an artifact of a custom type to get its folderId, then pass that folderId to spaces-sdlc-mutate-artifact create.",
+    "List the SDLC artifact types (canvas folders) in one SDLC Hub. Each type is a folder on the hub's channel and is shared by every repository in that hub, so this needs only the channelId — no repository; PRD and Tech Doc are seeded built-in types and users can add more custom types. Call this before creating an artifact of a custom type to get its folderId, then pass that folderId to spaces-sdlc-mutate-artifact create.",
   inputSchema: {
     type: "object",
-    properties: { repoId: { type: "string", minLength: 1 } },
-    required: ["repoId"],
+    properties: {
+      repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+    },
+    required: ["channelId"],
   },
   async handler(args, ctx) {
     return callSdlcArtifactTypes("/list", args, ctx);
@@ -5709,16 +5768,18 @@ const spacesSdlcListArtifactTypes: ToolDef = {
 
 const spacesSdlcListArtifacts: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifacts,
-  description: "List current trusted-repository Wiki, Baseline, and artifact documents (every artifact type, seeded or custom). Returns bounded identity and current-state metadata without historical bodies.",
+  description: "List one repository's current Wiki, Baseline, and artifact documents (every artifact type, seeded or custom) within one SDLC Hub. Returns bounded identity and current-state metadata without historical bodies.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       executionId: { type: "string" }, sessionId: { type: "string" },
       kinds: { type: "array", items: { type: "string", enum: ["WIKI", "BASELINE", "ARTIFACT", "PRD", "TECH_DOC"] }, description: "Filter by kind. ARTIFACT covers every artifact type (seeded or custom); PRD/TECH_DOC are accepted as legacy aliases for ARTIFACT." },
       includeArchived: { type: "boolean" },
     },
-    required: ["repoId", "workspaceId", "actorUserId"],
+    required: ["workspaceId", "actorUserId", "channelId"],
   },
   async handler(args, ctx) {
     return args["executionId"] && args["sessionId"]
@@ -5734,14 +5795,16 @@ const spacesSdlcListArtifacts: ToolDef = {
 
 const spacesSdlcReadArtifact: ToolDef = {
   name: SDLC_TOOL_NAMES.readArtifact,
-  description: "Read one current trusted-repository Wiki, Baseline, PRD, or Tech Doc artifact as Markdown with its live content hash.",
+  description: "Read one current Wiki, Baseline, PRD, or Tech Doc artifact as Markdown with its live content hash.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       selector: sdlcArtifactSelectorSchema,
     },
-    required: ["repoId", "workspaceId", "actorUserId", "selector"],
+    required: ["workspaceId", "actorUserId", "channelId", "selector"],
   },
   async handler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
@@ -9041,6 +9104,7 @@ export const tools: ToolDef[] = [
   spacesCreateCanvas,
   spacesSdlcListArtifacts,
   spacesSdlcReadArtifact,
+  spacesSdlcListRepositories,
   spacesSdlcListTracks,
   spacesSdlcCreateTrack,
   spacesSdlcListArtifactTypes,

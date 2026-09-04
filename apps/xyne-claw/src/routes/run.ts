@@ -48,7 +48,7 @@ import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
-import { trustedSdlcToolBindings } from "../sdlc-wiki-tool-bindings.js";
+import { packSdlcRunMeta, trustedSdlcToolBindings } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -1739,7 +1739,7 @@ export async function processTask(
     // ephemeral workspace teardown + resume) when a conversation is in play;
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"], channelId);
     const {
       groups: mcpGroups,
       cleanup,
@@ -1821,76 +1821,7 @@ export async function processTask(
       sdlcContext && typeof sdlcContext === "object" && !Array.isArray(sdlcContext)
         ? (sdlcContext as Record<string, unknown>)
         : undefined;
-    const trustedSdlcRepository =
-      trustedSdlcContext?.["repository"] &&
-      typeof trustedSdlcContext["repository"] === "object" &&
-      !Array.isArray(trustedSdlcContext["repository"])
-        ? (trustedSdlcContext["repository"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcExecution =
-      trustedSdlcContext?.["execution"] &&
-      typeof trustedSdlcContext["execution"] === "object" &&
-      !Array.isArray(trustedSdlcContext["execution"])
-        ? (trustedSdlcContext["execution"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcWiki =
-      trustedSdlcContext?.["wiki"] &&
-      typeof trustedSdlcContext["wiki"] === "object" &&
-      !Array.isArray(trustedSdlcContext["wiki"])
-        ? (trustedSdlcContext["wiki"] as Record<string, unknown>)
-        : undefined;
-    const isTrustedSdlcWikiRun =
-      trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki !== undefined;
-    if (trustedSdlcRepository) {
-      if (typeof trustedSdlcRepository["id"] === "string") meta["sdlcRepositoryId"] = trustedSdlcRepository["id"];
-      if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
-      if (typeof trustedSdlcRepository["url"] === "string") meta["sdlcRepositoryUrl"] = trustedSdlcRepository["url"];
-      if (typeof trustedSdlcRepository["baseBranch"] === "string") meta["sdlcRepositoryBaseBranch"] = trustedSdlcRepository["baseBranch"];
-      if (typeof trustedSdlcExecution?.["workflowExecutionId"] === "string") {
-        meta["sdlcExecutionId"] = trustedSdlcExecution["workflowExecutionId"];
-      }
-      if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
-        meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
-      }
-      if (typeof trustedSdlcExecution?.["conversationId"] === "string") {
-        meta["sdlcConversationId"] = trustedSdlcExecution["conversationId"];
-      }
-      // Runtime credentials are issued per dispatched execution (setup/
-      // artifact/work). Chat-surface runs carry repository context but no
-      // execution, so setting the operation flag without the ids would only
-      // trip the incomplete-binding guard in sandbox-repo-setup. Gate on both
-      // execution identifiers so chat runs degrade to baseline-canvas access.
-      if (
-        typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
-        typeof trustedSdlcExecution?.["sessionId"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] =
-          trustedSdlcContext?.["operation"] === "work" ? "PUSH" : "CLONE";
-      } else if (
-        trustedSdlcContext?.["operation"] === "interactive" &&
-        typeof trustedSdlcContext["interactiveGrant"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] = "INTERACTIVE";
-        meta["sdlcInteractiveGrant"] = trustedSdlcContext["interactiveGrant"];
-      }
-    }
-    if (trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki) {
-      meta["sdlcWikiRun"] = "true";
-      if (typeof trustedSdlcWiki["role"] === "string") {
-        meta["sdlcWikiRole"] = trustedSdlcWiki["role"];
-      }
-      if (Array.isArray(trustedSdlcWiki["assignedCommitShas"])) {
-        meta["sdlcWikiAssignedCommitShas"] = JSON.stringify(
-          trustedSdlcWiki["assignedCommitShas"].filter(value => typeof value === "string"),
-        );
-      }
-      if (typeof trustedSdlcWiki["bootstrapRef"] === "string") {
-        meta["sdlcWikiBootstrapRef"] = trustedSdlcWiki["bootstrapRef"];
-      }
-      if (typeof trustedSdlcWiki["targetHeadSha"] === "string") {
-        meta["sdlcWikiTargetHeadSha"] = trustedSdlcWiki["targetHeadSha"];
-      }
-    }
+    Object.assign(meta, packSdlcRunMeta(trustedSdlcContext));
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
     // Surfaced to the read-only sandbox message so the agent focuses on these repos.
     const sbxGitRepos = agentConfig?.["sbxGitRepos"];
