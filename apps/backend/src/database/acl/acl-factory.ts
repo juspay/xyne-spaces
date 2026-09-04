@@ -3,6 +3,8 @@ import { BaseQueryACL, ACLContext } from './base-acl'
 import {
   ActivitiesACL,
   AppsACL,
+  AppCommandACL,
+  AppPermissionACL,
   InstalledAppsACL,
   AgentsACL,
   AgentStepsACL,
@@ -373,11 +375,11 @@ export class ACLFactory {
     case 'apiKey':
       return new BaseQueryACL(ctx, prisma)
     case 'appCommand':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppCommandACL(ctx, prisma)
     case 'appIncomingWebhook':
       return new BaseQueryACL(ctx, prisma)
     case 'appPermission':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppPermissionACL(ctx, prisma)
     case 'apps':
       return new AppsACL(ctx, prisma)
     case 'availableAppPermission':

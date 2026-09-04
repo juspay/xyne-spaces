@@ -10,7 +10,7 @@ import { isValidUrl } from '@/utils/urlUtils';
 import { UserManagementService } from '@/services/userManagementService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { appSchema } from '@/vespa/src/types';
-import { withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
 
 const CreateAppBodySchema = z.object({
   name: z.string().min(1, 'App name cannot be empty').trim(),
@@ -235,8 +235,11 @@ export class AppController {
         return;
       }
 
-      // Promotion is authorised by org ownership above, not by who created the app.
-      const updated = await withWorkspaceScope(() =>
+      // Promotion is authorised by org ownership above, not by who created the app. The app row
+      // carries its creating workspace's id, which for a sibling workspace in the same org is not
+      // the caller's — so neither the creator predicate nor workspace scope would match it. Both
+      // checks that matter (XYNE-APPS admin, same owning org) have already run above.
+      const updated = await runAsSystem(() =>
         repositories.apps.update(appId, { scope: 'GLOBAL' }),
       );
       res.status(200).json(updated);
