@@ -130,6 +130,7 @@ import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
 import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import testAuthRoutes from '@/routes/testAuth';
+import testDeskRoutes from '@/routes/testDesk';
 import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
 import userSkillsRoutes from '@/routes/userSkills';
@@ -453,6 +454,7 @@ export class App {
     if (config.isTestEnv || enableDevAuth) {
       logger.info('Registering test routes (/api/test/*)');
       this.app.use('/api/test', testAuthRoutes);
+      this.app.use('/api/test', authMiddleware.authenticate, testDeskRoutes);
     }
 
     // Apply general rate limiter to all API routes from this point onward
