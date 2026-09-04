@@ -462,6 +462,8 @@ interface TicketDetailsProps {
   onFillRCA?: () => void;
   /** Display the current stage without exposing manual lifecycle transitions. */
   stageReadOnly?: boolean;
+  /** Show only the Sub-Tickets section, for hosts that give it its own tab. */
+  subTicketsOnly?: boolean;
 }
 
 const TicketKeyValuePair = ({
@@ -576,6 +578,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   expandedView = false,
   onFillRCA,
   stageReadOnly = false,
+  subTicketsOnly = false,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
@@ -3370,17 +3373,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       )}
 
-      <div className='relative'>
+      <div
+        className={cn(
+          'relative',
+          // Hide the sibling sections instead of re-parenting the sub-tickets one.
+          subTicketsOnly &&
+            '[&>*:not([data-testid=sub-tickets-section]):not(.archived-guard)]:hidden',
+        )}
+      >
         {/* Archived overlay - blocks all interactions on content */}
         {ticket?.isArchived && (
           <div
-            className='absolute inset-0 z-50 cursor-not-allowed'
+            className='archived-guard absolute inset-0 z-50 cursor-not-allowed'
             style={{ backgroundColor: 'transparent' }}
           />
         )}
 
         {ticket?.isArchived && (
-          <div className='mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
+          <div className='archived-guard mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
             <Archive className='w-5 h-5 text-muted-foreground shrink-0' />
             <div className='flex-1'>
               <p className='text-sm font-medium text-foreground'>
