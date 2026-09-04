@@ -1373,7 +1373,12 @@ export const MessageItem = React.memo(
                     Cancel
                   </button>
                   <button
-                    onClick={submitEdit}
+                    onClick={() => {
+                      if (editText.trim()) {
+                        onEditSubmit?.(editText.trim());
+                        setIsEditing(false);
+                      }
+                    }}
                     data-ph-capture-attribute-track-id='edit_message_submit'
                     disabled={!editText.trim()}
                     className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
