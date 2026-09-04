@@ -1,12 +1,12 @@
 /**
  * Just-in-time user mirroring.
  *
- * claw-auth's `users` table is a read-only mirror of Spaces' `public.users`,
- * keyed on the same id. Historically the mirror was populated only when the
- * frontend POSTed `/users` after a successful Google login. That meant any
- * other entry point (webhook, scheduled job, MCP call resolved purely from
- * the Spaces session cookie) failed if the user had never opened the
- * dashboard.
+ * claw-auth's `users` table mirrors Spaces people and memberships without
+ * reusing Spaces' workspace-scoped `public.users.id` as its primary key.
+ * Historically the mirror was populated only when the frontend POSTed
+ * `/users` after a successful Google login. That meant any other entry point
+ * (webhook, scheduled job, MCP call resolved purely from the Spaces session
+ * cookie) failed if the user had never opened the dashboard.
  *
  * `ensureUserExists(userId, caller)` plugs that gap: when a request lands
  * for a `userId` we don't have a row for, we look the profile up in the
@@ -16,7 +16,10 @@
  * and surface a normal 4xx).
  */
 
+import { randomUUID } from "node:crypto";
+import { Prisma, type User } from "@prisma/client";
 import { prisma } from "../db.js";
+import { resolveSurfacePerson } from "./identity-resolution.js";
 import { getSpacesUserById, type SpacesAuthCaller, type SpacesUserProfile } from "./spaces-db.js";
 
 import { createLogger } from "../logger.js";
@@ -29,6 +32,10 @@ const log = createLogger("users-jit");
  * backfill re-run.
  */
 const DEFAULT_ORG_NAME = "Juspay";
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 /**
  * Resolve the default org's id, or null if it doesn't exist yet (fresh DB
@@ -53,19 +60,152 @@ export async function ensureOrgMembership(userId: string, orgId: string): Promis
   });
 }
 
+export async function resolveClawUserIdForSpacesIdentity(
+  spacesUserId: string,
+  workspaceId?: string | null,
+): Promise<string | undefined> {
+  const id = spacesUserId.trim();
+  if (!id) {
+    return undefined;
+  }
+
+  // Check the workspace identity first. During the org-member migration a
+  // legacy Claw row can have the same id as this workspace-scoped Spaces user,
+  // while the identity correctly points to the member's canonical Claw user.
+  // Preferring the identity repairs that legacy shape lazily and is also the
+  // normal path for a second workspace membership.
+  const identity = await prisma.userSurfaceIdentity.findFirst({
+    where: {
+      surfaceId: "spaces",
+      surfaceUserId: id,
+      status: "ACTIVE",
+      ...(workspaceId ? { surfaceWorkspaceId: workspaceId } : {}),
+      userId: { not: null },
+    },
+    select: { userId: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (identity?.userId) {
+    return identity.userId;
+  }
+
+  const exact = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+  return exact?.id;
+}
+
+/**
+ * "Id-or-alias → canonical Claw user id, else the input unchanged": the shared
+ * one-liner for admin routes that accept either Claw ids or Spaces workspace
+ * aliases. Resolution failures degrade to the input id (fail-open) so a
+ * transient DB hiccup is a not-found, never a 500.
+ */
+export async function resolveCanonicalUserIdOrSelf(
+  spacesUserId: string,
+  workspaceId?: string | null,
+): Promise<string> {
+  return (await resolveClawUserIdForSpacesIdentity(spacesUserId, workspaceId).catch(() => undefined)) ?? spacesUserId;
+}
+
+/**
+ * Admin-facing "any wire id" row lookup: the id may be a canonical Claw user
+ * id OR a Spaces workspace-scoped alias (the two forms an admin console can
+ * plausibly copy from either system). Resolves through the identity/
+ * exact-id ladder and returns the canonical Claw users row (or null).
+ */
+export async function findUserByAnyId(rawId: string): Promise<User | null> {
+  const canonicalId = await resolveClawUserIdForSpacesIdentity(rawId).catch((err) => {
+    log.warn(`[users-jit] findUserByAnyId: identity resolution failed for "${rawId}":`, err instanceof Error ? err.message : err);
+    return undefined;
+  });
+  return canonicalId ? prisma.user.findUnique({ where: { id: canonicalId } }) : null;
+}
+
+async function linkSpacesIdentity(spacesUser: SpacesUserProfile, orgId: string, userId: string): Promise<void> {
+  if (!spacesUser.workspaceId) return;
+
+  // The `surfaces` registry row for "spaces" is seeded by migration
+  // 20260706205659_slice0_surface_foundation. Read-only here: a missing or
+  // mismatched row means migrations have not run — a hard deployment failure
+  // this request path must not self-heal over.
+  const surface = await prisma.surface.findUnique({ where: { id: "spaces" }, select: { id: true, key: true } });
+  if (!surface || surface.key !== "spaces") {
+    log.error(
+      `[users-jit] cannot link Spaces identity: surface row id="spaces" ${surface ? `has key "${surface.key}"` : "is missing"} — ` +
+        `expected migration 20260706205659_slice0_surface_foundation to seed it`,
+    );
+    return;
+  }
+
+  const existing = await prisma.userSurfaceIdentity.findUnique({
+    where: {
+      surfaceId_surfaceWorkspaceId_surfaceUserId: {
+        surfaceId: "spaces",
+        surfaceWorkspaceId: spacesUser.workspaceId,
+        surfaceUserId: spacesUser.id,
+      },
+    },
+    select: { userId: true, orgId: true },
+  });
+  if (existing?.userId && existing.userId !== userId) {
+    log.warn(
+      `[users-jit] Spaces identity conflict user=${spacesUser.id} workspace=${spacesUser.workspaceId} ` +
+        `existingClawUser=${existing.userId} canonicalClawUser=${userId}`,
+    );
+    return;
+  }
+  if (existing?.orgId && existing.orgId !== orgId) {
+    log.warn(
+      `[users-jit] Spaces identity org conflict user=${spacesUser.id} workspace=${spacesUser.workspaceId} ` +
+        `existingOrg=${existing.orgId} canonicalOrg=${orgId}`,
+    );
+    return;
+  }
+
+  await prisma.userSurfaceIdentity.upsert({
+    where: {
+      surfaceId_surfaceWorkspaceId_surfaceUserId: {
+        surfaceId: "spaces",
+        surfaceWorkspaceId: spacesUser.workspaceId,
+        surfaceUserId: spacesUser.id,
+      },
+    },
+    create: {
+      surfaceId: "spaces",
+      surfaceWorkspaceId: spacesUser.workspaceId,
+      surfaceUserId: spacesUser.id,
+      orgId,
+      userId,
+      ...(spacesUser.spacesOrgMemberId?.trim()
+        ? { surfaceMemberId: spacesUser.spacesOrgMemberId.trim() }
+        : {}),
+      status: "ACTIVE",
+      linkedAt: new Date(),
+      lastSeenAt: new Date(),
+    },
+    update: {
+      orgId,
+      userId,
+      ...(spacesUser.spacesOrgMemberId?.trim()
+        ? { surfaceMemberId: spacesUser.spacesOrgMemberId.trim() }
+        : {}),
+      status: "ACTIVE",
+      linkedAt: new Date(),
+      lastSeenAt: new Date(),
+    },
+  });
+}
+
 /**
  * Resolve which claw org a NEWLY-mirrored Spaces user belongs to (§13.2).
  * Order:
- *   1. `ConnectedSurface` — map the user's Spaces `workspaceId` → claw org.
- *      Falls back to legacy `SurfaceTenantLink` during the Slice 0 transition.
- *      AUTHORITATIVE when present (2026-07-15): the workspace defines the
- *      user's permanent org identity.
- *   2. `orgHint` — the invoked agent's org (webhook path). Only consulted for
- *      UNMAPPED workspaces / callers with no workspace context. Must never
- *      beat the mapping — the digital-twin webhook serves every workspace and
- *      hinted its own (Juspay) org, minting wrong-org users on plain people-
- *      mentions in the nammayatri workspace.
- *   3. Fallback — the default org (Juspay). Once a second tenant is live, set
+ *   1. `ConnectedSurface` — map the user's Spaces `workspaceId` -> claw org
+ *      and, when populated, verify `surfaceOrgId` against Spaces
+ *      `workspaces.orgId`.
+ *   2. Legacy `SurfaceTenantLink` — deprecated fallback while mappings are
+ *      being moved to `connected_surfaces`.
+ *   3. `orgHint` — an explicit org (e.g. the invoked agent's org), used only
+ *      when there is no workspace mapping and fail-closed policy is not active.
+ *   4. Fallback — the default org (Juspay). Once a second tenant is live, set
  *      `JIT_UNMAPPED_WORKSPACE_POLICY=reject` to FAIL CLOSED for unmapped
  *      workspaces so a new Spaces tenant can't silently pollute the default org.
  *
@@ -76,24 +216,66 @@ async function resolveOrgForNewUser(
   spacesUser: SpacesUserProfile,
   orgHint?: string,
 ): Promise<string | null> {
-  // 1. Spaces workspace → org mapping FIRST (2026-07-15). The hint used to
-  //    win, which minted wrong-org users: the digital-twin webhook handles
-  //    USER_MENTIONED for every workspace and passes ITS agent's org (Juspay)
-  //    as the hint — so a nammayatri-workspace user tagging a colleague got
-  //    permanently created in the Juspay org (ramesh.c/sanjna.sharma,
-  //    2026-07-15 09:41/09:53 UTC). The user's workspace is the authoritative
-  //    signal for their PERMANENT org identity; the hint is only a fallback
-  //    for callers with no workspace context (e.g. agent-scoped S2S paths).
+  const policy = (process.env["JIT_UNMAPPED_WORKSPACE_POLICY"] ?? "default").trim().toLowerCase();
+
+  // 1. Spaces workspace -> org mapping.
   if (spacesUser.workspaceId) {
-    const connected = await prisma.connectedSurface.findFirst({
+    const connectedRows = await prisma.connectedSurface.findMany({
       where: {
+        surfaceId: "spaces",
         surfaceTenantId: spacesUser.workspaceId,
-        surface: { key: "spaces" },
       },
-      select: { orgId: true },
+      select: { id: true, orgId: true, surfaceOrgId: true },
+      orderBy: { createdAt: "asc" },
+      take: 2,
     });
+    if (connectedRows.length > 1) {
+      const orgIds = [...new Set(connectedRows.map((row) => row.orgId))];
+      log.warn(
+        `[users-jit] tenant conflict: workspace=${spacesUser.workspaceId} has multiple connected_surfaces org mappings orgIds=${orgIds.join(",")}`,
+      );
+      if (orgIds.length > 1) return null;
+    }
+
+    const connected = connectedRows[0];
     if (connected) {
-      log.info(`[users-jit] org resolved via workspace mapping (ConnectedSurface): workspace=${spacesUser.workspaceId} → org=${connected.orgId}`);
+      if (connected.surfaceOrgId) {
+        if (spacesUser.spacesOrgId && connected.surfaceOrgId !== spacesUser.spacesOrgId) {
+          log.warn(
+            `[users-jit] tenant conflict: workspace=${spacesUser.workspaceId} Spaces org=${spacesUser.spacesOrgId} ` +
+              `connected_surface=${connected.id} surfaceOrgId=${connected.surfaceOrgId} clawOrgId=${connected.orgId}`,
+          );
+          return null;
+        }
+        if (!spacesUser.spacesOrgId) {
+          log.warn(
+            `[users-jit] cannot validate connected_surface=${connected.id} workspace=${spacesUser.workspaceId}: Spaces workspaces.orgId missing`,
+          );
+        }
+      } else {
+        log.warn(
+          `[users-jit] connected_surface=${connected.id} workspace=${spacesUser.workspaceId} missing surfaceOrgId; allowing temporarily`,
+        );
+      }
+
+      if (spacesUser.spacesOrgId) {
+        const orgRows = await prisma.connectedSurface.findMany({
+          where: {
+            surfaceId: "spaces",
+            surfaceOrgId: spacesUser.spacesOrgId,
+          },
+          select: { orgId: true },
+          distinct: ["orgId"],
+          take: 2,
+        });
+        if (orgRows.length > 1) {
+          log.warn(
+            `[users-jit] tenant warning: Spaces org=${spacesUser.spacesOrgId} maps to multiple claw orgs ` +
+              `orgIds=${orgRows.map((row) => row.orgId).join(",")}`,
+          );
+        }
+      }
+
       return connected.orgId;
     }
 
@@ -107,38 +289,35 @@ async function resolveOrgForNewUser(
       select: { orgId: true },
     });
     if (link) {
-      log.info(`[users-jit] org resolved via workspace mapping (SurfaceTenantLink): workspace=${spacesUser.workspaceId} → org=${link.orgId}`);
+      log.warn(
+        `[users-jit] workspace=${spacesUser.workspaceId} used deprecated surface_tenant_links fallback orgId=${link.orgId}`,
+      );
       return link.orgId;
     }
   }
 
-  // 2. Explicit hint (the invoked agent's org) — only when the workspace has
-  //    no mapping. Right for agent-scoped S2S callers with no workspace
-  //    context; must never override a mapped workspace (see note above).
+  if (policy === "reject") {
+    log.warn(
+      `[users-jit] unmapped workspace "${spacesUser.workspaceId ?? "(none)"}" for user ${spacesUser.id}; ` +
+        `JIT_UNMAPPED_WORKSPACE_POLICY=reject -> refusing JIT (no default-org fallback)`,
+    );
+    return null;
+  }
+
+  // 3. Explicit hint, after workspace source-of-truth checks.
   const hint = (orgHint ?? "").trim();
   if (hint) {
     const org = await prisma.organization.findUnique({ where: { id: hint }, select: { id: true } });
     if (org) {
-      log.info(`[users-jit] org resolved via orgHint: workspace=${spacesUser.workspaceId ?? "(none)"} (unmapped) → org=${org.id}`);
+      log.warn(
+        `[users-jit] user=${spacesUser.id} workspace=${spacesUser.workspaceId ?? "(none)"} has no surface mapping; using orgHint=${hint}`,
+      );
       return org.id;
     }
-    log.warn(`[users-jit] orgHint "${hint}" not found — falling through to fallback policy`);
+    log.warn(`[users-jit] orgHint "${hint}" not found - falling through to default org`);
   }
 
-  // 3. Fallback (policy-gated).
-  const policy = (process.env["JIT_UNMAPPED_WORKSPACE_POLICY"] ?? "default").trim().toLowerCase();
-  if (policy === "reject") {
-    log.warn(
-      `[users-jit] unmapped workspace "${spacesUser.workspaceId ?? "(none)"}" for user ${spacesUser.id}; ` +
-        `JIT_UNMAPPED_WORKSPACE_POLICY=reject → refusing JIT (no default-org fallback)`,
-    );
-    return null;
-  }
-  log.warn(
-    `[users-jit] org resolved via DEFAULT-ORG FALLBACK for user ${spacesUser.id} ` +
-      `(workspace=${spacesUser.workspaceId ?? "(none)"} unmapped, no valid hint) — ` +
-      `set JIT_UNMAPPED_WORKSPACE_POLICY=reject to fail closed instead`,
-  );
+  // 4. Fallback (policy-gated above).
   return getDefaultOrgId();
 }
 
@@ -149,11 +328,27 @@ export async function ensureUserExists(
 ): Promise<boolean> {
   if (!userId) return false;
 
+  // Do not return early just because a legacy Claw user exists. Reading their
+  // live Spaces profile lets this path create the missing workspace
+  // UserSurfaceIdentity (cross-workspace alias) on their next authenticated
+  // request. Only skip once an ACTIVE identity row proves the linkage exists.
   const existing = await prisma.user.findUnique({ where: { id: userId } });
-  if (existing) return true;
-
+  if (existing) {
+    const identity = await prisma.userSurfaceIdentity.findFirst({
+      where: {
+        surfaceId: "spaces",
+        surfaceUserId: userId,
+        status: "ACTIVE",
+        userId: { not: null },
+      },
+      select: { id: true },
+    });
+    // This raw, workspace-scoped user has already been migrated. Avoid a
+    // Spaces DB round-trip on every subsequent authenticated request.
+    if (identity) return true;
+  }
   const spacesUser = await getSpacesUserById(userId, caller);
-  if (!spacesUser) return false;
+  if (!spacesUser) return Boolean(existing);
 
   // The user row must carry an orgId at INSERT time (orgId is NOT NULL). Resolve
   // via §13.2 (hint → workspace mapping → default). Fail closed if nothing
@@ -168,18 +363,77 @@ export async function ensureUserExists(
     return false;
   }
 
-  // Upsert by id so concurrent JIT requests for the same user don't double-
-  // insert. Update branch keeps the local copy in sync with email/name changes
-  // on the Spaces side (rare but free); it does NOT touch orgId (an existing
-  // row's org is authoritative).
-  await prisma.user.upsert({
-    where: { id: spacesUser.id },
-    create: { id: spacesUser.id, email: spacesUser.email, name: spacesUser.name, orgId },
-    update: { email: spacesUser.email, name: spacesUser.name },
+  // Person resolution is shared with the spaces-sync provisioning route —
+  // see src/lib/identity-resolution.ts for the email-primary rule and the
+  // fail-closed refusal rails. A refusal here is a hard miss (no throw): the
+  // webhook/S2S entrypoints treat it as "user not mirrorable right now".
+  const email = normalizeEmail(spacesUser.email);
+  const resolution = await resolveSurfacePerson(prisma, {
+    orgId,
+    email,
+    ...(existing ? { exactUserId: existing.id } : {}),
+    ...(spacesUser.spacesOrgMemberId?.trim()
+      ? { memberId: spacesUser.spacesOrgMemberId.trim() }
+      : {}),
   });
-  await ensureOrgMembership(spacesUser.id, orgId);
+  if (resolution.kind === "refused") {
+    log.error(
+      `[users-jit] identity conflict for Spaces user ${spacesUser.id} ` +
+        `(workspace=${spacesUser.workspaceId ?? "none"}) org=${orgId} caller=${caller}: ${resolution.reason}`,
+    );
+    return false;
+  }
 
-  log.info(`[users-jit] created local user ${spacesUser.email} (id=${spacesUser.id}) org=${orgId} caller=${caller}`);
+  let canonicalUserId = resolution.kind === "reuse" ? resolution.userId : undefined;
+
+  if (canonicalUserId) {
+    await prisma.user.update({
+      where: { id: canonicalUserId },
+      data: { email, name: spacesUser.name },
+    });
+    log.info(
+      `[users-jit] linked Spaces user ${spacesUser.id} to existing local user ${canonicalUserId} ` +
+        `(${email}) org=${orgId} caller=${caller}`,
+    );
+  } else {
+    try {
+      const created = await prisma.user.create({
+        data: {
+          id: `claw-user-${randomUUID()}`,
+          email,
+          name: spacesUser.name,
+          orgId,
+        },
+        select: { id: true },
+      });
+      canonicalUserId = created.id;
+      log.info(`[users-jit] created local user ${email} (id=${canonicalUserId}) org=${orgId} caller=${caller}`);
+    } catch (err) {
+      // Two concurrent first-contact JITs race on User's @@unique([email,
+      // orgId]): the loser hits P2002. Re-resolve to the winner's row and
+      // continue linking instead of propagating — orgIdForSpacesUser only
+      // wants a clean miss-or-result, never a race exception.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) {
+        throw err;
+      }
+      const winner = await prisma.user.findFirst({
+        where: { orgId, email: { equals: email, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!winner) {
+        throw err;
+      }
+      canonicalUserId = winner.id;
+      log.info(
+        `[users-jit] concurrent JIT create for ${email} raced another request; ` +
+          `linking to winner ${canonicalUserId} org=${orgId} caller=${caller}`,
+      );
+    }
+  }
+
+  await ensureOrgMembership(canonicalUserId, orgId);
+  await linkSpacesIdentity(spacesUser, orgId, canonicalUserId);
+
   return true;
 }
 
@@ -204,6 +458,9 @@ export async function orgIdForSpacesUser(
   if (!id) return undefined;
   const ok = await ensureUserExists(id, caller, orgHint);
   if (!ok) return undefined;
-  const row = await prisma.user.findUnique({ where: { id }, select: { orgId: true } });
+  const clawUserId = await resolveClawUserIdForSpacesIdentity(id);
+  const row = clawUserId
+    ? await prisma.user.findUnique({ where: { id: clawUserId }, select: { orgId: true } })
+    : null;
   return row?.orgId ?? undefined;
 }

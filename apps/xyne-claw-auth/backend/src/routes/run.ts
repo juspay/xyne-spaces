@@ -59,6 +59,7 @@ import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { decryptStoredField } from "../surfaces/spaces/client.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
 import { getRequesterId, getOrgId } from "../middleware/agent-acl.js";
@@ -119,12 +120,21 @@ async function resolveSpacesAuthFromRequest(
       }
     }
 
-    // Workspace id: x-workspace-id header → xyne_last_workspace cookie
+    // Workspace id: VERIFIED x-spaces-workspace-id (requireAuth derived it
+    // from the session's active workspace) → x-workspace-id header →
+    // xyne_last_workspace cookie. The verified header must win: the others
+    // are client-supplied conveniences.
+    const verifiedWorkspaceHeader = req.headers["x-spaces-workspace-id"];
+    const verifiedWorkspaceId =
+      typeof verifiedWorkspaceHeader === "string" && verifiedWorkspaceHeader.trim()
+        ? verifiedWorkspaceHeader.trim()
+        : undefined;
     const workspaceHeader = req.headers["x-workspace-id"];
     const workspaceId =
-      typeof workspaceHeader === "string" && workspaceHeader.trim()
+      verifiedWorkspaceId ??
+      (typeof workspaceHeader === "string" && workspaceHeader.trim()
         ? workspaceHeader.trim()
-        : cookieMap.get("xyne_last_workspace");
+        : cookieMap.get("xyne_last_workspace"));
 
     // Token: workspace-scoped JWT → legacy google_access_token JWT → Authorization Bearer
     let token: string | undefined;
@@ -158,9 +168,13 @@ async function resolveSpacesAuthFromRequest(
 
     if (!token && !sessionId) return undefined;
 
+    const spacesUserIdHeader = req.headers["x-spaces-user-id"];
+    const spacesUserId = typeof spacesUserIdHeader === "string" && spacesUserIdHeader.trim()
+      ? spacesUserIdHeader.trim()
+      : userId;
     const effectiveWorkspaceId =
       workspaceId ??
-      (userId ? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) : null) ??
+      (spacesUserId ? await getWorkspaceIdForUser(spacesUserId, "require-auth").catch(() => null) : null) ??
       undefined;
     if (!workspaceId && effectiveWorkspaceId) {
       log.info(

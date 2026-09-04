@@ -27,7 +27,8 @@ import {
   isClawAdmin,
   requireRequester,
 } from "../middleware/agent-acl.js";
-import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { getRequesterAliases, matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { findUserByAnyId } from "../lib/users-jit.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -349,15 +350,64 @@ router.get("/check-name", asyncHandler(async (req: Request, res: Response, next)
 
 // ── Agent CRUD ───────────────────────────────────────────────────────
 
+/** Union one name-sorted listVisible result per identity alias into a single
+ *  name-sorted list, dropping the global agents every alias call returns. */
+function mergeVisibleAgentLists(
+  lists: Array<Awaited<ReturnType<typeof agentRepository.listVisible>>>,
+): Awaited<ReturnType<typeof agentRepository.listVisible>> {
+  const seen = new Set<string>();
+  const merged = [];
+  for (const list of lists) {
+    for (const agent of list) {
+      if (seen.has(agent.id)) continue;
+      seen.add(agent.id);
+      merged.push(agent);
+    }
+  }
+  merged.sort((a, b) => a.name.localeCompare(b.name));
+  return merged;
+}
+
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   // The caller-passed userId is honoured as a "scope" hint (lets a frontend
   // ask "what would user X see"), but the ADMIN bypass is determined from
   // the AUTHENTICATED user — requireAuth has already verified their cookie
   // and pinned the verified userId at req.headers["x-user-id"]. We never
   // trust the query string for that decision.
-  const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+  const scopeUserId = (req.query["userId"] as string | undefined)?.trim() || undefined;
   const authedUserId = String(req.headers["x-user-id"] ?? "");
   const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+
+  // Dashboard auth exposes the workspace-scoped Spaces user ID, while
+  // Agent.ownerUserId stores the canonical Claw User ID. Resolve an explicit
+  // scope through UserSurfaceIdentity before applying the visibility filter.
+  // Non-admin callers may only request their own two equivalent identities.
+  if (scopeUserId && !admin && !matchesAuthenticatedUserId(req, scopeUserId)) {
+    throw forbidden("userId does not match authenticated session");
+  }
+  const scopedUser = scopeUserId ? await findUserByAnyId(scopeUserId) : null;
+  if (scopeUserId && !scopedUser) {
+    throw notFound("User not found");
+  }
+  const canonicalScopeUserId = (scopedUser?.id ?? authedUserId) || undefined;
+
+  // Agent.ownerUserId / AgentShare.userId may be keyed by EITHER verified
+  // representation of the scoped caller — the canonical Claw id OR the raw
+  // workspace-scoped Spaces id (rows written before canonicalization, or by
+  // clients posting their raw dashboard id as ownerUserId). listVisible
+  // filters one id per call, so an OWN-scope read unions each alias's
+  // results; an admin's explicit foreign scope resolves to the target's
+  // canonical id only.
+  const visibilityUserIds = (() => {
+    if (scopedUser && !matchesAuthenticatedUserId(req, scopedUser.id)) {
+      return [scopedUser.id];
+    }
+    const ids = getRequesterAliases(req);
+    if (canonicalScopeUserId && !ids.includes(canonicalScopeUserId)) {
+      ids.push(canonicalScopeUserId);
+    }
+    return ids;
+  })();
 
   // The admin "see ALL agents" bypass is OPT-IN via ?scope=all. The default
   // list (e.g. the main "My Agents" view) stays filtered to
@@ -368,11 +418,22 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const wantAllAgents = req.query["scope"] === "all";
   const adminScope = getAdminOrgScope(req, "/agents", admin && wantAllAgents);
   const listOrgId = adminScope.orgId ?? getOrgId(req);
-  const agents = await agentRepository.listVisible({
-    ...(scopeUserId ? { userId: scopeUserId } : {}),
-    ...(listOrgId ? { orgId: listOrgId } : {}),
-    isAdmin: admin && wantAllAgents,
-  });
+  const agents = visibilityUserIds.length > 0
+    ? mergeVisibleAgentLists(
+        await Promise.all(
+          visibilityUserIds.map((id) =>
+            agentRepository.listVisible({
+              userId: id,
+              ...(listOrgId ? { orgId: listOrgId } : {}),
+              isAdmin: admin && wantAllAgents,
+            }),
+          ),
+        ),
+      )
+    : await agentRepository.listVisible({
+        ...(listOrgId ? { orgId: listOrgId } : {}),
+        isAdmin: admin && wantAllAgents,
+      });
   const orgNames = adminScope.allOrgs ? await getOrgNameMap(agents.map((a) => a.orgId)) : new Map();
 
   const view = req.query["view"] === "full" ? "full" : "light";
@@ -391,7 +452,7 @@ router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.query["userId"] as string | undefined)?.trim();
   if (!userId) throw badRequest("userId is required");
   const requesterId = requireRequester(req, "authenticated user required");
-  if (requesterId !== userId) throw forbidden("userId does not match authenticated session");
+  if (!matchesAuthenticatedUserId(req, userId)) throw forbidden("userId does not match authenticated session");
   const orgId = getOrgId(req);
   if (!orgId) throw badRequest("Organization context is required");
   const configs = await userAgentConfigRepository.listByUser(userId, orgId);
@@ -476,7 +537,9 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   const admin = requesterId ? await isClawAdmin(requesterId) : false;
   const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
-  if (ownerUserId && ownerUserId !== requesterId && !admin) {
+  // The auth boundary retains both representations of the caller, so accept
+  // either the canonical Claw id or the verified Spaces id from the session.
+  if (ownerUserId && !matchesAuthenticatedUserId(req, ownerUserId) && !admin) {
     throw forbidden("Only an admin can create an agent owned by another user");
   }
   // For personal agents, owner is required
@@ -2097,7 +2160,9 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
       return;
     }
 
-    const targetUser = await userRepository.findById(userId);
+    // The body userId may be a canonical Claw id OR a Spaces alias — resolve
+    // before keying the share row so it always references the canonical user.
+    const targetUser = await findUserByAnyId(userId);
     if (!targetUser) {
       res.status(404).json({ success: false, error: "Target user not found" });
       return;
@@ -2114,7 +2179,7 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
 
     const VALID_ROLES = ["VIEWER", "EDITOR", "CONTRIBUTOR"];
     const shareRole = VALID_ROLES.includes(role ?? "") ? (role as string) : "VIEWER";
-    const share = await agentShareRepository.upsert(agent.id, userId, shareRole, requesterId);
+    const share = await agentShareRepository.upsert(agent.id, targetUser.id, shareRole, requesterId);
 
     await writeAuditLog({
       actorUserId: requesterId,

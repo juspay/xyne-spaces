@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 export const chatMessageRepository = {
   create: (data: {
@@ -95,15 +96,22 @@ export const chatMessageRepository = {
       include: { attachments: true },
     }),
 
-  findByUserAndAgent: (userId: string, agentSlug: string) =>
-    prisma.chatMessage.findMany({ where: { userId, agentSlug }, orderBy: { createdAt: "asc" } }),
+  /** Rows may be keyed by EITHER of the caller's verified ids — the canonical
+   *  Claw id OR the workspace-scoped raw Spaces id (see getRequesterAliases).
+   *  Accept both so historical rows don't disappear from "my" reads. */
+  findByUserAndAgent: (userIds: string | string[], agentSlug: string) =>
+    prisma.chatMessage.findMany({
+      where: { ...userIdFilter(userIds), agentSlug },
+      orderBy: { createdAt: "asc" },
+    }),
 
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat
-   *  even if they guess a conversationId. Returns the delete count. */
-  deleteConversation: async (userId: string, agentSlug: string, conversationId: string) => {
+   *  even if they guess a conversationId. Returns the delete count. Alias
+   *  array = both verified representations of the SAME caller. */
+  deleteConversation: async (userIds: string | string[], agentSlug: string, conversationId: string) => {
     const result = await prisma.chatMessage.deleteMany({
-      where: { userId, agentSlug, conversationId },
+      where: { ...userIdFilter(userIds), agentSlug, conversationId },
     });
     return result.count;
   },

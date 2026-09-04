@@ -34,6 +34,7 @@ import {
 } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { mintSessionToken } from "./session-tokens.js";
+import { resolveClawUserIdForSpacesIdentity } from "./users-jit.js";
 import {
   resolveAgentProviderConfigs,
   resolveSubagentProviderMode,
@@ -238,12 +239,23 @@ async function resolveUserId(
 
   // Direct call with userId (e.g., from Xyne Spaces)
   if (userId && typeof userId === "string" && userId.trim().length > 0) {
+    // The body id arrives in either representation: legacy callers (queued
+    // messages, pre-migration cards) send the raw Spaces id, current callers
+    // the canonical Claw id. Resolve through the identity ladder so the run
+    // and every downstream row is keyed canonically.
+    // Deliberate MIXED failure policy: an identity-resolution failure here is
+    // FAIL-OPEN (fall back to the raw id — the request was authenticated
+    // upstream and a lookup hiccup must not block runs), while the
+    // body-vs-header userId pin check above is FAIL-CLOSED (403) because a
+    // mismatch there is a conflicting identity claim, not an infra error.
+    const clawUserId =
+      (await resolveClawUserIdForSpacesIdentity(userId.trim()).catch(() => undefined)) ?? userId.trim();
     const user = await prisma.user.findUnique({
-      where: { id: userId.trim() },
+      where: { id: clawUserId },
       select: { name: true, email: true, orgId: true },
     });
     return {
-      userId: userId.trim(),
+      userId: clawUserId,
       userName: userName?.trim() ?? user?.name ?? "",
       userEmail: user?.email ?? "",
       ...(user?.orgId ? { orgId: user.orgId } : {}),
@@ -653,8 +665,16 @@ export async function prepareRun(
     const bodyUserId =
       typeof bodyUserIdRaw === "string" && bodyUserIdRaw.trim() ? bodyUserIdRaw.trim() : undefined;
     if (bodyUserId && authenticatedUserId && bodyUserId !== authenticatedUserId) {
-      log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
-      return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      // The pinned header is canonical while legacy clients still send the
+      // raw Spaces alias in the body — resolve before comparing, or the
+      // authenticated user's own runs get falsely rejected. FAIL-CLOSED: an
+      // unresolvable or mismatching body id is a 403 (see resolveUserId for
+      // the complementary fail-open path).
+      const resolvedBodyUserId = await resolveClawUserIdForSpacesIdentity(bodyUserId).catch(() => undefined);
+      if (!resolvedBodyUserId || resolvedBodyUserId !== authenticatedUserId) {
+        log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
+        return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      }
     }
 
     const identityBody = {
