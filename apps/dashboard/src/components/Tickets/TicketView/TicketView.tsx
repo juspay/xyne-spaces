@@ -10,18 +10,29 @@ import { ChevronLeft, MultipleCrossCancelDefault as X } from '@xyne/icons';
 
 const TicketView = (): ReactElement => {
   const ticketViewContainerRef = useRef<HTMLDivElement>(null);
-  const { projectId, boardId, ticketId } = useParams<{
+  const { projectId, boardId, ticketId, channelId } = useParams<{
     projectId?: string;
     boardId?: string;
     ticketId: string;
+    channelId?: string;
   }>();
 
   const navigate = useNavigate();
+  // Only the SDLC route has :channelId; there this page stands in for the hub's board.
+  const sdlcBoardPath = channelId ? `/sdlc/${channelId}/tickets` : null;
+  const sdlcThreadProps = sdlcBoardPath
+    ? { showChannelLink: true, onChannelLinkClick: (): void => void navigate(sdlcBoardPath) }
+    : {};
 
   // Query ticket data to get xyneId and channelId
   const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: ticketId || '' }), {
     enabled: !!ticketId,
   });
+
+  // ThreadMessages cannot derive a conversation from a ticket id alone.
+  const threadIds = ticket
+    ? { channelId: ticket.channelId, conversationId: ticket.conversationId, ticketId: ticket.id }
+    : {};
 
   const bounds = useMeasure({ ref: ticketViewContainerRef, observeResize: true });
   const shouldStack = bounds.width < 700;
@@ -51,7 +62,9 @@ const TicketView = (): ReactElement => {
               size={16}
               className='cursor-pointer'
               onClick={() => {
-                if (projectId && boardId) {
+                if (sdlcBoardPath) {
+                  void navigate(sdlcBoardPath);
+                } else if (projectId && boardId) {
                   void navigate(`/projects/${projectId}/${boardId}`);
                 } else {
                   void navigate(-1);
@@ -64,9 +77,10 @@ const TicketView = (): ReactElement => {
           </div>
           <Link
             to={
-              ticket.channelId
+              sdlcBoardPath ??
+              (ticket.channelId
                 ? `/chat/dir/${ticket.channelId}?tab=tickets&layout=table`
-                : `/projects/${projectId}/${boardId}`
+                : `/projects/${projectId}/${boardId}`)
             }
             className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors duration-200'
             aria-label='Close thread panel'
@@ -82,7 +96,7 @@ const TicketView = (): ReactElement => {
           <>
             <TicketDetails ticketId={ticketId} />
             <div className='absolute inset-0 bg-background z-10 rounded-lg'>
-              <ThreadMessages />
+              <ThreadMessages {...threadIds} {...sdlcThreadProps} />
             </div>
           </>
         ) : (
@@ -101,7 +115,7 @@ const TicketView = (): ReactElement => {
 
             <Panel id='ticket-thread' defaultSize='47%' minSize='40%'>
               <div className='h-full'>
-                <ThreadMessages showHeader={true} />
+                <ThreadMessages showHeader={true} {...threadIds} {...sdlcThreadProps} />
               </div>
             </Panel>
           </ResizableGroup>
