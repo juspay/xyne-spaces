@@ -11,8 +11,6 @@ import {
   listCopilotModelsForUser,
   listClaudeModelsForUser,
   listCodexModelsForUser,
-  startCodexOauth,
-  exchangeCodexOauth,
   type ProviderCredential,
   type SubagentRouting,
   type GitHubDeviceCode,
@@ -54,14 +52,11 @@ function ProviderCredentialCard({
   provider: string;
   existing?: ProviderCredential;
   saving: boolean;
-  onSave: (payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token"; reasoningEffort?: "low" | "medium" | "high" }) => Promise<void>;
+  onSave: (payload: { apiKey?: string; model?: string; baseUrl?: string; reasoningEffort?: "low" | "medium" | "high" }) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const meta = PROVIDER_META[provider];
   const [apiKey, setApiKey] = useState("");
-  const [authType, setAuthType] = useState<"api_key" | "oauth_token">(
-    existing?.authType === "oauth_token" ? "oauth_token" : "api_key",
-  );
   const [model, setModel] = useState(existing?.model ?? meta?.defaultModel ?? "");
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? meta?.defaultBaseUrl ?? "");
   const [reasoningEffort, setReasoningEffort] = useState<"low" | "medium" | "high">(
@@ -74,15 +69,10 @@ function ProviderCredentialCard({
   const [modelsErr, setModelsErr] = useState<string | null>(null);
 
   // Codex OAuth flow state
-  const [codexFlow, setCodexFlow] = useState<{ url: string; state: string } | null>(null);
-  const [codexCode, setCodexCode] = useState("");
-  const [codexBusy, setCodexBusy] = useState(false);
-  const [codexErr, setCodexErr] = useState<string | null>(null);
 
   useEffect(() => {
     setModel(existing?.model ?? meta?.defaultModel ?? "");
     setBaseUrl(existing?.baseUrl ?? meta?.defaultBaseUrl ?? "");
-    setAuthType(existing?.authType === "oauth_token" ? "oauth_token" : "api_key");
     if (existing?.reasoningEffort === "low" || existing?.reasoningEffort === "medium" || existing?.reasoningEffort === "high") {
       setReasoningEffort(existing.reasoningEffort);
     }
@@ -91,8 +81,8 @@ function ProviderCredentialCard({
   const hasKey = Boolean(existing?.hasApiKey);
   const isClaude = provider === "claude";
   const isCodex = provider === "codex";
-  const supportsOauth = isClaude || isCodex;
-  const isOauth = authType === "oauth_token";
+  // Claude + Codex OAuth were removed (subscription tokens must not be
+  // stored on a third-party server) — both providers are API-key-only.
 
   useEffect(() => {
     if (!hasKey) return;
@@ -149,131 +139,9 @@ function ProviderCredentialCard({
 
       {editing && (
         <div className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
-          {supportsOauth && (
-            <div>
-              <label className="mb-2 block text-xs font-medium text-zinc-500">Auth method</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(["api_key", "oauth_token"] as const).map((type) => (
-                  <label
-                    key={type}
-                    className={`flex cursor-pointer flex-col gap-0.5 rounded-xl border px-3 py-2.5 text-xs transition ${
-                      authType === type
-                        ? "border-zinc-400 bg-white ring-1 ring-zinc-300"
-                        : "border-zinc-200 bg-zinc-50 hover:border-zinc-300"
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name={`authType-${provider}`}
-                        value={type}
-                        checked={authType === type}
-                        onChange={() => setAuthType(type)}
-                        className="accent-zinc-700"
-                      />
-                      <span className="font-medium text-zinc-800">
-                        {type === "api_key" ? "API Key" : isClaude ? "OAuth Token" : "ChatGPT OAuth Token"}
-                      </span>
-                    </span>
-                    <span className="ml-5 text-zinc-400">
-                      {type === "api_key"
-                        ? isClaude ? "usage-based, Console key" : "usage-based, Platform key"
-                        : isClaude ? "Pro/Max subscription" : "ChatGPT Plus/Pro subscription"}
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              {isOauth && isClaude && (
-                <p className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                  Run <code className="rounded bg-blue-100 px-1 font-mono">claude setup-token</code> on any
-                  machine with Claude Code installed. It opens a browser for one-time authorization and prints
-                  a token valid for one year — paste that token below.
-                </p>
-              )}
-
-              {isOauth && isCodex && (
-                <div className="mt-2 space-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-3 text-xs text-violet-700">
-                  <p>Sign in with your ChatGPT account. After authorizing, paste the code or callback URL below.</p>
-                  {!codexFlow ? (
-                    <button
-                      type="button"
-                      disabled={codexBusy}
-                      onClick={async () => {
-                        setCodexBusy(true);
-                        setCodexErr(null);
-                        try {
-                          const flow = await startCodexOauth(userId);
-                          setCodexFlow({ url: flow.url, state: flow.state });
-                          window.open(flow.url, "_blank", "noopener,noreferrer");
-                        } catch (e) {
-                          setCodexErr(e instanceof Error ? e.message : "Failed to start sign-in");
-                        } finally {
-                          setCodexBusy(false);
-                        }
-                      }}
-                      className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-                    >
-                      {codexBusy ? "Opening…" : "Sign in with ChatGPT"}
-                    </button>
-                  ) : (
-                    <>
-                      <p>
-                        If the tab didn't open,{" "}
-                        <a href={codexFlow.url} target="_blank" rel="noopener noreferrer" className="underline">
-                          click here
-                        </a>
-                        .
-                      </p>
-                      <textarea
-                        value={codexCode}
-                        onChange={(e) => setCodexCode(e.target.value)}
-                        placeholder="Paste the code or the full http://localhost:1455/auth/callback?code=…&state=… URL"
-                        rows={3}
-                        className="w-full rounded-xl border border-violet-300 bg-white px-3 py-2 text-xs text-zinc-800 placeholder-zinc-400 focus:border-violet-400 focus:outline-none"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={codexBusy || !codexCode.trim()}
-                          onClick={async () => {
-                            setCodexBusy(true);
-                            setCodexErr(null);
-                            try {
-                              await exchangeCodexOauth(userId, { code: codexCode.trim(), state: codexFlow.state });
-                              setCodexFlow(null);
-                              setCodexCode("");
-                              setEditing(false);
-                              await onSave({});
-                            } catch (e) {
-                              setCodexErr(e instanceof Error ? e.message : "Sign-in failed");
-                            } finally {
-                              setCodexBusy(false);
-                            }
-                          }}
-                          className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-                        >
-                          {codexBusy ? "Verifying…" : "Complete sign-in"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setCodexFlow(null); setCodexCode(""); setCodexErr(null); }}
-                          className="rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-800"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {codexErr && <p className="text-red-500">{codexErr}</p>}
-                </div>
-              )}
-            </div>
-          )}
-
           <div>
             <label className="mb-1.5 block text-xs font-medium text-zinc-500">
-              {supportsOauth && isOauth ? (isClaude ? "OAuth Token" : "ChatGPT OAuth Token") : "API Key"}{" "}
+              {"API Key"}{" "}
               {hasKey && <span className="text-zinc-400">(leave blank to keep current)</span>}
             </label>
             <input
@@ -281,13 +149,7 @@ function ProviderCredentialCard({
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={
-                hasKey
-                  ? "••••••••"
-                  : isClaude && isOauth
-                  ? "sk-ant-oat01-…"
-                  : isCodex && isOauth
-                  ? "ey…  (access_token from ~/.codex/auth.json)"
-                  : "sk-…"
+                hasKey ? "••••••••" : "sk-…"
               }
               className={inputCls}
             />
@@ -332,8 +194,7 @@ function ProviderCredentialCard({
 
           <button
             onClick={async () => {
-              const payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token"; reasoningEffort?: "low" | "medium" | "high" } = { model, baseUrl, reasoningEffort };
-              if (supportsOauth) payload.authType = authType;
+              const payload: { apiKey?: string; model?: string; baseUrl?: string; reasoningEffort?: "low" | "medium" | "high" } = { model, baseUrl, reasoningEffort };
               if (apiKey) payload.apiKey = apiKey;
               else if (!hasKey) return;
               await onSave(payload);

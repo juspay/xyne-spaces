@@ -294,9 +294,9 @@ async function callLlmForSlides(
   userPrompt: string,
 ): Promise<{ title?: string; layout?: string; slides: unknown[] }> {
   if (llm.api === "anthropic-messages") {
-    const authHeader = llm.authType === "oauth_token"
-      ? { Authorization: `Bearer ${llm.apiKey}` }
-      : { "x-api-key": llm.apiKey };
+    // x-api-key only: Claude creds are Anthropic API keys — the OAuth Bearer
+    // path (subscription tokens) was removed.
+    const authHeader = { "x-api-key": llm.apiKey };
     const res = await httpsPost(
       llm.endpoint,
       JSON.stringify({

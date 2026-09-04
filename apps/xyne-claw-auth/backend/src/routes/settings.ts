@@ -1,5 +1,4 @@
 import { Router, type Request, type Response } from "express";
-import crypto from "node:crypto";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 import {
   userProviderCredentialsRepository,
@@ -11,9 +10,7 @@ import { getRequesterId, isClawAdmin , requireRequester} from "../middleware/age
 import { prisma } from "../db.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decrypt } from "../crypto.js";
-import { extractClaudeBearer } from "../lib/claude-creds.js";
-import { extractCodexBearer } from "../lib/codex-creds.js";
-import { CONFIG, CLAUDE_OAUTH, claudeOAuthConfigured } from "../config.js";
+import { CONFIG } from "../config.js";
 import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { redisService } from "../redis.js";
 import { fetchAnthropicModels } from "./agents.js";
@@ -67,6 +64,11 @@ router.put("/provider-credentials/:provider", asyncHandler(async (req: Request<{
   if (authType !== undefined) {
     if (authType !== "api_key" && authType !== "oauth_token") {
       throw badRequest("authType must be 'api_key' or 'oauth_token'");
+    }
+    // Claude + Codex OAuth were removed (vendor subscription tokens must not
+    // be stored on a third-party server) — only API keys are accepted.
+    if (authType === "oauth_token" && (provider === "claude" || provider === "codex")) {
+      throw badRequest(`${provider} supports API keys only (oauth_token not allowed)`);
     }
     data.authType = authType;
   }
@@ -309,122 +311,6 @@ router.post("/copilot/github-poll", asyncHandler(async (req: Request, res: Respo
   throw new HttpError(400, data.error_description ?? data.error ?? "Authorization failed");
 }));
 
-// ── OpenAI Codex (ChatGPT) browser OAuth — PKCE ───────────────────────
-// Uses the same public client_id as the OpenAI Codex CLI. OpenAI only whitelists
-// `http://localhost:1455/auth/callback` for that client; we never actually serve
-// that callback — instead `codex_cli_simplified_flow=true` makes OpenAI render
-// the code on the redirect page so the user pastes it back into our UI.
-
-const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const CODEX_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
-const CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
-const CODEX_REDIRECT_URI = "http://localhost:1455/auth/callback";
-const CODEX_SCOPE = "openid profile email offline_access";
-const CODEX_PKCE_PREFIX = "codex-pkce:";
-const CODEX_PKCE_TTL = 600; // 10 min — user must finish OAuth in this window
-
-function base64UrlEncode(buf: Buffer): string {
-  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function generateCodexPkce(): { verifier: string; challenge: string } {
-  const verifier = base64UrlEncode(crypto.randomBytes(32));
-  const challenge = base64UrlEncode(crypto.createHash("sha256").update(verifier).digest());
-  return { verifier, challenge };
-}
-
-
-router.post("/codex/oauth/start", asyncHandler(async (req: Request, res: Response) => {
-  const userId = requireRequester(req);
-
-  const { verifier, challenge } = generateCodexPkce();
-  const state = base64UrlEncode(crypto.randomBytes(16));
-
-  const redis = redisService.getConnection();
-  await redis.set(`${CODEX_PKCE_PREFIX}${userId}:${state}`, verifier, "EX", CODEX_PKCE_TTL);
-
-  const url = new URL(CODEX_AUTHORIZE_URL);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", CODEX_CLIENT_ID);
-  url.searchParams.set("redirect_uri", CODEX_REDIRECT_URI);
-  url.searchParams.set("scope", CODEX_SCOPE);
-  url.searchParams.set("code_challenge", challenge);
-  url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("state", state);
-  url.searchParams.set("id_token_add_organizations", "true");
-  url.searchParams.set("codex_cli_simplified_flow", "true");
-  url.searchParams.set("originator", "codex_cli_rs");
-
-  ok(res, { url: url.toString(), state, expiresIn: CODEX_PKCE_TTL });
-}));
-
-router.post("/codex/oauth/exchange", asyncHandler(async (req: Request, res: Response) => {
-  const userId = requireRequester(req);
-
-  let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
-
-  // Tolerate user pasting the full callback URL (?code=...&state=...) instead of a bare code.
-  const raw = (code ?? "").trim();
-  if (raw && (raw.startsWith("http") || raw.includes("code="))) {
-    try {
-      const u = raw.startsWith("http") ? new URL(raw) : new URL(`http://x?${raw}`);
-      code = u.searchParams.get("code") ?? code;
-      state = u.searchParams.get("state") ?? state;
-    } catch { /* keep original */ }
-  }
-
-  if (!code || !state) throw badRequest("code and state are required");
-
-  const redis = redisService.getConnection();
-  const key = `${CODEX_PKCE_PREFIX}${userId}:${state}`;
-  const verifier = await redis.get(key);
-  if (!verifier) throw badRequest("PKCE verifier expired — start login again");
-  await redis.del(key);
-
-  const tokRes = await fetch(CODEX_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: CODEX_CLIENT_ID,
-      code,
-      code_verifier: verifier,
-      redirect_uri: CODEX_REDIRECT_URI,
-    }),
-  });
-
-  if (!tokRes.ok) {
-    const text = await tokRes.text().catch(() => "");
-    throw new HttpError(502, `OpenAI token exchange failed: ${tokRes.status} ${text.slice(0, 200)}`);
-  }
-
-  const tokens = await tokRes.json() as { access_token?: string; refresh_token?: string; expires_in?: number; id_token?: string };
-  if (!tokens.access_token || !tokens.refresh_token) {
-    throw new HttpError(502, "OpenAI did not return tokens");
-  }
-
-  // Stash the bundle (access + refresh + expiry) as the encrypted payload so the
-  // refresh flow can later mint new access tokens. Existing refreshAccessToken
-  // logic (when added) will read this JSON, refresh, and rewrite it.
-  const bundle = JSON.stringify({
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_at: Date.now() + (tokens.expires_in ?? 600) * 1000,
-  });
-  const enc = encrypt(bundle, CONFIG.encryptionKey);
-
-  await userProviderCredentialsRepository.upsert(userId, "codex", {
-    encryptedKey: enc.ciphertext,
-    iv: enc.iv,
-    authTag: enc.authTag,
-    authType: "oauth_token",
-    baseUrl: "https://api.openai.com/v1",
-    // Don't overwrite an existing model preference if one exists.
-  });
-
-  ok(res);
-}));
-
 // ── Model catalog fetchers (live, keyed on user's stored credentials) ─
 
 interface CopilotModel { id: string; name: string }
@@ -472,32 +358,15 @@ router.get("/claude/models", asyncHandler(async (req: Request, res: Response) =>
   }
   try {
     const decrypted = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
-    const apiKey = extractClaudeBearer(decrypted);
-    const models = await fetchAnthropicModels(apiKey, cred.baseUrl ?? undefined, cred.authType ?? undefined);
+    // Claude creds are API-key-only (OAuth sign-in + pasted setup-tokens were
+    // removed — storing subscription OAuth tokens here is not permitted).
+    const apiKey = decrypted.trim();
+    const models = await fetchAnthropicModels(apiKey, cred.baseUrl ?? undefined);
     ok(res, models);
   } catch (err) {
     throw badRequest(err instanceof Error ? err.message : "Failed to fetch Claude models");
   }
 }));
-
-// ChatGPT OAuth tokens lack the Platform's `api.model.read` scope, so OpenAI's
-// own /v1/models endpoint 403s. The Codex CLI works around this by hitting the
-// ChatGPT backend's /models endpoint instead (https://chatgpt.com/backend-api/models),
-// which IS authorized for ChatGPT tokens and returns the same authoritative list the
-// CLI shows in its picker. Source: openai/codex codex-rs/backend-client/src/client.rs +
-// codex-rs/login/src/auth/agent_identity.rs (DEFAULT_CHATGPT_BACKEND_BASE_URL).
-const CODEX_CHATGPT_BACKEND = "https://chatgpt.com/backend-api";
-
-interface CodexBackendModel {
-  slug: string;
-  display_name?: string;
-  description?: string;
-  default_reasoning_level?: string;
-  supported_reasoning_levels?: Array<{ effort: string; description?: string }>;
-  visibility?: string;
-  supported_in_api?: boolean;
-  priority?: number;
-}
 
 router.get("/codex/models", asyncHandler(async (req: Request, res: Response) => {
   const userId = requireRequester(req);
@@ -506,50 +375,20 @@ router.get("/codex/models", asyncHandler(async (req: Request, res: Response) => 
     throw badRequest("OpenAI is not configured. Save an API key first.");
   }
 
-  const decrypted = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
-  const apiKey = extractCodexBearer(decrypted);
+  const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey).trim();
 
-  // OAuth-mode → ChatGPT backend Codex endpoint (the same path the CLI hits:
-  // /backend-api/codex/models, with originator=codex_cli_rs). Platform's /v1/models
-  // refuses ChatGPT tokens (missing api.model.read scope).
-  // API-key mode → standard Platform /v1/models.
-  const isOauth = cred.authType === "oauth_token";
-  const url = isOauth
-    ? `${CODEX_CHATGPT_BACKEND}/codex/models?client_version=0.0.0`
-    : `${(cred.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "")}/models`;
+  // API keys only (ChatGPT OAuth removed) → standard Platform /v1/models.
+  const url = `${(cred.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "")}/models`;
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
+    "User-Agent": "codex-cli",
   };
-  if (isOauth) {
-    // Match Codex CLI's default client — without `originator` the backend refuses.
-    headers["originator"] = "codex_cli_rs";
-    headers["User-Agent"] = "codex_cli_rs/0.0.0 (xyne-claw-auth)";
-    // ChatGPT-Account-Id scopes the response to the user's workspace.
-    const accountId = decodeJwtChatgptAccountId(apiKey);
-    if (accountId) headers["ChatGPT-Account-Id"] = accountId;
-  } else {
-    headers["User-Agent"] = "codex-cli";
-  }
 
   const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => "");
     throw new HttpError(502, `Models endpoint ${upstream.status}: ${text.slice(0, 200)}`);
-  }
-
-  if (isOauth) {
-    // ChatGPT backend wraps the list under `models` (ModelsResponse in codex-rs).
-    // Exclude hidden entries (visibility: "hide"/"none") and sort by picker priority.
-    const body = (await upstream.json()) as { models?: CodexBackendModel[] };
-    const data = body.models ?? [];
-    const models = data
-      .filter((m) => m.slug)
-      .filter((m) => m.visibility !== "hide" && m.visibility !== "none")
-      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-      .map((m) => ({ id: m.slug, name: m.display_name ?? m.slug }));
-    ok(res, models);
-    return;
   }
 
   // Platform /v1/models returns { data: [{ id }] } — filter to chat-capable families.
@@ -602,179 +441,5 @@ router.post("/provider-credentials/litellm/models", asyncHandler(async (req: Req
   ok(res, models);
 }));
 
-/** Pull the chatgpt_account_id from a Codex OAuth JWT (only used to set ChatGPT-Account-Id header). */
-function decodeJwtChatgptAccountId(jwt: string): string | undefined {
-  try {
-    const parts = jwt.split(".");
-    if (parts.length !== 3 || !parts[1]) return undefined;
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString()) as Record<string, unknown>;
-    const auth = payload["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
-    const accountId = auth?.["chatgpt_account_id"];
-    return typeof accountId === "string" ? accountId : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-// ── Claude browser sign-in (user-scoped) ──────────────────────────────────────
-// Mirrors the agent-scoped flow in agents.ts, but writes the user's own
-// credential. Anthropic's Claude Code flow is PKCE with the verifier doubling
-// as `state`, and its redirect lands on localhost:53692 — a port only the
-// Claude Code CLI listens on — so the browser cannot post back to us. The user
-// copies the code (or the whole redirect URL) and pastes it into /exchange.
-//
-// Captures a REFRESHABLE token, unlike a pasted `claude setup-token` value.
-const USER_CLAUDE_PKCE_TTL = 600;
-
-function generateUserClaudePkce(): { verifier: string; challenge: string } {
-  const verifier = crypto.randomBytes(32).toString("base64url");
-  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
-  return { verifier, challenge };
-}
-
-router.post("/provider-credentials/claude/oauth/start", oauthLimiter, async (req: Request, res: Response) => {
-  try {
-    if (!claudeOAuthConfigured()) {
-      res.status(503).json({
-        success: false,
-        error: "Claude sign-in is not configured on this environment.",
-      });
-      return;
-    }
-
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "x-user-id header required" });
-      return;
-    }
-
-    const { verifier, challenge } = generateUserClaudePkce();
-    const state = verifier;
-    await redisService
-      .getConnection()
-      .set(`${CLAUDE_OAUTH.pkcePrefix}${userId}:${state}`, verifier, "EX", USER_CLAUDE_PKCE_TTL);
-
-    const url = new URL(CLAUDE_OAUTH.authorizeUrl);
-    url.searchParams.set("code", "true");
-    url.searchParams.set("client_id", CLAUDE_OAUTH.clientId);
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("redirect_uri", CLAUDE_OAUTH.redirectUri);
-    url.searchParams.set("scope", CLAUDE_OAUTH.scopes);
-    url.searchParams.set("code_challenge", challenge);
-    url.searchParams.set("code_challenge_method", "S256");
-    url.searchParams.set("state", state);
-
-    res.json({
-      success: true,
-      data: { url: url.toString(), state, expiresIn: USER_CLAUDE_PKCE_TTL },
-    });
-  } catch (err) {
-    log.error("[settings] claude/oauth/start error:", err);
-    res.status(500).json({ success: false, error: "Failed to start Claude login" });
-  }
-});
-
-router.post("/provider-credentials/claude/oauth/exchange", oauthLimiter, async (req: Request, res: Response) => {
-  try {
-    if (!claudeOAuthConfigured()) {
-      res.status(503).json({
-        success: false,
-        error: "Claude sign-in is not configured on this environment.",
-      });
-      return;
-    }
-
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "x-user-id header required" });
-      return;
-    }
-
-    let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
-
-    // Tolerate a full redirect URL, "code#state", or a bare code — users paste
-    // whichever of the three the browser happened to show them.
-    let raw = (code ?? "").trim();
-    if (raw.startsWith("http") || raw.includes("code=")) {
-      try {
-        const u = raw.startsWith("http") ? new URL(raw) : new URL(`http://x?${raw}`);
-        code = u.searchParams.get("code") ?? code;
-        state = u.searchParams.get("state") ?? state;
-        raw = (code ?? "").trim();
-      } catch {
-        /* keep original */
-      }
-    }
-    if (raw.includes("#")) {
-      const [c, s] = raw.split("#", 2);
-      code = c;
-      if (!state && s) state = s;
-    }
-
-    if (!code || !state) {
-      res.status(400).json({ success: false, error: "code and state are required" });
-      return;
-    }
-
-    const redis = redisService.getConnection();
-    const key = `${CLAUDE_OAUTH.pkcePrefix}${userId}:${state}`;
-    const verifier = await redis.get(key);
-    if (!verifier) {
-      res.status(400).json({ success: false, error: "Sign-in expired — start again" });
-      return;
-    }
-    await redis.del(key);
-
-    const tokRes = await fetch(CLAUDE_OAUTH.tokenUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        grant_type: "authorization_code",
-        client_id: CLAUDE_OAUTH.clientId,
-        code,
-        state,
-        redirect_uri: CLAUDE_OAUTH.redirectUri,
-        code_verifier: verifier,
-      }),
-    });
-    if (!tokRes.ok) {
-      const text = await tokRes.text().catch(() => "");
-      res.status(502).json({
-        success: false,
-        error: `Anthropic token exchange failed: ${tokRes.status} ${text.slice(0, 200)}`,
-      });
-      return;
-    }
-
-    const tokens = (await tokRes.json()) as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_in?: number;
-    };
-    if (!tokens.access_token || !tokens.refresh_token) {
-      res.status(502).json({ success: false, error: "Anthropic did not return tokens" });
-      return;
-    }
-
-    const bundle = JSON.stringify({
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-    });
-    const enc = encrypt(bundle, CONFIG.encryptionKey);
-    await userProviderCredentialsRepository.upsert(userId, "claude", {
-      encryptedKey: enc.ciphertext,
-      iv: enc.iv,
-      authTag: enc.authTag,
-      authType: "oauth_token",
-      baseUrl: "https://api.anthropic.com",
-    });
-
-    res.json({ success: true, data: { connected: true } });
-  } catch (err) {
-    log.error("[settings] claude/oauth/exchange error:", err);
-    res.status(500).json({ success: false, error: "Claude login exchange failed" });
-  }
-});
 
 export const settingsRouter = router;
