@@ -4,6 +4,25 @@
 ### Features
 
 * integrated workflow-sdk ([#1516](https://github.com/juspay/xyne-spaces/issues/1516)) ([cb65fcc](https://github.com/juspay/xyne-spaces/commit/cb65fcc382f77529b64c73b70167222686cc5b9a))
+* one canvas upload item instead of four ([#1481](https://github.com/juspay/xyne-spaces/issues/1481)) ([4143c85](https://github.com/juspay/xyne-spaces/commit/4143c85ad610574d065506e2533af9c57c5e25db))
+* pnpm lock push ui fix ([#1520](https://github.com/juspay/xyne-spaces/issues/1520)) ([6e49852](https://github.com/juspay/xyne-spaces/commit/6e4985243dc3f861218539dfde92d2d2661110e9))
+* remove redundant default ([#1551](https://github.com/juspay/xyne-spaces/issues/1551)) ([b53c29c](https://github.com/juspay/xyne-spaces/commit/b53c29c02dab3ed1ceffb57ce5dccccd235ee98d))
+* ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([#1471](https://github.com/juspay/xyne-spaces/issues/1471)) ([#1537](https://github.com/juspay/xyne-spaces/issues/1537)) ([45b93d2](https://github.com/juspay/xyne-spaces/commit/45b93d211b99866a5610621ed7869a6fd47582ef)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
+
+
+### Bug Fixes
+
+* canvas blocks behave as objects, and reach Ask AI and comments ([#1521](https://github.com/juspay/xyne-spaces/issues/1521)) ([93eacaa](https://github.com/juspay/xyne-spaces/commit/93eacaa2e4de9098cafeecb48dd067336a314164))
+* fixing doc upload when filling stage update forms ([#1526](https://github.com/juspay/xyne-spaces/issues/1526)) ([bb027fe](https://github.com/juspay/xyne-spaces/commit/bb027fe1d26bf1a824508de645aa84e6c65163be))
+* link replacement permission fix ([#1525](https://github.com/juspay/xyne-spaces/issues/1525)) ([cb55ec6](https://github.com/juspay/xyne-spaces/commit/cb55ec671be9381e80570f38e128195d75db532c))
+* open the discussion with a newly created artifact ([#1483](https://github.com/juspay/xyne-spaces/issues/1483)) ([a70260d](https://github.com/juspay/xyne-spaces/commit/a70260d3459f6c9f434ee570f12551af74cf7aab))
+
+## [1.268.0-release-20260903.5](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.4...v1.268.0-release-20260903.5) (2026-09-04)
+
+
+### Features
+
+* integrated workflow-sdk ([#1516](https://github.com/juspay/xyne-spaces/issues/1516)) ([cb65fcc](https://github.com/juspay/xyne-spaces/commit/cb65fcc382f77529b64c73b70167222686cc5b9a))
 * pnpm lock push ui fix ([#1520](https://github.com/juspay/xyne-spaces/issues/1520)) ([6e49852](https://github.com/juspay/xyne-spaces/commit/6e4985243dc3f861218539dfde92d2d2661110e9))
 * ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([#1471](https://github.com/juspay/xyne-spaces/issues/1471)) ([#1537](https://github.com/juspay/xyne-spaces/issues/1537)) ([45b93d2](https://github.com/juspay/xyne-spaces/commit/45b93d211b99866a5610621ed7869a6fd47582ef)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
 
