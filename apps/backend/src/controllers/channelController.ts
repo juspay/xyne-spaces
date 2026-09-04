@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
-  buildAppDeskSourceName,
   buildSlackDeskSourceName,
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
@@ -15,7 +14,7 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { Prisma } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import {
   createForwardedMessageXml,
@@ -30,6 +29,9 @@ import {
   AppPermissionType,
   ActivityClassification,
   ActivityClassificationJobType, ChannelType, ChannelRole,
+  normalizeHistoryScope,
+  type AddGroupDmParticipantsRequest,
+  type AddGroupDmParticipantsResponse,
 } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
@@ -45,6 +47,7 @@ import { websocketService } from '../services/websocketService';
 import { createChannelCreatedActivity } from '../utils/channelActivityUtils';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
@@ -58,6 +61,8 @@ import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
+import { groupDmParticipantService } from '@/services/groupDmParticipantService';
+import { AppError } from '@/middleware/errorHandler';
 
 export class ChannelController {
   private channelRepository: ChannelRepository;
@@ -70,6 +75,7 @@ export class ChannelController {
   private channelUserStatusRepository: ChannelUserStatusRepository;
   private projectRepository: ProjectRepository;
   private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
+  private externalSourceRepository: ExternalSourceRepository;
   private channelEmailAliasService: ChannelEmailAliasService;
 
   constructor() {
@@ -83,6 +89,7 @@ export class ChannelController {
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
     this.projectRepository = new ProjectRepository();
     this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
+    this.externalSourceRepository = new ExternalSourceRepository();
     this.channelEmailAliasService = new ChannelEmailAliasService();
   }
 
@@ -116,24 +123,54 @@ export class ChannelController {
     channelId: string,
     newParticipants: Array<{ userId: string; userName: string }>,
     authData: { id: string; name: string },
-    operationType: 'participants_added' | 'participants_removed'
+    operationType:
+      | 'participants_added'
+      | 'participants_removed'
+      | 'conversation_moved_source'
+      | 'conversation_moved_target',
+    options: { movedEverything?: boolean; destinationChannelId?: string } = {}
   ): Promise<void> {
     try {
-      if (newParticipants.length === 0) {
+      const isMove =
+        operationType === 'conversation_moved_source' ||
+        operationType === 'conversation_moved_target';
+      if (newParticipants.length === 0 && operationType !== 'conversation_moved_target') {
         return;
       }
 
-      // Format system message
-      const allUserNames = newParticipants.map((p) => p.userName);
+      // Names are user-supplied, so everything interpolated into the markup is escaped.
+      const esc = (value: string): string =>
+        value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const userPill = (userId: string, userName: string): string =>
+        `<span data-mention data-mention-type="user" data-user-id="${esc(userId)}" data-username="${esc(userName)}">${esc(userName)}</span>`;
+      const channelPill = (id: string, label: string): string =>
+        `<span data-channel-mention data-channel-id="${esc(id)}" data-channel-name="${esc(label)}" data-is-private="true">${esc(label)}</span>`;
+
+      const pills = newParticipants.map(p => userPill(p.userId, p.userName));
       let formattedUsers = '';
-      if (allUserNames.length === 1) {
-        formattedUsers = allUserNames[0];
-      } else if (allUserNames.length > 1) {
-        formattedUsers = `${allUserNames.slice(0, -1).join(', ')} and ${allUserNames[allUserNames.length - 1]}`;
+      if (pills.length === 1) {
+        formattedUsers = pills[0];
+      } else if (pills.length > 1) {
+        formattedUsers = `${pills.slice(0, -1).join(', ')} and ${pills[pills.length - 1]}`;
       }
+      const actor = userPill(authData.id, authData.name);
 
       const addedOrRemovedText = operationType === 'participants_added' ? 'added' : 'removed';
-      const systemContent = `${formattedUsers} ${allUserNames.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${authData.name}`;
+      let systemContent: string;
+      if (operationType === 'conversation_moved_source') {
+        const howMany = options.movedEverything ? 'all' : 'some of';
+        const destination = options.destinationChannelId
+          ? channelPill(
+              options.destinationChannelId,
+              newParticipants.map(p => p.userName).join(', ')
+            )
+          : formattedUsers;
+        systemContent = `${actor} moved ${howMany} the messages from this conversation to ${destination}`;
+      } else if (operationType === 'conversation_moved_target') {
+        systemContent = `${actor} moved messages from a previous conversation into this one`;
+      } else {
+        systemContent = `${formattedUsers} ${pills.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
+      }
 
       // Create metadata
       const messageMetadata = {
@@ -155,7 +192,7 @@ export class ChannelController {
       // Create system message
       const messageData: CreateMessageInput = {
         conversationId: conversation.conversationId,
-        senderId: newParticipants[0].userId,
+        senderId: isMove ? authData.id : newParticipants[0].userId,
         content: systemContent,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
@@ -174,7 +211,7 @@ export class ChannelController {
       await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
 
       // Get sender info
-      const senderInfo = await this.getUserInfo(newParticipants[0].userId);
+      const senderInfo = await this.getUserInfo(createdMessage.senderId);
 
       // Broadcast new conversation via WebSocket
       const conversationMessage = {
@@ -1275,17 +1312,11 @@ export class ChannelController {
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
 
-          await db.externalSource.create({
-            data: {
-              name: buildAppDeskSourceName(channel.id),
-              sourceType: 'app-desk',
-              displayName: name!,
-              channelId: channel.id,
-              externalIdentifier: installedAppId,
-              credentials: encrypt(JSON.stringify({ installedAppId })),
-              isActive: true,
-              workspaceId: req.user!.workspaceId!,
-            },
+          await this.externalSourceRepository.connectAppToChannel({
+            channelId: channel.id,
+            installedAppId,
+            workspaceId: req.user!.workspaceId!,
+            displayName: name!,
           });
 
           await this.channelParticipantRepository.addParticipant(
@@ -2071,19 +2102,18 @@ export class ChannelController {
       }
 
       // Validate all participants exist and are active (skip for self-DM)
-      const participantUsers = [];
+      let participantUsers: User[] = [];
       if (!isSelfDm) {
-        for (const participantId of otherParticipantIds) {
-          const user = await this.userRepository.findById(participantId);
-          if (!user || user.status !== 'ACTIVE') {
-            res.status(404).json({
-              error: 'Participant not found or inactive',
-              userId: participantId
-            });
-            return;
-          }
-          participantUsers.push(user);
+        const { users, missingUserId } =
+          await this.userRepository.findActiveByIds(otherParticipantIds);
+        if (missingUserId) {
+          res.status(404).json({
+            error: 'Participant not found or inactive',
+            userId: missingUserId
+          });
+          return;
         }
+        participantUsers = users;
       }
 
       // Handle self-DM case
@@ -2461,258 +2491,119 @@ export class ChannelController {
     }
   };
 
-  // POST /api/users/me/dms/:channelId/add - Add participants to GROUP_DM
+  getDmHistoryPreview = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const currentUserId = req.user!.id;
+      const { channelId } = req.params;
+      const sinceParam = typeof req.query.since === 'string' ? Number(req.query.since) : NaN;
+      const limitParam = typeof req.query.limit === 'string' ? Number(req.query.limit) : NaN;
+
+      const since = Number.isFinite(sinceParam) ? new Date(sinceParam) : null;
+      const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 20;
+
+      const { conversations, total } = await groupDmParticipantService.getHistoryPreview({
+        channelId,
+        currentUserId,
+        since,
+        limit,
+      });
+
+      res.status(200).json({ conversations, total });
+    } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Error building DM history preview:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   addGroupDmParticipants = async (req: Request, res: Response): Promise<void> => {
     try {
       const currentUserId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
       const { channelId } = req.params;
-      const { userIds, includeHistory }: { userIds: string[], includeHistory: boolean } = req.body;
+      const body = req.body as AddGroupDmParticipantsRequest;
 
-      // Validate request body
-      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-        res.status(400).json({
-          error: 'userIds array is required and cannot be empty'
-        });
-        return;
-      }
+      const result = await groupDmParticipantService.addParticipants({
+        channelId,
+        currentUserId,
+        workspaceId,
+        userIds: body.userIds,
+        historyScope: normalizeHistoryScope(body),
+      });
 
-      if (typeof includeHistory !== 'boolean') {
-        res.status(400).json({
-          error: 'includeHistory must be a boolean'
-        });
-        return;
-      }
+      const movedHistory = result.conversationsMoved > 0;
 
-      // Get DM project ID for this workspace
-      const dmProjectId = await this.projectRepository.getDMProjectId(workspaceId);
-      if (!dmProjectId) {
-        res.status(500).json({ error: 'DM project not found for workspace' });
-        return;
-      }
-
-      // Remove duplicates and filter out current user
-      const uniqueUserIds = [...new Set(userIds)].filter(id => id !== currentUserId);
-
-      if (uniqueUserIds.length === 0) {
-        res.status(400).json({
-          error: 'No valid participants provided'
-        });
-        return;
-      }
-
-      // 1. Validate channel exists
-      const channel = await this.channelRepository.findById(channelId);
-      if (!channel) {
-        res.status(404).json({
-          error: 'Channel not found'
-        });
-        return;
-      }
-
-      // 2. Validate channel is GROUP_DM
-      if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
-        res.status(400).json({
-          error: 'This endpoint is only for GROUP_DM channels',
-          channelScopeType: channel.scopeType
-        });
-        return;
-      }
-
-      // 3. Validate requesting user is a participant
-      const currentParticipants = await this.channelParticipantRepository.getChannelParticipants(channelId);
-      const isParticipant = currentParticipants.some(p => p.userId === currentUserId);
-
-      if (!isParticipant) {
-        res.status(403).json({
-          error: 'You must be a participant to add others to this GROUP_DM'
-        });
-        return;
-      }
-
-      // 4. Validate all new userIds are valid, active users
-      const newUsers = [];
-      for (const userId of uniqueUserIds) {
-        const user = await this.userRepository.findById(userId);
-        if (!user || user.status !== 'ACTIVE') {
-          res.status(404).json({
-            error: 'One or more participants not found or inactive',
-            invalidUserId: userId
-          });
-          return;
-        }
-        newUsers.push(user);
-      }
-
-      // 5. Calculate combined participant list (current + new, sorted)
-      const currentUserIds = currentParticipants.map(p => p.userId);
-      const allParticipantIds = [...currentUserIds, ...uniqueUserIds].sort();
-
-      // 5.1 Validate total participant count doesn't exceed 10
-      if (allParticipantIds.length > 10) {
-        res.status(400).json({
-          error: 'Too many participants',
-          details: 'Maximum 10 participants allowed in a GROUP_DM',
-          currentParticipants: currentUserIds.length,
-          attemptingToAdd: uniqueUserIds.length,
-          totalWouldBe: allParticipantIds.length,
-          maxParticipants: 10
-        });
-        return;
-      }
-
-      // 6. Check for existing GROUP_DM with same participants
-      const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allParticipantIds);
-
-      // 7. Handle different scenarios
-      if (existingGroupDM) {
-        // Existing GROUP_DM found
-        let conversationsMigrated = 0;
-
-        if (includeHistory) {
-          // Migrate conversations to existing channel
-          const conversations = await this.conversationRepository.getChannelConversations(channelId);
-          const conversationIds = conversations.map(c => c.conversationId);
-
-          if (conversationIds.length > 0) {
-            conversationsMigrated = await this.conversationRepository.migrateConversationsToChannel(
-              conversationIds,
-              existingGroupDM.id
+      if (result.addedParticipants.length > 0 || movedHistory) {
+        const authData = await this.getUserInfo(currentUserId);
+        try {
+          // A brand-new group announces the people. Merging into an existing one announces the
+          // move instead, since its members were already there — and only if anything moved.
+          if (!result.isExisting) {
+            await this.sendAddAndRemoveParticipantsSystemMessage(
+              result.channelId,
+              result.addedParticipants,
+              authData,
+              'participants_added'
+            );
+          } else if (movedHistory) {
+            await this.sendAddAndRemoveParticipantsSystemMessage(
+              result.channelId,
+              [],
+              authData,
+              'conversation_moved_target'
             );
           }
-
-          res.status(200).json({
-            channelId: existingGroupDM.id,
-            isExisting: true,
-            participantsAdded: 0,
-            conversationsMigrated,
-            message: conversationsMigrated > 0
-              ? `${conversationsMigrated} conversation(s) migrated to existing group DM`
-              : 'Navigated to existing group DM'
-          });
-        } else {
-          // Just navigate to existing channel, no migration
-          res.status(200).json({
-            channelId: existingGroupDM.id,
-            isExisting: true,
-            participantsAdded: 0,
-            conversationsMigrated: 0,
-            message: 'Navigated to existing group DM'
-          });
-        }
-      } else {
-        // No existing GROUP_DM with these participants
-        if (includeHistory) {
-          // Add participants to current channel
-          let participantsAdded = 0;
-          const participantsAddedList: string[] = [];
-          for (const userId of uniqueUserIds) {
-            // Check if already a participant
-            const alreadyParticipant = currentParticipants.some(p => p.userId === userId);
-            if (!alreadyParticipant) {
-              await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
-              participantsAddedList.push(userId);
-              participantsAdded++;
-            }
-          }
-
-          // Get all participant user IDs (current + newly added)
-          const currentUserIds = currentParticipants.map(p => p.userId);
-          const allParticipantIds = [...currentUserIds, ...participantsAddedList].sort();
-
-          // Update channel name to reflect all participants (using user IDs)
-          const newChannelName = allParticipantIds.join(',');
-          
-          await this.channelRepository.update(channelId, {
-            name: newChannelName
-          });
-
-          // Send system message for added participants
-          if (participantsAddedList.length > 0) {
-            const validUsers = await Promise.all(
-              participantsAddedList.map(async (userId) => {
-                const user = await this.userRepository.findById(userId);
-                return user ? { userId: user.id, userName: user.displayName || user.name } : null;
-              })
+          if (movedHistory) {
+            await this.sendAddAndRemoveParticipantsSystemMessage(
+              result.sourceChannelId,
+              result.destinationMembers,
+              authData,
+              'conversation_moved_source',
+              {
+                movedEverything: result.movedEverything,
+                destinationChannelId: result.channelId,
+              }
             );
-            const filteredUsers = validUsers.filter((u): u is { userId: string; userName: string } => u !== null);
-
-            if (filteredUsers.length > 0) {
-              const authData = await this.getUserInfo(currentUserId);
-              await this.sendAddAndRemoveParticipantsSystemMessage(
-                channelId,
-                filteredUsers,
-                authData,
-                'participants_added'
-              );
-
-              const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId, workspaceId: req.user!.workspaceId, role: req.user!.role, orgRole: req.user!.orgRole, memberId: req.user!.memberId });
-              for (const user of filteredUsers) {
-                const participant = await this.channelParticipantRepository.findParticipant(channelId, user.userId);
-                if (participant) {
-                  handler.onInsert({
-                    entityId: participant.id,
-                    entityType: 'channel_participants',
-                    operation: 'insert'
-                  }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-                }
-              }
-            }
           }
+        } catch (error) {
+          // Message can carry user-supplied names; strip newlines so it can't forge log lines.
+          const message = (error instanceof Error ? error.message : String(error)).replace(/\n|\r/g, ' ');
+          logger.error('Failed to post add-people system messages', { error: message });
+        }
 
-          res.status(200).json({
-            channelId: channel.id,
-            isExisting: false,
-            participantsAdded,
-            conversationsMigrated: 0,
-            message: `${participantsAdded} participant(s) added to current group DM`
-          });
-        } else {
-          // Create new GROUP_DM with all participants
-          const channelData: CreateChannelInput = {
-            scopeType: ChannelScopeType.GROUP_DM,
-            name: allParticipantIds.join(','),
-            visibility: ChannelVisibility.PRIVATE,
-            createdBy: currentUserId,
-            projectId: dmProjectId,
-            workspaceId,
-          };
-
-          const newChannel = await this.channelRepository.create(channelData);
-
-          // Add all participants to the new channel
-          let participantsAdded = 0;
-          for (const participantId of allParticipantIds) {
-            const role = participantId === currentUserId ? 'ADMIN' : 'MEMBER';
-            await this.channelParticipantRepository.addParticipant(newChannel.id, participantId, role as ChannelRole);
-            participantsAdded++;
-          }
-
-          const newlyAddedUserIds = uniqueUserIds.filter(id => id !== currentUserId);
-          const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId, workspaceId: req.user!.workspaceId, role: req.user!.role, orgRole: req.user!.orgRole, memberId: req.user!.memberId });
-          if (newlyAddedUserIds.length > 0) {
-            for (const userId of newlyAddedUserIds) {
-              const participant = await this.channelParticipantRepository.findParticipant(newChannel.id, userId);
-              if (participant) {
-                handler.onInsert({
-                  entityId: participant.id,
-                  entityType: 'channel_participants',
-                  operation: 'insert'
-                }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert (new DM)', err));
-              }
-            }
-          }
-
-          res.status(201).json({
-            channelId: newChannel.id,
-            isExisting: false,
-            participantsAdded,
-            conversationsMigrated: 0,
-            message: 'New group DM created'
-          });
+        const handler = new ChannelParticipantsSideEffectHandler({
+          userID: currentUserId,
+          workspaceId: req.user!.workspaceId,
+          role: req.user!.role,
+          orgRole: req.user!.orgRole,
+          memberId: req.user!.memberId,
+        });
+        for (const participant of result.addedParticipants) {
+          handler.onInsert({
+            entityId: participant.participantId,
+            entityType: 'channel_participants',
+            operation: 'insert'
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
         }
       }
+
+      const response: AddGroupDmParticipantsResponse = {
+        channelId: result.channelId,
+        isExisting: result.isExisting,
+        participantsAdded: result.participantsAdded,
+        conversationsMoved: result.conversationsMoved,
+        message: result.message,
+      };
+
+      res.status(result.isExisting ? 200 : 201).json(response);
     } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
       logger.error('Error adding GROUP_DM participants:', error);
       res.status(500).json({ error: 'Internal server error' });
     }

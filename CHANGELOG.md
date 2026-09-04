@@ -1,3 +1,84 @@
+## [1.273.2](https://github.com/juspay/xyne-spaces/compare/v1.273.1...v1.273.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* virtualize SearchUserV2 user-list dropdown ([#1477](https://github.com/juspay/xyne-spaces/issues/1477)) ([cb0c275](https://github.com/juspay/xyne-spaces/commit/cb0c275a665b4eb6f7b29fc7a2e536ddadbb1992))
+
+
+### Performance Improvements
+
+* scalar channel-access fast-paths + stagesByProject flip (PR [#602](https://github.com/juspay/xyne-spaces/issues/602)) ([#602](https://github.com/juspay/xyne-spaces/issues/602)) ([0d58ee6](https://github.com/juspay/xyne-spaces/commit/0d58ee6991e5aace98a16e6eec0e008f1d522785))
+
+## [1.273.1](https://github.com/juspay/xyne-spaces/compare/v1.273.0...v1.273.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* show the selected Claw agent instead of falling back to the Xyne AI label ([#927](https://github.com/juspay/xyne-spaces/issues/927)) ([b5f651b](https://github.com/juspay/xyne-spaces/commit/b5f651b8675b793cad50abd2d413ba37b39d4c44))
+
+## [1.273.0](https://github.com/juspay/xyne-spaces/compare/v1.272.0...v1.273.0) (2026-09-03)
+
+
+### Features
+
+* add people to a DM with conversation history scoping ([#690](https://github.com/juspay/xyne-spaces/issues/690)) ([0a5621f](https://github.com/juspay/xyne-spaces/commit/0a5621f045f285abb1c683a53175b826f94c267a))
+
+## [1.272.0](https://github.com/juspay/xyne-spaces/compare/v1.271.0...v1.272.0) (2026-09-03)
+
+
+### Features
+
+* icons for apps and rollbacks ([#1507](https://github.com/juspay/xyne-spaces/issues/1507)) ([55ddda0](https://github.com/juspay/xyne-spaces/commit/55ddda04a1f15eb1e0c52e4c1d7d321eb8a59810))
+* public SDK API ([#1502](https://github.com/juspay/xyne-spaces/issues/1502)) ([42af8ae](https://github.com/juspay/xyne-spaces/commit/42af8ae20a512450a3ac771b90599c069fde37e0))
+
+
+### Bug Fixes
+
+* correct DmListItem attachment preview label ([#1495](https://github.com/juspay/xyne-spaces/issues/1495)) ([3cdae36](https://github.com/juspay/xyne-spaces/commit/3cdae36238687f03296b573d0f888cd96fbf8102))
+* UI Changes, has_subticket button and ticket navigation fix ([#1368](https://github.com/juspay/xyne-spaces/issues/1368)) ([1e52a43](https://github.com/juspay/xyne-spaces/commit/1e52a43a9562f449995c6e104c1cad2731ae329f))
+
+## [1.271.0](https://github.com/juspay/xyne-spaces/compare/v1.270.0...v1.271.0) (2026-09-03)
+
+
+### Features
+
+* allow Xyne Apps to push tickets into any desk channel ([#1248](https://github.com/juspay/xyne-spaces/issues/1248)) ([6e3ab1c](https://github.com/juspay/xyne-spaces/commit/6e3ab1c08ee7b0c02c48dee2ff2c39ac802a76a8))
+
+
+### Bug Fixes
+
+* close sidebar quick-nav hover card on navigation ([#1487](https://github.com/juspay/xyne-spaces/issues/1487)) ([56fda61](https://github.com/juspay/xyne-spaces/commit/56fda61939491c83e842351000045c32106dfe42))
+* deskchannel in cmdK result ([#1400](https://github.com/juspay/xyne-spaces/issues/1400)) ([c483f50](https://github.com/juspay/xyne-spaces/commit/c483f502bf340eeb65e3447bc03c190e09364cb5))
+* shortcut api call fix ([#1490](https://github.com/juspay/xyne-spaces/issues/1490)) ([23afe4a](https://github.com/juspay/xyne-spaces/commit/23afe4a15dd774d61e3fa5c0fecab86d134ad9ae))
+
+## [1.270.0](https://github.com/juspay/xyne-spaces/compare/v1.269.3...v1.270.0) (2026-09-03)
+
+
+### Features
+
+* ticket fixes ([#1299](https://github.com/juspay/xyne-spaces/issues/1299)) ([#1471](https://github.com/juspay/xyne-spaces/issues/1471)) ([#1479](https://github.com/juspay/xyne-spaces/issues/1479)) ([73d18f7](https://github.com/juspay/xyne-spaces/commit/73d18f78a63bced57cd4f280465ea391b0295327)), closes [#1297](https://github.com/juspay/xyne-spaces/issues/1297) [#1383](https://github.com/juspay/xyne-spaces/issues/1383) [#1295](https://github.com/juspay/xyne-spaces/issues/1295)
+
+
+### Bug Fixes
+
+* open links in external browser by default ([#1470](https://github.com/juspay/xyne-spaces/issues/1470)) ([5599371](https://github.com/juspay/xyne-spaces/commit/559937155f3e1a628cdae8e479a3a6377f377f8c))
+* wire onExpand into carousel SlideContent so video minimize/maximize works in thread viewer ([#1369](https://github.com/juspay/xyne-spaces/issues/1369)) ([4cd80cd](https://github.com/juspay/xyne-spaces/commit/4cd80cde0b1b0b8092facbb168b3878d9953f847))
+
+## [1.269.3](https://github.com/juspay/xyne-spaces/compare/v1.269.2...v1.269.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* message deep-links land on wrong message for older messages ([#1393](https://github.com/juspay/xyne-spaces/issues/1393)) ([e34ac5c](https://github.com/juspay/xyne-spaces/commit/e34ac5c1388b0a7057230429798fb1b7f04cb9f7))
+
+## [1.269.2](https://github.com/juspay/xyne-spaces/compare/v1.269.1...v1.269.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* Modifying the script to skip ci check for workspaceId in certain tables ([#1468](https://github.com/juspay/xyne-spaces/issues/1468)) ([9ec3c34](https://github.com/juspay/xyne-spaces/commit/9ec3c34e648c77ccb2469103985f2c86dddd47a8))
+
 ## [1.269.1](https://github.com/juspay/xyne-spaces/compare/v1.269.0...v1.269.1) (2026-09-03)
 
 

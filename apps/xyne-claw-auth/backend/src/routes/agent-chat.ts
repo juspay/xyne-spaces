@@ -264,6 +264,23 @@ interface PersistedAttachment {
   mimeType: string;
   originalFilename: string;
   size: number;
+  /**
+   * Client-facing filename. The client's completion handler reads `fileName`,
+   * so sending only `originalFilename` left it undefined on the live path.
+   */
+  fileName?: string;
+  /**
+   * The artifact manifest, ENRICHED with appId/versionId.
+   *
+   * This is the only channel that can carry them live. `attachArtifactToSessionApp`
+   * runs at persist time — after the tool returned — so the tool's own metadata
+   * has no appId, and without it a freshly generated app cannot address itself:
+   * the card shows Save (thinking it is unsaved), Expand falls back to the
+   * dialog, and App Creation mode never opens until a reload refetches
+   * /messages. Allowlisted to `reactArtifact` for the same reason that endpoint
+   * allowlists it — passing metadata wholesale would leak the GCS `url`.
+   */
+  metadata?: { reactArtifact?: unknown };
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -476,11 +493,17 @@ async function persistAssistantResult(args: {
             ...(attachmentMetadata ? { metadata: attachmentMetadata as import("@prisma/client").Prisma.InputJsonValue } : {}),
           },
         });
+        const reactArtifactMeta =
+          attachmentMetadata && typeof attachmentMetadata === "object"
+            ? attachmentMetadata["reactArtifact"]
+            : undefined;
         persistedAttachments.push({
           id: row.id,
           mimeType: row.mimeType,
           originalFilename: row.originalFilename,
+          fileName: row.originalFilename,
           size: row.size,
+          ...(reactArtifactMeta ? { metadata: { reactArtifact: reactArtifactMeta } } : {}),
         });
       } catch (e) {
         log.error("[agent-chat] failed to persist assistant attachment:", e);

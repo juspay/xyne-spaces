@@ -6,12 +6,13 @@ import Avatar from '../../../ui/Avatar/Avatar';
 import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
-import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
+import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
 import { Button } from '../../../ui/Button/Button';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
+import { useChannelApps } from '../../../../hooks/useChannelApps';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
@@ -49,6 +50,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     isSlack,
     isApp,
     isSocial,
+    isDeskChannel,
     ownerId,
     setOwner,
     sendAsAlias,
@@ -73,6 +75,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   );
   const signatureModalRef = useRef<HTMLDivElement>(null);
 
+  // Webhook delivery is a per-channel preference that now applies to any desk
+  // carrying app bindings, not just ChannelType.APP. Keep it visible on APP desks
+  // even before the first connect so the pre-existing control never disappears.
+  const { data: connectedApps } = useChannelApps(channelId, isDeskChannel);
+  const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
+
   useEffect(() => {
     if (signatureModalOpen) {
       signatureModalRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -94,8 +102,13 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     <>
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isApp && <AppDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {/*
+        Single owner of app connections on every desk type, APP included. Apps are the
+        one source type that went 1:N per channel, so unlike Slack/social they cannot be
+        managed by a single-connection card.
+      */}
+      {isDeskChannel && <ConnectedAppsSection channelId={channelId} canManage={canManage} />}
 
       <div className='flex flex-col gap-[16px]'>
         <div className='flex flex-col gap-[4px]'>
@@ -287,7 +300,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         </div>
       )}
 
-      {isApp && (
+      {showAppWebhookDelivery && (
         <div className='flex items-start justify-between gap-4'>
           <div className='flex flex-col gap-[4px]'>
             <div className='text-desk-label'>Send replies to app webhook</div>

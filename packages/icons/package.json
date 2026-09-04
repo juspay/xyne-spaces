@@ -17,6 +17,11 @@
       "types": "./dist/icons/*.d.ts",
       "import": "./dist/icons/*.js",
       "default": "./dist/icons/*.js"
+    },
+    "./meta": {
+      "types": "./dist/meta.d.ts",
+      "import": "./dist/meta.js",
+      "default": "./dist/meta.js"
     }
   },
   "files": [
