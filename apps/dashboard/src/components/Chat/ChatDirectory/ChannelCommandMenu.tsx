@@ -2,7 +2,7 @@ import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { X, SlidersHorizontal, SignalHigh } from 'lucide-react';
+import { X, SlidersHorizontal, SignalHigh, Check } from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -3693,88 +3693,147 @@ const ChannelCommandMenu = ({
               </div>
             </Popover.Root>
           )}
-          {!inline && !hideTabs && (
-            <Popover.Root open={searchFiltersOpen} onOpenChange={setSearchFiltersOpen}>
-              <div className='relative group/filtertip'>
-                <Popover.Trigger asChild>
-                  <button
-                    type='button'
-                    className={cn(
-                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-0',
-                      searchFiltersOpen
-                        ? 'bg-primary/10 border-primary/40 text-primary'
-                        : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
+          {!inline &&
+            !hideTabs &&
+            (() => {
+              // Toggles inside this filter panel. Each row shows its on/off state in the
+              // hover card; only the "on" toggles drive the badge count + red button state.
+              const filterRows = [
+                {
+                  active: onlyMyChannels,
+                  label: onlyMyChannels ? 'Only my channels' : 'All channels searched',
+                },
+                {
+                  active: includeBotMessages,
+                  label: includeBotMessages ? 'Bot messages included' : 'Bot messages hidden',
+                },
+              ];
+              const activeFilterCount = filterRows.filter(r => r.active).length;
+              return (
+                <Popover.Root open={searchFiltersOpen} onOpenChange={setSearchFiltersOpen}>
+                  <div className='relative group/filtertip'>
+                    <Popover.Trigger asChild>
+                      <button
+                        type='button'
+                        className={cn(
+                          'relative flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-0',
+                          searchFiltersOpen || activeFilterCount > 0
+                            ? 'bg-primary/10 border-primary/40 text-primary'
+                            : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
+                        )}
+                        aria-label='Search filters'
+                      >
+                        <SlidersHorizontal size={13} />
+                        {activeFilterCount > 0 && (
+                          <span className='absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-1 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-semibold leading-none'>
+                            {activeFilterCount}
+                          </span>
+                        )}
+                      </button>
+                    </Popover.Trigger>
+                    {searchFiltersOpen ? null : activeFilterCount > 0 ? (
+                      <div className='pointer-events-none absolute top-full right-0 mt-2 w-max rounded-xl bg-foreground text-background shadow-xl opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001] text-left'>
+                        {/* caret pointing up to the button */}
+                        <div className='absolute -top-1.5 right-3.5 h-3 w-3 rotate-45 rounded-[2px] bg-foreground' />
+                        <div className='relative px-4 py-3'>
+                          <div className='mb-2 text-[11px] font-bold uppercase tracking-wider text-background/40'>
+                            Filters
+                          </div>
+                          <div className='flex flex-col gap-2'>
+                            {filterRows.map(row => (
+                              <div
+                                key={row.label}
+                                className='flex items-center gap-2.5 text-sm whitespace-nowrap'
+                              >
+                                {row.active ? (
+                                  <Check
+                                    size={15}
+                                    strokeWidth={3}
+                                    className='flex-shrink-0 text-primary'
+                                  />
+                                ) : (
+                                  <X
+                                    size={15}
+                                    strokeWidth={3}
+                                    className='flex-shrink-0 text-background/40'
+                                  />
+                                )}
+                                <span className={row.active ? 'font-medium' : 'text-background/60'}>
+                                  {row.label}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className='pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001]'>
+                        Search filters
+                      </div>
                     )}
-                    aria-label='Search filters'
-                  >
-                    <SlidersHorizontal size={13} />
-                  </button>
-                </Popover.Trigger>
-                <div className='pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001]'>
-                  Search filters
-                </div>
-                <Popover.Portal>
-                  <Popover.Content
-                    side='bottom'
-                    align='end'
-                    sideOffset={6}
-                    className='z-[10000] bg-popover border border-border rounded-lg shadow-md min-w-[180px] p-1 text-popover-foreground'
-                    onOpenAutoFocus={e => e.preventDefault()}
-                  >
-                    {/* State-only — deliberately not mirrored to the URL: a per-click searchParams
+                    <Popover.Portal>
+                      <Popover.Content
+                        side='bottom'
+                        align='end'
+                        sideOffset={6}
+                        className='z-[10000] bg-popover border border-border rounded-lg shadow-md min-w-[180px] p-1 text-popover-foreground'
+                        onOpenAutoFocus={e => e.preventDefault()}
+                      >
+                        {/* State-only — deliberately not mirrored to the URL: a per-click searchParams
                         update would push a browser history entry each toggle. The URL is stamped
                         once at the full-screen hand-off (buildSearchParams) instead. */}
-                    <button
-                      type='button'
-                      onMouseDown={e => e.preventDefault()}
-                      onClick={() => setOnlyMyChannels(v => !v)}
-                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
-                      data-track-category='SEARCH'
-                      data-track-name='TOGGLE_ONLY_MY_CHANNELS'
-                    >
-                      <span>Only my channels</span>
-                      <span
-                        className={cn(
-                          'w-8 h-4 rounded-full transition-colors flex-shrink-0',
-                          onlyMyChannels ? 'bg-primary' : 'bg-muted-foreground/30',
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            'block w-3 h-3 rounded-full bg-white mt-0.5 transition-transform',
-                            onlyMyChannels ? 'translate-x-4' : 'translate-x-0.5',
-                          )}
-                        />
-                      </span>
-                    </button>
-                    <button
-                      type='button'
-                      onMouseDown={e => e.preventDefault()}
-                      onClick={() => setIncludeBotMessages(v => !v)}
-                      className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
-                      data-track-category='SEARCH'
-                      data-track-name='TOGGLE_BOT_MESSAGES'
-                    >
-                      <span>Include bot messages</span>
-                      <span
-                        className={cn(
-                          'w-8 h-4 rounded-full transition-colors flex-shrink-0',
-                          includeBotMessages ? 'bg-primary' : 'bg-muted-foreground/30',
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            'block w-3 h-3 rounded-full bg-white mt-0.5 transition-transform',
-                            includeBotMessages ? 'translate-x-4' : 'translate-x-0.5',
-                          )}
-                        />
-                      </span>
-                    </button>
-                  </Popover.Content>
-                </Popover.Portal>
-              </div>
-            </Popover.Root>
-          )}
+                        <button
+                          type='button'
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => setOnlyMyChannels(v => !v)}
+                          className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
+                          data-track-category='SEARCH'
+                          data-track-name='TOGGLE_ONLY_MY_CHANNELS'
+                        >
+                          <span>Only my channels</span>
+                          <span
+                            className={cn(
+                              'w-8 h-4 rounded-full transition-colors flex-shrink-0',
+                              onlyMyChannels ? 'bg-primary' : 'bg-muted-foreground/30',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'block w-3 h-3 rounded-full bg-white mt-0.5 transition-transform',
+                                onlyMyChannels ? 'translate-x-4' : 'translate-x-0.5',
+                              )}
+                            />
+                          </span>
+                        </button>
+                        <button
+                          type='button'
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => setIncludeBotMessages(v => !v)}
+                          className='flex w-full items-center justify-between gap-2 px-3 py-1.5 text-sm rounded hover:bg-accent hover:text-accent-foreground text-popover-foreground text-left focus-visible:outline-none focus-visible:bg-accent focus-visible:text-accent-foreground'
+                          data-track-category='SEARCH'
+                          data-track-name='TOGGLE_BOT_MESSAGES'
+                        >
+                          <span>Include bot messages</span>
+                          <span
+                            className={cn(
+                              'w-8 h-4 rounded-full transition-colors flex-shrink-0',
+                              includeBotMessages ? 'bg-primary' : 'bg-muted-foreground/30',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'block w-3 h-3 rounded-full bg-white mt-0.5 transition-transform',
+                                includeBotMessages ? 'translate-x-4' : 'translate-x-0.5',
+                              )}
+                            />
+                          </span>
+                        </button>
+                      </Popover.Content>
+                    </Popover.Portal>
+                  </div>
+                </Popover.Root>
+              );
+            })()}
           <kbd className='px-1.5 py-0.5 text-xs font-semibold text-muted-foreground border border-border rounded flex-shrink-0 hidden sm:block'>
             Esc
           </kbd>
