@@ -12,6 +12,13 @@ import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
 import { ActivityItem } from '../ActivityItem';
 import { NofocusRefProvider } from '../ActivityItemCard';
+import { CodeBlockRenderContext } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+
+const ACTIVITY_CODE_BLOCK_OPTIONS = {
+  collapseThreshold: 10,
+  previewLines: 10,
+  showExpandToggle: true,
+};
 import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
@@ -852,13 +859,17 @@ const ActivityListView = (): ReactElement => {
                 // px wraps each row (not the scroller) and pb creates the 8px
                 // row gap — padding is used instead of margin so Virtuoso's
                 // item measurement includes it.
+                const row =
+                  item.type === 'single' ? (
+                    <ActivityItem activity={item.activity} isExpanded={isExpanded} />
+                  ) : (
+                    <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
+                  );
                 return (
                   <div className='px-3 pb-3'>
-                    {item.type === 'single' ? (
-                      <ActivityItem activity={item.activity} isExpanded={isExpanded} />
-                    ) : (
-                      <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
-                    )}
+                    <CodeBlockRenderContext.Provider value={ACTIVITY_CODE_BLOCK_OPTIONS}>
+                      {row}
+                    </CodeBlockRenderContext.Provider>
                   </div>
                 );
               }}

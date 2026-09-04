@@ -2,7 +2,7 @@ import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
-import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -84,9 +84,9 @@ export const ReactionAddedActivityV2 = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />
       ) : (
-        (getFlowJsonPreviewText(reactionPreview) ?? (
-          <RenderMessageWithHTML message={reactionPreview} showEdited={message.edited} />
-        ))
+        <div className='text-foreground text-sm line-clamp-2 whitespace-normal break-words'>
+          {getFlowJsonPreviewText(reactionPreview) ?? htmlToPlainText(reactionPreview)}
+        </div>
       )}
     </ActivityItemCard>
   );
