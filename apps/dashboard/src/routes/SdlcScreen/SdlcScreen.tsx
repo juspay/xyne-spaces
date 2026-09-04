@@ -142,6 +142,7 @@ import {
   repoKnowledgeControl,
   repoKnowledgeState,
   type RepoKnowledgeControl,
+  type RepoSetupExecution,
 } from './repoKnowledgePolicy';
 
 type Section = 'overview' | 'wiki' | 'baseline' | 'tracks' | 'tickets' | 'artifacts';
@@ -248,7 +249,23 @@ export default function SdlcScreen(): ReactElement {
       selectedRepo && channel ? { ...selectedRepo, channel, channelId: channel.id } : undefined,
     [selectedRepo, channel],
   );
-  const repoId = repo?.id;
+  const repoId = repo?.id;]
+  const setupExecutionQuery = useQuery({
+    queryKey: ['sdlc-setup-execution', repoId, repo?.sdlcSetupExecutionId ?? null],
+    queryFn: async () => {
+      const response = await apiInstance.get<{
+        success: boolean;
+        execution: RepoSetupExecution | null;
+      }>(`/sdlc/repositories/${encodeURIComponent(repoId!)}/setup-execution`);
+      return response.data.execution;
+    },
+    enabled: Boolean(repoId),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchInterval: query =>
+      isRepoKnowledgeRunning(repoKnowledgeState(query.state.data).phase) ? 2_000 : false,
+  });
+  const setupExecution = setupExecutionQuery.data ?? null;
   const zero = useZero();
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
@@ -825,12 +842,12 @@ export default function SdlcScreen(): ReactElement {
         });
       })
     : [];
-  const state = repoKnowledgeState(repo ? repo.setupExecution : null);
+  const state = repoKnowledgeState(repo ? setupExecution : null);
   const setupRunning = isRepoKnowledgeRunning(state.phase);
 
   useEffect(() => {
     if (!repoId || externalDebuggerTarget?.repoId !== repoId) return;
-    if (repo && externalDebuggerTarget.executionId === repo.setupExecution?.id) {
+    if (repo && externalDebuggerTarget.executionId === setupExecution?.id) {
       updateExternalDebugger(repoId, {
         conversationId: state.conversationId || externalDebuggerTarget.conversationId,
         sessionId: state.sessionId || externalDebuggerTarget.sessionId,
@@ -857,6 +874,7 @@ export default function SdlcScreen(): ReactElement {
     externalDebuggerTarget,
     repo,
     repoId,
+    setupExecution?.id,
     setupRunning,
     state.conversationId,
     state.sessionId,
@@ -955,7 +973,10 @@ export default function SdlcScreen(): ReactElement {
     const action = repoKnowledgeAction(control);
     return call(
       action.key,
-      () => apiInstance.post(`/sdlc/repositories/${repoId!}/${action.path}`),
+      async () => {
+        await apiInstance.post(`/sdlc/repositories/${repoId!}/${action.path}`);
+        await setupExecutionQuery.refetch();
+      },
       action.success,
     );
   };
@@ -1211,7 +1232,7 @@ export default function SdlcScreen(): ReactElement {
     const Icon = controlPresentation.icon;
     const debugAvailable = canDebugRepoKnowledge({
       isAdmin,
-      executionId: repo.setupExecution?.id,
+      executionId: setupExecution?.id,
       conversationId: state.conversationId,
     });
     const requiresReadAccess =
@@ -1232,7 +1253,7 @@ export default function SdlcScreen(): ReactElement {
               openSdlcDebugger({
                 source: 'sdlc',
                 repoId: repo.id,
-                executionId: repo.setupExecution!.id,
+                executionId: setupExecution!.id,
                 conversationId: state.conversationId!,
                 sessionId: state.sessionId || null,
                 running: setupRunning,

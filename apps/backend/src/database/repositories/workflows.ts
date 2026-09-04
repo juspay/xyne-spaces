@@ -39,7 +39,7 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   return `
     WITH claimed AS (
       SELECT "id"
-      FROM "workflow_executions"
+      FROM "workflow"."workflow_executions"
       WHERE "status" = 'PENDING'
       ${tagFilter}
       ${typeFilter}
@@ -48,7 +48,7 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
-    UPDATE "workflow_executions"
+    UPDATE "workflow"."workflow_executions"
     SET "status" = 'RUNNING', "updatedAt" = NOW()
     FROM claimed
     WHERE "workflow_executions"."id" = claimed."id"
