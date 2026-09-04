@@ -99,34 +99,43 @@ interface BoardStageRow {
   defaultTicketStatusV2: TicketStatusV2;
 }
 
-const normalizeStageName = (name: string): string => name.trim().toLowerCase();
-
-export const getSharedBoardStages = (
-  boardIds: string[],
+export const groupStagesByBoard = (
   stageRows: ReadonlyArray<BoardStageRow>,
-): Stage[] | null => {
-  const stagesByBoard = new Map<string, BoardStageRow[]>();
+): Map<string, Stage[]> => {
+  const stagesByBoard = new Map<string, Stage[]>();
   stageRows.forEach(row => {
     const boardStages = stagesByBoard.get(row.boardId) ?? [];
-    if (!boardStages.some(s => normalizeStageName(s.name) === normalizeStageName(row.name))) {
-      boardStages.push(row);
+    if (!boardStages.some(s => s.name === row.name)) {
+      boardStages.push({
+        id: row.id,
+        name: row.name,
+        color: getStageColor(row.name),
+        sequenceNumber: row.sequenceNumber,
+        defaultTicketStatusV2: row.defaultTicketStatusV2,
+      });
       stagesByBoard.set(row.boardId, boardStages);
     }
   });
-  const signature = (rows: BoardStageRow[]): string =>
-    rows.map(row => `${normalizeStageName(row.name)}::${row.defaultTicketStatusV2}`).join('\n');
+  return stagesByBoard;
+};
+
+export const getSharedBoardStages = (
+  boardIds: string[],
+  stagesByBoard: Map<string, Stage[]>,
+): Stage[] | null => {
+  const signature = (boardStages: Stage[]): string =>
+    boardStages
+      .map(stage => stage.name)
+      .sort()
+      .join('\n');
   const perBoard = boardIds.map(id => stagesByBoard.get(id));
   const [first] = perBoard;
   if (!first) return null;
   const firstSignature = signature(first);
-  if (perBoard.some(rows => !rows || signature(rows) !== firstSignature)) return null;
-  return first.map(stage => ({
-    id: stage.id,
-    name: stage.name,
-    color: getStageColor(stage.name),
-    sequenceNumber: stage.sequenceNumber,
-    defaultTicketStatusV2: stage.defaultTicketStatusV2,
-  }));
+  if (perBoard.some(boardStages => !boardStages || signature(boardStages) !== firstSignature)) {
+    return null;
+  }
+  return first;
 };
 
 /**

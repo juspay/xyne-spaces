@@ -151,6 +151,7 @@ import {
   getStageColor,
   getStatusColumns,
   getSharedBoardStages,
+  groupStagesByBoard,
   groupTicketsByStage,
   groupTicketsByStatus,
   applyTicketFilters,
@@ -1261,12 +1262,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   const sharedBoardStagesReady =
     !shouldShowBoardWiseView || multiBoardStagesResult.type === 'complete';
-  const sharedBoardStages = useMemo(
+  const multiBoardStagesByBoardId = useMemo(
     () =>
       shouldShowBoardWiseView && sharedBoardStagesReady
-        ? getSharedBoardStages(filters.boards ?? [], multiBoardStages ?? [])
+        ? groupStagesByBoard(multiBoardStages ?? [])
         : null,
-    [shouldShowBoardWiseView, sharedBoardStagesReady, filters.boards, multiBoardStages],
+    [shouldShowBoardWiseView, sharedBoardStagesReady, multiBoardStages],
+  );
+  const sharedBoardStages = useMemo(
+    () =>
+      multiBoardStagesByBoardId
+        ? getSharedBoardStages(filters.boards ?? [], multiBoardStagesByBoardId)
+        : null,
+    [multiBoardStagesByBoardId, filters.boards],
   );
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
@@ -3292,6 +3300,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setLocalTickets: setDragLocalTickets,
     zero,
     stages,
+    ...(sharedBoardStages && multiBoardStagesByBoardId
+      ? { stagesByBoardId: multiBoardStagesByBoardId }
+      : {}),
     mode: dragDropMode,
     canReorder,
     onStageFormRequired: handleStageFormRequired,
