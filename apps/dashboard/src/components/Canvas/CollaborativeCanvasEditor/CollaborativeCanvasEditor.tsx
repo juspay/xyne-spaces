@@ -84,6 +84,8 @@ import { AnimatePresence } from 'framer-motion';
 
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { CanvasObjectToolbar } from '../CanvasObjectToolbar';
+import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
 import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
@@ -561,6 +563,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       openCommentsForCurrentBlock,
       focusCommentBlock,
       clearActiveCommentAnchor,
+      finishInlineCommentDraft,
       closeInlineCommentThread,
       applyCommentAnchorStyle,
       removeCommentAnchorStyle,
@@ -774,6 +777,7 @@ export const CollaborativeCanvasEditor = forwardRef<
               overflowWrap: 'break-word',
             }}
           >
+            <CanvasWidthHandles surfaceRef={containerRef} />
             <div
               className='blocknote-editor-wrapper w-full max-w-full'
               style={{
@@ -801,6 +805,12 @@ export const CollaborativeCanvasEditor = forwardRef<
                     onChange={handleCollaborativeChange}
                   >
                     <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                    <CanvasObjectToolbar
+                      onAddComment={openCommentsForCurrentBlock}
+                      canComment={editable && !isReadOnly}
+                      {...(canvasId && { canvasId })}
+                      {...(title && { canvasTitle: title })}
+                    />
                     <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
                     <CanvasPastedLinkToolbar />
                     <FilePanelController filePanel={CanvasFilePanel} />
@@ -846,7 +856,7 @@ export const CollaborativeCanvasEditor = forwardRef<
               editable={editable && !isReadOnly}
               onClose={closeInlineCommentThread}
               onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
+              onCreateThreadCreated={finishInlineCommentDraft}
               onCreateThreadFailed={removeCommentAnchorStyle}
             />
           )}
