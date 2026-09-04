@@ -11,7 +11,13 @@ import { TicketStatusV2 } from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
-import { FormFieldType, type FieldEnumOption, type FormFields } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  type FieldEnumOption,
+  type FormFields,
+} from '@xyne/shared';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 import { matchesDynamicFieldValue } from '../../utils/board/dynamicFieldFilters';
 
@@ -97,6 +103,12 @@ interface BoardStageRow {
   name: string;
   sequenceNumber: number;
   defaultTicketStatusV2: TicketStatusV2;
+  approvers?: Stage['approvers'];
+  formContextMappings?: ReadonlyArray<{
+    contextType: FormContextType;
+    entityType: FormEntityType;
+    formId: string;
+  }>;
 }
 
 export const groupStagesByBoard = (
@@ -112,6 +124,11 @@ export const groupStagesByBoard = (
         color: getStageColor(row.name),
         sequenceNumber: row.sequenceNumber,
         defaultTicketStatusV2: row.defaultTicketStatusV2,
+        formId:
+          row.formContextMappings?.find(
+            m => m.contextType === FormContextType.STAGE && m.entityType === FormEntityType.TICKET,
+          )?.formId ?? null,
+        ...(row.approvers && { approvers: row.approvers }),
       });
       stagesByBoard.set(row.boardId, boardStages);
     }
@@ -128,7 +145,7 @@ export const getSharedBoardStages = (
       .map(stage => stage.name)
       .sort()
       .join('\n');
-  const perBoard = boardIds.map(id => stagesByBoard.get(id));
+  const perBoard = [...boardIds].sort().map(id => stagesByBoard.get(id));
   const [first] = perBoard;
   if (!first) return null;
   const firstSignature = signature(first);

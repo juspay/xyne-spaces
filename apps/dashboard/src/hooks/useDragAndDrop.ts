@@ -275,9 +275,11 @@ export const useDragAndDrop = ({
             // Used for linear boards without explicitly defined transitions.
             if (!isNonLinearBoard && (!transitions || transitions.length === 0)) {
               const boardHasStagesWithApproval =
-                stages.some(s => s.approvers && s.approvers.length > 0) ?? false;
+                (boardStages ?? stages).some(s => s.approvers && s.approvers.length > 0) ?? false;
               // Check if board has any stage with forms
-              const boardHasStagesWithForms = stageFormMap.size > 0;
+              const boardHasStagesWithForms = boardStages
+                ? boardStages.some(s => !!s.formId)
+                : stageFormMap.size > 0;
               // Enforce sequential movement if board has EITHER approvers OR forms
               const shouldEnforceSequentialMovement =
                 boardHasStagesWithApproval || boardHasStagesWithForms;

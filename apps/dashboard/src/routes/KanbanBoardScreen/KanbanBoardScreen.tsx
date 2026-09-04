@@ -1257,11 +1257,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [viewMode, boardId, filters.boards]);
 
   const [multiBoardStages, multiBoardStagesResult] = useCachedQuery(
-    queries.getStagesByBoardIds({ boardIds: filters.boards ?? [] }),
+    queries.getStagesWithGatesByBoardIds({ boardIds: filters.boards ?? [] }),
     { enabled: shouldShowBoardWiseView },
   );
   const sharedBoardStagesReady =
-    !shouldShowBoardWiseView || multiBoardStagesResult.type === 'complete';
+    !shouldShowBoardWiseView || multiBoardStagesResult.type !== 'unknown';
   const multiBoardStagesByBoardId = useMemo(
     () =>
       shouldShowBoardWiseView && sharedBoardStagesReady
@@ -1966,13 +1966,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
   const stageFormMap = useMemo(() => {
     const map = new Map<string, string>();
-    if (stages) {
-      stages.forEach(stage => {
-        if (stage.formId) {
-          map.set(stage.id, stage.formId);
-        }
-      });
-    }
+    const gatedStages =
+      sharedBoardStages && multiBoardStagesByBoardId
+        ? Array.from(multiBoardStagesByBoardId.values()).flat()
+        : stages;
+    gatedStages.forEach(stage => {
+      if (stage.formId) {
+        map.set(stage.id, stage.formId);
+      }
+    });
     if (isNonLinearBoard && boardStageTransitions) {
       boardStageTransitions.forEach(t => {
         if (t.formId) {
@@ -1981,7 +1983,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       });
     }
     return map;
-  }, [stages, isNonLinearBoard, boardStageTransitions]);
+  }, [
+    stages,
+    sharedBoardStages,
+    multiBoardStagesByBoardId,
+    isNonLinearBoard,
+    boardStageTransitions,
+  ]);
 
   const tagsByTicketId = useMemo(() => {
     const map = new Map<
@@ -3272,13 +3280,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Use drag and drop hook
   const dragDropMode = useMemo(() => {
     if (sharedBoardStages) return 'stage';
-    // For channel tickets: use view type to determine mode
     if (channelId && viewMode === 'project') {
-      return channelViewType === 'stage' ? 'stage' : 'status';
+      return shouldUseStatusColumns ? 'status' : 'stage';
     }
     // For other views
     return viewMode === 'board' || filteredSingleBoardId ? 'stage' : 'status';
-  }, [sharedBoardStages, channelId, viewMode, channelViewType, filteredSingleBoardId]);
+  }, [sharedBoardStages, channelId, viewMode, shouldUseStatusColumns, filteredSingleBoardId]);
 
   const canReorder = !!filteredSingleBoardId;
   const setDragLocalTickets = useCallback<React.Dispatch<React.SetStateAction<Ticket[]>>>(value => {
@@ -3502,7 +3509,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     (lastKnownKanbanGroupsRef.current?.groups.length ?? 0) > 0;
 
   const isTicketsSyncing = isKanbanLayout
-    ? !hasSearchTerm && kanbanCounts.isLoading
+    ? (!hasSearchTerm && kanbanCounts.isLoading) || !sharedBoardStagesReady
     : ticketsDetails.type !== 'complete';
 
   const kanbanTicketsForGrouping = useMemo(() => {
@@ -5300,8 +5307,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                   stageName?: string | undefined;
                                 }) =>
                                   openCreateForColumn({
-                                    status: col.status,
-                                    stageName: col.stageName,
+                                    ...(sharedBoardStages
+                                      ? {}
+                                      : { status: col.status, stageName: col.stageName }),
                                     assignee:
                                       group.entityType === 'user' && group.entityId
                                         ? { type: 'assigneeTo', value: group.entityId }
