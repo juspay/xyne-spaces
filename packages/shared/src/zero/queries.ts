@@ -248,7 +248,7 @@ const applyKanbanTicketPageConditions = (
 
   query = query.where('isArchived', false);
 
-  if (channelId) {
+  if (channelId && !boardId) {
     query = query.where('channelId', channelId);
   }
 

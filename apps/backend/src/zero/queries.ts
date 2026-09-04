@@ -76,6 +76,7 @@ const kanbanTicketsPageArgsSchema = z.object({
   viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
   projectId: z.string().optional(),
   boardId: z.string().optional(),
+  channelId: z.string().optional(),
   userId: z.string().optional(),
   groupId: z.string().optional(),
   ...flowStepVisibilitySchemaShape,
@@ -227,6 +228,7 @@ const applyKanbanTicketPageConditions = (
 ) => {
   const {
     viewMode,
+    channelId,
     projectId,
     boardId,
     userId,
@@ -249,6 +251,10 @@ const applyKanbanTicketPageConditions = (
   }
 
   query = query.where('isArchived', false);
+
+  if (channelId && !boardId) {
+    query = query.where('channelId', channelId);
+  }
 
   if (filters?.stages?.length) {
     query = query.where('stageName', 'IN', filters.stages);
@@ -883,6 +889,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
       projectId: z.string().optional(),
       boardId: z.string().optional(),
+      channelId: z.string().optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
       ...flowStepVisibilitySchemaShape,
@@ -894,6 +901,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         viewMode,
         projectId,
         boardId,
+        channelId,
         userId,
         groupId,
         excludeFlowSteps,
@@ -901,6 +909,11 @@ export const queries: AnyQueryRegistry = defineQueries({
       },
     }) => {
       let query = zql.tickets;
+
+      // Apply channel scoping only when no explicit board is selected (board wins).
+      if (channelId && !boardId) {
+        query = query.where('channelId', channelId);
+      }
 
       // Apply explicit board filter if provided (works across all view modes)
       // boardId implicitly scopes to project, so no need for separate projectId filter
@@ -989,6 +1002,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       projectId: z.string().optional(),
       boardId: z.string().optional(),
       boardIds: z.array(z.string()).optional(),
+      channelId: z.string().optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
       ...flowStepVisibilitySchemaShape,
@@ -1001,6 +1015,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         projectId,
         boardId,
         boardIds,
+        channelId,
         userId,
         groupId,
         excludeFlowSteps,
@@ -1008,6 +1023,11 @@ export const queries: AnyQueryRegistry = defineQueries({
       },
     }) => {
       let query = zql.tickets;
+
+      // Apply channel scoping only when no explicit board is selected (board wins).
+      if (channelId && !boardId) {
+        query = query.where('channelId', channelId);
+      }
 
       // Apply explicit board filter if provided (works across all view modes)
       // boardId implicitly scopes to project, so no need for separate projectId filter

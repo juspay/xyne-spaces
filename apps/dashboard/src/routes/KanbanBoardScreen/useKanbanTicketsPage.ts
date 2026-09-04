@@ -532,7 +532,7 @@ export const useKanbanTicketsPage = (
     () =>
       shouldUseDirectVespaRows
         ? applyLocalVespaFilters(
-            options.channelId
+            options.channelId && !options.boardId
               ? (vespaTicketSearch.searchResults?.filter(
                   ticket => ticket.channelId === options.channelId,
                 ) ?? null)
