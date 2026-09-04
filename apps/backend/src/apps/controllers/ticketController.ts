@@ -2437,6 +2437,17 @@ export class TicketController {
       const files = reqFiles['files'] ?? [];
       const emailBody = body ?? '';
       if (!emailBody && files.length === 0) {
+        logger.warn('[AppDeskInbound] rejected: no body and no files', {
+          channelId,
+          threadId,
+          externalId: bodyExternalId,
+          senderEmail,
+          senderName,
+          appUserId: userId,
+          bodyType: typeof body,
+          bodyKeys: Object.keys(req.body ?? {}),
+          fileFields: Object.keys(reqFiles),
+        });
         res.status(400).json({ error: 'body or at least one file is required', code: 'VALIDATION_ERROR' });
         return;
       }
