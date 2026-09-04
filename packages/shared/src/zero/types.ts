@@ -963,6 +963,11 @@ export enum ProjectType {
   DM = "DM",
 }
 
+// @ts-ignore TS1294
+export enum QuestionnaireType {
+  ONBOARDING = 'onboarding',
+}
+
 // Saved Views Enums
 
 // @ts-ignore TS1294

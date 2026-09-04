@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { ArrowRight } from '@xyne/icons';
 import { ChevronDown, ChevronRight, ChevronUp, Folder, Loader2, UserRound } from 'lucide-react';
+import { QuestionnaireType } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
 import { useChannelByName } from '../../hooks/useChannels';
@@ -132,7 +133,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
       ).server;
 
       await saveQuestionnaireResponse({
-        questionnaireType: 'onboarding',
+        questionnaireType: QuestionnaireType.ONBOARDING,
         payload: {
           ...(companyName.trim()
             ? {

@@ -15,7 +15,7 @@ import { OrgRole,
   ProjectType,
   UserStatus,
   WorkspaceRole,
-  Status, ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
+  Status, ChannelRole, WorkspaceJoinRequestStatus, QuestionnaireType } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -58,7 +58,7 @@ export class UserService {
     return await runAsSystem(async () => {
       const onboardingResponse = await this.prisma.questionnaireResponse.findFirst({
         where: {
-          questionnaireType: 'onboarding',
+          questionnaireType: QuestionnaireType.ONBOARDING,
           email: normalizedEmail,
         },
         select: { id: true },
