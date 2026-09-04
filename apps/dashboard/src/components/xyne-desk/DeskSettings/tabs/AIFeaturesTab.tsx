@@ -12,7 +12,7 @@ import { useClawAgentDetail } from '../../../../hooks/useClawAgentDetail';
 import type { ChannelClawAgent } from '../../../../hooks/useChannelClawAgents';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { apiInstance } from '../../../../services/clients/apiClient';
-import { Button } from '../../../ui/Button/Button';
+
 import KnowledgeTab from '../../../../routes/ClawAgentsScreen/tabs/KnowledgeTab';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import type { AIFeaturesSubTabId } from '../DeskSettings';
@@ -679,10 +679,9 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
 
       <MaybeTooltip side='bottom'>
         <span className='inline-flex self-start'>
-          <Button
+          <button
             type='button'
-            variant='ghost'
-            trackId='run_ai_sync'
+            data-ph-capture-attribute-track-id='run_ai_sync'
             className='inline-flex h-auto items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
             onClick={() => {
               void handleRunSync();
@@ -693,7 +692,7 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
           >
             {syncLoading ? <Loader2 size={14} className='animate-spin' /> : <Sparkles size={14} />}
             {inCooldown ? 'AI Sync ran recently — wait a few minutes' : 'Run AI Sync'}
-          </Button>
+          </button>
         </span>
       </MaybeTooltip>
     </div>
