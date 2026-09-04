@@ -4264,6 +4264,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     }
   ),
 
+  getStagesWithGatesByBoardIds: defineQuery(
+    z.object({ boardIds: z.array(z.string()) }),
+    ({ args: { boardIds } }) => {
+      const base =
+        boardIds.length === 0
+          ? zql.stages.where('id', 'nonexistent').limit(0)
+          : zql.stages.where('boardId', 'IN', boardIds).orderBy('sequenceNumber', 'asc')
+      return base.related('approvers').related('formContextMappings')
+    }
+  ),
+
   getBoardComplexityScores: defineQuery(
     z.object({ userGroupId: z.string() }),
     ({ args: { userGroupId } }) => {
