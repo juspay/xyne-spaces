@@ -42,9 +42,3 @@ export interface ProviderModelOption {
   id: string;
   name: string;
 }
-
-export interface CodexOauthStart {
-  url: string;
-  state: string;
-  expiresIn: number;
-}

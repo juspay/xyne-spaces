@@ -1,7 +1,6 @@
 import { clawRequest } from './clawRequest';
 import type {
   ClaudeModelInfo,
-  CodexOauthStart,
   GitHubDeviceCode,
   ProviderCredential,
   ProviderCredentialPayload,
@@ -122,69 +121,10 @@ export async function listClaudeModelsForUser(userId: string): Promise<ClaudeMod
   return data.data;
 }
 
-export async function startCodexOauth(userId: string): Promise<CodexOauthStart> {
-  const data = await clawRequest<{ success: boolean; data: CodexOauthStart }>(
-    '/api/v1/settings/codex/oauth/start',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-    },
-  );
-  return data.data;
-}
-
-export async function exchangeCodexOauth(
-  userId: string,
-  payload: { code: string; state: string },
-): Promise<void> {
-  await clawRequest<{ success: boolean }>('/api/v1/settings/codex/oauth/exchange', {
-    method: 'POST',
-    headers: { [USER_ID_HEADER]: userId },
-    body: JSON.stringify(payload),
-  });
-}
-
 export async function listCodexModelsForUser(userId: string): Promise<ProviderModelOption[]> {
   const data = await clawRequest<{ success: boolean; data: ProviderModelOption[] }>(
     '/api/v1/settings/codex/models',
     withUser(userId),
   );
   return data.data;
-}
-
-export interface ClaudeOauthFlow {
-  url: string;
-  state: string;
-  expiresIn: number;
-}
-
-/** Begin the Claude browser sign-in; returns the consent URL to open. */
-export async function startClaudeOauth(userId: string): Promise<ClaudeOauthFlow> {
-  const data = await clawRequest<{ success: boolean; data: ClaudeOauthFlow }>(
-    '/api/v1/settings/provider-credentials/claude/oauth/start',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-      body: JSON.stringify({}),
-    },
-  );
-  return data.data;
-}
-
-/**
- * Finish sign-in with what Anthropic showed the user. Accepts a bare code, a
- * "code#state" pair, or the whole redirect URL — the server normalises it.
- */
-export async function exchangeClaudeOauth(
-  userId: string,
-  payload: { code: string; state: string },
-): Promise<void> {
-  await clawRequest<{ success: boolean }>(
-    '/api/v1/settings/provider-credentials/claude/oauth/exchange',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-      body: JSON.stringify(payload),
-    },
-  );
 }
