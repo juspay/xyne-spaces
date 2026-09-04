@@ -202,6 +202,7 @@ import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
+import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
@@ -625,6 +626,7 @@ export class App {
       handleWorkflowClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
 
     // Encrypted-fields config (S2S-only). Backend is the source of truth; the
     // encryption service fetches this and caches it instead of importing @xyne/shared.
