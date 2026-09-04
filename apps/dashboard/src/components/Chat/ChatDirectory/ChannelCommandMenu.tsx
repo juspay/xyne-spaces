@@ -2,14 +2,7 @@ import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import {
-  CalendarDays,
-  ChevronDown,
-  LayoutGrid,
-  SignalHigh,
-  SlidersHorizontal,
-  X,
-} from 'lucide-react';
+import { CalendarDays, ChevronDown, LayoutGrid, SignalHigh, X } from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -29,13 +22,19 @@ import {
   ArrowTurnDownLeft,
   SearchDefault,
   CheckTickSingle,
-  FilterFunnel,
 } from '@xyne/icons';
 import * as Tabs from '@radix-ui/react-tabs';
-import * as Popover from '@radix-ui/react-popover';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
-import { ChannelChipIcon, PRIORITY_ICON_COLOR } from './FilterChipNode';
+import {
+  ChannelChipIcon,
+  ChipIcon,
+  chipLabelText,
+  chipPrefixText,
+  isSelfMentionChip,
+  resolveChipName,
+  PRIORITY_ICON_COLOR,
+} from './FilterChipNode';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -44,6 +43,7 @@ import {
   parseDMParticipantIds,
   getDMNames,
   formatChannelLabel,
+  resolveChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -123,7 +123,6 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
 import { TicketPreviewPanel } from './TicketPreviewPanel';
-import { SearchFiltersMenu } from './SearchFiltersMenu';
 import { DATE_RANGE_OPTIONS } from '../../../search/filterRegistry';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -134,6 +133,20 @@ import { toast } from 'sonner';
 import Button from '../../ui/Button';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
+
+/**
+ * The concrete window a date preset stands for, shown beside its label. The chip itself
+ * carries the keyword so the window stays live, but the row still says what it means now.
+ * Null for a typed date, which is already its own answer.
+ */
+const dateOptionHint = (value: string): string | null => {
+  const bounds = resolveDateKeyword(value);
+  if (!bounds) return null;
+  return bounds.after === bounds.before ? bounds.after : `${bounds.after} – ${bounds.before}`;
+};
+
+/** One entry in the category tab strip. */
+type TabDefinition = { id: TabType; label: string; icon?: ReactElement };
 
 function stripHtmlTags(html: string): string {
   const div = document.createElement('div');
@@ -611,6 +624,8 @@ const ChannelCommandMenu = ({
     includeBotMessages,
     setIncludeBotMessages,
     onlyMyChannels,
+    exactMatch,
+    setExactMatch,
     setOnlyMyChannels,
     loadMoreRef,
     filteredLocalUsers,
@@ -731,8 +746,37 @@ const ChannelCommandMenu = ({
   >(null);
 
   const insertTextRef = useRef<((text: string) => void) | null>(null);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [searchFiltersOpen, setSearchFiltersOpen] = useState(false);
+
+  /**
+   * The only three filters with no typed syntax: they're search *modes*, not values, so
+   * they can't be expressed as `prefix:value` and need a control of their own. Everything
+   * else is reachable by typing its prefix (see CHIP_PREFIXES).
+   */
+  const SEARCH_MODE_TOGGLES = [
+    {
+      id: 'myChannels',
+      label: '@Ch',
+      tooltip: 'Only my channels',
+      isOn: onlyMyChannels,
+      toggle: () => setOnlyMyChannels(v => !v),
+    },
+    {
+      id: 'bot',
+      label: 'Bot',
+      tooltip: 'Include bot messages',
+      isOn: includeBotMessages,
+      toggle: () => setIncludeBotMessages(v => !v),
+    },
+    {
+      id: 'exact',
+      label: '"ab"',
+      tooltip: 'Exact message match',
+      isOn: exactMatch,
+      // A mode, not text: the query is quoted when the request is built
+      // (buildVespaSearchParams), so the user never sees quotes in the box.
+      toggle: () => setExactMatch(value => !value),
+    },
+  ];
 
   // Type autocomplete - derived from searchText
   const typeAutocomplete = useMemo(() => {
@@ -1043,6 +1087,7 @@ const ChannelCommandMenu = ({
       ...filtersFromChips(mentions as ResultsMention[]),
       onlyMyChannels,
       includeBotMessages,
+      exactMatch,
     };
     writeRegistryParams(filters, params);
 
@@ -1335,24 +1380,14 @@ const ChannelCommandMenu = ({
   );
 
   /**
-   * Land a picked date. A single day becomes a chip; a range has two bounds, which one chip
-   * can't hold, so it replaces the trigger with `after:… before:…` text instead.
+   * Land a picked date as a single chip. A preset carries its keyword and shows its label
+   * (`before:Last 7 days`); a typed day carries the date itself. Either way it's one chip,
+   * and the keyword is expanded to its two bounds at the request boundary
+   * (`dateFiltersFromChips`), so what's sent is unchanged — only what's read is friendlier.
    */
   const selectDate = useCallback(
-    (option: { id: string; name: string; before: string; isRange: boolean }) => {
-      // A range is two bounds, which one chip can't hold — so it lands as two chips,
-      // `after:` and `before:`, rather than as raw text.
-      if (option.isRange && replaceTriggerChipsRef.current) {
-        replaceTriggerChipsRef.current([
-          { id: option.id, name: option.id, type: ChipType.DATE, prefix: 'after:' },
-          { id: option.before, name: option.before, type: ChipType.DATE, prefix: 'before:' },
-        ]);
-        setMentionSearchType(null);
-        setMentionSearchQuery('');
-        setSelectedMentionIndex(0);
-        return;
-      }
-      void handleMentionSelect({ id: option.id, name: option.id, type: ChipType.DATE });
+    (option: { id: string; name: string }) => {
+      void handleMentionSelect({ id: option.id, name: option.name, type: ChipType.DATE });
     },
     [handleMentionSelect],
   );
@@ -1848,26 +1883,15 @@ const ChannelCommandMenu = ({
   const availableDates = useMemo(() => {
     if (mentionSearchType !== ChipType.DATE) return [];
     const query = mentionSearchQuery.trim().toLowerCase();
-    const presets = DATE_RANGE_OPTIONS.filter(opt => opt.value)
-      .map(opt => {
-        const bounds = resolveDateKeyword(opt.value);
-        if (!bounds) return null;
-        // A single day becomes a chip; a range can't (a chip holds one value), so it's
-        // landed as `after:… before:…` text instead — hence both bounds here.
-        return {
-          id: bounds.after,
-          name: opt.label,
-          before: bounds.before,
-          isRange: bounds.after !== bounds.before,
-        };
-      })
-      .filter(
-        (o): o is { id: string; name: string; before: string; isRange: boolean } => o !== null,
-      );
+    // The chip carries the *keyword*, not the window it resolves to: a preset means "last
+    // 7 days from whenever this runs", and freezing it to today's dates would quietly go
+    // stale in a restored search. Only offered when we can resolve it, so a chip never
+    // stands for a window the backend and the UI would compute differently.
+    const presets = DATE_RANGE_OPTIONS.filter(
+      opt => opt.value && resolveDateKeyword(opt.value),
+    ).map(opt => ({ id: opt.value, name: opt.label }));
     // A typed date is always offered first, so an exact day never needs a preset.
-    const typed = /^\d{4}-\d{2}-\d{2}$/.test(query)
-      ? [{ id: query, name: query, before: query, isRange: false }]
-      : [];
+    const typed = /^\d{4}-\d{2}-\d{2}$/.test(query) ? [{ id: query, name: query }] : [];
     return [
       ...typed,
       ...presets.filter(o => (query ? o.name.toLowerCase().includes(query) : true)),
@@ -2388,7 +2412,7 @@ const ChannelCommandMenu = ({
 
   const iconSize = 14;
 
-  const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
+  const allTabDefinitions: TabDefinition[] = [
     { id: TabType.MESSAGES, label: 'Messages', icon: <ChatDefault size={iconSize} /> },
     { id: TabType.USERS, label: 'People', icon: <UserTwo size={iconSize} /> },
     { id: TabType.CHANNELS, label: 'Channels', icon: <Hashtag size={iconSize} /> },
@@ -2400,7 +2424,37 @@ const ChannelCommandMenu = ({
     { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
   ];
 
-  const tabs = allTabDefinitions.filter(t => activeEnabledTabs.includes(t.id));
+  // Tabs the active filters could actually fill. `in:#general` scopes to content *within* a
+  // channel, so People and Channels can only ever come back empty — this is the same
+  // relevance map that already hides the local People/Channels sections, now applied to
+  // their tabs too, so the strip and the list agree about what the filter can return.
+  // Not `enabledTabs` — that name is already a prop, and shadowing it here would put the
+  // `activeEnabledTabs` line above into the temporal dead zone.
+  const allowedTabs: TabDefinition[] = allTabDefinitions.filter(t =>
+    activeEnabledTabs.includes(t.id),
+  );
+  const narrowedTabs: TabDefinition[] = relevantTabs
+    ? allowedTabs.filter(tab => relevantTabs.has(tab.id))
+    : allowedTabs;
+  // An empty intersection means the filters conflict. Showing no tabs at all would strand
+  // the user, so the strip is left alone — the same call getRelevantTabs makes for itself.
+  const tabs: TabDefinition[] = narrowedTabs.length > 0 ? narrowedTabs : allowedTabs;
+
+  // Adding a filter that hides the current tab has to move the user off it, or they sit on
+  // a tab that's no longer in the strip, reading results the filter can't produce. ALL is
+  // the "no tab selected" state, so it's always a safe place to land.
+  useEffect(() => {
+    // Same two exemptions the enabled-tabs reset above uses: with the strip hidden there's
+    // no stranding to undo, and inline mode has no ALL to fall back to.
+    if (hideTabs) return;
+    if (activeTab === TabType.ALL || tabs.some(tab => tab.id === activeTab)) return;
+    const fallback = inline ? (tabs[0]?.id ?? TabType.ALL) : TabType.ALL;
+    setActiveTab(fallback);
+    onTabChange?.(fallback);
+    // `tabs` is rebuilt every render (it carries icon elements), so it can't be a dep —
+    // the ids it holds are what matters, and they only move when relevance does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relevantTabs, activeEnabledTabs, activeTab, hideTabs, inline]);
 
   const getCategoryLabel = (category: ChannelCategory): string => {
     switch (category) {
@@ -2513,15 +2567,25 @@ const ChannelCommandMenu = ({
       if (hasNavigatedRef.current) return;
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (items && items.length > 0) {
-        // The popup pins "Show results for" first in the DOM, but it must not become the
-        // resting Enter target — highlight the first real result instead, falling back to
-        // the row only when it is the sole item. The screen palette keeps first-row.
+        // Once there's a query or a filter, the user has expressed a search rather than a
+        // jump-to, so Enter should open the full results — that row becomes the resting
+        // target. With an empty box it stays on the first real result, where Enter is a
+        // quick-switch. The screen palette keeps first-row either way.
+        const rows = Array.from(items);
+        const showResultsIndex = rows.findIndex(
+          item => item.getAttribute('data-show-results-item') === 'true',
+        );
+        const hasSearchIntent = searchText.trim().length > 0 || selectedMentions.length > 0;
+
         const firstReal = isScreenPalette
           ? -1
-          : Array.from(items).findIndex(
-              item => item.getAttribute('data-show-results-item') !== 'true',
-            );
-        const selectedIndex = firstReal === -1 ? 0 : firstReal;
+          : rows.findIndex(item => item.getAttribute('data-show-results-item') !== 'true');
+        const selectedIndex =
+          !isScreenPalette && hasSearchIntent && showResultsIndex !== -1
+            ? showResultsIndex
+            : firstReal === -1
+              ? 0
+              : firstReal;
         items.forEach((item, i) => {
           item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
@@ -2540,6 +2604,9 @@ const ChannelCommandMenu = ({
     backendResultOrder,
     mentionSearchType,
     commandActive,
+    // Adding/removing a chip flips the resting Enter target between the first result and
+    // the "Show results for" row, so the auto-select has to re-run.
+    selectedMentions.length,
     // `commandText` is a dep (not read in the body) so the first-row auto-select
     // re-fires as the `/` command list / user picker narrows while typing.
     commandText,
@@ -3721,72 +3788,41 @@ const ChannelCommandMenu = ({
         <span className='flex items-center flex-wrap gap-1'>
           <span className='text-sm'>Show detailed results for:</span>
           {selectedMentions.map(m => {
-            const isPriority = m.type === ChipType.PRIORITY;
-            const isDate = m.type === ChipType.DATE;
-            const isBoard = m.type === ChipType.BOARD;
-            const isUser = m.type === ChipType.USER;
-            const name = isPriority
-              ? m.id.toLowerCase()
-              : isDate
-                ? m.id
-                : isBoard
-                  ? (m.name ?? m.id)
-                  : isUser
-                    ? `${m.prefix === 'mentions:' ? '@' : ''}${getUserDisplayName(
-                        usersById.get(m.id) ?? { displayName: m.id, email: '' },
-                      )}`
-                    : (() => {
-                        const ch = allChannels.find(c => c.channel.id === m.id);
-                        if (!ch) return m.id;
-                        // No sigil — the glyph beside it already says what this is, and
-                        // `formatChannelLabel` would add a `#` next to a lock.
-                        return formatChannelLabel(ch).replace(/^[#@]/, '');
-                      })();
-            // A prefix-less chip is the mention filter — `filterChipToKind` routes it to
-            // `mention`/`channelMention` and it leaves as `mentions=`. The old fallback
-            // said `from:`/`in:`, so the palette showed one filter and the page ran another.
-            const prefix =
-              m.prefix ??
-              (isPriority ? 'priority:' : isDate ? 'on:' : isBoard ? 'board:' : 'mentions:');
+            // The surface supplies the lookups; everything after that — which prefix,
+            // how the value reads, whether it's you — comes from the chip's own helpers,
+            // so this row and the pill in the box above can't word a filter differently.
+            const chip: ChipData = {
+              ...m,
+              name: resolveChipName(m as ChipData, {
+                userName: id =>
+                  getUserDisplayName(usersById.get(id) ?? { displayName: id, email: '' }),
+                channelName: id => {
+                  const found = allChannels.find(c => c.channel.id === id);
+                  return found
+                    ? resolveChannelLabel(found.channel, currentUserID, allUsers)
+                    : undefined;
+                },
+              }),
+            } as ChipData;
+            const prefix = chipPrefixText(chip);
+            const name = chipLabelText(chip);
+
             return (
               <span
                 key={`${m.prefix}-${m.id}`}
-                className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6'
-              >
-                {isPriority ? (
-                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                    <SignalHigh
-                      size={12}
-                      className={PRIORITY_ICON_COLOR[m.id] ?? 'text-foreground'}
-                    />
-                  </div>
-                ) : isBoard ? (
-                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                    <LayoutGrid size={12} className='text-foreground' />
-                  </div>
-                ) : isDate ? (
-                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-                    <CalendarDays size={12} className='text-foreground' />
-                  </div>
-                ) : isUser ? (
-                  // No presence dot — at 16px it reads as noise, same call the Lexical
-                  // chip's ChipIcon makes.
-                  <Avatar
-                    userId={m.id}
-                    size='xs'
-                    showActiveStatus={false}
-                    className='size-4 flex-shrink-0 rounded-sm'
-                  />
-                ) : (
-                  <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm text-foreground'>
-                    {/* Resolves to hash / lock / person, so a private channel doesn't read
-                        as a public one. */}
-                    <ChannelChipIcon id={m.id} size={12} />
-                  </div>
+                // The same `.filter-chip` the search box renders, so a filter looks
+                // identical whether it's a chip you're editing above or a value being
+                // summarised here — including the self-mention tint for your own user.
+                className={cn(
+                  'filter-chip h-6 px-1.5',
+                  isSelfMentionChip(chip, currentUserID) && 'filter-chip--self-mention',
                 )}
-                <span className='leading-tight'>
-                  {prefix} {name}
-                </span>
+              >
+                {/* prefix → icon → value, the order `$createFilterChip` appends them in,
+                    so this reads identically to the chip in the box above. */}
+                <span className='leading-tight'>{prefix}</span>
+                <ChipIcon mentionData={m as ChipData} />
+                <span className='leading-tight'>{name}</span>
               </span>
             );
           })}
@@ -3887,95 +3923,36 @@ const ChannelCommandMenu = ({
               )}
             </button>
           )}
-          {hideTabs && (
-            <Popover.Root open={filterOpen} onOpenChange={setFilterOpen}>
-              <div className='relative group/filtertip'>
-                <Popover.Trigger asChild>
-                  <button
-                    type='button'
-                    className={cn(
-                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-0',
-                      filterOpen
-                        ? 'bg-primary/10 border-primary/40 text-primary'
-                        : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
-                    )}
-                    aria-label='Show filters'
-                  >
-                    <FilterFunnel size={13} />
-                  </button>
-                </Popover.Trigger>
-                <div className='pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001]'>
-                  Show filters
+          {/* Three inline toggles instead of a filters popover (design 5a): every other
+              filter is reachable by typing its prefix, and these three have no syntax —
+              they're modes, so they need a control. Active = filled, per the design. */}
+          <div className='flex items-center gap-1 flex-shrink-0'>
+            {SEARCH_MODE_TOGGLES.map(({ id, label, tooltip, isOn, toggle }) => (
+              <div key={id} className='relative group/modetip'>
+                <button
+                  type='button'
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={toggle}
+                  aria-pressed={isOn}
+                  className={cn(
+                    'rounded-md border px-1.5 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-0',
+                    isOn
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-transparent text-muted-foreground hover:border-border',
+                  )}
+                  data-track-category='SEARCH'
+                  data-track-name={`TOGGLE_${id.toUpperCase()}`}
+                >
+                  {label}
+                </button>
+                {/* Right-aligned, not centred: these sit at the panel's right edge, so a
+                    centred tooltip runs off it and gets clipped. */}
+                <div className='pointer-events-none absolute top-full right-0 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/modetip:opacity-100 transition-opacity z-[10001]'>
+                  {tooltip}
                 </div>
-                <Popover.Portal>
-                  <Popover.Content
-                    side='bottom'
-                    align='end'
-                    sideOffset={6}
-                    className='z-[10000] max-h-[min(70vh,560px)] overflow-y-auto bg-popover border border-border rounded-lg shadow-md min-w-[180px] p-1 text-popover-foreground'
-                    onOpenAutoFocus={e => e.preventDefault()}
-                  >
-                    <SearchFiltersMenu
-                      onInsert={text => {
-                        insertTextRef.current?.(text);
-                        setFilterOpen(false);
-                      }}
-                      onlyMyChannels={onlyMyChannels}
-                      onToggleOnlyMyChannels={() => setOnlyMyChannels(v => !v)}
-                      includeBotMessages={includeBotMessages}
-                      onToggleIncludeBotMessages={() => setIncludeBotMessages(v => !v)}
-                    />
-                  </Popover.Content>
-                </Popover.Portal>
               </div>
-            </Popover.Root>
-          )}
-          {!inline && !hideTabs && (
-            <Popover.Root open={searchFiltersOpen} onOpenChange={setSearchFiltersOpen}>
-              <div className='relative group/filtertip'>
-                <Popover.Trigger asChild>
-                  <button
-                    type='button'
-                    className={cn(
-                      'flex items-center px-2 py-1 rounded-md text-xs font-medium border flex-shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-0',
-                      searchFiltersOpen
-                        ? 'bg-primary/10 border-primary/40 text-primary'
-                        : 'border-border text-foreground hover:bg-accent hover:text-accent-foreground',
-                    )}
-                    aria-label='Search filters'
-                  >
-                    <SlidersHorizontal size={13} />
-                  </button>
-                </Popover.Trigger>
-                <div className='pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/filtertip:opacity-100 transition-opacity z-[10001]'>
-                  Search filters
-                </div>
-                <Popover.Portal>
-                  <Popover.Content
-                    side='bottom'
-                    align='end'
-                    sideOffset={6}
-                    className='z-[10000] max-h-[min(70vh,560px)] overflow-y-auto bg-popover border border-border rounded-lg shadow-md min-w-[186px] p-1 text-popover-foreground'
-                    onOpenAutoFocus={e => e.preventDefault()}
-                  >
-                    <SearchFiltersMenu
-                      onInsert={text => {
-                        insertTextRef.current?.(text);
-                        setSearchFiltersOpen(false);
-                      }}
-                      onlyMyChannels={onlyMyChannels}
-                      onToggleOnlyMyChannels={() => setOnlyMyChannels(v => !v)}
-                      includeBotMessages={includeBotMessages}
-                      onToggleIncludeBotMessages={() => setIncludeBotMessages(v => !v)}
-                    />
-                  </Popover.Content>
-                </Popover.Portal>
-              </div>
-            </Popover.Root>
-          )}
-          <kbd className='px-1.5 py-0.5 text-xs font-semibold text-muted-foreground border border-border rounded flex-shrink-0 hidden sm:block'>
-            Esc
-          </kbd>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -4673,9 +4650,9 @@ const ChannelCommandMenu = ({
                                 {option.name}
                               </div>
                             </div>
-                            {option.name !== option.id && (
+                            {dateOptionHint(option.id) !== null && (
                               <div className='text-xs text-muted-foreground shrink-0'>
-                                {option.isRange ? `${option.id} – ${option.before}` : option.id}
+                                {dateOptionHint(option.id)}
                               </div>
                             )}
                           </Command.Item>

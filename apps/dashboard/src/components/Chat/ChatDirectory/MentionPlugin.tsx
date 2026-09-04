@@ -16,7 +16,7 @@ import {
   $getRoot,
 } from 'lexical';
 import { TicketPriority } from '@xyne/shared';
-import { type ChipPrefix } from '../../../search/filterModel';
+import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
 import { $createFilterChip, $removeExistingPriorityChips } from './FilterChipNode';
 import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 
@@ -52,23 +52,19 @@ function priorityQueryHasMatch(query: string): boolean {
   return Object.values(TicketPriority).some(value => value.toLowerCase().startsWith(q));
 }
 
-// 'in:#' and 'in:@' are trigger modifiers; the chip prefix is just 'in:'.
+/**
+ * A typeahead trigger → the prefix its finished chip carries. Only the triggers that
+ * *differ* from their prefix need a branch; everything else is already a chip prefix
+ * verbatim, so it's checked against CHIP_PREFIXES rather than listed again here. Adding a
+ * prefix to the model therefore needs no change in this function.
+ */
 function normalizePrefix(trigger: string): ChipPrefix | null {
-  if (trigger === 'from:') return 'from:';
-  if (trigger === 'to:') return 'to:';
-  if (trigger === 'with:') return 'with:';
-  if (trigger === 'assignee:') return 'assignee:';
-  if (trigger === 'priority:') return 'priority:';
-  if (trigger === 'board:') return 'board:';
-  if (trigger === 'mentions:') return 'mentions:';
-  if (trigger === 'on:') return 'on:';
-  if (trigger === 'after:') return 'after:';
-  if (trigger === 'before:') return 'before:';
+  // `in:#` and `in:@` are trigger modifiers; the chip prefix is just `in:`.
   if (trigger.startsWith('in:')) return 'in:';
   // A bare `@`/`#` that got this far isn't a quick-switch — it's the mention filter, the
   // same one `mentions:` produces. One prefix, one representation.
   if (trigger === '@' || trigger === '#') return 'mentions:';
-  return null;
+  return isChipPrefix(trigger) ? trigger : null;
 }
 
 function buildMentionData(
@@ -82,6 +78,17 @@ function buildMentionData(
   if (item.email) mentionData.email = item.email;
   return mentionData;
 }
+
+/**
+ * The chip kinds this plugin can insert on its own: one candidate in, one chip out. Date,
+ * board and mentions candidates need the palette's own handler (see the note by
+ * `insertableItems`), so they're deliberately absent.
+ */
+const INSERTABLE_TYPES: ReadonlySet<ChipType> = new Set([
+  ChipType.USER,
+  ChipType.CHANNEL,
+  ChipType.PRIORITY,
+]);
 
 interface MentionPluginProps {
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
@@ -132,6 +139,9 @@ export function MentionPlugin({
   availableUsers = [],
   availableChannels = [],
   availablePriorities = [],
+  availableDates = [],
+  availableBoards = [],
+  availableMentionTargets = [],
   onMentionSelect,
   mentionSearchType,
   selectedMentionIndex = 0,
@@ -439,13 +449,30 @@ export function MentionPlugin({
   useEffect(() => {
     if (!mentionSearchType || !setSelectedMentionIndex) return;
 
-    const currentItems =
-      mentionSearchType === ChipType.USER
-        ? availableUsers
-        : mentionSearchType === ChipType.PRIORITY
-          ? availablePriorities
-          : availableChannels;
+    // Keyed by type rather than chained: a ternary chain ends in a default, and every
+    // type it forgets silently inherits it. `before:` used to land on `availableChannels`
+    // — empty during a date search — so the effect bailed on the length check below and
+    // Up/Down/Tab were never registered at all. Enter still worked, because the palette
+    // handles that one itself (acceptHighlightedMention), which is what made this look
+    // like a navigation-only bug.
+    const itemsByType: Partial<Record<ChipType, ReadonlyArray<{ id: string; name: string }>>> = {
+      [ChipType.USER]: availableUsers,
+      [ChipType.CHANNEL]: availableChannels,
+      [ChipType.PRIORITY]: availablePriorities,
+      [ChipType.DATE]: availableDates,
+      [ChipType.BOARD]: availableBoards,
+      [ChipType.MENTIONS]: availableMentionTargets,
+    };
+    const currentItems = itemsByType[mentionSearchType] ?? [];
     if (currentItems.length === 0) return;
+
+    // Moving the highlight is the plugin's job for every type. *Accepting* it isn't:
+    // `insertMention` lands exactly one chip, and a date preset like "Last 7 days" needs
+    // two (`after:` + `before:`), while a mentions candidate has to be routed by whether
+    // it turned out to be a person or a channel. The palette's `acceptHighlightedMention`
+    // knows both; these handlers stand down for those types by reporting no candidates,
+    // which lets the key fall through to it.
+    const insertableItems = INSERTABLE_TYPES.has(mentionSearchType) ? currentItems : [];
 
     const removeKeyDownCommand = editor.registerCommand(
       KEY_ARROW_DOWN_COMMAND,
@@ -480,14 +507,14 @@ export function MentionPlugin({
       event => {
         if (
           mentionSearchType &&
-          currentItems.length > 0 &&
+          insertableItems.length > 0 &&
           selectedMentionIndex >= 0 &&
-          selectedMentionIndex < currentItems.length &&
+          selectedMentionIndex < insertableItems.length &&
           mentionStartOffset.current !== null
         ) {
           event?.preventDefault();
           event?.stopPropagation();
-          const item = currentItems[selectedMentionIndex];
+          const item = insertableItems[selectedMentionIndex];
           if (item) {
             const userItem =
               mentionSearchType === ChipType.USER
@@ -507,13 +534,13 @@ export function MentionPlugin({
       event => {
         if (
           mentionSearchType &&
-          currentItems.length > 0 &&
+          insertableItems.length > 0 &&
           selectedMentionIndex >= 0 &&
-          selectedMentionIndex < currentItems.length &&
+          selectedMentionIndex < insertableItems.length &&
           mentionStartOffset.current !== null
         ) {
           event?.preventDefault();
-          const item = currentItems[selectedMentionIndex];
+          const item = insertableItems[selectedMentionIndex];
           if (item) {
             const userItem =
               mentionSearchType === ChipType.USER
@@ -569,6 +596,9 @@ export function MentionPlugin({
     availableUsers,
     availableChannels,
     availablePriorities,
+    availableDates,
+    availableBoards,
+    availableMentionTargets,
     selectedMentionIndex,
     setSelectedMentionIndex,
     insertMention,

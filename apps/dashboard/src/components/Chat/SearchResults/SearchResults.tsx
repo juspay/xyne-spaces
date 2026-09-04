@@ -310,6 +310,7 @@ const SearchResults = (): ReactElement => {
     setSelectedMentions,
     setIncludeBotMessages,
     setOnlyMyChannels,
+    setExactMatch,
     setRankProfile,
     setStructuredFilters,
     setIncludeDebugInfo,
@@ -379,6 +380,12 @@ const SearchResults = (): ReactElement => {
     setOnlyMyChannels(filters.onlyMyChannels);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
+
+  // Sync exact-match → hook; the hook quotes the query when the request is built.
+  useEffect(() => {
+    setExactMatch(filters.exactMatch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.exactMatch]);
 
   // Sync rankProfile filter → hook; clear selection so the matrix never mixes
   // ranking data captured under different profiles
@@ -489,6 +496,7 @@ const SearchResults = (): ReactElement => {
       buildTokens(filters, filterResolvers).map(token => ({
         key: token.key,
         ...(token.prefix ? { prefix: token.prefix } : {}),
+        ...(token.chip ? { chip: token.chip } : {}),
         label: token.label,
         onRemove: () => handleFiltersChangeRef.current({ ...filters, ...token.patch }),
         ...(token.icon ? { icon: token.icon } : {}),
@@ -546,12 +554,14 @@ const SearchResults = (): ReactElement => {
         setActiveTab(effectiveTab);
       }
       setOnlyMyChannels(newFilters.onlyMyChannels);
+      setExactMatch(newFilters.exactMatch);
       setSelectedMentions(buildChips(newFilters, filterResolvers));
       setStructuredFilters(buildSearchFilters(newFilters));
     },
     [
       setActiveTab,
       setOnlyMyChannels,
+      setExactMatch,
       setSelectedMentions,
       setStructuredFilters,
       mentionUserName,
@@ -866,6 +876,8 @@ const SearchResults = (): ReactElement => {
             <SearchQueryInput
               query={query}
               tokens={queryTokens}
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
               onSubmit={handleQuerySubmit}
               onLiveChange={setText}
               isSearching={isLoading}

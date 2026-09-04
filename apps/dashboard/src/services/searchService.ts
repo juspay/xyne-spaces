@@ -1,6 +1,7 @@
 import { apiInstance } from './clients/apiClient';
 import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
 import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
+import { toSearchQuery } from '../utils/exactSearch';
 /**
  * Sanitizes search query by removing potentially harmful characters
  */
@@ -118,8 +119,12 @@ export class SearchService {
    * Build query parameters for Vespa search request
    */
   private buildVespaSearchParams(filters: VespaSearchFilters): Record<string, string> {
+    // Exact match is expressed by quoting the query, which is what the backend's phrase
+    // grammar keys off. Done here rather than in the box so the user never sees the quotes.
+    // Same helper the ticket search uses, so the two surfaces can't drift on what "exact"
+    // means or on where the mode stops being a flag and becomes text.
     const params: Record<string, string> = {
-      q: filters.query,
+      q: toSearchQuery(filters.query, filters.exactMatch === true),
     };
 
     if (filters.apps) {

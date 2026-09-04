@@ -1,7 +1,7 @@
 // Types for ChannelCommandMenu component (using const objects due to erasableSyntaxOnly)
 import type { Channel } from '@xyne/shared';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
-import { CHIP_PREFIXES, type ChipPrefix } from '../../../search/filterModel';
+import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
 import type { ContextItem } from '../ThreadContextPanel/ThreadContextPanel.types';
 import type { InitialQueryData } from './LexicalSearchInput';
 import { parseSearchFilters, parseTypeFilter } from '../../../utils/searchFilterParser';
@@ -393,8 +393,6 @@ type FilterChip = { type: string; prefix?: string };
  * attach to USER chips, in: only to CHANNEL — enforced at chip creation in MentionPlugin), so
  * the bare-@/# type checks below are reached only by prefix-less chips.
  */
-const isChipPrefix = (value: string): value is ChipPrefix =>
-  (CHIP_PREFIXES as readonly string[]).includes(value);
 
 const PREFIX_TO_KIND: Record<ChipPrefix, FilterKind> = {
   'from:': 'from',

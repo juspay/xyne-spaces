@@ -147,6 +147,11 @@ export interface VespaSearchFilters {
   // Filter-only mode (no query text, just filters)
   filterOnly?: boolean;
 
+  // Cmd-K exact-match toggle. The query is quoted on the way out (see
+  // buildVespaSearchParams) so the backend reads it as a phrase; the quotes are never
+  // shown in the box, which is why this is a flag rather than part of the text.
+  exactMatch?: boolean;
+
   // Cmd-K "Include bot messages" toggle. Default off → backend excludes BOT messages.
   includeBotMessages?: boolean;
 

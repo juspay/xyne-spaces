@@ -14,6 +14,7 @@ import { useVespaTicketSearch } from '../../hooks/useVespaTicketSearch';
 import { useCachedQuery } from '@xyne/shared/hooks';
 import { sortByKanbanPosition } from './KanbanBoardScreen.utils';
 import { withTicketChannelScope } from './ticketChannelScope';
+import { toSearchQuery } from '../../utils/exactSearch';
 
 export type KanbanTicketsPageRow = Ticket & {
   assignments?: TicketAssignment[];
@@ -44,6 +45,8 @@ export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   userId?: string;
   groupId?: string;
   searchTerm?: string;
+  /** Exact-phrase mode. Travels beside the text; folded into it only for the request. */
+  exactSearch?: boolean;
   groupBy?: KanbanPageGroupBy;
   groupKey?: string;
   filters?: TicketFilters;
@@ -384,7 +387,10 @@ export const useKanbanTicketsPage = (
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
   const overdueReferenceTimeRef = useRef<number | null>(null);
-  const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
+  // The request boundary: the mode becomes quotes here and nowhere else. The backend reads
+  // exactness off them (`isExactMatch` in the Vespa searchService), so this mirrors what
+  // the message search does in services/searchService.ts — one helper, both surfaces.
+  const trimmedSearchTerm = toSearchQuery(options.searchTerm ?? '', options.exactSearch ?? false);
   const pageVespaTokensSet = new Set(options.dynamicFieldVespaTokens ?? []);
   const pageVespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
   if (typeof options.groupBy === 'object' && options.groupBy?.type === 'formField') {

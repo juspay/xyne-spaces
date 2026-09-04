@@ -30,6 +30,10 @@ export const CHIP_PREFIXES = [
 
 export type ChipPrefix = (typeof CHIP_PREFIXES)[number];
 
+/** Narrows an arbitrary string to a known prefix, so callers can look up rather than branch. */
+export const isChipPrefix = (value: string): value is ChipPrefix =>
+  (CHIP_PREFIXES as readonly string[]).includes(value);
+
 export interface SearchResultsFilters {
   docType: 'all' | 'messages' | 'files' | 'tickets' | 'channels' | 'desk' | 'people';
   fromUserIds: string[];
@@ -55,6 +59,8 @@ export interface SearchResultsFilters {
   before: string;
   sortBy: 'relevance' | 'newest' | 'oldest';
   includeBotMessages: boolean;
+  /** Phrase search. The query is quoted when the request is built, never in the box. */
+  exactMatch: boolean;
   onlyMyChannels: boolean;
   rankProfile: string;
 }
@@ -78,6 +84,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   before: '',
   sortBy: 'relevance',
   includeBotMessages: false,
+  exactMatch: false,
   onlyMyChannels: true,
   rankProfile: '',
 };

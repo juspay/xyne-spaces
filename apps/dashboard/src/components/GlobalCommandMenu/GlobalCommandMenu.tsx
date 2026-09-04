@@ -1,16 +1,15 @@
 import { ReactElement, useState, useMemo, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
+import { isDeskChannelType, ChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import {
   useAllChannels,
   useAllVisibleChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
-import { ChannelScopeType, isDeskChannelType, ChannelType } from '@xyne/shared';
 import {
   groupChannelsByScope,
-  isDMChannel,
-  getDMParticipantIdsToFetch,
+  resolveChannelLabel,
 } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { rankChannelsByAffinity } from '../../utils/rankingUtils';
@@ -32,22 +31,6 @@ import { queries } from '../../zero/queries';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { DEFAULT_SEARCH_FILTERS, readLastSearchState } from '../../hooks/useSearchResultsScreen';
 import { buildChips, buildQueryText, readFiltersFromParams } from '../../search/filterRegistry';
-
-export function resolveDMChannelName(
-  channel: { name: string; scopeType: ChannelScopeType },
-  currentUserId: string,
-  allUsers: { id: string; name?: string | null; displayName?: string | null }[],
-): string {
-  if (!isDMChannel(channel.scopeType)) return channel.name;
-  const participantIds = getDMParticipantIdsToFetch(channel, currentUserId);
-  const names = participantIds
-    .map(id => {
-      const u = allUsers.find(u => u.id === id);
-      return u ? u.displayName || u.name || null : null;
-    })
-    .filter((name): name is string => !!name);
-  return names.length > 0 ? names.join(', ') : channel.name;
-}
 
 interface GlobalCommandMenuProps {
   open?: boolean;
@@ -143,7 +126,7 @@ const GlobalCommandMenu = ({
     setDeskMergeEnabled(supportIndex !== -1);
 
     const buildChannelMention = (channel: (typeof channelData)[number]): ChipData => {
-      const channelName = resolveDMChannelName(channel, context.userID ?? '', allUsers);
+      const channelName = resolveChannelLabel(channel, context.userID ?? '', allUsers);
       return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
     };
 
@@ -285,9 +268,7 @@ const GlobalCommandMenu = ({
         },
         channelName: id => {
           const channel = channelData.find(c => c.id === id);
-          return channel
-            ? resolveDMChannelName(channel, context.userID ?? '', allUsers)
-            : undefined;
+          return channel ? resolveChannelLabel(channel, context.userID ?? '', allUsers) : undefined;
         },
         // Board chips carry the id the backend matches on; without this the restored chip
         // renders as a raw cuid.

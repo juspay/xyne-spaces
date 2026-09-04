@@ -51,6 +51,34 @@ export type SerializedFilterChipNode = Spread<
 
 /** The pill's leading prefix (`from:`, `in:`, `priority:`), or null for a prefix-less
  *  mention chip. Rendered as its own node so the avatar/glyph can sit after it. */
+/**
+ * True when the chip points at the signed-in user — `@me`, or `from:`/`with:`/`assignee:`
+ * me. Slack tints those differently, and both the editor chip and the palette's summary
+ * row need the same answer.
+ */
+export function isSelfMentionChip(mentionData: ChipData, currentUserId?: string): boolean {
+  return mentionData.type === ChipType.USER && !!currentUserId && mentionData.id === currentUserId;
+}
+
+/**
+ * A chip stores an id; the label needs a name, and only the rendering surface knows how to
+ * look one up. Same shape as the registry's `FilterResolvers`, kept local so this module
+ * stays free of registry imports (a cycle here is a module-init crash, not a type error).
+ */
+export function resolveChipName(
+  mentionData: ChipData,
+  resolve: {
+    userName: (id: string) => string | undefined;
+    channelName: (id: string) => string | undefined;
+  },
+): string {
+  if (mentionData.type === ChipType.USER) return resolve.userName(mentionData.id) ?? mentionData.id;
+  if (mentionData.type === ChipType.CHANNEL) {
+    return resolve.channelName(mentionData.id) ?? mentionData.id;
+  }
+  return mentionData.name ?? mentionData.id;
+}
+
 export function chipPrefixText(mentionData: ChipData): string | null {
   // Priority is a value filter; its chip always reads `priority:` regardless of ChipData.
   if (mentionData.type === ChipType.PRIORITY) {
@@ -221,7 +249,11 @@ export function ChannelChipIcon({
   );
 }
 
-function ChipIcon({ mentionData }: { mentionData: ChipData }): React.JSX.Element {
+/**
+ * Exported so the palette's "Show detailed results for" row renders the *same* glyph as the
+ * chip above it — it previously had a parallel copy that drifted on size and colour.
+ */
+export function ChipIcon({ mentionData }: { mentionData: ChipData }): React.JSX.Element {
   // Priority — checked first so it never falls through to the channel branch (which
   // calls `useChannel`). Glyph tinted by severity; pill stays blue.
   if (mentionData.type === ChipType.PRIORITY) {
@@ -487,9 +519,7 @@ export function $createFilterChip(
   const prefix = chipPrefixText(mentionData);
   // Any chip referencing the current user — bare @me or from:/with:/assignee: me — gets the
   // Slack self-mention color.
-  const isSelfMention =
-    mentionData.type === ChipType.USER && !!currentUserId && mentionData.id === currentUserId;
-  const container = new FilterChipContainerNode(isSelfMention);
+  const container = new FilterChipContainerNode(isSelfMentionChip(mentionData, currentUserId));
   if (prefix === null) {
     container.append($createFilterChipNode(mentionData));
   } else {

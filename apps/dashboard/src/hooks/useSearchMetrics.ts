@@ -32,6 +32,7 @@ import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
 import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 import type { StructuredSearchFilters } from './useSearchResultsScreen';
+import { resolveDateKeyword } from '../search/filterModel';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -152,6 +153,11 @@ function boardFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilt
 function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
   const dates = mentions.filter(m => m.type === ChipType.DATE);
   if (dates.length === 0) return {};
+  // A preset chip carries its keyword (`last 7 days`) rather than a date — one chip
+  // standing for a window, so the user reads back what they picked. The window is resolved
+  // here, at the request boundary, so the backend still gets the two bounds it wants.
+  const preset = dates.map(m => resolveDateKeyword(m.id)).find(Boolean);
+  if (preset) return { after: preset.after, before: preset.before };
   const on = dates.find(m => m.prefix === 'on:');
   if (on) return { on: on.id };
   const after = dates.find(m => m.prefix === 'after:')?.id;
@@ -204,6 +210,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
   // other consumers (full-page search) default OFF so their behavior is unchanged.
   const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
+  // Exact-match mode. Not derived from the query text: the quotes are added when the
+  // request is built, so the box stays clean.
+  const [exactMatch, setExactMatch] = useState(false);
   // Vespa rank profile, passed through to the search payload. '' => backend default.
   const [rankProfile, setRankProfile] = useState('');
   // Structured filters picked from UI (the results page's Filters popover) rather than typed
@@ -919,6 +928,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
+              exactMatch,
               ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
               ...(priorityFilter && { priority: priorityFilter }),
@@ -1229,6 +1239,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       options.isCallSearchPage,
       includeBotMessages,
       onlyMyChannels,
+      exactMatch,
       rankProfile,
       allDefaultRankProfile,
       includeDebugInfo,
@@ -1243,6 +1254,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: string;
     includeBotMessages: boolean;
     onlyMyChannels: boolean;
+    exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
     includeDebugInfo: boolean;
@@ -1253,6 +1265,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: '',
     includeBotMessages: false,
     onlyMyChannels: options.defaultOnlyMyChannels ?? false,
+    exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
     includeDebugInfo: false,
@@ -1304,6 +1317,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         activeTab,
         includeBotMessages,
         onlyMyChannels,
+        exactMatch,
         rankProfile,
         allDefaultRankProfile,
         includeDebugInfo,
@@ -1347,6 +1361,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     performSearch,
     includeBotMessages,
     onlyMyChannels,
+    exactMatch,
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
@@ -1424,6 +1439,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
+          exactMatch,
           ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
           ...(priorityFilter && { priority: priorityFilter }),
@@ -1579,6 +1595,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     includeBotMessages,
     onlyMyChannels,
+    exactMatch,
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
@@ -1673,6 +1690,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setIncludeBotMessages,
     onlyMyChannels,
     setOnlyMyChannels,
+    exactMatch,
+    setExactMatch,
     rankProfile,
     setRankProfile,
     structuredFilters,

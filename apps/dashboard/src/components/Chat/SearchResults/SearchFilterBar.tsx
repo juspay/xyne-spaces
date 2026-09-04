@@ -20,7 +20,7 @@ import { isDMChannel, resolveChannelLabel } from '../../Chat/ChatDirectory/ChatD
 import { type SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { type Channel } from '@xyne/shared';
-import { clearInapplicable } from '../../../search/filterRegistry';
+import { clearInapplicable, entriesFor } from '../../../search/filterRegistry';
 import {
   useCmdkDefaultRankProfiles,
   cmdkTabKeyForDocType,
@@ -265,6 +265,12 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const { userID: currentUserId } = useAuthContextValues();
 
   const knownChannelsForLabels = useAllChannels();
+
+  // The mode pills the row ends with, in registry order.
+  const toggleEntries = useMemo(
+    () => entriesFor(filters.docType).filter(entry => entry.control?.kind === 'toggle'),
+    [filters.docType],
+  );
 
   const filteredChannels = useMemo(() => {
     const q = inQuery.toLowerCase().trim();
@@ -650,8 +656,33 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
           </Popover.Root>
         )}
 
-        {/* From and In are the only standalone chips; every other filter is set and shown
-            inside the Filters dialog, which carries a count so they aren't invisible. */}
+        {/* The mode pills, mirroring the palette's row so the same three controls read the
+            same on both surfaces. They belong here rather than in the dialog: each is a
+            mode you flip while reading results, not a value you configure. Driven from the
+            registry, so `appliesTo` decides which are offered — `Bot` is message-only and
+            drops off the Tickets tab on its own. */}
+        {toggleEntries.map(entry => {
+          const isOn = entry.getValue?.(filters) === true;
+          return (
+            <Button
+              key={entry.id}
+              variant='outline'
+              size='sm'
+              onClick={() => onFiltersChange({ ...filters, ...(entry.setValue?.(!isOn) ?? {}) })}
+              aria-pressed={isOn}
+              title={entry.label}
+              className={cn(CHIP_BASE, isOn && CHIP_ACTIVE)}
+              data-track-category='SEARCH_FILTERS'
+              data-track-name={`TOGGLE_${entry.id.toUpperCase()}`}
+            >
+              {entry.control?.kind === 'toggle' ? entry.control.barLabel : entry.label}
+            </Button>
+          );
+        })}
+
+        {/* From, In and the mode pills are the standalone controls; every other filter is
+            set and shown inside the Filters dialog, which carries a count so they aren't
+            invisible. */}
         <FiltersModal
           filters={filters}
           onFiltersChange={onFiltersChange}

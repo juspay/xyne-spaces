@@ -14,7 +14,7 @@
  * is still one entry.
  */
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
-import { ChipType } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
+import { ChipType, type ChipData } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import {
   DEFAULT_SEARCH_FILTERS,
   resolveDateKeyword,
@@ -67,6 +67,12 @@ export interface FilterToken {
   label: string;
   patch: Partial<SearchResultsFilters>;
   icon?: TokenIcon;
+  /**
+   * The chip this token stands for, when it has one. Lets a surface hand it straight to
+   * the chip helpers (`buildChipText` for demotion, `isSelfMentionChip` for the tint)
+   * instead of re-deriving what the chip already knows.
+   */
+  chip?: ChipData;
 }
 
 export type DocType = SearchResultsFilters['docType'];
@@ -77,6 +83,12 @@ export interface FilterEntry {
   label: string;
   /** URL params this filter owns. Nothing else may write them. */
   params: readonly string[];
+  /**
+   * The typed prefix that summons this filter (`from:`, `board:`). Present only where
+   * typing it is meaningful, so a typeahead can offer exactly the filters that accept a
+   * picked value instead of keeping its own list.
+   */
+  syntax?: string;
   /** Types that can express this filter; others hide and clear it. */
   appliesTo?: (docType: DocType) => boolean;
   /** Counted by the Filters badge — false for things with their own bar control. */
@@ -122,7 +134,9 @@ export type FilterControl =
     }
   | { kind: 'text'; placeholder: string }
   | { kind: 'date' }
-  | { kind: 'toggle' };
+  // Toggles live in the bar as pills, not in the modal: `barLabel` is the short caption
+  // the pill wears (`@Ch`, `Bot`, `"ab"`), `label` the sentence its tooltip spells out.
+  | { kind: 'toggle'; barLabel: string };
 
 /** The shape `parseSearchFilters` returns — filter syntax found in free text. */
 export interface TypedFilters {
@@ -240,6 +254,8 @@ function chipListEntry(opts: {
     id: opts.id,
     label: opts.label,
     params: [opts.param],
+    // A bare `@`/`#` isn't typed syntax — it's a sigil the palette's editor reacts to.
+    ...(named ? { syntax: opts.tokenPrefix } : {}),
     ...(opts.appliesTo ? { appliesTo: opts.appliesTo } : {}),
     ...(opts.hidden === undefined ? {} : { hidden: opts.hidden }),
     isActive: f => f[opts.field].length > 0,
@@ -269,6 +285,12 @@ function chipListEntry(opts: {
         patch: {
           [opts.field]: f[opts.field].filter(v => v !== id),
         } as Partial<SearchResultsFilters>,
+        chip: {
+          id,
+          type: opts.mentionType,
+          ...(opts.prefix ? { prefix: opts.prefix } : {}),
+          name: nameFor(id, resolve),
+        },
         icon:
           opts.resolveWith === 'user'
             ? ({ kind: 'user', userId: id } as const)
@@ -313,6 +335,7 @@ function textListEntry(opts: {
     id: opts.id,
     label: opts.label,
     params: [opts.param],
+    syntax: opts.syntax,
     // Ticket filters are the common case; tags span tickets and messages.
     appliesTo: opts.appliesTo ?? isTicketType,
     isActive: f => f[opts.field].length > 0,
@@ -377,9 +400,11 @@ function toggleEntry(opts: {
   id: string;
   label: string;
   param: string;
-  field: 'onlyMyChannels' | 'includeBotMessages';
+  field: 'onlyMyChannels' | 'includeBotMessages' | 'exactMatch';
   /** Written only when it differs from this. */
   defaultValue: boolean;
+  /** Short caption for the bar pill. */
+  barLabel: string;
   explicitOff?: boolean;
   appliesTo?: (docType: DocType) => boolean;
 }): FilterEntry {
@@ -388,6 +413,12 @@ function toggleEntry(opts: {
     label: opts.label,
     params: [opts.param],
     ...(opts.appliesTo ? { appliesTo: opts.appliesTo } : {}),
+    // Never counted in the Filters badge. That badge counts what the *dialog* holds, and
+    // every toggle has its own lit pill in the bar — the same rule From and In follow.
+    // Counting one there too would report a filter the dialog doesn't contain, and for a
+    // default-on toggle it read as a lie: switching `onlyMyChannels` OFF *widens* the
+    // search, yet the badge announced "Filters 1" as though it had been narrowed.
+    hidden: false,
     isActive: f => f[opts.field] !== opts.defaultValue,
     cleared: { [opts.field]: opts.defaultValue } as Partial<SearchResultsFilters>,
     read: params => {
@@ -400,18 +431,12 @@ function toggleEntry(opts: {
       // A default-on toggle needs an explicit '0' to say "switched off".
       else params.set(opts.param, f[opts.field] ? '1' : '0');
     },
-    tokens: f =>
-      f[opts.field] === opts.defaultValue
-        ? []
-        : [
-            {
-              key: opts.id,
-              label: opts.label,
-              patch: { [opts.field]: opts.defaultValue } as Partial<SearchResultsFilters>,
-              icon: { kind: 'value' },
-            },
-          ],
-    control: { kind: 'toggle' },
+    // No token, deliberately. A token carries a *value*, and a boolean has none — the
+    // label alone can't say which way it's set. `onlyMyChannels` defaults to on, so a
+    // token appeared only once it was switched OFF, captioned "Only my channels": the
+    // exact opposite of the truth. Its checkbox in the dialog (and the Filters badge, for
+    // the ones without their own bar control) is the honest representation.
+    control: { kind: 'toggle', barLabel: opts.barLabel },
     getValue: f => f[opts.field],
     setValue: next => ({ [opts.field]: next }) as Partial<SearchResultsFilters>,
   };
@@ -419,6 +444,10 @@ function toggleEntry(opts: {
 
 /** Turning the date filter off means dropping the preset and both bounds together. */
 const DATE_CLEARED: Partial<SearchResultsFilters> = { dateRange: '', after: '', before: '' };
+
+/** A preset's display label — `last 7 days` reads back as `Last 7 days`. */
+const presetLabel = (keyword: string): string =>
+  DATE_RANGE_OPTIONS.find(opt => opt.value === keyword)?.label ?? keyword;
 
 export const FILTER_REGISTRY: FilterEntry[] = [
   chipListEntry({
@@ -499,6 +528,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     id: 'mentions',
     label: 'Mentions',
     params: ['mentions', 'channelMentions'],
+    syntax: 'mentions:',
     appliesTo: isMessageType,
     isActive: f => f.mentionUserIds.length > 0 || f.mentionChannelIds.length > 0,
     cleared: { mentionUserIds: [], mentionChannelIds: [] },
@@ -576,6 +606,25 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     // since it has no date form to put in a chip.
     queryText: f => (dateBounds(f) ? '' : f.dateRange ? `range:${f.dateRange}` : ''),
     chips: f => {
+      // A preset rides as ONE chip carrying its keyword, not as the two dates it resolves
+      // to. `before:Last 7 days` is what the user picked and can recognise later, where
+      // `after:2026-08-28 before:2026-09-04` is two chips they never chose. The bounds are
+      // re-derived at the request boundary, so the query itself is identical.
+      //
+      // The prefix is `before:` because the palette can't tell us which one was typed —
+      // `dateRange` records the window, not the syntax that reached for it. A picked
+      // `after:<preset>` therefore reads back as `before:<preset>` after a round-trip
+      // through this screen; the window it stands for is the same either way.
+      if (f.dateRange && !f.after && !f.before && resolveDateKeyword(f.dateRange)) {
+        return [
+          {
+            id: f.dateRange,
+            type: ChipType.DATE,
+            prefix: 'before:',
+            name: presetLabel(f.dateRange),
+          },
+        ];
+      }
       const bounds = dateBounds(f);
       if (!bounds) return [];
       // A window that opens and closes on the same day is a single day — `on:` says that
@@ -605,6 +654,10 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     fromChips: mentions => {
       const dates = mentions.filter(m => m.type === ChipType.DATE);
       if (dates.length === 0) return {};
+      // A chip whose value is a keyword is a preset — keep it as one, so it stays a live
+      // window rather than freezing to the dates it happened to mean when it was picked.
+      const preset = dates.find(m => resolveDateKeyword(m.id));
+      if (preset) return { dateRange: preset.id, after: '', before: '' };
       const on = dates.find(m => m.prefix === 'on:');
       if (on) return { dateRange: '', after: on.id, before: on.id };
       return {
@@ -623,10 +676,21 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     },
     control: { kind: 'date' },
     tokens: f => {
+      // A preset shows its label, matching the single chip the palette lands — one token
+      // for one thing the user picked. Removing it drops the whole window.
+      if (f.dateRange && !f.after && !f.before && resolveDateKeyword(f.dateRange)) {
+        return [
+          {
+            key: 'range',
+            prefix: 'before:',
+            label: presetLabel(f.dateRange),
+            patch: DATE_CLEARED,
+            icon: { kind: 'date' as const },
+          },
+        ];
+      }
       const bounds = dateBounds(f);
-      // A preset shows the window it stands for, not its keyword — `after:2026-05-28
-      // before:2026-08-28` rather than `range:last three months`. Same values the query
-      // is actually run with, so the box can't disagree with the search.
+      // An unresolvable keyword (`last hour`) has no date form; it travels as itself.
       if (!bounds) {
         return f.dateRange
           ? [
@@ -682,6 +746,16 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     param: 'myChannels',
     field: 'onlyMyChannels',
     defaultValue: DEFAULT_SEARCH_FILTERS.onlyMyChannels,
+    barLabel: '@Ch',
+    appliesTo: notLocal,
+  }),
+  toggleEntry({
+    id: 'exactMatch',
+    label: 'Exact match',
+    param: 'exact',
+    field: 'exactMatch',
+    defaultValue: false,
+    barLabel: '"ab"',
     appliesTo: notLocal,
   }),
   toggleEntry({
@@ -690,6 +764,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     param: 'automations',
     field: 'includeBotMessages',
     defaultValue: false,
+    barLabel: 'Bot',
     appliesTo: isMessageType,
   }),
   // Ticket-only filters last: they apply to one result type, so they sit below the
@@ -711,6 +786,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     id: 'priority',
     label: 'Priority',
     params: ['priority'],
+    syntax: 'priority:',
     appliesTo: isTicketType,
     isActive: f => Boolean(f.priority),
     cleared: { priority: '' },
@@ -831,7 +907,7 @@ export function readFiltersFromParams(
 }
 
 export function writeFiltersToParams(filters: SearchResultsFilters, params: URLSearchParams): void {
-  for (const entry of FILTER_REGISTRY) entry.write(filters, params);
+  FILTER_REGISTRY.forEach(entry => entry.write(filters, params));
 }
 
 export function buildChips(

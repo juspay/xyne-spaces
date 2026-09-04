@@ -141,20 +141,9 @@ export function FiltersModal({
   // The registry decides what this modal contains; the switch below only knows how to
   // render each *kind* of control, never an individual filter.
   const visible = entriesFor(draft.docType);
+  // Toggles are excluded: each has its own pill in the filter bar, and a control that
+  // exists in two places invites the two to disagree about which one you last touched.
   const fieldEntries = visible.filter(e => e.control && e.control.kind !== 'toggle');
-  // Rendered in registry order, with consecutive toggles collapsed into one unlabelled
-  // grid — the design groups them as a block mid-form, not as trailing fields.
-  const blocks = visible
-    .filter(e => e.control)
-    .reduce<Array<{ toggles: FilterEntry[] } | { field: FilterEntry }>>((acc, entry) => {
-      if (entry.control?.kind !== 'toggle') return [...acc, { field: entry }];
-      const last = acc[acc.length - 1];
-      if (last && 'toggles' in last) {
-        last.toggles.push(entry);
-        return acc;
-      }
-      return [...acc, { toggles: [entry] }];
-    }, []);
   const carriedTokens = visible
     .filter(e => !e.control && e.isActive(draft))
     .flatMap(e => e.tokens?.(draft, chipResolvers) ?? []);
@@ -336,29 +325,14 @@ export function FiltersModal({
 
       <div className='flex-1 space-y-4 overflow-y-auto px-5 pb-[18px] pt-4'>
         {/* Fields in registry order — this component knows control kinds, not filters. */}
-        {blocks.map(block =>
-          'toggles' in block ? (
-            <div key={block.toggles.map(t => t.id).join('-')} className={CHECK_GRID}>
-              {block.toggles.map(entry => (
-                <div key={entry.id} className='py-[2px]'>
-                  <Checkbox
-                    checked={entry.getValue?.(draft) === true}
-                    onChange={checked => patch(entry.setValue?.(checked) ?? {})}
-                    label={entry.label}
-                    labelClassName={CHECK_LABEL}
-                  />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div key={block.field.id}>
-              <label className={FIELD_LABEL} htmlFor={`filter-${block.field.id}`}>
-                {block.field.label}
-              </label>
-              {renderControl(block.field)}
-            </div>
-          ),
-        )}
+        {fieldEntries.map(entry => (
+          <div key={entry.id}>
+            <label className={FIELD_LABEL} htmlFor={`filter-${entry.id}`}>
+              {entry.label}
+            </label>
+            {renderControl(entry)}
+          </div>
+        ))}
 
         {/* Filters the palette can hand over that have no control of their own. Shown only
             when set, and removable, so an active filter is never invisible. */}
