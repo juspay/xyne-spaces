@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type ReactElement,
@@ -16,9 +17,20 @@ import {
   PlusDefault,
   SearchDefault,
 } from '@xyne/icons';
-import { ChannelVisibility, type ProjectSectionSuggestion } from '@xyne/shared';
+import {
+  ChannelVisibility,
+  MAX_ACTIVE_WINDOW_DAYS,
+  MIN_ACTIVE_WINDOW_DAYS,
+  SECTION_NAME_MAX_LENGTH,
+  clampActiveWindowDays,
+  type SectionSuggestion,
+} from '@xyne/shared';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
+import {
+  SegmentedToggle,
+  type SegmentedToggleOption,
+} from '../../ui/SegmentedToggle/SegmentedToggle';
 import { cn } from '../../../utils/classNames';
 import { isDMChannel, getDMSearchableName } from './ChatDirectory.utils';
 import type { VisibleChannel } from '../../../machines/stateMachine';
@@ -28,6 +40,11 @@ import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 const AUTO_EXPAND_MAX_CHANNELS = 25;
+
+const MODE_OPTIONS: SegmentedToggleOption<OrganizerMode>[] = [
+  { label: 'By project', value: 'project' },
+  { label: 'By activity', value: 'activity' },
+];
 const TIP_INDEX_KEY = 'xyne:section-organizer-tip-index';
 
 const SECTION_TIPS = [
@@ -40,7 +57,7 @@ const SECTION_TIPS = [
 ];
 
 export interface OrganizerGroup {
-  projectId: string;
+  id: string;
   name: string;
   channelIds: string[];
   excludedChannelIds: string[];
@@ -48,10 +65,16 @@ export interface OrganizerGroup {
   expanded: boolean;
 }
 
+export type OrganizerMode = 'project' | 'activity';
+
 interface SectionOrganizerDialogProps {
-  suggestions: readonly ProjectSectionSuggestion[];
+  suggestions: readonly SectionSuggestion[];
   channelsById: Map<string, VisibleChannel>;
   existingNames: readonly string[];
+  mode: OrganizerMode;
+  onModeChange: (mode: OrganizerMode) => void;
+  activeWindowDays: number;
+  onActiveWindowDaysChange: (days: number) => void;
   onCancel: () => void;
   onConfirm: (groups: OrganizerGroup[]) => void;
 }
@@ -103,10 +126,27 @@ const ChannelLine = ({
   );
 };
 
+const buildGroups = (
+  suggestions: readonly SectionSuggestion[],
+  totalChannels: number,
+): OrganizerGroup[] =>
+  suggestions.map(s => ({
+    id: s.id,
+    name: s.name,
+    channelIds: [...s.channelIds],
+    excludedChannelIds: [],
+    included: true,
+    expanded: totalChannels <= AUTO_EXPAND_MAX_CHANNELS,
+  }));
+
 export const SectionOrganizerDialog = ({
   suggestions,
   channelsById,
   existingNames,
+  mode,
+  onModeChange,
+  activeWindowDays,
+  onActiveWindowDaysChange,
   onCancel,
   onConfirm,
 }: SectionOrganizerDialogProps): ReactElement => {
@@ -117,15 +157,22 @@ export const SectionOrganizerDialog = ({
 
   const [filter, setFilter] = useState('');
   const [groups, setGroups] = useState<OrganizerGroup[]>(() =>
-    suggestions.map(s => ({
-      projectId: s.projectId,
-      name: s.name,
-      channelIds: [...s.channelIds],
-      excludedChannelIds: [],
-      included: true,
-      expanded: totalChannels <= AUTO_EXPAND_MAX_CHANNELS,
-    })),
+    buildGroups(suggestions, totalChannels),
   );
+
+  const suggestionsRef = useRef(suggestions);
+  const totalChannelsRef = useRef(totalChannels);
+  suggestionsRef.current = suggestions;
+  totalChannelsRef.current = totalChannels;
+
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setGroups(buildGroups(suggestionsRef.current, totalChannelsRef.current));
+  }, [mode, activeWindowDays]);
 
   const { userID } = useAuthContextValues();
   const allUsers = useUsers();
@@ -153,14 +200,14 @@ export const SectionOrganizerDialog = ({
       .filter(g => g.channelIds.length > 0 || g.name.toLowerCase().includes(query));
   }, [groups, query, matchesQuery]);
 
-  const updateGroup = (projectId: string, patch: Partial<OrganizerGroup>): void => {
-    setGroups(prev => prev.map(g => (g.projectId === projectId ? { ...g, ...patch } : g)));
+  const updateGroup = (groupId: string, patch: Partial<OrganizerGroup>): void => {
+    setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, ...patch } : g)));
   };
 
-  const toggleChannel = (projectId: string, channelId: string): void => {
+  const toggleChannel = (groupId: string, channelId: string): void => {
     setGroups(prev =>
       prev.map(g => {
-        if (g.projectId !== projectId) return g;
+        if (g.id !== groupId) return g;
         const excluded = g.excludedChannelIds.includes(channelId)
           ? g.excludedChannelIds.filter(id => id !== channelId)
           : [...g.excludedChannelIds, channelId];
@@ -185,7 +232,7 @@ export const SectionOrganizerDialog = ({
   for (const group of selectedGroups) {
     const normalized = group.name.trim().toLowerCase();
     if (!normalized || takenNames.has(normalized) || seen.has(normalized)) {
-      invalidNames.add(group.projectId);
+      invalidNames.add(group.id);
     }
     seen.add(normalized);
   }
@@ -222,6 +269,36 @@ export const SectionOrganizerDialog = ({
         </button>
       </div>
 
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <SegmentedToggle
+          options={MODE_OPTIONS}
+          value={mode}
+          onChange={onModeChange}
+          tone='primary'
+          trackCategory='CHAT_SIDEBAR'
+          trackPrefix='ORGANIZER_SET_MODE'
+        />
+
+        {mode === 'activity' && (
+          <label className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+            Active in the last
+            <input
+              type='number'
+              min={MIN_ACTIVE_WINDOW_DAYS}
+              max={MAX_ACTIVE_WINDOW_DAYS}
+              value={activeWindowDays}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                onActiveWindowDaysChange(clampActiveWindowDays(Number(e.target.value)))
+              }
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='ORGANIZER_SET_ACTIVE_WINDOW'
+              className='w-14 rounded border border-border bg-background px-1.5 py-1 text-center text-xs text-foreground outline-none focus:ring-2 focus:ring-ring'
+            />
+            days
+          </label>
+        )}
+      </div>
+
       <div className='flex items-center gap-2 rounded-md border border-border bg-background px-2 focus-within:ring-2 focus-within:ring-ring'>
         <SearchDefault size={16} className='shrink-0 text-muted-foreground' />
         <input
@@ -239,20 +316,20 @@ export const SectionOrganizerDialog = ({
         <div className='max-h-[22rem] min-h-0 overflow-y-auto rounded-md border border-border bg-sidebar/40 p-2'>
           {visibleGroups.map(group => {
             const isOpen = (group.expanded || !!query) && group.included;
-            const hasNameError = invalidNames.has(group.projectId);
+            const hasNameError = invalidNames.has(group.id);
             return (
-              <div key={group.projectId} className='mb-1'>
+              <div key={group.id} className='mb-1'>
                 <div className='flex h-9 items-center gap-1.5 rounded-[10px] border border-transparent px-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'>
                   <Checkbox
                     checked={group.included}
-                    onChange={included => updateGroup(group.projectId, { included })}
+                    onChange={included => updateGroup(group.id, { included })}
                     ariaLabel={`Include ${group.name}`}
                     label=''
                     size='sm'
                   />
                   <button
                     type='button'
-                    onClick={() => updateGroup(group.projectId, { expanded: !group.expanded })}
+                    onClick={() => updateGroup(group.id, { expanded: !group.expanded })}
                     aria-label={isOpen ? 'Collapse' : 'Expand'}
                     data-track-category='CHAT_SIDEBAR'
                     data-track-name='ORGANIZER_TOGGLE_EXPAND'
@@ -265,8 +342,8 @@ export const SectionOrganizerDialog = ({
                   </button>
                   <input
                     value={group.name}
-                    onChange={e => updateGroup(group.projectId, { name: e.target.value })}
-                    maxLength={50}
+                    onChange={e => updateGroup(group.id, { name: e.target.value })}
+                    maxLength={SECTION_NAME_MAX_LENGTH}
                     disabled={!group.included}
                     data-track-category='CHAT_SIDEBAR'
                     data-track-name='ORGANIZER_RENAME_SECTION'
@@ -291,7 +368,7 @@ export const SectionOrganizerDialog = ({
                           key={channelId}
                           channel={channel}
                           excluded={group.excludedChannelIds.includes(channelId)}
-                          onToggle={() => toggleChannel(group.projectId, channelId)}
+                          onToggle={() => toggleChannel(group.id, channelId)}
                         />
                       );
                     })}
@@ -303,7 +380,9 @@ export const SectionOrganizerDialog = ({
 
           {visibleGroups.length === 0 && (
             <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-              No channels found
+              {query || mode !== 'activity'
+                ? 'No channels found'
+                : `Everything falls on one side of ${activeWindowDays} days. Try a shorter window.`}
             </div>
           )}
         </div>
