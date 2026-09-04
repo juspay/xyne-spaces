@@ -159,10 +159,11 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       hide();
     };
 
+    // Pointer events already cover mouse, touch and pen, so one
+    // pointerover/pointerleave pair is enough. The old mouseover/mouseleave
+    // duplicates fired handlePointerOver twice per mouse move.
     container.addEventListener('pointerover', handlePointerOver);
     container.addEventListener('pointerleave', handlePointerLeave);
-    container.addEventListener('mouseover', handlePointerOver);
-    container.addEventListener('mouseleave', handlePointerLeave);
     // The (Virtuoso) scroller lives inside the container — capture catches it.
     container.addEventListener('scroll', handleScroll, { capture: true, passive: true });
     window.addEventListener('resize', markContainerDirty);
@@ -170,8 +171,6 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       cancelPendingClear();
       container.removeEventListener('pointerover', handlePointerOver);
       container.removeEventListener('pointerleave', handlePointerLeave);
-      container.removeEventListener('mouseover', handlePointerOver);
-      container.removeEventListener('mouseleave', handlePointerLeave);
       container.removeEventListener('scroll', handleScroll, { capture: true });
       window.removeEventListener('resize', markContainerDirty);
     };
