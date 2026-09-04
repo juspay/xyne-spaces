@@ -7,6 +7,7 @@ import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState } from "./oauth-state.js";
+import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth-return.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "./http.js";
 import { createLogger } from "../logger.js";
@@ -52,6 +53,8 @@ interface StatePayload {
   clientSecret?: string | undefined;
   codeVerifier: string;
   redirectUri: string;
+  /** Where the UI that started this flow wants the browser sent back to. */
+  returnTo?: string;
 }
 
 export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider {
@@ -199,7 +202,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
 
   router.post(`/:userId/oauth/${type}/authorize`, asyncHandler(async (req, res) => {
     const { userId } = req.params as { userId: string };
-    const { redirectUri, scope } = req.body as { redirectUri?: string; scope?: string };
+    const { redirectUri, scope, returnTo } = req.body as { redirectUri?: string; scope?: string; returnTo?: string };
 
     const callbackUri =
       redirectUri ??
@@ -210,7 +213,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = deriveCodeChallenge(codeVerifier);
 
-    const state = encodeState({ userId, clientId, ...(confidential ? { clientSecret } : {}), codeVerifier, redirectUri: callbackUri });
+    const state = encodeState({ userId, clientId, ...(confidential ? { clientSecret } : {}), codeVerifier, redirectUri: callbackUri, returnTo: resolveOAuthReturn(returnTo) });
 
     const url = new URL(authUrl);
     url.searchParams.set("client_id", clientId);
@@ -268,19 +271,21 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
   const callbackRouter = Router();
 
   callbackRouter.get(`/${type}/callback`, async (req: Request, res: Response) => {
-    const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
+    // Default until the state verifies below — an unverified state must never
+    // steer the redirect.
+    let frontendUrl = defaultOAuthReturn();
 
     try {
       const { code, state, error: oauthError } = req.query as { code?: string; state?: string; error?: string };
 
       if (oauthError) {
         log.error(`[${type}-oauth] OAuth error: ${oauthError}`);
-        res.redirect(`${frontendUrl}?${type}_error=${encodeURIComponent(oauthError)}`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, oauthError));
         return;
       }
 
       if (!code || !state) {
-        res.redirect(`${frontendUrl}?${type}_error=missing_code_or_state`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "missing_code_or_state"));
         return;
       }
 
@@ -288,11 +293,12 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
       try {
         statePayload = decodeState(state);
       } catch {
-        res.redirect(`${frontendUrl}?${type}_error=invalid_state`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "invalid_state"));
         return;
       }
 
       const { userId, clientId, clientSecret, codeVerifier, redirectUri } = statePayload;
+      frontendUrl = resolveOAuthReturn(statePayload.returnTo);
 
       const tokenRes = await fetch(tokenUrl, {
         method: "POST",
@@ -303,7 +309,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
       if (!tokenRes.ok) {
         const text = await tokenRes.text();
         log.error(`[${type}-oauth] Browser callback token exchange failed: ${tokenRes.status} ${text}`);
-        res.redirect(`${frontendUrl}?${type}_error=token_exchange_failed`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "token_exchange_failed"));
         return;
       }
 
@@ -312,17 +318,17 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user) {
         log.error(`[${type}-oauth] User not found: ${userId}`);
-        res.redirect(`${frontendUrl}?${type}_error=user_not_found`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "user_not_found"));
         return;
       }
 
       await storeTokens(userId, clientId, clientSecret, tokens.access_token, tokens.refresh_token, tokens.expires_in);
 
       log.info(`[${type}-oauth] Stored ${label} credentials for user ${userId} via browser callback`);
-      res.redirect(`${frontendUrl}?${type}_connected=true`);
+      res.redirect(withOAuthResult(frontendUrl, `${type}_connected`, "true"));
     } catch (err) {
       log.error(`[${type}-oauth] browser callback error:`, err);
-      res.redirect(`${frontendUrl}?${type}_error=internal_error`);
+      res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "internal_error"));
     }
   });
 

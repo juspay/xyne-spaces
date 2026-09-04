@@ -4,6 +4,7 @@ import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "./oauth-state.js";
+import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth-return.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { asyncHandler, ok, badRequest, HttpError } from "./http.js";
 import { createLogger } from "../logger.js";
@@ -126,7 +127,7 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
 
   router.post(`/:userId/oauth/${type}/authorize`, asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
     const { userId } = req.params;
-    const { redirectUri } = req.body as { redirectUri?: string };
+    const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
 
     const callbackUri = redirectUri ?? `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/${type}/callback`;
 
@@ -138,7 +139,7 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", config.scope);
     for (const [k, v] of Object.entries(config.extraAuthParams ?? {})) url.searchParams.set(k, v);
-    url.searchParams.set("state", signOAuthState(userId));
+    url.searchParams.set("state", signOAuthState(userId, { returnTo: resolveOAuthReturn(returnTo) }));
 
     ok(res, { authUrl: url.toString() });
   }));
@@ -161,29 +162,34 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
   const callbackRouter = Router();
 
   callbackRouter.get(`/${type}/callback`, async (req: Request, res: Response) => {
-    const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
+    // Stays the default until the state is verified below: an unverified state
+    // must never steer the redirect.
+    let frontendUrl = defaultOAuthReturn();
 
     try {
       const { code, state, error: oauthError } = req.query as { code?: string; state?: string; error?: string };
 
       if (oauthError) {
         log.error(`[${type}-oauth] OAuth error: ${oauthError}`);
-        res.redirect(`${frontendUrl}?${type}_error=${encodeURIComponent(oauthError)}`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, oauthError));
         return;
       }
 
       if (!code || !state) {
-        res.redirect(`${frontendUrl}?${type}_error=missing_code_or_state`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "missing_code_or_state"));
         return;
       }
 
       let userId: string;
       try {
-        userId = verifyOAuthState(state).userId;
+        const verified = verifyOAuthState(state);
+        userId = verified.userId;
+        // Signed, so this is the origin that actually started the flow.
+        frontendUrl = resolveOAuthReturn(verified.extra?.["returnTo"]);
       } catch (err) {
         const reason = err instanceof OAuthStateError ? err.reason : "malformed";
         log.error(`[${type}-oauth] state ${reason}`);
-        res.redirect(`${frontendUrl}?${type}_error=invalid_state`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "invalid_state"));
         return;
       }
 
@@ -193,7 +199,7 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
       try {
         creds = await exchangeCode(code, redirectUri);
       } catch {
-        res.redirect(`${frontendUrl}?${type}_error=token_exchange_failed`);
+        res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "token_exchange_failed"));
         return;
       }
 
@@ -203,7 +209,7 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user) {
           log.error(`[${type}-oauth] User not found: ${userId}`);
-          res.redirect(`${frontendUrl}?${type}_error=user_not_found`);
+          res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "user_not_found"));
           return;
         }
       }
@@ -211,10 +217,10 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
       await storeTokens(userId, creds);
 
       log.info(`[${type}-oauth] Stored ${label} credentials for user ${userId} via browser callback`);
-      res.redirect(`${frontendUrl}?${type}_connected=true`);
+      res.redirect(withOAuthResult(frontendUrl, `${type}_connected`, "true"));
     } catch (err) {
       log.error(`[${type}-oauth] browser callback error:`, err);
-      res.redirect(`${frontendUrl}?${type}_error=internal_error`);
+      res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "internal_error"));
     }
   });
 
