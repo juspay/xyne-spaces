@@ -479,7 +479,7 @@ const SearchResultItem = ({
       const scopeType = result.searchContext?.scopeType;
       const isDmOrGroupDm = scopeType === 'DM' || scopeType === 'GROUP_DM';
       const isThread = (result.searchContext?.replyCount ?? 0) > 0;
-      const preposition = `${isThread ? 'thread ' : ''}${isDmOrGroupDm ? 'with' : 'in'}`;
+      const preposition = `${isThread ? 'Thread ' : ''}${isDmOrGroupDm ? 'with' : 'in'}`;
 
       return (
         <Command.Item
