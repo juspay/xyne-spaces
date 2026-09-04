@@ -26,7 +26,7 @@ import { useDragCreate } from '../../../routes/CallHistoryScreen/useDragCreate';
 import { XyneCalendarCallPill, type XyneCalendarCallPillVariant } from './XyneCalendarCallPill';
 import CallDetailSidebarView from './CallDetailSidebarView';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
-import { getDefaultScheduledCallTitle } from '../../Call/ScheduleCallModal/defaults';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { DeleteCallModal } from '../../Call/DeleteCallModal';
 import { roomActor } from '../../../machines/roomMachine';
 
@@ -356,7 +356,10 @@ const XyneCalendarSidebarTimeline = memo(
     } | null>(null);
 
     const isCallDetailOpen = selectedCallId !== null;
-    const defaultCallTitle = getDefaultScheduledCallTitle(user);
+    const defaultCallTitle = useMemo(() => {
+      const displayName = getUserDisplayName(user);
+      return displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '';
+    }, [user]);
 
     const upcomingCallDates = useMemo(() => {
       const dates = new Set<number>();
