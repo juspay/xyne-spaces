@@ -1,5 +1,4 @@
 export { XyneCalendarSidebar } from './XyneCalendarSidebar';
-export { XyneCalendarSidebarHost } from './XyneCalendarSidebarHost';
 export { XyneCalendarCallPill } from './XyneCalendarCallPill';
 export { default as CallDetailSidebarView } from './CallDetailSidebarView';
 export type { CallDetailSidebarViewProps } from './CallDetailSidebarView';
@@ -8,11 +7,9 @@ export type {
   XyneCalendarCallPillVariant,
 } from './XyneCalendarCallPill';
 export {
-  closeXyneCalendarSidebar,
-  closeXyneCalendarSidebarForHandoff,
+  XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE,
+  XYNE_CALENDAR_SIDEBAR_MIN_SIZE,
+  XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
   getNextCalendarBadgeBoundary,
   getPendingCalendarCallCount,
-  openXyneCalendarSidebar,
-  openXyneCalendarSidebarForHandoff,
-  toggleXyneCalendarSidebar,
 } from './xyneCalendarSidebar.utils';

@@ -47,13 +47,8 @@ import { XyneAIStar } from '../../icons/xyne-ai';
 import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
 import { CalendarEvent } from '@xyne/icons';
-import {
-  closeXyneCalendarSidebarForHandoff,
-  getNextCalendarBadgeBoundary,
-  getPendingCalendarCallCount,
-  openXyneCalendarSidebarForHandoff,
-  toggleXyneCalendarSidebar,
-} from '../XyneCalendarSidebar';
+import { getNextCalendarBadgeBoundary, getPendingCalendarCallCount } from '../XyneCalendarSidebar';
+import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useNowWithBoundary } from '../../../hooks/useNowWithBoundary';
@@ -393,10 +388,14 @@ const ConversationHeader = ({
                 if (isAIOnboardingActive()) return;
                 if (xyneAIActor.getSnapshot().matches('open')) {
                   xyneAIActor.send({ type: 'CLOSE' });
-                  openXyneCalendarSidebarForHandoff();
+                  xyneCalendarActor.send({ type: 'OPEN' });
                   return;
                 }
-                toggleXyneCalendarSidebar();
+                if (xyneCalendarActor.getSnapshot().matches('open')) {
+                  xyneCalendarActor.send({ type: 'CLOSE' });
+                } else {
+                  xyneCalendarActor.send({ type: 'OPEN' });
+                }
               }}
               className={cn('relative h-7 w-7 overflow-visible rounded-lg', actionIconClass)}
               aria-label={
@@ -431,7 +430,7 @@ const ConversationHeader = ({
                 trackAskAIOpened(channel.scopeType);
 
                 // Trigger xstate machine to open XyneAI
-                closeXyneCalendarSidebarForHandoff();
+                xyneCalendarActor.send({ type: 'CLOSE' });
                 xyneAIActor.send({ type: 'OPEN', channelId });
               }}
               className='h-7 w-7 rounded-lg'
