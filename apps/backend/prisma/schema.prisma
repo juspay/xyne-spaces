@@ -4598,7 +4598,7 @@ model ThreadTypeVocabulary {
   workspaceId String
   name        String
   label       String
-  summary     String?  @default("")
+  summary     String
   color       String
   description String
   status      String   @default("APPROVED")

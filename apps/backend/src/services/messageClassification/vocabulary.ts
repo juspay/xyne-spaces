@@ -78,15 +78,13 @@ const inDisplayOrder = (entries: ThreadTypeEntry[]): ThreadTypeEntry[] =>
 const toEntry = (row: {
   name: string;
   label: string;
-  // Nullable in the column: DEFAULT '' covers a writer that omits it, but one that passes NULL
-  // explicitly stores NULL. Normalised here so every caller keeps a plain string.
-  summary: string | null;
+  summary: string;
   color: string;
   description: string;
 }): ThreadTypeEntry => ({
   name: row.name,
   label: row.label,
-  summary: row.summary ?? '',
+  summary: row.summary,
   color: row.color,
   description: row.description,
 });
@@ -220,6 +218,8 @@ export async function getThreadTypeVocabulary(workspaceId: string): Promise<Thre
 export interface VocabularyInput {
   name: string;
   label: string;
+  /** The column has no default — the request schema fills '' for a caller that omits it. */
+  summary: string;
   color: string;
   description: string;
   /** Omitted means APPROVED — writing an entry through the API is how a candidate is promoted. */
@@ -656,6 +656,8 @@ export async function recordVocabularyCandidate(
         // Placeholders an admin edits on approval. The label is the raw name so the review
         // screen shows what was actually typed.
         label: name,
+        // No prose yet — an admin writes one when they approve the name.
+        summary: '',
         color: '#6b7280',
         // The note the inventor typed, if they gave one. It belongs here rather than on the
         // thread: it explains what the TAG means, so it is written once and every chip of
