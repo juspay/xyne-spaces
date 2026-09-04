@@ -3,6 +3,7 @@ import { tagRepository } from '@/database/repositories/tagRepository';
 import { TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
 import { TagsConfigShapeSchema } from './schema';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
+import { syncTicketTagsFromEmail } from './deskTicket';
 import type { CategoryCatalogEntry, CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
 
 export class TagServiceError extends Error {
@@ -167,7 +168,7 @@ export class TagService {
       );
     }
 
-    return tagRepository.insertTagRow({
+    const created = await tagRepository.insertTagRow({
       sourceId,
       sourceType,
       workspaceId,
@@ -178,6 +179,10 @@ export class TagService {
       createdBy,
       updatedBy: createdBy,
     });
+
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+
+    return created;
   }
 
   async updateTag(
@@ -194,7 +199,7 @@ export class TagService {
     this.assertTagNameFormat(oldTag, 'Tag');
     this.assertTagNameFormat(newTag, 'Tag');
 
-    return tagRepository.getDb().$transaction(async (tx) => {
+    const updated = await tagRepository.getDb().$transaction(async (tx) => {
       const existing = await tagRepository.findActiveTag(sourceId, sourceType, tagCategory, oldTag, tx);
       if (!existing) {
         throw new TagServiceError(
@@ -219,6 +224,10 @@ export class TagService {
         updatedBy,
       }, tx);
     });
+
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+
+    return updated;
   }
 
   async deleteTag(
@@ -244,6 +253,8 @@ export class TagService {
     await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
 
     await tagRepository.softDeleteTagRow(existing.id, deletedBy);
+
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
   }
 
   /**
@@ -259,7 +270,11 @@ export class TagService {
     }
     if (existing.method === TagMethod.MANUAL) return existing;
 
-    return tagRepository.updateTagMethod(tagId, TagMethod.MANUAL, updatedBy);
+    const confirmed = await tagRepository.updateTagMethod(tagId, TagMethod.MANUAL, updatedBy);
+
+    if (existing.sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(existing.sourceId);
+
+    return confirmed;
   }
 
   async getUniqueTagValues(
@@ -301,7 +316,7 @@ export class TagService {
     }
     await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
 
-    return tagRepository.getDb().$transaction(async (tx) => {
+    const result = await tagRepository.getDb().$transaction(async (tx) => {
       const current = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
       const currentTagValues = new Set(current.map((row) => row.tag));
       const desiredTagValues = new Set(tags);
@@ -330,6 +345,10 @@ export class TagService {
       const updated = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
       return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method as TagMethod }));
     });
+
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+
+    return result;
   }
 
   async replaceTagsForCategories(
@@ -347,8 +366,8 @@ export class TagService {
       generatedByCategory.set(item.category, list);
     }
 
-    return tagRepository.getDb().$transaction(async (tx) => {
-      const persisted: PersistedTag[] = [];
+    const persisted = await tagRepository.getDb().$transaction(async (tx) => {
+      const result: PersistedTag[] = [];
 
       for (const [category, categoryConfig] of Object.entries(categories)) {
         if (categoryConfig.method === 'manual') continue;
@@ -375,12 +394,16 @@ export class TagService {
             method,
             reason,
           }, tx);
-          persisted.push({ tagCategory: category, tag: item.tag, method, reason });
+          result.push({ tagCategory: category, tag: item.tag, method, reason });
         }
       }
 
-      return persisted;
+      return result;
     });
+
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+
+    return persisted;
   }
 
   private assertTagNameFormat(value: string, label: 'Tag' | 'Tag category'): void {

@@ -19,6 +19,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { mailSchema } from '@/vespa/src/types';
 import { config as appConfig } from '@/config/env';
 import { tagGenerationPipeline, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
+import { syncTicketTagsForConversation } from '@/tags/deskTicket';
 
 interface DemergeEmailRequest {
   emailId: string;
@@ -159,6 +160,11 @@ export class EmailDemergeController {
         await syncTicketEmailCount(tx, originalTicket.conversationId);
         await syncTicketEmailCount(tx, newConversation.conversationId);
       });
+
+      // Re-sync old ticket's tags — emails moved out so its latest email changed,
+      // but no tag write fired on the old conversation's side.
+      // New conversation's ticket tags are covered by the regen jobs below.
+      void syncTicketTagsForConversation(email.conversationId);
 
       // Re-index moved emails in Vespa — conversationId (threadId) and permissions changed
       for (const id of emailIdsToMove) {
