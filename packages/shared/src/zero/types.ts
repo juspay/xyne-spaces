@@ -982,6 +982,12 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
+// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// @ts-ignore TS1294
+export enum ViewAccessEntityType {
+  USER = 'USER',
+}
+
 // @ts-ignore TS1294
 export enum DelayedMessageStatus {
   PENDING = 'PENDING',
@@ -1154,6 +1160,10 @@ export enum WorkflowEventType {
   MESSAGE_RECEIVED = 'MESSAGE_RECEIVED',
   CALL_EVENT = 'CALL_EVENT',
   TAG_GENERATED = 'TAG_GENERATED',
+  MANUAL = 'MANUAL',
+  CRON = 'CRON',
+  EVENT = 'EVENT',
+  WEBHOOK_V2 = 'WEBHOOK_V2',
 }
 
 // @ts-ignore TS1294
