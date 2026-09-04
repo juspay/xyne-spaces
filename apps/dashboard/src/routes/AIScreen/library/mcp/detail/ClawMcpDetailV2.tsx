@@ -10,7 +10,6 @@ import {
   canEditMcpDefinition,
   createMcpConnection,
   deleteMcpConnection,
-  mcpCredentialFields,
   mcpRequiresCredentials,
   startMcpOAuth,
 } from '@/services/claw/clawMcpService';
@@ -22,6 +21,7 @@ import { Pill } from '../../shared/primitives/Pill';
 import { CopyButton } from '../../shared/primitives/CopyButton';
 import { McpLogo } from '../../shared/pickers/mcp/McpLogo';
 import { useMcpCatalog } from '../../shared/pickers/mcp/useMcpCatalog';
+import { useMcpCredentialFields } from '../../shared/pickers/mcp/useMcpCredentialFields';
 import { VerifiedTick } from '../../shared/pickers/mcp/McpIdentity';
 
 const NOTE =
@@ -64,6 +64,7 @@ const ClawMcpDetailV2 = (): ReactElement => {
 
   const { entries, connectedServerIds, connectionsByServerId, loading, isError, refetch } =
     useMcpCatalog();
+  const { fieldsFor, ensureFieldsFor } = useMcpCredentialFields();
   const { user } = useAuth();
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -79,11 +80,11 @@ const ClawMcpDetailV2 = (): ReactElement => {
   const config = server?.httpConfigTemplate ?? server?.launchConfigTemplate ?? null;
   const configJson = config ? JSON.stringify(config, null, 2) : null;
   const connected = server ? connectedServerIds.has(server.id) : false;
-  const needsCredentials = server ? mcpRequiresCredentials(server) : false;
+  const credentialFields = fieldsFor(server);
   const connection = server ? connectionsByServerId.get(server.id) : undefined;
   // Only connectors with fields have anything to re-enter; an OAuth connector
   // is re-authorised by connecting again, not by editing a form.
-  const canEditCredentials = server ? mcpCredentialFields(server).length > 0 : false;
+  const canEditCredentials = credentialFields.length > 0;
   const canEditDefinition = server ? canEditMcpDefinition(server, user?.id, isClawAdmin) : false;
 
   const handleDisconnect = async (): Promise<void> => {
@@ -111,8 +112,9 @@ const ClawMcpDetailV2 = (): ReactElement => {
     setConnectError(null);
 
     // Credential connectors collect their fields first; everything else can
-    // connect straight away.
-    if (needsCredentials) {
+    // connect straight away. Re-resolved here rather than trusting the render
+    // pass, so a click before the registry lands still opens the form.
+    if (mcpRequiresCredentials(server, await ensureFieldsFor(server))) {
       setCredentialsOpen(true);
       return;
     }
