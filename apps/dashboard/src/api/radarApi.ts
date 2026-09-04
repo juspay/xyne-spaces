@@ -30,6 +30,7 @@ export interface RadarApplyResult {
   created: number;
   resolved: number;
   reassigned: number;
+  dismissed: number;
 }
 
 export interface RadarRunLog {
@@ -101,56 +102,19 @@ export function fetchRadarItemTrail(itemId: string): Promise<RadarItemTrail> {
   );
 }
 
-export interface RadarTeam {
-  id: string;
-  name: string;
-  memberIds: string[];
+export interface RadarMessagePreview {
+  messageId: string;
   createdAt: string;
-}
-
-export interface RadarTeamFeedItem extends RadarFeedItem {
-  channelVisibility: string;
-}
-
-export function fetchRadarTeams(): Promise<RadarTeam[]> {
-  return unwrap(apiInstance.get<SuccessEnvelope<{ teams: RadarTeam[] }>>('/radar/teams')).then(
-    d => d.teams,
-  );
-}
-
-export function createRadarTeam(name: string, memberIds: string[]): Promise<RadarTeam> {
-  return unwrap(apiInstance.post<SuccessEnvelope<RadarTeam>>('/radar/teams', { name, memberIds }));
-}
-
-export function updateRadarTeam(
-  teamId: string,
-  name: string,
-  memberIds: string[],
-): Promise<RadarTeam> {
-  return unwrap(
-    apiInstance.patch<SuccessEnvelope<RadarTeam>>(`/radar/teams/${encodeURIComponent(teamId)}`, {
-      name,
-      memberIds,
-    }),
-  );
-}
-
-export function deleteRadarTeam(teamId: string): Promise<void> {
-  return apiInstance.delete(`/radar/teams/${encodeURIComponent(teamId)}`).then(() => undefined);
-}
-
-export function fetchRadarTeamFeed(teamId: string): Promise<RadarTeamFeedItem[]> {
-  return unwrap(
-    apiInstance.get<SuccessEnvelope<{ items: RadarTeamFeedItem[] }>>(
-      `/radar/feed/team/${encodeURIComponent(teamId)}`,
-    ),
-  ).then(d => d.items);
+  senderId: string | null;
+  text: string;
 }
 
 export interface RadarRunsResult {
   runs: RadarRunLog[];
   threadState: { watermarkCreatedAt: string; watermarkMsgId: string; updatedAt: string } | null;
-  latestMessage: { messageId: string; createdAt: string } | null;
+  latestMessage: RadarMessagePreview | null;
+  /** The message the watermark sits on — what "processed till" actually means. */
+  watermarkMessage: RadarMessagePreview | null;
   /** Every item the thread produced (resolved included) when scoped to one thread. */
   items: Array<{ id: string; title: string; status: string }>;
 }
@@ -173,6 +137,23 @@ export function resolveAllRadarItems(conversationId: string): Promise<RadarApply
   return unwrap(
     apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
       `/radar/threads/${encodeURIComponent(conversationId)}/resolve-all`,
+    ),
+  );
+}
+
+/** Drops the caller from pendingOn; the item closes only when nobody is left. */
+export function dismissRadarItem(itemId: string): Promise<RadarApplyResult> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
+      `/radar/items/${encodeURIComponent(itemId)}/dismiss`,
+    ),
+  );
+}
+
+export function dismissAllRadarItems(conversationId: string): Promise<RadarApplyResult> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
+      `/radar/threads/${encodeURIComponent(conversationId)}/dismiss-all`,
     ),
   );
 }
