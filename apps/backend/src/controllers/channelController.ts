@@ -1452,7 +1452,7 @@ export class ChannelController {
     try {
       // projectId is accepted for backwards compatibility with older clients but
       // is no longer required or used: duplicate-channel checks are workspace-scoped.
-      const { name, projectId }: { name: string; projectId?: string } = req.body;
+      const { name, projectId, channelId }: { name: string; projectId?: string; channelId?: string } = req.body;
 
       // Validate required fields
       if (!name) {
@@ -1471,7 +1471,7 @@ export class ChannelController {
         res.status(400).json({ error: 'Missing workspaceId' });
         return;
       }
-      const isDuplicate = await this.channelRepository.checkDuplicateName(name.trim(), workspaceId);
+      const isDuplicate = await this.channelRepository.checkDuplicateName(name.trim(), workspaceId, channelId);
 
       const response: CheckDuplicateChannelResponse = {
         isDuplicate,

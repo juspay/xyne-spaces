@@ -1230,7 +1230,13 @@ export function createMutators(
             throw new Error('You are not a participant of this channel');
           }
 
-          const existingChannel = await tx.run(zql.channels.where('name', name).one());
+          const existingChannel = await tx.run(
+            zql.channels
+              .where('name', name)
+              .where('isArchived', false)
+              .where('scopeType', ChannelScopeType.DEFAULT)
+              .one(),
+          );
           if (existingChannel && existingChannel.id !== channelId) {
             throw new Error('A channel with this name already exists');
           }
@@ -2009,8 +2015,16 @@ export function createMutators(
           }
 
 
-          // Check for duplicate name
-          const existingChannel = await tx.run(zql.channels.where('name', name).one());
+          // Check for duplicate name — only ACTIVE, DEFAULT-scope channels own a
+          // name. Archived channels release it and non-DEFAULT scopes never
+          // block it. A channel never collides with itself (id !== channelId).
+          const existingChannel = await tx.run(
+            zql.channels
+              .where('name', name)
+              .where('isArchived', false)
+              .where('scopeType', ChannelScopeType.DEFAULT)
+              .one(),
+          );
           if (existingChannel && existingChannel.id !== channelId) {
             throw new Error('A channel with this name already exists');
           }
@@ -2262,6 +2276,25 @@ export function createMutators(
 
           if (!channel.isArchived) {
             throw new Error('Channel is not archived');
+          }
+
+          // Archived channels release their name, so another active DEFAULT
+          // channel may have claimed it in the meantime. Un-archiving into that
+          // collision would produce two active channels with the same name, so
+          // block it and ask the user to rename first.
+          if (channel.scopeType === ChannelScopeType.DEFAULT) {
+            const nameOwner = await tx.run(
+              zql.channels
+                .where('name', channel.name)
+                .where('isArchived', false)
+                .where('scopeType', ChannelScopeType.DEFAULT)
+                .one(),
+            );
+            if (nameOwner && nameOwner.id !== channelId) {
+              throw new Error(
+                `An active channel named '${channel.name}' already exists. Rename it before unarchiving this one.`,
+              );
+            }
           }
 
           await tx.mutate.channels.update({
