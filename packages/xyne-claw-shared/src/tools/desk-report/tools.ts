@@ -595,7 +595,16 @@ export const createDeskReportTool: ToolDefinition = {
         type: "string",
         description:
           "Full report in markdown. Headings, tables, lists, code blocks, and ```chart blocks all " +
-          "render natively. BAR_CHART items may include an optional drilldown field: " +
+          "render natively. Supported chart visualTypes (exactly these — anything else renders as raw text): " +
+          "KPI, KPI_COMPARE, BAR_CHART, PIE_CHART, DONUT_CHART, DATA_TABLE. " +
+          "IMPORTANT — BAR_CHART is ALWAYS re-sorted by value descending at render time, ignoring the order you " +
+          "provide. Use BAR_CHART ONLY for categorical rankings (top tags, categories, priorities, per-agent counts). " +
+          "NEVER use BAR_CHART for time series (hourly or daily opened-vs-closed, trends over time). Render time " +
+          "series as a DATA_TABLE with rows in chronological order and one column per series, exactly like: " +
+          '{ "title": "Hourly opened vs closed", "visualType": "DATA_TABLE", "data": { "columns": [ ' +
+          '{ "key": "hour", "label": "Hour (IST)" }, { "key": "opened", "label": "Opened" }, ' +
+          '{ "key": "closed", "label": "Closed" } ], "rows": [ { "hour": "02/09 09:00", "opened": 13, "closed": 4 } ] } }. ' +
+          "BAR_CHART items may include an optional drilldown field: " +
           '{ "label": "X", "value": 42, "drilldown": { "verbatims": ["..."], "action": "Fix Y" } }. ' +
           "Soft limit: 500,000 chars.",
       },
