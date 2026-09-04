@@ -18,6 +18,7 @@ import {
   SpeakerOn,
   Translate,
   VideoCallDefault,
+  CopyCopied,
 } from '@xyne/icons';
 import { CallStatus, ChannelScopeType, ChannelVisibility, MeetingStatus } from '@xyne/shared';
 import { useCachedQuery } from '@xyne/shared/hooks';
@@ -321,14 +322,20 @@ function CallLocationSection({
   channel: XyneCalendarChannelPresentation | undefined;
   location: string | undefined;
 }): ReactElement {
+  const [copied, setCopied] = useState(false);
+
   const handleCopyLink = (): void => {
     if (!copyLink) {
-      toast.error('No link available');
       return;
     }
     void copyTextToClipboard(copyLink)
-      .then(() => toast.success('Link copied to clipboard'))
-      .catch(() => toast.error('Failed to copy link'));
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
+        setCopied(false);
+      });
   };
 
   return (
@@ -352,10 +359,20 @@ function CallLocationSection({
               onClick={handleCopyLink}
               data-track-category='Calendar'
               data-track-name='CALL_DETAIL_COPY_LINK'
-              className='h-7 shrink-0 rounded-lg border-border bg-background px-2.5 text-xs font-semibold text-foreground shadow-none hover:bg-muted'
+              className='!w-24 h-7 shrink-0 rounded-lg border-border bg-background px-2.5 text-xs font-semibold text-foreground shadow-none hover:bg-muted'
             >
-              <CopyDefault className='size-3.5' aria-hidden='true' />
-              Copy link
+              <span className='relative flex size-3.5 shrink-0 items-center justify-center'>
+                <CopyDefault
+                  className={`absolute size-3.5 ${copied ? 'invisible' : 'visible'}`}
+                  aria-hidden='true'
+                />
+                <CopyCopied
+                  className={`absolute size-3.5 text-status-success ${copied ? 'visible' : 'invisible'}`}
+                  aria-hidden='true'
+                />
+              </span>
+
+              <span>{copied ? 'Copied!' : 'Copy link'}</span>
             </Button>
           )}
         </div>
