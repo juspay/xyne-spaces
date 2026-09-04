@@ -504,37 +504,16 @@ export interface SubagentProviderResolution {
 /**
  * Returns (provider, providerConfig) for a subagent, or undefined to fall back to shared LITELLM.
  *
- * Special-case: when the parent is on Anthropic OAuth (Pro/Max plan token),
- * the parent's calls hit plan-billing fine but subagents' inner-LLM calls get
- * routed to credits by Anthropic — bucket-routing logic we can't see from this
- * side. With $0 credits, every subagent fails with "out of extra usage".
- * Bypassing that entirely: when parent is Anthropic OAuth and the user
- * didn't explicitly pin a subagent provider, return undefined here so the
- * subagent falls through to shared LiteLLM. Parent keeps using the plan; the
- * inner-LLM is on LiteLLM (separate billing).
- *
- * Override: set XYNE_SUBAGENT_FOLLOW_PARENT=1 to disable this special-case
- * (e.g. for testing). User can still explicitly pin a subagent via
- * subagentProviders[def.name] regardless of this gate.
+ * The Anthropic-OAuth special-case (parent on Pro/Max OAuth token → force subagent
+ * inner-LLM to LiteLLM, XYNE_SUBAGENT_FOLLOW_PARENT override) is gone: Claude OAuth
+ * was removed because subscription tokens must not be stored on a third-party
+ * server — Claude credentials are API-key-only now, so subagents can follow the parent.
  */
 function resolveProviderForSubagent(
   def: SubagentDefinition,
   resolution: SubagentProviderResolution | undefined,
 ): { provider: string; config: CopilotConfig | ClaudeConfig | CodexConfig } | undefined {
   const explicit = resolution?.subagentProviders?.[def.name];
-  const followParent = process.env["XYNE_SUBAGENT_FOLLOW_PARENT"] === "1";
-  const parentIsAnthropicOAuth =
-    resolution?.parentProvider === "claude"
-    && resolution?.providerConfigs?.claude?.authType === "oauth_token";
-
-  // Force LiteLLM when parent is Anthropic OAuth and no explicit subagent
-  // override exists. Avoids the plan→credits spillover that consistently
-  // breaks subagents on this path.
-  if (parentIsAnthropicOAuth && !explicit && !followParent) {
-    log.info(`[${def.name}] parent is Anthropic OAuth — routing subagent inner LLM through LiteLLM (set XYNE_SUBAGENT_FOLLOW_PARENT=1 to disable)`);
-    return undefined;
-  }
-
   const chosen = explicit ?? resolution?.parentProvider;
   if ((chosen === "copilot" || chosen === "claude" || chosen === "codex") && resolution?.providerConfigs?.[chosen]) {
     const cfg = resolution.providerConfigs[chosen]!;

@@ -8,12 +8,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
-import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
@@ -1513,30 +1512,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "agent"; }
     }
     applyFastModeModels(providerConfigs, agent.config, effectiveSpeed);
-
-    // Refresh Claude OAuth before use (short-lived token; see webhook.ts for the
-    // rationale). Mutates the resolved config's apiKey and persists the rotated
-    // token to the owning cred row. Pass-through for api_key / bare-token creds.
-    const claudeCfg = providerConfigs["claude"];
-    if (claudeCfg && claudeCfg.authType === "oauth_token") {
-      const scope = providerScope["claude"];
-      const credRow = scope === "agent"
-        ? agentCreds.find((c) => c.provider === "claude")
-        : allCreds.find((c) => c.provider === "claude");
-      const ownerId = scope === "agent" ? agent.id : userId;
-      if (credRow) {
-        // Rows in either scope may be bindings to a shared org credential —
-        // the refresh then targets the shared row (see agentCredRefreshTarget).
-        const target = scope === "agent"
-          ? agentCredRefreshTarget(agent.id, "claude", credRow as { sharedCredentialId?: string | null })
-          : userCredRefreshTarget(userId, "claude", credRow as { sharedCredentialId?: string | null });
-        try {
-          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
-        } catch (err) {
-          log.warn("[agent-chat] Claude OAuth refresh failed — credential likely needs reconnect:", err instanceof Error ? err.message : err);
-        }
-      }
-    }
 
     // Resolution: personal user provider always wins. Otherwise providerOrder
     // (canonical) takes over, with legacy config.provider as fallback for

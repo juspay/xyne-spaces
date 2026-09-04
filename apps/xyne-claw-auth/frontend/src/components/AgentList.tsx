@@ -75,7 +75,7 @@ function ProviderPopup({
   const providers: Array<{ id: string; label: string; description: string; needsCreds: boolean }> = [
     { id: "spaces", label: "Spaces (Default)", description: "Shared LLM gateway", needsCreds: false },
     { id: "copilot", label: "GitHub Copilot", description: "Use your GitHub Copilot subscription", needsCreds: true },
-    { id: "claude", label: "Anthropic Claude", description: "Use your Anthropic API key or Pro/Max OAuth token", needsCreds: true },
+    { id: "claude", label: "Anthropic Claude", description: "Use your Anthropic API key", needsCreds: true },
     { id: "codex", label: "OpenAI (Codex)", description: "Use your OpenAI Platform API key", needsCreds: true },
   ];
 

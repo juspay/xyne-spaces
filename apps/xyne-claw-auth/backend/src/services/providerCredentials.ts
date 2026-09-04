@@ -6,7 +6,6 @@
  */
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { extractCodexBearer } from "../lib/codex-creds.js";
 
 interface ProviderCredRow {
   encryptedKey: string | null;
@@ -45,8 +44,6 @@ function defaultModelForProvider(provider: string): string {
   // gpt-4o is NOT servable through Copilot OAuth here — every defaulted call
   // failed and fell back to spaces.
   if (provider === "copilot") return "claude-sonnet-4.6";
-  // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (400
-  // "model is not supported when using Codex with a ChatGPT account").
   if (provider === "codex") return "gpt-5.5";
   // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth path.
   return "claude-opus-4-8";
@@ -63,9 +60,8 @@ function buildProviderConfig(
   if (!row.encryptedKey || !row.iv || !row.authTag) return null;
   try {
     const decrypted = decrypt(row.encryptedKey, row.iv, row.authTag, CONFIG.encryptionKey);
-    // Codex OAuth-mode stores a JSON bundle ({access_token, refresh_token, …});
-    // pull out the bare access_token so downstream sees a usable Bearer string.
-    const apiKey = provider === "codex" ? extractCodexBearer(decrypted) : decrypted;
+    // All creds are plain API keys now — Claude and Codex OAuth were removed.
+    const apiKey = decrypted;
     return {
       apiKey,
       model: row.model ?? defaultModelForProvider(provider),

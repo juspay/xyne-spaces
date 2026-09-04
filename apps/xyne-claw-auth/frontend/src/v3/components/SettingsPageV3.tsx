@@ -24,8 +24,6 @@ import {
   listClaudeModelsForUser,
   listCodexModelsForUser,
   listLitellmModelsForUser,
-  startCodexOauth,
-  exchangeCodexOauth,
   shareMyProviderCredential,
   listAgents,
   type ProviderCredential,
@@ -758,7 +756,6 @@ function GenericProviderConfigForm({
   const isClaude = provider === "claude";
   const isCodex = provider === "codex";
   const isLitellm = provider === "litellm";
-  const supportsOauth = isClaude || isCodex;
 
   const [existing, setExisting] = useState<ProviderCredential | undefined>();
   const [apiKey, setApiKey] = useState("");
@@ -773,9 +770,6 @@ function GenericProviderConfigForm({
   const [err, setErr] = useState<string | null>(null);
 
   // Codex OAuth flow state
-  const [codexFlow, setCodexFlow] = useState<{ url: string; state: string } | null>(null);
-  const [codexCode, setCodexCode] = useState("");
-  const [codexBusy, setCodexBusy] = useState(false);
 
   // Load existing credential
   useEffect(() => {
@@ -786,7 +780,7 @@ function GenericProviderConfigForm({
         if (cred) {
           setModel(cred.model ?? (isClaude ? "claude-sonnet-4-5" : isLitellm ? "private-large" : "gpt-4.1"));
           setBaseUrl(cred.baseUrl ?? (isClaude ? "https://api.anthropic.com" : isLitellm ? "" : "https://api.openai.com/v1"));
-          setAuthType(cred.authType === "oauth_token" ? "oauth_token" : "api_key");
+          setAuthType("api_key"); // OAuth removed — creds are always api_key
           if (cred.reasoningEffort === "low" || cred.reasoningEffort === "medium" || cred.reasoningEffort === "high") {
             setReasoningEffort(cred.reasoningEffort);
           }
@@ -834,17 +828,14 @@ function GenericProviderConfigForm({
   }, [provider, existing?.hasApiKey, userId, isClaude, isLitellm, apiKey, baseUrl]);
 
   const hasKey = existing?.hasApiKey ?? false;
-  const isOauth = authType === "oauth_token";
 
   const handleSave = async () => {
     const payload: {
       apiKey?: string;
       model?: string;
       baseUrl?: string;
-      authType?: "api_key" | "oauth_token";
       reasoningEffort?: "low" | "medium" | "high";
     } = { model, baseUrl, reasoningEffort };
-    if (supportsOauth) payload.authType = authType;
     if (apiKey) payload.apiKey = apiKey;
     else if (!hasKey) {
       setErr("API key is required");
@@ -881,36 +872,6 @@ function GenericProviderConfigForm({
     }
   };
 
-  const startCodexOAuth = async () => {
-    setCodexBusy(true);
-    setErr(null);
-    try {
-      const flow = await startCodexOauth(userId);
-      setCodexFlow({ url: flow.url, state: flow.state });
-      window.open(flow.url, "_blank", "noopener,noreferrer");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to start sign-in");
-    } finally {
-      setCodexBusy(false);
-    }
-  };
-
-  const completeCodexOAuth = async () => {
-    setCodexBusy(true);
-    setErr(null);
-    try {
-      await exchangeCodexOauth(userId, { code: codexCode.trim(), state: codexFlow!.state });
-      setCodexFlow(null);
-      setCodexCode("");
-      onMutate();
-      onClose();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Sign-in failed");
-    } finally {
-      setCodexBusy(false);
-    }
-  };
-
   return (
     <div className="flex flex-col gap-4">
       {hasKey && (
@@ -920,82 +881,14 @@ function GenericProviderConfigForm({
         </div>
       )}
 
-      {supportsOauth && (
-        <div>
-          <label className="mb-1.5 block text-[12px] font-medium text-xyne-fg-secondary">Auth method</label>
-          <div className="grid grid-cols-2 gap-2">
-            <AuthMethodOption
-              label="API Key"
-              sublabel={isClaude ? "Usage-based, Console key" : "Usage-based, Platform key"}
-              selected={authType === "api_key"}
-              onSelect={() => setAuthType("api_key")}
-            />
-            <AuthMethodOption
-              label={isClaude ? "OAuth Token" : "ChatGPT OAuth Token"}
-              sublabel={isClaude ? "Pro/Max subscription" : "ChatGPT Plus/Pro subscription"}
-              selected={authType === "oauth_token"}
-              onSelect={() => setAuthType("oauth_token")}
-            />
-          </div>
-
-          {isOauth && isClaude && (
-            <p className="mt-2 rounded-lg border border-xyne-info-border bg-xyne-info-bg px-3 py-2 text-[12px] text-xyne-info-fg">
-              Run <code className="rounded bg-xyne-surface px-1">claude setup-token</code> on any machine with
-              Claude Code installed. Paste the resulting token below.
-            </p>
-          )}
-
-          {isOauth && isCodex && (
-            <div className="mt-2 flex flex-col gap-2 rounded-lg border border-xyne-info-border bg-xyne-info-bg px-3 py-2.5 text-[12px] text-xyne-info-fg">
-              {!codexFlow ? (
-                <Button size="sm" onClick={startCodexOAuth} disabled={codexBusy}>
-                  {codexBusy ? "Opening…" : "Sign in with ChatGPT"}
-                </Button>
-              ) : (
-                <>
-                  <p>
-                    Paste the code from the OpenAI page below.{" "}
-                    <a href={codexFlow.url} target="_blank" rel="noopener noreferrer" className="underline">
-                      Re-open tab
-                    </a>
-                  </p>
-                  <TextField
-                    value={codexCode}
-                    onChange={(e) => setCodexCode(e.target.value)}
-                    placeholder="Paste code or callback URL"
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={completeCodexOAuth} disabled={codexBusy || !codexCode.trim()}>
-                      {codexBusy ? "Verifying…" : "Complete sign-in"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setCodexFlow(null);
-                        setCodexCode("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {(!isOauth || isClaude) && (
-        <TextField
+      <TextField
           type="password"
-          label={isOauth ? (isClaude ? "OAuth Token" : "ChatGPT OAuth Token") : "API Key"}
+          label="API Key"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder={hasKey ? "••••••••" : isLitellm ? "JUSPAY_GRID_API_KEY" : "sk-…"}
           hint={hasKey ? "Leave blank to keep current" : undefined}
         />
-      )}
 
       <div>
         <label className="mb-1.5 block text-[12px] font-medium text-xyne-fg-secondary">Model</label>

@@ -31,12 +31,6 @@ export type ModelSpeed = (typeof MODEL_SPEEDS)[number];
 
 export const FAST_MODE_BETA = "fast-mode-2026-02-01";
 
-// pi-ai's OAuth client path sets these two betas itself; because headers are
-// merged with Object.assign (last write wins), a caller-supplied
-// `anthropic-beta` REPLACES that list rather than extending it. Re-state them
-// so fast mode can't silently strip the OAuth identity betas.
-const OAUTH_BETAS = ["claude-code-20250219", "oauth-2025-04-20"] as const;
-
 /** Direct-Anthropic provider name registered by resolveModel's `claude` branch. */
 export const ANTHROPIC_USER_PROVIDER = "anthropic-user";
 
@@ -91,16 +85,14 @@ type StreamFn = (
 
 type StreamAgent = { streamFn: StreamFn };
 
-function isOAuthApiKey(apiKey: string | undefined): boolean {
-  return typeof apiKey === "string" && apiKey.includes("sk-ant-oat");
-}
-
-/** Build the `anthropic-beta` value: extend whatever the caller already set,
- *  otherwise re-state pi-ai's OAuth betas when the key is an OAuth token. */
+/** Build the `anthropic-beta` value: extend whatever the caller already set
+ *  with the fast-mode beta. (The OAuth-identity betas re-injection is gone —
+ *  Claude OAuth was removed; credentials are API keys now.) */
 export function fastModeBetaHeader(existing: string | undefined, apiKey: string | undefined): string {
+  void apiKey; // kept for signature compatibility with callers/tests
   const base = existing
     ? existing.split(",").map((s) => s.trim()).filter(Boolean)
-    : isOAuthApiKey(apiKey) ? [...OAUTH_BETAS] : [];
+    : [];
   if (!base.includes(FAST_MODE_BETA)) base.push(FAST_MODE_BETA);
   return base.join(",");
 }

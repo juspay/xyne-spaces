@@ -113,9 +113,7 @@ Headless runs (scheduled jobs) use agent-level creds only.
 per-subagent). Higher = slower & costlier; only meaningful on reasoning-capable models.
 
 **Subagents bill separately.** A subagent resolves its own provider
-(per-user subagent override → explicit → parent → else LiteLLM). Special case: if the
-parent is on **Anthropic OAuth** (Pro/Max plan token), subagents are forced onto
-LiteLLM to avoid plan→credits billing spillover (override `XYNE_SUBAGENT_FOLLOW_PARENT=1`).
+(per-user subagent override → explicit → parent → else LiteLLM).
 
 ---
 

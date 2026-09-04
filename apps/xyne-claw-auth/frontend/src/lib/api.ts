@@ -880,52 +880,6 @@ export async function deleteAgentProviderCredential(
   );
 }
 
-// Agent-scoped Codex ChatGPT OAuth (PKCE). Mirrors the user-scoped flow
-// (startCodexOauth / exchangeCodexOauth) but writes the OAuth bundle into
-// `agentProviderCredentials` instead of `userProviderCredentials`. Gated by
-// owner/admin via the backend's `requireAgentOwnerOrAdmin` middleware.
-export async function startAgentCodexOauth(
-  slug: string,
-): Promise<{ url: string; state: string; expiresIn: number }> {
-  const data = await request<{ success: boolean; data: { url: string; state: string; expiresIn: number } }>(
-    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/codex/oauth/start`,
-    { method: "POST", body: JSON.stringify({}) },
-  );
-  return data.data;
-}
-
-export async function exchangeAgentCodexOauth(
-  slug: string,
-  payload: { code: string; state: string },
-): Promise<void> {
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/codex/oauth/exchange`,
-    { method: "POST", body: JSON.stringify(payload) },
-  );
-}
-
-// Agent-scoped Anthropic (Claude) OAuth — captures the {access_token,
-// refresh_token, expires_at} bundle so the token can be auto-refreshed.
-export async function startAgentClaudeOauth(
-  slug: string,
-): Promise<{ url: string; state: string; expiresIn: number }> {
-  const data = await request<{ success: boolean; data: { url: string; state: string; expiresIn: number } }>(
-    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/claude/oauth/start`,
-    { method: "POST", body: JSON.stringify({}) },
-  );
-  return data.data;
-}
-
-export async function exchangeAgentClaudeOauth(
-  slug: string,
-  payload: { code: string; state: string },
-): Promise<void> {
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/provider-credentials/claude/oauth/exchange`,
-    { method: "POST", body: JSON.stringify(payload) },
-  );
-}
-
 export async function listAgentCodexModels(
   slug: string,
 ): Promise<Array<{ id: string; name: string }>> {
@@ -3763,21 +3717,6 @@ export async function listClaudeModelsForUser(userId: string): Promise<ClaudeMod
     { headers: { "x-user-id": userId } },
   );
   return data.data;
-}
-
-export async function startCodexOauth(userId: string): Promise<{ url: string; state: string; expiresIn: number }> {
-  const data = await request<{ success: boolean; data: { url: string; state: string; expiresIn: number } }>(
-    `${AUTH_API_URL}/api/v1/settings/codex/oauth/start`,
-    { method: "POST", headers: { "x-user-id": userId } },
-  );
-  return data.data;
-}
-
-export async function exchangeCodexOauth(userId: string, payload: { code: string; state: string }): Promise<void> {
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/settings/codex/oauth/exchange`,
-    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
-  );
 }
 
 export async function listCodexModelsForUser(userId: string): Promise<Array<{ id: string; name: string }>> {

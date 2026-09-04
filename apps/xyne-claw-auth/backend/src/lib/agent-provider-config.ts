@@ -2,10 +2,6 @@ import { agentProviderCredentialsRepository, sharedProviderCredentialRepository,
 import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { extractCodexBearer } from "./codex-creds.js";
-import { extractClaudeBearer } from "./claude-creds.js";
-import { getValidClaudeBearer } from "./claude-oauth-refresh.js";
-import { getValidCodexBearer } from "./codex-oauth-refresh.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-provider-config");
@@ -167,62 +163,6 @@ export type CredRow = {
 };
 
 /**
- * Where an agent-scoped credential's OAuth refresh must single-flight and
- * persist. Binding rows (sharedCredentialId set) refresh against the SHARED
- * row — one live provider session for every bound agent — while dedicated
- * rows keep the per-agent key/write-back. Used by every agent-cred refresh
- * site (this file, webhook.ts, agent-chat.ts) so the target logic can't drift.
- */
-export function agentCredRefreshTarget(
-  agentId: string,
-  provider: string,
-  row: { sharedCredentialId?: string | null },
-): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void> } {
-  const sharedId = row.sharedCredentialId;
-  if (sharedId) {
-    return {
-      credKey: `shared:${sharedId}:${provider}`,
-      persist: async (enc) => {
-        await sharedProviderCredentialRepository.persistBundle(sharedId, enc);
-      },
-    };
-  }
-  return {
-    credKey: `agent:${agentId}:${provider}`,
-    persist: async (enc) => {
-      await agentProviderCredentialsRepository.upsert(agentId, provider, enc);
-    },
-  };
-}
-
-/** User-scope twin of agentCredRefreshTarget: personal credential rows can
- *  also be bindings to a shared credential (the "connect once personally,
- *  share to agents" flow), in which case the refresh must target the shared
- *  row — otherwise the personal copy and the shared copy would hold two
- *  OAuth sessions of the same account and invalidate each other. */
-export function userCredRefreshTarget(
-  userId: string,
-  provider: string,
-  row: { sharedCredentialId?: string | null },
-): { credKey: string; persist: (enc: { encryptedKey: string; iv: string; authTag: string }) => Promise<void> } {
-  const sharedId = row.sharedCredentialId;
-  if (sharedId) {
-    return {
-      credKey: `shared:${sharedId}:${provider}`,
-      persist: async (enc) => {
-        await sharedProviderCredentialRepository.persistBundle(sharedId, enc);
-      },
-    };
-  }
-  return {
-    credKey: `user:${userId}:${provider}`,
-    persist: async (enc) => {
-      await userProviderCredentialsRepository.upsert(userId, provider, enc);
-    },
-  };
-}
-
-/**
  * Decrypt + shape one credential row into a ProviderConfig (null on failure).
  * SINGLE SOURCE OF TRUTH for per-provider default models + OAuth-bundle
  * extraction — imported by webhook / agent-chat / flow-action so a provider's
@@ -232,11 +172,8 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
   if (!row.encryptedKey || !row.iv || !row.authTag) return null;
   try {
     const decrypted = decrypt(row.encryptedKey, row.iv, row.authTag, CONFIG.encryptionKey);
-    // Codex & Claude OAuth-mode store a JSON bundle; pull the bare access_token.
-    const apiKey =
-      provider === "codex" ? extractCodexBearer(decrypted) :
-      provider === "claude" ? extractClaudeBearer(decrypted) :
-      decrypted;
+    // All claude/codex creds are plain API keys (both OAuth flows were removed).
+    const apiKey = decrypted;
     // Keep in sync with defaultModelForProvider() in services/providerCredentials.ts,
     // which documents the measured ok-rates behind these choices. A stale id here
     // fails silently — ~300ms error, read as an empty completion, fallback to
@@ -245,13 +182,8 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
       // gpt-4o is NOT servable through Copilot OAuth here (0 ok / 21 fail over
       // 72h) — every defaulted call fell back to spaces.
       provider === "copilot" ? "claude-sonnet-4.6" :
-      // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (OpenAI
-      // 400s "model is not supported when using Codex with a ChatGPT
-      // account") — every defaulted call failed and fell back to spaces.
       provider === "codex" ? "gpt-5.5" :
       provider === "litellm" ? "private-large" :
-      // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth
-      // path (0 ok / 1425 fail over 72h).
       "claude-opus-4-8";
     return {
       apiKey,
@@ -338,37 +270,8 @@ export async function resolveAgentProviderConfigs(
   }
   applyFastModeModels(providerConfigs, agent.config, speed);
 
-  // Refresh short-lived OAuth tokens before use (persist the rotated token back
-  // to the agent cred row), same as the chat path. api_key / not-yet-expired
-  // tokens pass through with no network call.
-  const claudeCfg = providerConfigs["claude"];
-  if (claudeCfg && claudeCfg.authType === "oauth_token") {
-    const credRow = agentCredsByProvider.get("claude");
-    if (credRow) {
-      const target = agentCredRefreshTarget(agent.id, "claude", credRow);
-      try {
-        claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
-      } catch (err) {
-        log.warn("Claude OAuth refresh failed for agent — credential likely needs reconnect", {
-          error: errMsg(err),
-        });
-      }
-    }
-  }
-  const codexCfg = providerConfigs["codex"];
-  if (codexCfg && codexCfg.authType === "oauth_token") {
-    const credRow = agentCredsByProvider.get("codex");
-    if (credRow) {
-      const target = agentCredRefreshTarget(agent.id, "codex", credRow);
-      try {
-        codexCfg.apiKey = await getValidCodexBearer(target.credKey, credRow, target.persist);
-      } catch (err) {
-        log.warn("Codex OAuth refresh failed for agent — credential likely needs reconnect", {
-          error: errMsg(err),
-        });
-      }
-    }
-  }
+  // No pre-run OAuth-bearer refresh needed: Claude + Codex OAuth were
+  // removed — all creds are API keys (no expiry, no refresh).
 
   // STRICT RANKING — the order is the source of truth, top first. "spaces" is
   // the keyless platform provider and can ALWAYS serve, so an explicit spaces

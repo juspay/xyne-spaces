@@ -132,7 +132,7 @@ export const CREATE_PDF_CONFIG_SCHEMA = {
     label: "PDF Auth Type",
     default: "api_key",
     required: false as const,
-    placeholder: "api_key | oauth_token",
+    placeholder: "api_key (oauth_token deprecated — Claude OAuth removed)",
   },
 };
 
@@ -217,9 +217,9 @@ async function callLlmForDocument(
   userPrompt: string,
 ): Promise<{ title?: string; style?: string; pages: unknown[] }> {
   if (llm.api === "anthropic-messages") {
-    const authHeader = llm.authType === "oauth_token"
-      ? { Authorization: `Bearer ${llm.apiKey}` }
-      : { "x-api-key": llm.apiKey };
+    // x-api-key only: Claude creds are Anthropic API keys — the OAuth Bearer
+    // path (subscription tokens) was removed.
+    const authHeader = { "x-api-key": llm.apiKey };
     const res = await httpsPost(
       llm.endpoint,
       JSON.stringify({

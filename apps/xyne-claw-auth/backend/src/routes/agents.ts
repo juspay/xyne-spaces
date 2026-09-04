@@ -15,8 +15,6 @@ import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
-import { extractCodexBearer } from "../lib/codex-creds.js";
-import { extractClaudeBearer } from "../lib/claude-creds.js";
 import { redisService } from "../redis.js";
 import {
   requireClawAdmin,
@@ -2901,23 +2899,17 @@ export interface ClaudeModelInfo {
   displayName: string;
 }
 
-export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, authType?: string): Promise<ClaudeModelInfo[]> {
+// Anthropic API keys (Console-issued) authenticate with x-api-key. The
+// OAuth/Pro-Max token path (Bearer + anthropic-beta=oauth-2025-04-20) was
+// removed — subscription OAuth tokens must not be stored on a third-party
+// server, so only the API-key path exists here.
+export async function fetchAnthropicModels(apiKey: string, baseUrl?: string): Promise<ClaudeModelInfo[]> {
   const root = (baseUrl?.trim() || ANTHROPIC_BASE_URL).replace(/\/+$/, "");
-  // Anthropic OAuth tokens (Pro/Max via `claude setup-token`) authenticate
-  // with Authorization: Bearer + anthropic-beta=oauth-2025-04-20. The API
-  // key path (Console keys) uses x-api-key. Sending the OAuth token as
-  // x-api-key returns 401 "invalid x-api-key".
-  const isOAuth = authType === "oauth_token";
   const headers: Record<string, string> = {
     "anthropic-version": ANTHROPIC_VERSION,
     "content-type": "application/json",
+    "x-api-key": apiKey,
   };
-  if (isOAuth) {
-    headers["Authorization"] = `Bearer ${apiKey}`;
-    headers["anthropic-beta"] = "oauth-2025-04-20";
-  } else {
-    headers["x-api-key"] = apiKey;
-  }
   await assertSafeOutboundUrl(`${root}/v1/models`);
   const res = await fetch(`${root}/v1/models`, {
     method: "GET",
@@ -3061,28 +3053,25 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
 
 router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
-    const { apiKey, baseUrl, authType } = req.body as { apiKey?: string; baseUrl?: string; authType?: string };
+    const { apiKey, baseUrl } = req.body as { apiKey?: string; baseUrl?: string };
     let resolvedApiKey = apiKey?.trim();
-    let resolvedAuthType: string | undefined = authType;
     let resolvedBaseUrl: string | undefined = baseUrl;
 
     // No key in the body → resolve a stored cred. Try the user's personal cred
     // first, then fall back to the AGENT's cred (the /v1/models list is
-    // account-wide, so either works to populate the dropdown). Use
-    // extractClaudeBearer so an OAuth *bundle* ({access_token,…}) yields the
-    // bare token instead of the JSON blob.
+    // account-wide, so either works to populate the dropdown). Creds are
+    // API-key-only since the OAuth flow was removed, so the decrypted payload
+    // IS the key.
     if (!resolvedApiKey) {
       const userCred = await userProviderCredentialsRepository.findByUserAndProvider(req.params.userId, "claude");
       if (userCred?.encryptedKey && userCred.iv && userCred.authTag) {
-        resolvedApiKey = extractClaudeBearer(decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey));
-        if (!resolvedAuthType) resolvedAuthType = userCred.authType ?? undefined;
+        resolvedApiKey = decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey).trim();
         resolvedBaseUrl = resolvedBaseUrl ?? userCred.baseUrl ?? undefined;
       } else {
         const agentRow = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
         const agentCred = agentRow ? await agentProviderCredentialsRepository.findByAgentAndProvider(agentRow.id, "claude") : null;
         if (agentCred?.encryptedKey && agentCred.iv && agentCred.authTag) {
-          resolvedApiKey = extractClaudeBearer(decrypt(agentCred.encryptedKey, agentCred.iv, agentCred.authTag, CONFIG.encryptionKey));
-          if (!resolvedAuthType) resolvedAuthType = agentCred.authType ?? undefined;
+          resolvedApiKey = decrypt(agentCred.encryptedKey, agentCred.iv, agentCred.authTag, CONFIG.encryptionKey).trim();
           resolvedBaseUrl = resolvedBaseUrl ?? agentCred.baseUrl ?? undefined;
         }
       }
@@ -3093,7 +3082,7 @@ router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (r
       return;
     }
 
-    const models = await fetchAnthropicModels(resolvedApiKey, resolvedBaseUrl, resolvedAuthType);
+    const models = await fetchAnthropicModels(resolvedApiKey, resolvedBaseUrl);
     res.json({ success: true, data: models });
   } catch (err) {
     log.error("[agents] claude-models error:", err);
@@ -3699,328 +3688,11 @@ router.post("/:slug/fork-subagent", requireAgentOwnerContributorOrAdmin, async (
 void decrypt;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Agent-scoped OAuth flows (Codex ChatGPT PKCE + GitHub Copilot device code)
-//
-// Mirror of the user-scoped flows in routes/settings.ts but targets are:
-//   - Redis keys are scoped to (agentId, state) instead of (userId, state)
-//   - The minted credential bundle lands in agentProviderCredentials, not
-//     userProviderCredentials.
-//   - Gated by `requireAgentOwnerOrAdmin` — only owner/admin can wire up the
-//     team's Codex sub (or Copilot account) to the shared agent slot.
-//
-// Why duplicate rather than parameterize the existing user-scoped routes:
-//   - The user-scoped routes mix request identity (req.headers["x-user-id"])
-//     with storage targeting. Threading an "agentSlug" param into them would
-//     require both flows to live in one handler with a permission switch,
-//     which is harder to audit. Mirroring keeps each handler's permission
-//     contract simple: agent-scoped routes go through `requireAgentOwnerOrAdmin`,
-//     user-scoped routes go through user-session middleware. No shared mutable
-//     state path.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const AGENT_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const AGENT_CODEX_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
-const AGENT_CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
-const AGENT_CODEX_REDIRECT_URI = "http://localhost:1455/auth/callback";
-const AGENT_CODEX_SCOPE = "openid profile email offline_access";
-const AGENT_CODEX_PKCE_PREFIX = "codex-pkce-agent:";
-const AGENT_CODEX_PKCE_TTL = 600;
-
-function agentBase64UrlEncode(buf: Buffer): string {
-  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function generateAgentCodexPkce(): { verifier: string; challenge: string } {
-  const verifier = agentBase64UrlEncode(crypto.randomBytes(32));
-  const challenge = agentBase64UrlEncode(crypto.createHash("sha256").update(verifier).digest());
-  return { verifier, challenge };
-}
-
-router.post(
-  "/:slug/provider-credentials/codex/oauth/start",
-  requireAgentOwnerOrAdmin,
-  async (req: Request<{ slug: string }>, res: Response) => {
-    try {
-      const agent = req.agentContext!.agent;
-      const { verifier, challenge } = generateAgentCodexPkce();
-      const state = agentBase64UrlEncode(crypto.randomBytes(16));
-
-      const redis = redisService.getConnection();
-      await redis.set(`${AGENT_CODEX_PKCE_PREFIX}${agent.id}:${state}`, verifier, "EX", AGENT_CODEX_PKCE_TTL);
-
-      const url = new URL(AGENT_CODEX_AUTHORIZE_URL);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", AGENT_CODEX_CLIENT_ID);
-      url.searchParams.set("redirect_uri", AGENT_CODEX_REDIRECT_URI);
-      url.searchParams.set("scope", AGENT_CODEX_SCOPE);
-      url.searchParams.set("code_challenge", challenge);
-      url.searchParams.set("code_challenge_method", "S256");
-      url.searchParams.set("state", state);
-      url.searchParams.set("id_token_add_organizations", "true");
-      url.searchParams.set("codex_cli_simplified_flow", "true");
-      url.searchParams.set("originator", "codex_cli_rs");
-
-      res.json({ success: true, data: { url: url.toString(), state, expiresIn: AGENT_CODEX_PKCE_TTL } });
-    } catch (err) {
-      log.error("[agents] codex/oauth/start error:", err);
-      res.status(500).json({ success: false, error: "Failed to start Codex login" });
-    }
-  },
-);
-
-router.post(
-  "/:slug/provider-credentials/codex/oauth/exchange",
-  requireAgentOwnerOrAdmin,
-  async (req: Request<{ slug: string }>, res: Response) => {
-    try {
-      const agent = req.agentContext!.agent;
-      const requesterId = getRequesterId(req);
-      let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
-
-      // Tolerate user pasting the full callback URL instead of bare code.
-      const raw = (code ?? "").trim();
-      if (raw && (raw.startsWith("http") || raw.includes("code="))) {
-        try {
-          const u = raw.startsWith("http") ? new URL(raw) : new URL(`http://x?${raw}`);
-          code = u.searchParams.get("code") ?? code;
-          state = u.searchParams.get("state") ?? state;
-        } catch { /* keep original */ }
-      }
-
-      if (!code || !state) {
-        res.status(400).json({ success: false, error: "code and state are required" });
-        return;
-      }
-
-      const redis = redisService.getConnection();
-      const key = `${AGENT_CODEX_PKCE_PREFIX}${agent.id}:${state}`;
-      const verifier = await redis.get(key);
-      if (!verifier) {
-        res.status(400).json({ success: false, error: "PKCE verifier expired — start login again" });
-        return;
-      }
-      await redis.del(key);
-
-      const tokRes = await fetch(AGENT_CODEX_TOKEN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          client_id: AGENT_CODEX_CLIENT_ID,
-          code,
-          code_verifier: verifier,
-          redirect_uri: AGENT_CODEX_REDIRECT_URI,
-        }),
-      });
-
-      if (!tokRes.ok) {
-        const text = await tokRes.text().catch(() => "");
-        res.status(502).json({ success: false, error: `OpenAI token exchange failed: ${tokRes.status} ${text.slice(0, 200)}` });
-        return;
-      }
-
-      const tokens = (await tokRes.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
-      if (!tokens.access_token || !tokens.refresh_token) {
-        res.status(502).json({ success: false, error: "OpenAI did not return tokens" });
-        return;
-      }
-
-      // Store the bundle (access + refresh + expiry) so a future refresh flow
-      // can mint new access tokens without re-prompting.
-      const bundle = JSON.stringify({
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        expires_at: Date.now() + (tokens.expires_in ?? 600) * 1000,
-      });
-      const enc = encrypt(bundle, CONFIG.encryptionKey);
-
-      await agentProviderCredentialsRepository.upsert(agent.id, "codex", {
-        encryptedKey: enc.ciphertext,
-        iv: enc.iv,
-        authTag: enc.authTag,
-        authType: "oauth_token",
-        baseUrl: "https://api.openai.com/v1",
-        ...(requesterId ? { createdByUserId: requesterId } : {}),
-      });
-
-      await writeAuditLog({
-        ...(requesterId ? { actorUserId: requesterId } : {}),
-        eventType: "AGENT_SHARED",
-        targetId: agent.id,
-        description: `Configured Codex OAuth credentials on agent "${agent.slug}" via ChatGPT sign-in`,
-      });
-
-      res.json({ success: true });
-    } catch (err) {
-      log.error("[agents] codex/oauth/exchange error:", err);
-      res.status(500).json({ success: false, error: "Codex login exchange failed" });
-    }
-  },
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Agent-level Claude (Anthropic) OAuth. Captures the {access_token,
-// refresh_token, expires_at} bundle so the access token can be AUTO-REFRESHED
-// (see lib/claude-oauth-refresh.ts) — pasting a bare token (the old way) gave us
-// no refresh token, so it just expired → 401. Same endpoints/scopes the Claude
-// Code CLI uses (via pi-ai). Browser-paste flow like codex: open the URL,
-// complete login, paste back the code (or the full redirect URL / "code#state").
-// ─────────────────────────────────────────────────────────────────────────────
-const AGENT_CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const AGENT_CLAUDE_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
-const AGENT_CLAUDE_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
-const AGENT_CLAUDE_REDIRECT_URI = "http://localhost:53692/callback";
-const AGENT_CLAUDE_SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
-const AGENT_CLAUDE_PKCE_PREFIX = "claude-pkce-agent:";
-const AGENT_CLAUDE_PKCE_TTL = 600;
-
-router.post(
-  "/:slug/provider-credentials/claude/oauth/start",
-  requireAgentOwnerOrAdmin,
-  async (req: Request<{ slug: string }>, res: Response) => {
-    try {
-      const agent = req.agentContext!.agent;
-      const { verifier, challenge } = generateAgentCodexPkce(); // generic S256 PKCE
-      // Anthropic's flow uses the verifier as `state` (matches pi-ai's Claude
-      // Code flow). Stash it so the exchange can recover the verifier.
-      const state = verifier;
-      await redisService.getConnection().set(`${AGENT_CLAUDE_PKCE_PREFIX}${agent.id}:${state}`, verifier, "EX", AGENT_CLAUDE_PKCE_TTL);
-
-      const url = new URL(AGENT_CLAUDE_AUTHORIZE_URL);
-      url.searchParams.set("code", "true");
-      url.searchParams.set("client_id", AGENT_CLAUDE_CLIENT_ID);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("redirect_uri", AGENT_CLAUDE_REDIRECT_URI);
-      url.searchParams.set("scope", AGENT_CLAUDE_SCOPES);
-      url.searchParams.set("code_challenge", challenge);
-      url.searchParams.set("code_challenge_method", "S256");
-      url.searchParams.set("state", state);
-
-      res.json({ success: true, data: { url: url.toString(), state, expiresIn: AGENT_CLAUDE_PKCE_TTL } });
-    } catch (err) {
-      log.error("[agents] claude/oauth/start error:", err);
-      res.status(500).json({ success: false, error: "Failed to start Claude login" });
-    }
-  },
-);
-
-router.post(
-  "/:slug/provider-credentials/claude/oauth/exchange",
-  requireAgentOwnerOrAdmin,
-  async (req: Request<{ slug: string }>, res: Response) => {
-    try {
-      const agent = req.agentContext!.agent;
-      const requesterId = getRequesterId(req);
-      let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
-
-      // Tolerate: full redirect URL, "code#state", or bare code.
-      let raw = (code ?? "").trim();
-      if (raw.startsWith("http") || raw.includes("code=")) {
-        try {
-          const u = raw.startsWith("http") ? new URL(raw) : new URL(`http://x?${raw}`);
-          code = u.searchParams.get("code") ?? code;
-          state = u.searchParams.get("state") ?? state;
-          raw = (code ?? "").trim();
-        } catch { /* keep original */ }
-      }
-      if (raw.includes("#")) {
-        const [c, s] = raw.split("#", 2);
-        code = c;
-        if (!state && s) state = s;
-      }
-
-      if (!code || !state) {
-        res.status(400).json({ success: false, error: "code and state are required" });
-        return;
-      }
-
-      const redis = redisService.getConnection();
-      const key = `${AGENT_CLAUDE_PKCE_PREFIX}${agent.id}:${state}`;
-      const verifier = await redis.get(key);
-      if (!verifier) {
-        res.status(400).json({ success: false, error: "PKCE verifier expired — start login again" });
-        return;
-      }
-      await redis.del(key);
-
-      const tokRes = await fetch(AGENT_CLAUDE_TOKEN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          client_id: AGENT_CLAUDE_CLIENT_ID,
-          code,
-          state,
-          redirect_uri: AGENT_CLAUDE_REDIRECT_URI,
-          code_verifier: verifier,
-        }),
-      });
-      if (!tokRes.ok) {
-        const text = await tokRes.text().catch(() => "");
-        res.status(502).json({ success: false, error: `Anthropic token exchange failed: ${tokRes.status} ${text.slice(0, 200)}` });
-        return;
-      }
-
-      const tokens = (await tokRes.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
-      if (!tokens.access_token || !tokens.refresh_token) {
-        res.status(502).json({ success: false, error: "Anthropic did not return tokens" });
-        return;
-      }
-
-      const bundle = JSON.stringify({
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-      });
-      const enc = encrypt(bundle, CONFIG.encryptionKey);
-      await agentProviderCredentialsRepository.upsert(agent.id, "claude", {
-        encryptedKey: enc.ciphertext,
-        iv: enc.iv,
-        authTag: enc.authTag,
-        authType: "oauth_token",
-        baseUrl: "https://api.anthropic.com",
-        ...(requesterId ? { createdByUserId: requesterId } : {}),
-      });
-
-      res.json({ success: true, data: { connected: true } });
-    } catch (err) {
-      log.error("[agents] claude/oauth/exchange error:", err);
-      res.status(500).json({ success: false, error: "Claude login exchange failed" });
-    }
-  },
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Agent-level Codex model list — mirror of `/settings/codex/models` but reads
-// the agent-scoped credential. ChatGPT OAuth tokens cannot hit OpenAI's
-// `/v1/models` (missing `api.model.read` scope, returns 403); Codex CLI works
-// around this by calling the ChatGPT backend's `/codex/models` endpoint with
-// `originator=codex_cli_rs`, which IS authorized for ChatGPT tokens and
-// returns the exact model picker list (gpt-5.5, gpt-5.4, gpt-5.3-codex, etc.).
-// API-key mode uses the standard Platform `/v1/models`.
+// the agent-scoped credential. API-key-only now (ChatGPT OAuth removed):
+// standard Platform `/v1/models`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const AGENT_CODEX_CHATGPT_BACKEND = "https://chatgpt.com/backend-api";
-
-interface AgentCodexBackendModel {
-  slug: string;
-  display_name?: string;
-  visibility?: string;
-  priority?: number;
-}
-
-function decodeAgentChatgptAccountId(jwt: string): string | undefined {
-  try {
-    const parts = jwt.split(".");
-    if (parts.length !== 3 || !parts[1]) return undefined;
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString()) as Record<string, unknown>;
-    const auth = payload["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
-    const accountId = auth?.["chatgpt_account_id"];
-    return typeof accountId === "string" ? accountId : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 router.get(
   "/:slug/provider-credentials/codex/models",
@@ -4034,41 +3706,20 @@ router.get(
         return;
       }
 
-      const decrypted = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
-      const apiKey = extractCodexBearer(decrypted);
-      const isOauth = cred.authType === "oauth_token";
+      const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey).trim();
 
-      const url = isOauth
-        ? `${AGENT_CODEX_CHATGPT_BACKEND}/codex/models?client_version=0.0.0`
-        : `${(cred.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "")}/models`;
+      const url = `${(cred.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "")}/models`;
 
-      const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-      if (isOauth) {
-        headers["originator"] = "codex_cli_rs";
-        headers["User-Agent"] = "codex_cli_rs/0.0.0 (xyne-claw-auth)";
-        const accountId = decodeAgentChatgptAccountId(apiKey);
-        if (accountId) headers["ChatGPT-Account-Id"] = accountId;
-      } else {
-        headers["User-Agent"] = "codex-cli";
-      }
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${apiKey}`,
+        "User-Agent": "codex-cli",
+      };
 
       await assertSafeOutboundUrl(url);
       const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
         res.status(502).json({ success: false, error: `Models endpoint ${upstream.status}: ${text.slice(0, 200)}` });
-        return;
-      }
-
-      if (isOauth) {
-        const body = (await upstream.json()) as { models?: AgentCodexBackendModel[] };
-        const data = body.models ?? [];
-        const models = data
-          .filter((m) => m.slug)
-          .filter((m) => m.visibility !== "hide" && m.visibility !== "none")
-          .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-          .map((m) => ({ id: m.slug, name: m.display_name ?? m.slug }));
-        res.json({ success: true, data: models });
         return;
       }
 
@@ -4370,6 +4021,12 @@ router.post(
       }
       if (authType && authType !== "api_key" && authType !== "oauth_token") {
         res.status(400).json({ success: false, error: "authType must be 'api_key' or 'oauth_token'" });
+        return;
+      }
+      // Claude OAuth was removed (subscription tokens must not be stored on a
+      // third-party server) — only Console-issued Anthropic API keys are accepted.
+      if ((provider === "claude" || provider === "codex") && authType === "oauth_token") {
+        res.status(400).json({ success: false, error: `${provider} supports API keys only (oauth_token not allowed)` });
         return;
       }
 

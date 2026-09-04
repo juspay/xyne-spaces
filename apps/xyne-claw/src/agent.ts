@@ -709,7 +709,7 @@ export interface ClaudeConfig {
   apiKey: string;
   model: string;
   baseUrl?: string;
-  /** "api_key" (default, uses x-api-key header) | "oauth_token" (claude setup-token, uses Authorization: Bearer). */
+  /** Deprecated: Claude OAuth is removed — creds are always treated as API keys (x-api-key header). */
   authType?: string;
   /** "low" | "medium" | "high" — reasoning effort, only meaningful for reasoning-capable models. Falls back to provider default when undefined. */
   reasoningEffort?: string;
@@ -719,7 +719,7 @@ export interface CodexConfig {
   apiKey: string;
   model: string;
   baseUrl?: string;
-  /** "api_key" (default — Platform /v1/chat/completions) | "oauth_token" (ChatGPT backend Codex /responses, same path the Codex CLI uses). */
+  /** Deprecated: ChatGPT OAuth is removed — creds are always Platform API keys. */
   authType?: string;
   /** "low" | "medium" | "high" — reasoning effort, only meaningful for gpt-5.x / o-series. Falls back to provider default when undefined. */
   reasoningEffort?: string;
@@ -967,61 +967,39 @@ export function resolveModel(
 
   if (provider === "codex" && providerConfig?.apiKey) {
     const codexCfg = providerConfig as CodexConfig;
-    const isOauth = codexCfg.authType === "oauth_token";
     const isReasoning = /^(o\d|gpt-5|codex)/i.test(codexCfg.model);
-    // OAuth tokens are scoped to chatgpt.com/backend-api/codex/* — they CAN'T
-    // call Platform's /v1/chat/completions. Route them through pi-ai's
-    // openai-codex-responses provider, which targets /backend-api/codex/responses
-    // with the same headers the Codex CLI sends (originator, ChatGPT-Account-Id,
-    // OpenAI-Beta=responses=experimental).
-    const providerName = isOauth ? "openai-codex-user" : "openai-user";
-    if (isOauth) {
-      // OAuth tokens are only valid on the ChatGPT backend — ignore any
-      // baseUrl carried over from a previous API-key setup (e.g. /v1 default).
-      modelRegistry.registerProvider(providerName, {
-        baseUrl: "https://chatgpt.com/backend-api",
-        apiKey: codexCfg.apiKey,
-        api: "openai-codex-responses",
-        authHeader: true,
-        models: [
-          {
-            id: codexCfg.model,
-            name: codexCfg.model,
-            reasoning: isReasoning,
-            input: ["text", "image"],
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: contextWindowFor(codexCfg.model),
-            maxTokens,
-          },
-        ],
-      });
-    } else {
-      modelRegistry.registerProvider(providerName, {
-        baseUrl: codexCfg.baseUrl || "https://api.openai.com/v1",
-        apiKey: codexCfg.apiKey,
-        api: "openai-completions",
-        authHeader: true,
-        models: [
-          {
-            id: codexCfg.model,
-            name: codexCfg.model,
-            reasoning: isReasoning,
-            input: ["text", "image"],
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: contextWindowFor(codexCfg.model),
-            maxTokens,
-          },
-        ],
-      });
-    }
+    // API keys only — the ChatGPT OAuth path (openai-codex-responses against
+    // chatgpt.com/backend-api) was removed: vendor subscription tokens must
+    // not be stored on a third-party server. `authType` may still arrive in
+    // old payloads and is ignored.
+    const providerName = "openai-user";
+    modelRegistry.registerProvider(providerName, {
+      baseUrl: codexCfg.baseUrl || "https://api.openai.com/v1",
+      apiKey: codexCfg.apiKey,
+      api: "openai-completions",
+      authHeader: true,
+      models: [
+        {
+          id: codexCfg.model,
+          name: codexCfg.model,
+          reasoning: isReasoning,
+          input: ["text", "image"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: contextWindowFor(codexCfg.model),
+          maxTokens,
+        },
+      ],
+    });
     const model = modelRegistry.find(providerName, codexCfg.model);
-    if (!model) throw new Error(`Failed to register OpenAI model "${codexCfg.model}" at ${codexCfg.baseUrl ?? (isOauth ? "chatgpt.com/backend-api" : "openai")}`);
-    log.info(`[agent] Using OpenAI (codex${isOauth ? " oauth" : ""}) model: ${codexCfg.model}${isReasoning ? " (reasoning)" : ""}`);
+    if (!model) throw new Error(`Failed to register OpenAI model "${codexCfg.model}" at ${codexCfg.baseUrl ?? "openai"}`);
+    log.info(`[agent] Using OpenAI (codex) model: ${codexCfg.model}${isReasoning ? " (reasoning)" : ""}`);
     return model;
   }
 
   if (provider === "claude" && providerConfig?.apiKey) {
-    const isOauthToken = (providerConfig as ClaudeConfig).authType === "oauth_token";
+    // API keys only — the OAuth/Pro-Max path (Bearer + oauth beta headers) was
+    // removed: subscription OAuth tokens may not be stored on a third-party
+    // server. `authType` may still arrive in old payloads and is ignored.
     const providerName = "anthropic-user";
     // Claude 4.6+ takes adaptive thinking (`thinking: {type:"adaptive"}` +
     // output_config.effort); pi-ai only flags that for its built-in catalogue,
@@ -1033,8 +1011,8 @@ export function resolveModel(
       baseUrl: providerConfig.baseUrl || "https://api.anthropic.com",
       apiKey: providerConfig.apiKey,
       api: "anthropic-messages",
-      // api_key → x-api-key (authHeader: false). oauth_token → Authorization: Bearer (authHeader: true).
-      authHeader: isOauthToken,
+      // x-api-key (authHeader: false) — the OAuth Bearer path is gone.
+      authHeader: false,
       models: [
         {
           id: providerConfig.model,
@@ -1052,7 +1030,7 @@ export function resolveModel(
     if (!model) {
       throw new Error(`Failed to register Claude model "${providerConfig.model}" at ${providerConfig.baseUrl ?? "anthropic"}`);
     }
-    log.info(`[agent] Using Claude model: ${providerConfig.model} (${isOauthToken ? "oauth_token" : "api_key"}, ${adaptiveThinking ? "adaptive thinking" : "reasoning"})`);
+    log.info(`[agent] Using Claude model: ${providerConfig.model} (api_key, ${adaptiveThinking ? "adaptive thinking" : "reasoning"})`);
     return model;
   }
 

@@ -8,8 +8,6 @@ import {
   resolveSubagentProviderMode,
   KNOWN_PROVIDERS,
   buildProviderConfig,
-  agentCredRefreshTarget,
-  userCredRefreshTarget,
   agentDefaultSpeed,
   providerConfigForSpeed,
   applyFastModeModels,
@@ -17,8 +15,6 @@ import {
   type ProviderConfig,
   type SubagentProviderMode,
 } from "./agent-provider-config.js";
-import { getValidClaudeBearer } from "./claude-oauth-refresh.js";
-import { getValidCodexBearer } from "./codex-oauth-refresh.js";
 import { errMsg } from "./errors.js";
 import { isLocalHarnessProvider } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
@@ -103,30 +99,9 @@ export async function resolveProvidersForDispatch(
   addConfigs(agentCredsByProvider, "agent");
   applyFastModeModels(providerConfigs, agentRow?.config, mentionSpeed);
 
-  const refreshBearer = async (provider: "claude" | "codex"): Promise<void> => {
-    const cfg = providerConfigs[provider];
-    if (!cfg || cfg.authType !== "oauth_token") return;
-    const scope = providerScope[provider];
-    const credRow = scope === "agent" ? agentCredsByProvider.get(provider) : credsByProvider.get(provider);
-    const ownerId = scope === "agent" ? agentRow?.id : targetUserId;
-    if (!credRow || !ownerId) return;
-    const target = scope === "agent" && agentRow?.id
-      ? agentCredRefreshTarget(agentRow.id, provider, credRow as SharedCredRow)
-      : userCredRefreshTarget(targetUserId, provider, credRow as SharedCredRow);
-    try {
-      cfg.apiKey = provider === "claude"
-        ? await getValidClaudeBearer(target.credKey, credRow as Parameters<typeof getValidClaudeBearer>[1], target.persist)
-        : await getValidCodexBearer(target.credKey, credRow as Parameters<typeof getValidCodexBearer>[1], target.persist);
-    } catch (err) {
-      log.warn(`${provider === "claude" ? "Claude" : "Codex"} OAuth refresh failed — credential likely needs reconnect`, {
-        scope,
-        error: errMsg(err),
-      });
-    }
-  };
-  await refreshBearer("claude");
-  await refreshBearer("codex");
-
+  // No OAuth-bearer refreshable creds remain: Claude + Codex OAuth were
+  // removed; claude/codex credentials are plain API keys (no expiry, no
+  // refresh). Copilot OAuth is GitHub's — refreshed through its own path.
   const hasCreds = (p: string | undefined): p is string => !!p && !!providerConfigs[p];
 
   const runtimeProviderOrder: string[] = [];
