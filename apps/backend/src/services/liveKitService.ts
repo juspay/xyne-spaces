@@ -11,12 +11,28 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { repositories } from '@/database/repositories';
-import {
-  DEFAULT_TRANSCRIPTION_AGENT_ROLE,
-  type TranscriptionAgentRole,
-} from '@/database/repositories/transcriptionAgent';
 import { superpositionClient } from '@/services/superpositionClient';
 import { DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
+
+/** Open-ended role/slot name ('default', 'test', or any future canary arm) — not a fixed enum. */
+type TranscriptionAgentRole = string;
+const DEFAULT_TRANSCRIPTION_AGENT_ROLE = 'default';
+
+/**
+ * Superposition config key holding every role's current agent build, as one JSON object —
+ * {"default": {"agentName": "...", "url": "..."}, "test": {...}} — edited directly by
+ * whoever deploys a build. A single object (not one flag per role) is what keeps roles
+ * open-ended: a new canary slot is just a new key, no code change needed here.
+ */
+const TRANSCRIPTION_AGENT_ROLES_CONFIG_KEY = 'transcription_agent_roles';
+
+/** How long to wait for an agent's own health check before treating it as unreachable. */
+const AGENT_HEALTH_CHECK_TIMEOUT_MS = 3 * 1000;
+
+interface ConfiguredTranscriptionAgent {
+  agentName: string;
+  url: string;
+}
 
 /**
  * Superposition/CAC flag naming which agent role/slot a call creator routes to (e.g.
@@ -246,29 +262,61 @@ export class LiveKitService {
   }
 
   /**
+   * Every role's current {agentName, url}, read fresh from Superposition on every call —
+   * no cache, since a stale read here just means an extra ~3s health-check timeout on an
+   * already-rolled-back name, not a correctness issue. `getObjectValue` already fails
+   * closed to `{}` internally on any CAC error, so no separate try/catch is needed here.
+   */
+  private async getConfiguredAgentRoles(): Promise<Record<string, ConfiguredTranscriptionAgent>> {
+    const value = await superpositionClient.getObjectValue(TRANSCRIPTION_AGENT_ROLES_CONFIG_KEY, {});
+    return (value ?? {}) as unknown as Record<string, ConfiguredTranscriptionAgent>;
+  }
+
+  /**
+   * Fast pre-filter, not a replacement for the ~9s post-dispatch claim-check below: a
+   * bounded-timeout HTTP GET against the agent's own self-reported health. Any error,
+   * non-OK response, or timeout is treated as unhealthy — erring toward trying the
+   * fallback role quickly rather than dispatching to a name we already have reason to
+   * doubt, since the claim-check remains the real authority regardless of which way this
+   * check turns out to be wrong.
+   */
+  private async checkAgentHealthy(url: string): Promise<boolean> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AGENT_HEALTH_CHECK_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      return response.ok;
+    } catch (error) {
+      logger.warn(`transcription_agent_health_check_failed | url=${url}, error=${error}`);
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
    * Resolves which agent_name should be dispatched for a NEW call in `role`. Any
    * non-default role falls back to `DEFAULT_TRANSCRIPTION_AGENT_ROLE` when nothing
-   * currently holds that slot — this is the only fallback rule for initial resolution; a
-   * role that IS assigned but not currently claimable is a different situation, handled
-   * by the retry loop below, not by silently jumping to another role mid-attempt.
+   * currently holds that slot OR the holder's health check fails — this is the only
+   * fallback rule for initial resolution; a role that resolves healthy here but still
+   * isn't claimable moments later is a different situation, handled by the retry loop
+   * below, not by silently jumping to another role mid-attempt.
    */
   async resolveAgentName(role: TranscriptionAgentRole): Promise<string | null> {
-    try {
-      const row = await repositories.transcriptionAgents.getActive(role);
-      if (row) return row.agentName;
-      if (role !== DEFAULT_TRANSCRIPTION_AGENT_ROLE) {
-        const defaultRow = await repositories.transcriptionAgents.getActive(DEFAULT_TRANSCRIPTION_AGENT_ROLE);
-        return defaultRow?.agentName ?? null;
-      }
-      return null;
-    } catch (error) {
-      // A DB error here (not "no row" — an actual query failure) must not cascade into
-      // failing the whole call join/creation. "No agent dispatched" is an accepted
-      // outcome; "user can't join their call" is not — same fail-safe contract as the
-      // CAC lookup in resolveAgentNameForUser.
-      logger.error(`transcription_agent_role_lookup_failed | role=${role}, error=${error}, falling_back_to=no_explicit_dispatch`);
-      return null;
+    const roles = await this.getConfiguredAgentRoles();
+
+    const primary = roles[role];
+    if (primary && (await this.checkAgentHealthy(primary.url))) {
+      return primary.agentName;
     }
+
+    if (role === DEFAULT_TRANSCRIPTION_AGENT_ROLE) return null;
+
+    const fallback = roles[DEFAULT_TRANSCRIPTION_AGENT_ROLE];
+    if (fallback && (await this.checkAgentHealthy(fallback.url))) {
+      return fallback.agentName;
+    }
+    return null;
   }
 
   /** Bare explicit-dispatch call — best-effort, never throws. Returns null on failure. */
@@ -353,11 +401,12 @@ export class LiveKitService {
     await this.ensureTranscriptionAgent(roomName, agentName, { reason: 'dispatch_unclaimed' });
   }
 
-  /** Null when there's nothing to fall back to (default IS the agent that just failed, or has no active row). */
+  /** Null when there's nothing to fall back to (default IS the agent that just failed, or isn't configured). */
   private async resolveFallbackAgentName(failedAgentName: string): Promise<string | null> {
-    const defaultRow = await repositories.transcriptionAgents.getActive(DEFAULT_TRANSCRIPTION_AGENT_ROLE);
-    if (!defaultRow || defaultRow.agentName === failedAgentName) return null;
-    return defaultRow.agentName;
+    const roles = await this.getConfiguredAgentRoles();
+    const fallback = roles[DEFAULT_TRANSCRIPTION_AGENT_ROLE];
+    if (!fallback || fallback.agentName === failedAgentName) return null;
+    return fallback.agentName;
   }
 
   /**
@@ -399,66 +448,6 @@ export class LiveKitService {
       logger.warn(`[${roomName}] dispatch_claim_check_call_failed | dispatch_id=${dispatchId}, error=${error}`);
       return null;
     }
-  }
-
-  /**
-   * Live verification for a rollout: dispatches `agentName` into a disposable,
-   * uniquely-named room and checks whether a worker claims it within ~9s. This is what
-   * lets the rollout path reject a typo'd/undeployed name outright, and it's also the
-   * on-startup self-check a pod's own rollout call effectively performs — same
-   * mechanism, same room-scoped dispatch, just a throwaway room instead of a real call.
-   */
-  async verifyAgentLive(agentName: string): Promise<boolean> {
-    const verifyRoomName = `agent-verify-${agentName}-${Date.now()}`;
-    const dispatch = await this.dispatchTranscriptionAgent(verifyRoomName, agentName);
-    if (!dispatch) return false;
-
-    await new Promise((resolve) => setTimeout(resolve, DISPATCH_CLAIM_CHECK_DELAY_MS));
-    const claimed = await this.isDispatchClaimed(verifyRoomName, dispatch.id);
-
-    await this.roomService.deleteRoom(verifyRoomName).catch(() => {
-      // Best-effort cleanup — an unclaimed verification room just expires on its own.
-    });
-
-    // A failed check (null) is treated as "not verified" here, unlike the per-call
-    // fallback path above — rejecting an ambiguous rollout is the safe default,
-    // whereas an in-progress call needs the opposite bias (don't assume the worst).
-    return claimed === true;
-  }
-
-  /**
-   * Verify-then-commit, shared by both trigger paths: the human-facing rollout endpoint
-   * and a pod's own on-startup self-report call. Neither writes to the DB directly —
-   * both go through this, so a bad/unclaimed name can never reach the table regardless
-   * of who's asking. No cross-role logic here on purpose — this only ever touches the
-   * one role it was called with; a build holding both `test` and `default` as two
-   * separate rows is expected, not something this reconciles.
-   */
-  async attemptTranscriptionAgentRollout(
-    agentName: string,
-    role: TranscriptionAgentRole,
-  ): Promise<{ success: true } | { success: false; reason: string }> {
-    // Idempotent no-op: `role`'s active holder is already this exact agentName. This is
-    // the common case when N replicas of the same build each self-report independently
-    // on startup — skip before doing anything, so replicas 2..N don't each fire a real
-    // verification dispatch (a throwaway-room createDispatch + ~9s wait) and don't each
-    // demote+re-insert a row that's already correct. Keeps the table from accumulating a
-    // fresh row per replica for what is, functionally, the same rollout.
-    const current = await repositories.transcriptionAgents.getActive(role);
-    if (current?.agentName === agentName) {
-      logger.info(`transcription_agent_rollout_noop | agentName=${agentName}, role=${role}, reason=already_active`);
-      return { success: true };
-    }
-
-    const claimed = await this.verifyAgentLive(agentName);
-    if (!claimed) {
-      logger.error(`transcription_agent_rollout_rejected | agentName=${agentName}, role=${role}, reason=not_claimed`);
-      return { success: false, reason: 'agent_not_claimed' };
-    }
-
-    await repositories.transcriptionAgents.rollout(agentName, role);
-    logger.warn(`transcription_agent_rolled_out | agentName=${agentName}, role=${role}`);
-    return { success: true };
   }
 
   /**

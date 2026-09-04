@@ -25,7 +25,6 @@ export { UserRepository } from './users';
 export { ResourceRepository } from './resources';
 export { ResourceAccessRepository } from './resourceAccess';
 export { ACLAuditLogRepository } from './aclAuditLogs';
-export { TranscriptionAgentRepository } from './transcriptionAgent';
 export {
   NotificationRepository, 
   NotificationPreferenceRepository, 
@@ -94,9 +93,8 @@ import { UserRepository } from './users';
 import { ResourceRepository } from './resources';
 import { ResourceAccessRepository } from './resourceAccess';
 import { ACLAuditLogRepository } from './aclAuditLogs';
-import { TranscriptionAgentRepository } from './transcriptionAgent';
 import {
-  NotificationRepository, 
+  NotificationRepository,
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
@@ -160,7 +158,6 @@ export class RepositoryContainer {
   public resources: ResourceRepository;
   public resourceAccess: ResourceAccessRepository;
   public aclAuditLogs: ACLAuditLogRepository;
-  public transcriptionAgents: TranscriptionAgentRepository;
   public notifications: NotificationRepository;
   public notificationPreferences: NotificationPreferenceRepository;
   public browserNotificationSubscriptions: BrowserNotificationSubscriptionRepository;
@@ -220,7 +217,6 @@ export class RepositoryContainer {
     this.resources = new ResourceRepository();
     this.resourceAccess = new ResourceAccessRepository();
     this.aclAuditLogs = new ACLAuditLogRepository();
-    this.transcriptionAgents = new TranscriptionAgentRepository();
     this.notifications = new NotificationRepository();
     this.notificationPreferences = new NotificationPreferenceRepository();
     this.browserNotificationSubscriptions = new BrowserNotificationSubscriptionRepository();

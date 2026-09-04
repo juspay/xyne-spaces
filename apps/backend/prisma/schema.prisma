@@ -3345,19 +3345,6 @@ model LookupValue {
 // be the active holder of a given role — enforced by a partial unique index added by
 // hand in the migration (Prisma's schema DSL has no partial-index syntax), see
 // migration.sql: CREATE UNIQUE INDEX ... ON (role) WHERE status = 'active'.
-model TranscriptionAgent {
-  id         String   @id @default(cuid())
-  agentName  String                       // e.g. "agent_<commit-sha>" — NOT unique; same build can hold multiple roles as separate rows
-  role       String?                      // open-ended slot name, e.g. 'default' | 'test' | ... — not a fixed enum, or null if never assigned a role
-  status     String   @default("active")  // 'active' | 'inactive' — inactive rows are frozen history, never touched again
-  createdAt  DateTime @default(now())
-  modifiedAt DateTime @updatedAt
-
-  @@index([agentName])
-  @@map("transcription_agent")
-  @@schema("non_zero")
-}
-
 model Form {
   id              String         @id @default(cuid())
   formName        String
