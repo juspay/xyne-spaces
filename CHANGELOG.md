@@ -1,3 +1,15 @@
+## [1.260.0-release-20260902.2](https://github.com/juspay/xyne-spaces/compare/v1.260.0-release-20260902.1...v1.260.0-release-20260902.2) (2026-09-04)
+
+
+### Features
+
+* schedule call fixes ([#1396](https://github.com/juspay/xyne-spaces/issues/1396)) ([#1459](https://github.com/juspay/xyne-spaces/issues/1459)) ([5ea62d8](https://github.com/juspay/xyne-spaces/commit/5ea62d858400c1d06bd88530174994b0c4df138d))
+
+
+### Bug Fixes
+
+* added new section in dm and optimized the search ([#1429](https://github.com/juspay/xyne-spaces/issues/1429)) ([704c5fb](https://github.com/juspay/xyne-spaces/commit/704c5fb90c21ba787389464fd32ae63420b040f9))
+
 ## [1.260.0-release-20260902.2](https://github.com/juspay/xyne-spaces/compare/v1.260.0-release-20260902.1...v1.260.0-release-20260902.2) (2026-09-02)
 
 
