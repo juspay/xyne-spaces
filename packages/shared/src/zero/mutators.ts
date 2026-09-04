@@ -6503,6 +6503,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comment_threads.insert({
           id: threadId,
+          workspaceId: ctx.workspaceId,
           canvasId,
           blockId,
           anchorText: anchorText || null,
@@ -6517,6 +6518,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: ctx.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6548,6 +6550,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: ctx.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6585,7 +6588,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }
@@ -6610,7 +6615,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }

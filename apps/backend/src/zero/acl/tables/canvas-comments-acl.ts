@@ -35,7 +35,13 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'canvas_comments'>>, tx: Transaction<Schema>): Promise<void> {
-    const thread = await tx.run(zql.canvas_comment_threads.where('id', args.threadId).one());
+    if (args.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Canvas comment insert failed: workspace mismatch', 'canvas_comments');
+    }
+
+    const thread = await tx.run(
+      zql.canvas_comment_threads.where('id', args.threadId).one(),
+    );
     if (!thread || thread.canvasId !== args.canvasId) {
       throw new MutationACLError('Canvas comment insert failed: thread not found', 'canvas_comments');
     }
@@ -47,6 +53,7 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
 
   async canUpdate(args: UpdateValue<TableSchema<'canvas_comments'>>, tx: Transaction<Schema>): Promise<void> {
     const comment = await tx.run(zql.canvas_comments.where('id', args.id).one());
+    
     if (!comment) {
       throw new MutationACLError('Canvas comment update failed: comment not found', 'canvas_comments');
     }
