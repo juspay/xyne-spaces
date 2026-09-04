@@ -26,11 +26,18 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     // Verify requesting user is a channel participant and get their record
     const requestingParticipant = await this.verifyChannelParticipant(args.channelId, tx, 'insert');
 
-    // Check addUserPolicy: if ADMINS_ONLY, only admins can add users.
-    const channelStats = await tx.run(zql.channel_stats.where('channelId', '=', args.channelId).one());
-    const addUserPolicy = channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
-    if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
-      throw new MutationACLError('Channel user status insert failed: only channel admins can add users to this channel', 'channel_user_status');
+    // Check addUserPolicy: if ADMINS_ONLY, only admins can add *other* users.
+    // Joining yourself is governed by channel visibility, and group DMs manage
+    // membership through their own flow, so both are exempt (matches the checks
+    // in addParticipants / handleNonParticipantAction).
+    const isSelfInsert = args.userId === this.ctx.userID;
+    const isGroupDM = channel.scopeType === ChannelScopeType.GROUP_DM;
+    if (!isSelfInsert && !isGroupDM) {
+      const channelStats = await tx.run(zql.channel_stats.where('channelId', '=', args.channelId).one());
+      const addUserPolicy = channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+      if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
+        throw new MutationACLError('Channel user status insert failed: only channel admins can add users to this channel', 'channel_user_status');
+      }
     }
 
     await this.validateDMChannelNotificationLevels(args.channelId, args.desktopNotificationLevel, args.mobileNotificationLevel, tx);
@@ -83,12 +90,19 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
         throw new MutationACLError('Channel user status restore failed: invalid keys', 'channel_user_status');
       }
       
-      const channelStats = await tx.run(zql.channel_stats.where('channelId', '=', status.channelId).one());
       const requestingParticipant = await this.verifyChannelParticipant(status.channelId, tx, 'update');
-      
-      const addUserPolicy = channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
-      if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
-        throw new MutationACLError('Channel user status restore failed: only channel admins can restore users to this channel', 'channel_user_status');
+
+      // Same exemptions as insert: restoring your own membership (e.g. rejoining a
+      // public channel) and group DMs are not governed by addUserPolicy.
+      if (status.userId !== this.ctx.userID) {
+        const restoreChannel = await tx.run(zql.channels.where('id', '=', status.channelId).one());
+        if (restoreChannel?.scopeType !== ChannelScopeType.GROUP_DM) {
+          const channelStats = await tx.run(zql.channel_stats.where('channelId', '=', status.channelId).one());
+          const addUserPolicy = channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+          if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
+            throw new MutationACLError('Channel user status restore failed: only channel admins can restore users to this channel', 'channel_user_status');
+          }
+        }
       }
       return;
     }
