@@ -307,6 +307,29 @@ export const ThreadMessages = ({
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
   const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
 
+  // The enriched thread query is re-subscribed whenever its inputs change — most
+  // notably when channel membership (isMember) resolves and recreates the query
+  // object. During that re-subscription `conversation` reads null for a frame or
+  // two while `isMessagesLoaded` stays true. That transient used to flip the render
+  // below from <ThreadList> to the "No thread messages" placeholder and back,
+  // remounting ThreadList mid-open. The remount re-ran ThreadList's mark-as-read
+  // effect, which overwrote the stored lastReadAt with `now`, so the unread divider
+  // and first-unread scroll position were lost and the panel fell back to the
+  // bottom. Hold the last resolved conversation for the current thread so the
+  // placeholder only shows for a genuinely empty/absent thread and ThreadList stays
+  // stably mounted across the re-subscription. Reset synchronously when the thread
+  // id changes so a switched-to thread never reads the previous one's value.
+  const lastResolvedConversationRef = useRef(conversation);
+  const lastResolvedConversationIdRef = useRef(derivedConversationId);
+  if (lastResolvedConversationIdRef.current !== derivedConversationId) {
+    lastResolvedConversationIdRef.current = derivedConversationId;
+    lastResolvedConversationRef.current = undefined;
+  }
+  if (conversation) {
+    lastResolvedConversationRef.current = conversation;
+  }
+  const stableConversation = conversation ?? lastResolvedConversationRef.current;
+
   const threadParticipantIds = useMemo(() => {
     const set = new Set<string>();
     for (const m of messages) {
@@ -1636,7 +1659,7 @@ export const ThreadMessages = ({
               value='thread'
               className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
             >
-              {isMessagesLoaded && !conversation && !!derivedConversationId ? (
+              {isMessagesLoaded && !stableConversation && !!derivedConversationId ? (
                 <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
                   <ChatDefault size={48} className='mb-2 opacity-40' />
                   <p className='text-sm'>No thread messages</p>
@@ -1792,7 +1815,7 @@ export const ThreadMessages = ({
             {headerActionsContainer
               ? createPortal(simpleViewHeaderActions, headerActionsContainer)
               : null}
-            {isMessagesLoaded && !conversation && !!derivedConversationId ? (
+            {isMessagesLoaded && !stableConversation && !!derivedConversationId ? (
               <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
                 <ChatDefault size={48} className='mb-2 opacity-40' />
                 <p className='text-sm'>No thread messages</p>
