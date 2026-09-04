@@ -561,8 +561,9 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Merge just the detailed-summary status onto Call.metadata. Used by the
-   * queue worker to publish 'pending'/'failed' transitions without touching
+   * Merge just the detailed-summary status onto Call.metadata. Used by
+   * regenerateSummary and by the CallValidationWorker stale-'pending' sweep to
+   * publish 'pending'/'failed' transitions without touching
    * detailedSummaryCanvasId or detailedSummaryReady — those are owned by the
    * success paths in processFinalTranscript and regenerateSummary and must
    * remain the source of truth for readers on older recordings.

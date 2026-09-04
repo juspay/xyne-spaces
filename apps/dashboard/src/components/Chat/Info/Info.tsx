@@ -344,6 +344,7 @@ const Info = ({
       <div className='flex justify-between px-4 mb-4 gap-x-3 overflow-x-auto no-scrollbar'>
         <Button
           variant='ghost'
+          size='inline'
           onClick={handleStarToggle}
           className={[
             headerLinkContainerStyle,
@@ -421,6 +422,7 @@ const Info = ({
         {isParticipant && !isDM && !isGroupDM && (
           <Button
             variant='ghost'
+            size='inline'
             onClick={handleLeaveChannel}
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
