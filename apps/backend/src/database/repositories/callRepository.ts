@@ -237,6 +237,28 @@ export class CallRepository {
     });
   }
 
+  /**
+   * HEADLESS recordings whose detailed summary has sat in 'pending' since
+   * before `staleBefore` with no row activity. Summary generation runs
+   * in-process in the API, so a backend restart mid-run leaves the row
+   * 'pending' forever — this is the query the validation worker sweeps.
+   * updatedAt is part of the predicate so a fresh manual regenerate on an old
+   * recording (which re-publishes 'pending' and bumps updatedAt) is not swept
+   * on the next cycle.
+   */
+  async findStalePendingSummaryCalls(take: number, staleBefore: Date): Promise<Call[]> {
+    return DatabaseClient.getInstance().call.findMany({
+      where: {
+        callType: CallType.HEADLESS,
+        endedAt: { lt: staleBefore },
+        updatedAt: { lt: staleBefore },
+        metadata: { path: ['detailedSummaryStatus'], equals: 'pending' },
+      },
+      orderBy: { endedAt: 'asc' },
+      take,
+    });
+  }
+
   async update(id: string, data: UpdateCallInput): Promise<Call> {
     const client = DatabaseClient.getInstance();
     const result = await client.call.update({
