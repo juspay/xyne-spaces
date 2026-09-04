@@ -48,6 +48,7 @@ import {
   type ConversationTagMap,
   type DimensionContext,
   type DimensionKey,
+  type TopicNode,
   type TopicsTicket,
 } from './TopicsExplorer.utils';
 
@@ -62,6 +63,8 @@ const PAGER_BUTTON =
 const PANEL = 'flex min-h-[320px] flex-col overflow-hidden rounded-xl border border-border bg-card';
 const PANEL_HEADER = 'flex items-baseline justify-between border-b border-border px-4 py-2';
 const PANEL_TITLE = 'text-xs font-medium uppercase tracking-wide text-muted-foreground';
+/** Stable, so the read-only trail rows keep `TrendRow`'s memo. */
+const NOOP = (): void => {};
 /** The filters this panel applies, keyed by the search-param the list reads. */
 const FILTER_KEYS = [
   'aiCategory',
@@ -84,6 +87,53 @@ const startOfDay = (ms: number): number => {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
+};
+
+/** Panel state worth restoring; drill path and page stay ephemeral. */
+type ViewState = {
+  dims: DimensionKey[];
+  filters: TicketFilters;
+  dateRange: DateRangeValue;
+  startTime: string;
+  endTime: string;
+};
+
+const viewStateKey = (channelId: string): string => `topics-explorer-view-${channelId}`;
+
+const loadViewState = (channelId: string): Partial<ViewState> => {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(viewStateKey(channelId)) ?? '{}') as Partial<
+      Omit<ViewState, 'dateRange'> & { startDate?: string; endDate?: string }
+    >;
+    const startDate = s.startDate ? new Date(s.startDate) : null;
+    const endDate = s.endDate ? new Date(s.endDate) : null;
+    return {
+      ...(Array.isArray(s.dims) ? { dims: s.dims } : {}),
+      ...(s.filters ? { filters: s.filters } : {}),
+      ...(startDate && endDate && !Number.isNaN(+startDate + +endDate)
+        ? { dateRange: { startDate, endDate } }
+        : {}),
+      ...(s.startTime ? { startTime: s.startTime } : {}),
+      ...(s.endTime ? { endTime: s.endTime } : {}),
+    };
+  } catch {
+    return {};
+  }
+};
+
+const saveViewState = (channelId: string, { dateRange, ...rest }: ViewState): void => {
+  try {
+    sessionStorage.setItem(
+      viewStateKey(channelId),
+      JSON.stringify({
+        ...rest,
+        startDate: dateRange.startDate.toISOString(),
+        endDate: dateRange.endDate.toISOString(),
+      }),
+    );
+  } catch {
+    // Ignore storage errors (private mode, quota).
+  }
 };
 
 export interface TopicsExplorerProps {
@@ -112,24 +162,30 @@ export const TopicsExplorer = ({
   availableStages,
 }: TopicsExplorerProps): ReactElement => {
   const navigate = useNavigate();
-  const [dims, setDims] = useState<DimensionKey[]>(['priority', 'aiCategory']);
-  const [filters, setFilters] = useState<TicketFilters>({});
+  // Drilling into a group unmounts the panel, so the view is saved on every
+  // change and restored on mount, per desk.
+  const [restored] = useState(() => loadViewState(channelId));
+  const [dims, setDims] = useState<DimensionKey[]>(restored.dims ?? ['priority', 'aiCategory']);
+  const [filters, setFilters] = useState<TicketFilters>(restored.filters ?? {});
   // AI tags/sentiment live outside Zero, so they arrive per conversation.
   const [aiTagsByConversation, setAiTagsByConversation] = useState<ConversationTagMap>(
     () => new Map<string, readonly ConversationTag[]>(),
   );
-  const [isLoadingAiTagDimensions, setIsLoadingAiTagDimensions] = useState(false);
+  // True from the first render when a restored tag filter is in play: the fetch
+  // only starts in an effect, and until it lands every ticket fails that filter.
+  const [isLoadingAiTagDimensions, setIsLoadingAiTagDimensions] = useState(
+    () => !!restored.filters?.generatedTags?.length,
+  );
   const [aiTagsFailed, setAiTagsFailed] = useState(false);
   const [path, setPath] = useState<string[]>([]);
   const [page, setPage] = useState(0);
-  // Defaults to today: the rollup runs client-side over synced rows, so the
-  // panel opens on the cheapest window and widens only when asked.
-  const [dateRange, setDateRange] = useState<DateRangeValue>(() => ({
-    startDate: new Date(),
-    endDate: new Date(),
-  }));
-  const [startTime, setStartTime] = useState('00:00');
-  const [endTime, setEndTime] = useState('23:59');
+  // Defaults to today when nothing was saved: the rollup runs client-side over
+  // synced rows, so the panel opens on the cheapest window and widens on ask.
+  const [dateRange, setDateRange] = useState<DateRangeValue>(
+    () => restored.dateRange ?? { startDate: new Date(), endDate: new Date() },
+  );
+  const [startTime, setStartTime] = useState(restored.startTime ?? '00:00');
+  const [endTime, setEndTime] = useState(restored.endTime ?? '23:59');
   const [hovered, setHovered] = useState<string | null>(null);
   const isMember = !!useGetChannelUserStatus(channelId);
   const usersById = useUsersById();
@@ -220,6 +276,12 @@ export const TopicsExplorer = ({
   const { categories: tagCategories } = useDeskTagsConfig(channelId, open && !!channelId);
   const configuredTagCategories = useMemo(() => Object.keys(tagCategories), [tagCategories]);
 
+  // The desk the view was restored from, so save and restore cannot disagree.
+  const savedChannelId = useRef(channelId);
+  useEffect(() => {
+    saveViewState(savedChannelId.current, { dims, filters, dateRange, startTime, endTime });
+  }, [dims, filters, dateRange, startTime, endTime]);
+
   const dimensions = useMemo(
     () => buildDimensions(aiTagsByConversation, configuredTagCategories),
     [aiTagsByConversation, configuredTagCategories],
@@ -260,20 +322,23 @@ export const TopicsExplorer = ({
   }, [dims, dimensions]);
 
   /** Walk the drill path, one dimension per step. */
-  const { allNodes, depth, scoped, validPath } = useMemo(() => {
+  const { allNodes, depth, scoped, validPath, trail } = useMemo(() => {
     let current = tickets;
     let dimIndex = 0;
     const walked: string[] = [];
+    const steps: TopicNode[] = [];
 
     for (const key of path) {
       const dim = activeDims[dimIndex];
       const nextDim = activeDims[dimIndex + 1];
       if (!dim || !nextDim) break;
-      const subset = ticketsForKey(current, dimensionFor(dimensions, dim), key);
+      const dimension = dimensionFor(dimensions, dim);
+      const subset = ticketsForKey(current, dimension, key);
       if (subset.length === 0) break;
       current = subset;
       dimIndex += 1;
       walked.push(key);
+      steps.push({ key, label: labelFor(dimension, key, ctx), tickets: subset });
     }
 
     return {
@@ -281,6 +346,7 @@ export const TopicsExplorer = ({
       depth: dimIndex,
       scoped: current,
       validPath: walked,
+      trail: steps,
     };
   }, [tickets, activeDims, dimensions, ctx, path]);
 
@@ -302,6 +368,24 @@ export const TopicsExplorer = ({
     () => maxDailyCount(allNodes, rangeDays, endMs),
     [allNodes, rangeDays, endMs],
   );
+
+  // One line per drilled step, so a spike here reads against the slices it came
+  // from. One Y domain across the trail, not the level's: the drill only
+  // narrows, so steps compare to each other but not to the groups below.
+  const trailTrend = useMemo(() => {
+    const points = buildTrend(trail, rangeDays, endMs);
+    return {
+      rows: trail.map((node, i) => ({
+        // `__none__` is every dimension's empty bucket, so raw keys collide.
+        key: `${i}-${node.key}`,
+        label: node.label,
+        colour: swatchFor(i).fill,
+        points: points[i] ?? [],
+        canSelect: false,
+      })),
+      max: maxDailyCount(trail, rangeDays, endMs),
+    };
+  }, [trail, rangeDays, endMs]);
 
   const currentDim = dimensionFor(dimensions, activeDims[depth]);
   const isOverlapping = currentDim.multi === true;
@@ -783,24 +867,45 @@ export const TopicsExplorer = ({
               </div>
             </section>
 
-            {/* Right: one trend row per group, same order and shade as the tiles */}
-            <section className={PANEL}>
-              <header className={PANEL_HEADER}>
-                <h3 className={PANEL_TITLE}>Daily volume</h3>
-                {/* Not "last N days": the range can be any window, e.g. Yesterday. */}
-                <span className='text-xs text-muted-foreground'>
-                  {rangeDays} {rangeDays === 1 ? 'day' : 'days'}
-                </span>
-              </header>
+            {/* Right: the drilled steps in their own panel — sharing the level's
+                would read as one list on one scale — then one trend row per
+                group at this level, same order and shade as the tiles */}
+            <div className='flex min-h-0 flex-col gap-4'>
+              {trailTrend.rows.length > 0 && (
+                <section className={cn(PANEL, 'min-h-0 shrink-0')}>
+                  <header className={PANEL_HEADER}>
+                    <h3 className={PANEL_TITLE}>Drill path</h3>
+                    <span className='text-xs text-muted-foreground'>own scale</span>
+                  </header>
 
-              <TopicsTrendPanel
-                rows={rowsWithTrend}
-                max={trendMax}
-                hovered={hovered}
-                onHover={setHovered}
-                onSelect={onTileClick}
-              />
-            </section>
+                  <TopicsTrendPanel
+                    rows={trailTrend.rows}
+                    max={trailTrend.max}
+                    hovered={null}
+                    onHover={NOOP}
+                    onSelect={NOOP}
+                  />
+                </section>
+              )}
+
+              <section className={cn(PANEL, 'flex-1')}>
+                <header className={PANEL_HEADER}>
+                  <h3 className={PANEL_TITLE}>Daily volume</h3>
+                  {/* Not "last N days": the range can be any window, e.g. Yesterday. */}
+                  <span className='text-xs text-muted-foreground'>
+                    {rangeDays} {rangeDays === 1 ? 'day' : 'days'}
+                  </span>
+                </header>
+
+                <TopicsTrendPanel
+                  rows={rowsWithTrend}
+                  max={trendMax}
+                  hovered={hovered}
+                  onHover={setHovered}
+                  onSelect={onTileClick}
+                />
+              </section>
+            </div>
           </div>
         </div>
       </div>
