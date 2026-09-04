@@ -40,6 +40,7 @@ import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { isSlashCommandArtifactMessage } from '../SlashCommandArtifacts';
 import { cn } from '../../../utils/classNames';
 import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
+import { replaceEmojiHtmlWithShortcodes } from '../../../utils/customEmojiUtils';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
@@ -75,7 +76,6 @@ import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
 import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
-import DOMPurify from 'dompurify';
 import { CallParticipantsSelectionModal } from '../../Call/CallParticipantsSelectionModal';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import {
@@ -704,16 +704,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       // Convert markdown to HTML if needed, then normalize headings to bold paragraphs
       const copyPromise = isMarkdownContent
         ? markdownToHtml(contentToCopy)
-            .then(html => copyHtmlToClipboard(html))
+            .then(html => copyHtmlToClipboard(replaceEmojiHtmlWithShortcodes(html)))
             .catch(error => {
               logger.warn(Event.FRONTEND_ERROR, {
                 type: 'migrated_console_warn',
                 message: String('Markdown processing failed, falling back to raw content:'),
                 context: [error],
               });
-              return copyHtmlToClipboard(contentToCopy);
+              return copyHtmlToClipboard(replaceEmojiHtmlWithShortcodes(contentToCopy));
             })
-        : copyHtmlToClipboard(contentToCopy);
+        : copyHtmlToClipboard(replaceEmojiHtmlWithShortcodes(contentToCopy));
 
       copyPromise
         .then(() => {
@@ -723,25 +723,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           toast.error('Could not copy message to clipboard');
         });
 
-      // Also copy plain text with emoji replacement (only if there are emoji images)
-      if (contentToCopy.includes('data-emoji="true"')) {
-        const sanitizedContent = DOMPurify.sanitize(contentToCopy);
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(sanitizedContent, 'text/html');
-
-        // Replace custom emoji <img> with :emoji_name:
-        doc.querySelectorAll('img[data-emoji="true"]').forEach(img => {
-          const alt = img.getAttribute('alt') || '';
-          img.replaceWith(document.createTextNode(alt));
-        });
-
-        const plainText = doc.body.textContent || '';
-
-        navigator.clipboard
-          .writeText(plainText)
-          .then(() => toast.success('Message copied to clipboard'))
-          .catch(() => toast.error('Could not copy message'));
-      }
     }
   };
 

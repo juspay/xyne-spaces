@@ -18,6 +18,7 @@ import { ChatListItem } from '../ChatListItem/ChatListItem';
 import { DatePill } from '../DatePill';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
+import { replaceEmojiImagesWithShortcodes } from '../../../utils/customEmojiUtils';
 import { useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
 import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
@@ -344,6 +345,24 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // Container for the shared hover toolbar overlay (Slack pattern): one
   // toolbar for the whole list, positioned over the hovered row.
   const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
+
+  // Native copy (Cmd/Ctrl+C on a text selection) drops custom-emoji <img>
+  // elements from the plain-text clipboard flavor. Rewrite the selection so
+  // each emoji is copied as its :shortcode:. No-op when the selection has no
+  // custom emoji, so ordinary copy behaviour is unchanged.
+  const handleMessageCopy = useCallback((event: React.ClipboardEvent<HTMLDivElement>): void => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+
+    const holder = document.createElement('div');
+    holder.appendChild(selection.getRangeAt(0).cloneContents());
+    if (!holder.querySelector('img[data-emoji="true"]')) return;
+
+    replaceEmojiImagesWithShortcodes(holder);
+    event.clipboardData.setData('text/plain', holder.textContent || '');
+    event.clipboardData.setData('text/html', holder.innerHTML);
+    event.preventDefault();
+  }, []);
   const shouldUseCutoffQuery =
     channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
 
@@ -1367,6 +1386,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   return (
     <div
       ref={hoverToolbarContainerRef}
+      onCopy={handleMessageCopy}
       data-component='ChatListV11'
       data-testid='chat-message-list'
       className='flex-1 relative no-scrollbar min-h-0'
