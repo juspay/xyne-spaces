@@ -34,6 +34,7 @@ import {
 } from "../lib/docusign-config.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "../lib/oauth-return.js";
+import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
@@ -156,7 +157,7 @@ export const docusignOAuthProvider: OAuthTokenProvider = {
  * POST /:userId/oauth/docusign/authorize
  * Returns the DocuSign consent URL with an HMAC-signed `state`.
  */
-router.post("/:userId/oauth/docusign/authorize", asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
+router.post("/:userId/oauth/docusign/authorize", oauthLimiter, asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
   const { userId } = req.params;
   const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
 

@@ -8,6 +8,7 @@ import { evictSession } from "../mcp/runner.js";
 import { type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState } from "./oauth-state.js";
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth-return.js";
+import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "./http.js";
 import { createLogger } from "../logger.js";
@@ -200,7 +201,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
   const router = Router();
   router.use("/:userId", pinUserIdParam);
 
-  router.post(`/:userId/oauth/${type}/authorize`, asyncHandler(async (req, res) => {
+  router.post(`/:userId/oauth/${type}/authorize`, oauthLimiter, asyncHandler(async (req, res) => {
     const { userId } = req.params as { userId: string };
     const { redirectUri, scope, returnTo } = req.body as { redirectUri?: string; scope?: string; returnTo?: string };
 
