@@ -48,6 +48,7 @@ import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { usePinnedArtifactApps } from '../../hooks/usePinnedArtifactApps';
+import { AppIcon } from '../AppIcon/AppIcon';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -515,7 +516,11 @@ const AppSidebar = (): ReactElement => {
                               : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                           )}
                         >
-                          {initial}
+                          {app.icon ? (
+                            <AppIcon name={app.icon} size={16} aria-hidden='true' />
+                          ) : (
+                            initial
+                          )}
                         </Link>
                       </Tooltip>
                     </li>

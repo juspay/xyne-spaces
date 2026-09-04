@@ -1769,6 +1769,9 @@ importers:
       '@types/pdfkit':
         specifier: ^0.17.6
         version: 0.17.6
+      '@xyne/icons':
+        specifier: workspace:*
+        version: link:../../../packages/icons
       '@xyne/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
@@ -2233,6 +2236,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
+      '@xyne/icons':
+        specifier: workspace:*
+        version: link:../icons
       '@xyne/kata-sdk':
         specifier: workspace:*
         version: link:../kata-sdk
