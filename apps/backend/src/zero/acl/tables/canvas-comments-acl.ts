@@ -6,9 +6,7 @@ import { zql } from '../../queries';
 
 export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
   private async canEditCanvas(canvasId: string, tx: Transaction<Schema>): Promise<boolean> {
-    const canvas = await tx.run(
-      zql.canvases.where('id', canvasId).where('workspaceId', this.ctx.workspaceId).one(),
-    );
+    const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
     if (!canvas) {
       throw new MutationACLError('Canvas comment failed: canvas not found', 'canvas_comments');
     }
@@ -17,7 +15,6 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
 
     const participant = await tx.run(
       zql.canvas_participants
-        .where('workspaceId', this.ctx.workspaceId)
         .where('canvasId', canvasId)
         .where('role', 'IN', [CanvasRole.EDITOR, CanvasRole.OWNER])
         .where(({ or, cmp, exists: ex }: any) =>
@@ -43,10 +40,7 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
     }
 
     const thread = await tx.run(
-      zql.canvas_comment_threads
-        .where('id', args.threadId)
-        .where('workspaceId', this.ctx.workspaceId)
-        .one(),
+      zql.canvas_comment_threads.where('id', args.threadId).one(),
     );
     if (!thread || thread.canvasId !== args.canvasId) {
       throw new MutationACLError('Canvas comment insert failed: thread not found', 'canvas_comments');
@@ -59,10 +53,7 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
 
   async canUpdate(args: UpdateValue<TableSchema<'canvas_comments'>>, tx: Transaction<Schema>): Promise<void> {
     const comment = await tx.run(
-      zql.canvas_comments
-        .where('id', args.id)
-        .where('workspaceId', this.ctx.workspaceId)
-        .one(),
+      zql.canvas_comments.where('id', args.id).one(),
     );
     if (!comment) {
       throw new MutationACLError('Canvas comment update failed: comment not found', 'canvas_comments');
