@@ -151,22 +151,21 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
   // Channel Participant specific methods
   async addParticipant(channelId: string, userId: string, role: ChannelRole = ChannelRole.MEMBER, isClosed: boolean = false): Promise<ChannelParticipant> {
-    return await this.db.$transaction(async (tx) => {
-      const now = new Date();
-      const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(tx, channelId, now);
-      // Check if participant already exists
-      const existing = await tx.channelParticipant.findUnique({
-        where: {
-          channelId_userId: {
-            channelId,
-            userId
-          }
-        }
-      });
-      if (existing) {
-        return existing;
-      }
+    // Existence check + the seen-cutoff scan run OUTSIDE the write transaction. getConversationSeenCutoffAt is a
+    // per-channel `ORDER BY createdAt` scan that, under heavy parallel migration load, can take many seconds; leaving it
+    // inside the interactive transaction ate the 5s budget and made the next query die with P2028. The common resume
+    // re-add returns here without a transaction at all; the transaction below now holds only fast indexed writes.
+    const existing = await this.db.channelParticipant.findUnique({
+      where: { channelId_userId: { channelId, userId } },
+    });
+    if (existing) {
+      return existing;
+    }
 
+    const now = new Date();
+    const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(this.db, channelId, now);
+
+    return await this.db.$transaction(async (tx) => {
       const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: channelId });
 
       // Create participant

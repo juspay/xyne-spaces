@@ -11,6 +11,7 @@ import {
 import {
   Check,
   Code2,
+  Settings2,
   Loader2,
   Maximize2,
   Pencil,
@@ -191,11 +192,12 @@ export const ReactArtifactView = ({
   expandLabel = 'Open full screen',
   onClose,
   titleSlot,
+  settingsSlot,
   onSave,
   saveState = 'idle',
 }: ReactArtifactViewProps): ReactElement => {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
-  const [tab, setTab] = useState<'preview' | 'code'>('preview');
+  const [tab, setTab] = useState<'preview' | 'code' | 'settings'>('preview');
   const [refreshingData, setRefreshingData] = useState(false);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
   const auth = useAuthContextValues();
@@ -303,6 +305,9 @@ export const ReactArtifactView = ({
                 [
                   ['preview', Play],
                   ['code', Code2],
+                  // Only when a caller supplied settings — the inline card and
+                  // the dialog have no app behind them to configure.
+                  ...(settingsSlot ? ([['settings', Settings2]] as const) : []),
                 ] as const
               ).map(([value, Icon]) => (
                 <button
@@ -446,6 +451,14 @@ export const ReactArtifactView = ({
       {fill && tab === 'code' && (
         <div style={bodyStyle}>
           <ArtifactCodeView payload={payload} />
+        </div>
+      )}
+      {fill && tab === 'settings' && settingsSlot && (
+        // Explicit background: Preview paints its own (the Sandpack iframe) and
+        // Code paints its own (the editor), so the pane shell deliberately has
+        // none. A plain panel has to supply it or the app behind shows through.
+        <div style={bodyStyle} className='overflow-y-auto bg-background'>
+          {settingsSlot}
         </div>
       )}
     </div>

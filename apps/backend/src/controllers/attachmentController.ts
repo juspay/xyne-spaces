@@ -594,7 +594,15 @@ export class AttachmentController {
         entityType === AttachmentEntityType.IMPACT
           ? (await db.impact.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId
           : (await db.formEntityValues.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId;
-      if (!entityWorkspaceId || entityWorkspaceId !== callerWorkspaceId) {
+      if (!entityWorkspaceId) {
+        // FORM_ENTITY_VALUE ids are minted client-side before the row exists; upload runs first,
+        // then createV2 creates/verifies the row, so a missing row is legitimate and must not 404.
+        if (entityType !== AttachmentEntityType.FORM_ENTITY_VALUE) {
+          res.status(404).json({ error: 'Entity not found' });
+          return;
+        }
+      } else if (entityWorkspaceId !== callerWorkspaceId) {
+        // Existing row in another workspace: block cross-tenant attachment writes/leaks.
         res.status(404).json({ error: 'Entity not found' });
         return;
       }
