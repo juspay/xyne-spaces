@@ -1,3 +1,10 @@
+## [1.274.1](https://github.com/juspay/xyne-spaces/compare/v1.274.0...v1.274.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* dark-mode fill for New Project modal text inputs ([#1509](https://github.com/juspay/xyne-spaces/issues/1509)) ([d8186cf](https://github.com/juspay/xyne-spaces/commit/d8186cf5b89cd2995b06fd9da575446ce7cb9922))
+
 ## [1.274.0](https://github.com/juspay/xyne-spaces/compare/v1.273.4...v1.274.0) (2026-09-04)
 
 
