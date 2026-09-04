@@ -15,6 +15,7 @@
 * verifying "[data-testid='participant-count']" is visible
 
 ## User joins ongoing group call
+tags: quarantine
 * Using browser
 * Logging in user "user-1" on temp browser "caller-browser-1"
 * Logging in user "user-3" on temp browser "user3-browser-1"
