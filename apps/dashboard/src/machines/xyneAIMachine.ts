@@ -491,14 +491,13 @@ export const xyneAIMachine = setup({
           event.canvasInfo,
         );
 
-        // When opening from closed state with canvas context (Ask AI on canvas),
-        // always start a fresh chat unless explicitly overridden
+        // Opening from closed with canvas context (Ask AI on canvas) starts a
+        // fresh chat unless explicitly overridden. Once open, OPEN is handled by
+        // updateOpen instead, which keeps the conversation.
         const startFreshChat =
           event.startFreshChat !== undefined
             ? event.startFreshChat
-            : event.canvasInfo !== null && event.canvasInfo !== undefined
-              ? true
-              : false;
+            : event.canvasInfo !== null && event.canvasInfo !== undefined;
 
         // Preserve existing threadInfo when OPEN doesn't supply one (e.g.,
         // ticket Ask AI button after SET_TICKET_CONTEXT already set it).
@@ -575,14 +574,11 @@ export const xyneAIMachine = setup({
           event.canvasInfo,
         );
 
-        // When already open and canvas context is provided (Ask AI on canvas),
-        // always start a fresh chat unless explicitly overridden
-        const startFreshChat =
-          event.startFreshChat !== undefined
-            ? event.startFreshChat
-            : event.canvasInfo !== null && event.canvasInfo !== undefined
-              ? true
-              : false;
+        // Already open means there may be a conversation in progress, so Ask AI
+        // from a canvas block attaches its selection as more context instead of
+        // discarding the exchange that prompted the question. Opening from
+        // closed still starts fresh (see setOpen); an explicit flag still wins.
+        const startFreshChat = event.startFreshChat !== undefined ? event.startFreshChat : false;
 
         const threadInfo = event.threadInfo !== undefined ? event.threadInfo : context.threadInfo;
 
