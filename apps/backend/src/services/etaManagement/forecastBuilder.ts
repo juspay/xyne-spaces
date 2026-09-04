@@ -24,7 +24,13 @@ export function buildForecast(input: BuildForecastInput): ForecastResult {
   const { route, activeStageDeadline, now, stagesById } = input;
 
   if (route.kind === 'NOT_APPLICABLE') {
-    return { status: 'NOT_APPLICABLE', incompleteReason: null, incompleteStageIds: [], forecastEta: null };
+    return {
+      status: 'NOT_APPLICABLE',
+      incompleteReason: null,
+      incompleteStageIds: [],
+      forecastEta: null,
+      standardPathUsed: false,
+    };
   }
 
   if (route.kind === 'DEVIATED') {
@@ -33,6 +39,8 @@ export function buildForecast(input: BuildForecastInput): ForecastResult {
       incompleteReason: 'TICKET_OFF_STANDARD_PATH',
       incompleteStageIds: [route.offPathStageId],
       forecastEta: null,
+      // A deviation is only reachable on a board that has a Standard Path configured.
+      standardPathUsed: true,
     };
   }
 
@@ -42,6 +50,7 @@ export function buildForecast(input: BuildForecastInput): ForecastResult {
       incompleteReason: 'NO_TRACKED_ACTIVE_DEADLINE',
       incompleteStageIds: [],
       forecastEta: null,
+      standardPathUsed: route.standardPathUsed,
     };
   }
 
@@ -70,6 +79,7 @@ export function buildForecast(input: BuildForecastInput): ForecastResult {
       incompleteReason: 'MISSING_STAGE_ESTIMATE',
       incompleteStageIds,
       forecastEta: null,
+      standardPathUsed: route.standardPathUsed,
     };
   }
 
@@ -80,5 +90,11 @@ export function buildForecast(input: BuildForecastInput): ForecastResult {
   const basis = activeStageDeadline.getTime() > now.getTime() ? activeStageDeadline : now;
   const forecastEta = calculateETADeadline(basis, totalHours);
 
-  return { status: 'COMPLETE', incompleteReason: null, incompleteStageIds: [], forecastEta };
+  return {
+    status: 'COMPLETE',
+    incompleteReason: null,
+    incompleteStageIds: [],
+    forecastEta,
+    standardPathUsed: route.standardPathUsed,
+  };
 }

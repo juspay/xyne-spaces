@@ -260,6 +260,23 @@ export const getActivityDescription = (
       };
     }
 
+    case ActivityType.ETA:
+      return {
+        description: 'changed due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {value?.oldValue ? new Date(value.oldValue).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {value?.newValue ? new Date(value.newValue).toLocaleDateString() : 'none'}
+            </span>
+          </>
+        ),
+      };
+
     case ActivityType.STAGE_ETA:
       return {
         description: `updated stage deadline`,

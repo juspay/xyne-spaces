@@ -52,7 +52,7 @@ export function resolveForecastRoute(input: RouteResolutionInput): RouteResoluti
       });
       fromId = stage.id;
     }
-    return { kind: 'ROUTE', steps };
+    return { kind: 'ROUTE', steps, standardPathUsed: false };
   }
 
   if (boardType === BoardType.NON_LINEAR) {
@@ -75,7 +75,7 @@ export function resolveForecastRoute(input: RouteResolutionInput): RouteResoluti
       });
       fromId = stageId;
     }
-    return { kind: 'ROUTE', steps };
+    return { kind: 'ROUTE', steps, standardPathUsed: true };
   }
 
   // FLOW (and any other board type): automatic due-date management is deferred this

@@ -107,7 +107,6 @@ import {
   parseTicketEtaManagement,
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
-  type EtaManuallyUpdatedActivityValue,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -5835,11 +5834,6 @@ export function createMutators(
           kanbanPosition: z.string().nullable().optional(),
           updatedAt: z.number(),
           // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
-          // Optional (not required) so existing/other callers that touch `eta` without this
-          // context keep working unchanged; the dashboard's dedicated due-date editor (M5)
-          // is expected to always pass both.
-          etaExpectedFingerprint: z.string().optional(),
-          etaChangeReason: z.string().optional(),
         }),
         async ({ tx, args: params }) => {
           const ticket = await tx.run(zql.tickets.where('id', params.id).one());
@@ -5929,11 +5923,6 @@ export function createMutators(
             params.statusV2 !== undefined &&
             ticket.statusV2 === TicketStatusV2.PAUSED &&
             params.statusV2 !== TicketStatusV2.PAUSED;
-          // Excludes isBoardChanging: a combined board+eta call is fully handled by the
-          // transfer branch's own evaluation - see needsEtaEvaluation below.
-          const isPureManualEtaChange =
-            isEtaChanging && !isStageChanging && !isBoardChanging && !isResumingFromPause && !isEnteringTerminal && !isLeavingTerminal;
-
           // Board/etaManagement context, fetched once and reused by both the permission gate
           // below and the ETA domain-service evaluation further down - only when one of the
           // triggers that actually needs it is present, so an unrelated field edit (title,
@@ -6253,7 +6242,6 @@ export function createMutators(
               if (field === 'statusV2') activityType = 'STATUS';
               if (field === 'assignedTo') activityType = 'ASSIGNED_TO';
               if (field === 'userGroupId') activityType = 'USER_GROUP_ID';
-              if (field === 'eta' && isPureManualEtaChange) continue;
               if (field === 'eta') activityType = 'ETA';
               if (field === 'boardId') activityType = 'BOARD';
               if (field === 'isArchived') activityType = 'IS_ARCHIVED';
@@ -6476,24 +6464,6 @@ export function createMutators(
             !isBoardChanging &&
             (isStageChanging || isEtaChanging || isEnteringTerminal || isLeavingTerminal || isResumingFromPause);
 
-          // Pure manual due-date edit: optimistic-concurrency check against the persisted
-          // fingerprint, so a stale client refetches rather than committing a change decided
-          // against outdated risk state.
-          if (isPureManualEtaChange && params.etaExpectedFingerprint !== undefined) {
-            const preCheckEtaManagement = parseTicketEtaManagement(ticket.metadata);
-            if (preCheckEtaManagement.planningRisk.fingerprint !== params.etaExpectedFingerprint) {
-              throw new ApplicationError(
-                'Planning risk state has changed since you loaded this ticket. Refresh and try again.',
-                {
-                  details: {
-                    code: 'STALE_FINGERPRINT',
-                    currentFingerprint: preCheckEtaManagement.planningRisk.fingerprint,
-                  },
-                },
-              );
-            }
-          }
-
           if (needsEtaEvaluation) {
             const effectiveStageName = (updateData.stageName as string | undefined) ?? ticket.stageName;
             const effectiveStatusV2 = (updateData.statusV2 as string | undefined) ?? ticket.statusV2;
@@ -6566,29 +6536,6 @@ export function createMutators(
                 previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
               });
             }
-          }
-
-          if (isPureManualEtaChange) {
-            // User-attributed, unlike the system-attributed ETA_AUTO_RECOMPUTED/ETA_RISK_*
-            // rows. REPLACES the generic ActivityType.ETA row the `fields` loop would
-            // otherwise write - suppressed for this case above (`if (field === 'eta' &&
-            // isPureManualEtaChange) continue;`), so a manual edit produces one timeline row
-            // carrying the reason, not two saying the same thing. Travels through the outbox
-            // since the reason is a mutator param the side-effect layer cannot observe on its
-            // own.
-            etaActivityIntentsForTicketUpdate = [
-              ...etaActivityIntentsForTicketUpdate,
-              {
-                activityType: ActivityType.ETA_MANUALLY_UPDATED,
-                value: {
-                  oldEta: ticket.eta ?? null,
-                  newEta: params.eta as number,
-                  reason: params.etaChangeReason ?? '',
-                  actingUserId: authData.sub,
-                } satisfies EtaManuallyUpdatedActivityValue,
-                actorId: authData.sub,
-              },
-            ];
           }
 
           if (etaActivityIntentsForTicketUpdate.length > 0) {
@@ -7094,12 +7041,9 @@ export function createMutators(
           updatedAt: z.number(),
           ticketId: z.string().optional(),
           stageId: z.string().optional(),
-          // Optional optimistic-concurrency guard against the ticket's persisted planning-risk
-          // fingerprint - see the matching param on ticket.update for why it's optional.
-          etaExpectedFingerprint: z.string().optional(),
         }),
         async ({ tx, args }) => {
-          const { id, stageEta, updatedAt, ticketId, stageId, etaExpectedFingerprint } = args;
+          const { id, stageEta, updatedAt, ticketId, stageId } = args;
 
           const now = Date.now();
           if (stageEta < now) {
@@ -7143,21 +7087,6 @@ export function createMutators(
 
           const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
           const boardEtaManagement = parseBoardEtaManagement(board?.metadata ?? null, board?.boardType ?? BoardType.DEFAULT);
-
-          if (etaExpectedFingerprint !== undefined) {
-            const preCheckEtaManagement = parseTicketEtaManagement(ticket.metadata);
-            if (preCheckEtaManagement.planningRisk.fingerprint !== etaExpectedFingerprint) {
-              throw new ApplicationError(
-                'Planning risk state has changed since you loaded this ticket. Refresh and try again.',
-                {
-                  details: {
-                    code: 'STALE_FINGERPRINT',
-                    currentFingerprint: preCheckEtaManagement.planningRisk.fingerprint,
-                  },
-                },
-              );
-            }
-          }
 
           // This mutator changes Ticket.eta the same way ticket.update's eta-changing path
           // does, but has never been gated by ticketControlRoleIds. Close that gap. No

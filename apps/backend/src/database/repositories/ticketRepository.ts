@@ -629,16 +629,18 @@ export class TicketRepository {
         null,
         { requireExplicitTransition: false },
       );
-      // currentTicket.metadata was read before this transaction opened, so a concurrent
-      // write (e.g. acknowledgeEtaRisk) landing before ours would be silently lost by the
-      // merge below. FOR UPDATE locks the row so that can't happen, and feeding this into
-      // evaluateEta too keeps the risk decision - not just the write - based on current state.
-      const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown }[]>`
-        SELECT "metadata"
+      // metadata AND eta were both read before this transaction opened, so a concurrent write
+      // (e.g. acknowledgeEtaRisk, or a manual due-date edit) landing before ours would be lost.
+      // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
+      // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
+      // against - and then overwrite - a due date someone else just moved.
+      const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
+        SELECT "metadata", "eta"
         FROM "tickets"
         WHERE "id" = ${ticketId}
         FOR UPDATE
       `;
+      const lockedEta = lockedTicket?.eta ?? null;
       const boardEtaCtx = await loadBoardEtaContext(tx, currentTicket.boardId);
       const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
 
@@ -646,7 +648,7 @@ export class TicketRepository {
         ticketId,
         ticketStatus: newStatusV2,
         isTerminal: isTerminalStatus(newStatusV2),
-        currentTicketEta: currentTicket.eta,
+        currentTicketEta: lockedEta,
         currentTicketEtaManagement,
         boardType: boardEtaCtx.boardType,
         boardEtaManagement: boardEtaCtx.boardEtaManagement,
@@ -797,7 +799,7 @@ export class TicketRepository {
       // not authored by the user who moved the stage.
       const activityIntents = buildEtaActivityIntents(etaResult, {
         currentStageId: targetStage.id,
-        oldEta: currentTicket.eta ? currentTicket.eta.getTime() : null,
+        oldEta: lockedEta ? lockedEta.getTime() : null,
         trigger: 'STAGE_TRANSITION',
         systemReason: `Automatic recalculation after moving to stage "${newStageName}"`,
         previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,

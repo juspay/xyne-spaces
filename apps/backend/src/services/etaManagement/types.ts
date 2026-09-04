@@ -50,7 +50,10 @@ export interface RouteStep {
 }
 
 export type RouteResolution =
-  | { kind: 'ROUTE'; steps: RouteStep[] }
+  /** `standardPathUsed` distinguishes a NON_LINEAR board's admin-configured Standard Path
+   *  from a DEFAULT/RELEASE board's implicit sequenceNumber order - both produce a ROUTE,
+   *  and the audit trail records which one a forecast came from. */
+  | { kind: 'ROUTE'; steps: RouteStep[]; standardPathUsed: boolean }
   /** Current stage isn't on the configured Standard Path (NON_LINEAR only). */
   | { kind: 'DEVIATED'; offPathStageId: string }
   /** Board type/config doesn't support forecasting this release (Flow, non-linear with no Standard Path, unknown current stage). */
@@ -71,6 +74,8 @@ export interface ForecastResult {
   incompleteReason: string | null;
   incompleteStageIds: string[];
   forecastEta: Date | null;
+  /** Propagated from the route so ETA_AUTO_RECOMPUTED can record how the forecast was built. */
+  standardPathUsed: boolean;
 }
 
 export interface EtaUpdateDecision {

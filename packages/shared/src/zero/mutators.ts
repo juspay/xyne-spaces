@@ -4262,12 +4262,6 @@ export const mutators = defineMutators({
         isArchived: z.boolean().optional(),
         kanbanPosition: z.string().nullable().optional(),
         updatedAt: z.number(),
-        // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit - see
-        // the matching backend mutator. Not used by this optimistic client-side write (the
-        // server is authoritative on the fingerprint check); accepted here only so callers
-        // passing them don't hit an excess-property type error.
-        etaExpectedFingerprint: z.string().optional(),
-        etaChangeReason: z.string().optional(),
       }),
       async ({
         tx,
@@ -4435,9 +4429,6 @@ export const mutators = defineMutators({
         updatedAt: z.number(),
         ticketId: z.string().optional(),
         stageId: z.string().optional(),
-        // See ticket.update's matching fields - accepted so callers passing it don't hit an
-        // excess-property type error; the server is authoritative on the fingerprint check.
-        etaExpectedFingerprint: z.string().optional(),
       }),
       async ({ tx, ctx, args: { id, stageEta, updatedAt, ticketId, stageId } }) => {
         await tx.mutate.ticket_stage_eta.update({

@@ -3,7 +3,6 @@ import {
   parseTicketEtaManagement,
   type EtaActivityOutbox,
   type EtaAutoRecomputedActivityValue,
-  type EtaManuallyUpdatedActivityValue,
   type EtaRiskAcknowledgedActivityValue,
   type EtaChangeTrigger,
   type EtaRiskDetectedActivityValue,
@@ -107,16 +106,6 @@ export function etaSystemMessageContent(
       const reason = (intent.value as EtaRiskAcknowledgedActivityValue | undefined)?.reason ?? '';
       return `${actorName} acknowledged the planning-risk warning: ${reason}`;
     }
-    // Replaces the thread message the generic ActivityType.ETA row used to post for a
-    // manual due-date edit; that row is now suppressed on this path, and this one carries
-    // the reason the old text had no field for.
-    case ActivityType.ETA_MANUALLY_UPDATED: {
-      const v = intent.value as EtaManuallyUpdatedActivityValue | undefined;
-      const oldDate = v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none';
-      const newDate = v?.newEta ? new Date(v.newEta).toLocaleDateString() : 'none';
-      const reason = v?.reason ? `: ${v.reason}` : '';
-      return `${actorName} updated ETA from ${oldDate} to ${newDate}${reason}`;
-    }
     default:
       return null;
   }
@@ -149,6 +138,7 @@ export function buildRiskTransitionActivityIntents(
         incompleteReason: null,
         incompleteStageIds: [],
         forecastEta: null,
+        standardPathUsed: false,
       },
       etaDecision: { newEta: null, changed: false },
       planningRisk,
@@ -171,7 +161,7 @@ export function buildEtaActivityIntents(
       forecastEta: result.forecast.forecastEta.getTime(),
       finalEta: result.etaDecision.newEta.getTime(),
       stageVisitId: result.ticketEtaManagementPatch.activeVisit?.stageVisitId ?? null,
-      standardPathUsed: false,
+      standardPathUsed: result.forecast.standardPathUsed,
       systemReason: ctx.systemReason,
     };
     intents.push({ activityType: ActivityType.ETA_AUTO_RECOMPUTED, value });

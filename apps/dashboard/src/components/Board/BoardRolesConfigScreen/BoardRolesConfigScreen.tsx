@@ -11,7 +11,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
-import { BoardType } from '@xyne/shared';
+import { BoardType, parseBoardEtaManagement } from '@xyne/shared';
 
 interface BoardStageInfo {
   id: string;
@@ -180,25 +180,16 @@ const BoardRolesConfigScreen = ({
   useEffect(() => {
     if (board && typeof board === 'object' && 'metadata' in board) {
       const metadata = board.metadata as Record<string, unknown>;
-      const etaManagement = metadata?.['etaManagement'];
-      setAutoRecomputeEnabled(
-        Boolean(
-          etaManagement &&
-          typeof etaManagement === 'object' &&
-          (etaManagement as Record<string, unknown>)['autoRecomputeEnabled'] === true,
-        ),
-      );
-      if (
-        etaManagement &&
-        typeof etaManagement === 'object' &&
-        Array.isArray((etaManagement as Record<string, unknown>)['standardPathStageIds'])
-      ) {
-        setStandardPathStageIds(
-          ((etaManagement as Record<string, unknown>)['standardPathStageIds'] as unknown[]).filter(
-            (id): id is string => typeof id === 'string',
-          ),
-        );
-      }
+      // Parse through the shared helper rather than reading the JSON by hand: a board that has
+      // never saved etaManagement has no key at all, and the helper applies the board-type
+      // default (auto-recompute ON) that the backend actually acts on. Reading the raw key
+      // would show "off" for every such board - and then save that false back.
+      const boardTypeForEta =
+        ('boardType' in board ? (board as { boardType?: string }).boardType : null) ??
+        BoardType.DEFAULT;
+      const etaManagement = parseBoardEtaManagement(metadata, boardTypeForEta);
+      setAutoRecomputeEnabled(etaManagement.autoRecomputeEnabled);
+      setStandardPathStageIds([...etaManagement.standardPathStageIds]);
       if (Array.isArray(metadata?.['ticketControlRoleIds'])) {
         setTicketControlRoleIds(
           (metadata['ticketControlRoleIds'] as unknown[]).filter(
@@ -378,7 +369,6 @@ const BoardRolesConfigScreen = ({
       const result = zero.mutate(
         mutators.board.update({
           boardId,
-          autoRecomputeEnabled,
           standardPathStageIds,
           timestamp: Date.now(),
         }),
@@ -400,7 +390,7 @@ const BoardRolesConfigScreen = ({
     } finally {
       setSavingStandardPath(false);
     }
-  }, [boardId, autoRecomputeEnabled, standardPathStageIds, zero]);
+  }, [boardId, standardPathStageIds, zero]);
 
   const handleSave = useCallback(async () => {
     if (!boardId) return;
