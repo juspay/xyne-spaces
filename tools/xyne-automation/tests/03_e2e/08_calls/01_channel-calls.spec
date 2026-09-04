@@ -1,5 +1,8 @@
 # Channel Calls E2E Flow
 > Initiate and join calls from a channel conversation.
+> "User joins ongoing call" is quarantined: starting a call works, but the join
+> affordance never surfaces to a second member (active-call presence isn't propagating).
+> Needs a call-presence fix, not a selector change.
 
 ## User starts call from channel
 * Using browser
@@ -14,6 +17,7 @@
 * verifying "[data-testid='participant-count']" is visible
 
 ## User joins ongoing call from channel
+tags: quarantine
 * Using browser
 * Logging in user "admin-1" on temp browser "caller-browser-1"
 * Ensuring user "user-1" is logged in

@@ -482,6 +482,41 @@ async function ensureBaselineChannelMembership(
   }
 }
 
+// The chat view can hit a transient render race on the first cold load in a fresh
+// container, tripping the app's error boundary. It recovers on reload, so navigate
+// and reload until the expected control renders (later navigations are unaffected).
+async function gotoChatViewUntilReady(url: string, readySelector: string): Promise<void> {
+  const page = testContext.activePage;
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt === 1) {
+      await page.goto(url, { waitUntil: 'networkidle' });
+    } else {
+      await page.reload({ waitUntil: 'networkidle' });
+    }
+
+    const ready = page.locator(readySelector).first();
+    const boundary = page.getByText('Oops! Something went wrong', { exact: false }).first();
+    const outcome = await Promise.race([
+      ready
+        .waitFor({ state: 'visible', timeout: 25000 })
+        .then(() => 'ready' as const)
+        .catch(() => 'timeout' as const),
+      boundary
+        .waitFor({ state: 'visible', timeout: 25000 })
+        .then(() => 'boundary' as const)
+        .catch(() => 'timeout' as const),
+    ]);
+
+    if (outcome === 'ready') return;
+    baselineLogger.warn(
+      `Chat view not ready at ${url} (attempt ${attempt}/${maxAttempts}, outcome=${outcome}); reloading.`
+    );
+  }
+  // Surface a clear failure via the caller's expected control if still not ready.
+  await page.locator(readySelector).first().waitFor({ state: 'visible', timeout: 25000 });
+}
+
 async function createProject(adminUser: StoredUser): Promise<BaselineProject> {
   const suffix = buildRandomSuffix();
   const projectName = `baseline-project-${suffix}`;
@@ -501,7 +536,9 @@ async function createProject(adminUser: StoredUser): Promise<BaselineProject> {
   await page.waitForLoadState('networkidle');
 
   const newProjectTrigger = page.getByText('New', { exact: true }).first();
-  await newProjectTrigger.waitFor({ state: 'visible' });
+  // 60s: the first authenticated render on a cold Docker/CI start waits on zero-cache
+  // sync + hydration and can exceed the default 30s.
+  await newProjectTrigger.waitFor({ state: 'visible', timeout: 60000 });
   await newProjectTrigger.click();
 
   await page.locator("input[placeholder*='Enter project name']").first().fill(projectName);
@@ -570,9 +607,10 @@ async function createChannel(adminUser: StoredUser): Promise<BaselineChannel> {
 
   const page = testContext.activePage;
 
-  await page.goto(`${config.dashboard.baseUrl}/${adminUser.workspaceId}/chat/dir`, {
-    waitUntil: 'networkidle',
-  });
+  await gotoChatViewUntilReady(
+    `${config.dashboard.baseUrl}/${adminUser.workspaceId}/chat/dir`,
+    "[data-testid='create-new-channel']"
+  );
   await page.locator("[data-testid='create-new-channel']").first().click();
   await page.locator("[data-testid='add-channel-form']").first().waitFor({ state: 'visible' });
 
@@ -748,8 +786,15 @@ export async function bootstrapBaselineFixture(): Promise<void> {
   }
 
   writeBaselineContextSnapshot('before');
+  const consoleErrors: string[] = [];
   try {
     await ensureBrowserSession(1280, 720, config.browser);
+    testContext.activePage.on('pageerror', (e) =>
+      consoleErrors.push(`PAGEERROR: ${String(e.stack ?? e.message ?? e).slice(0, 900)}`)
+    );
+    testContext.activePage.on('console', (m) => {
+      if (m.type() === 'error') consoleErrors.push(`console.error: ${m.text().slice(0, 300)}`);
+    });
     const user = await loginAsUser(BASELINE_USER_ALIAS);
     baselineLogger.info(`[1/8] User created: ${user.alias}`);
     const partnerUser = await loginAsUser(BASELINE_SECONDARY_USER_ALIAS);
@@ -781,6 +826,29 @@ export async function bootstrapBaselineFixture(): Promise<void> {
     testContext.storedUsers.set(BASELINE_USER_ALIAS, user);
     testContext.storedUsers.set(BASELINE_SECONDARY_USER_ALIAS, partnerUser);
     writeBaselineContextSnapshot('after');
+  } catch (bootstrapError) {
+    // Capture app state at the failure point so bootstrap failures are diagnosable
+    // from the copied reports instead of a bare stack.
+    try {
+      const artifactDir = process.env.XYNE_RUN_ARTIFACT_DIR;
+      if (artifactDir) {
+        const page = testContext.activePage;
+        await page.screenshot({
+          path: path.resolve(artifactDir, 'baseline-failure.png'),
+          fullPage: true,
+        });
+        const body = await page.locator('body').innerText().catch(() => '');
+        baselineLogger.error(
+          `Baseline bootstrap failed at ${page.url()}. Body(0..300): ${body.slice(0, 300)}`
+        );
+        baselineLogger.error(
+          `Page console/errors (last 12): ${consoleErrors.slice(-12).join(' || ')}`
+        );
+      }
+    } catch (_snapErr) {
+      // best-effort diagnostics only
+    }
+    throw bootstrapError;
   } finally {
     await resetAllBrowserSessionsForReuse();
     testContext.resetScenarioState();

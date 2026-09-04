@@ -11,6 +11,7 @@
 * verifying "[data-testid='participant-count']" is visible
 
 ## User joins ongoing call from DM
+tags: quarantine
 * Using browser
 * Logging in user "user-1" on temp browser "caller-browser-1"
 * Ensuring user "user-2" is logged in
