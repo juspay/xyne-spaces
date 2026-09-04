@@ -56,7 +56,8 @@ class UnifiedDMService {
 
     // Create new DM channel with bot
     const channelName = [userId, botUserId].sort().join(',');
-    const channel = await channelRepository.create({
+    // Concurrency-safe: partial unique index guards against duplicate bot DMs.
+    const { channel } = await channelRepository.getOrCreateDmChannel({
       scopeType: ChannelScopeType.DM,
       name: channelName,
       visibility: ChannelVisibility.PRIVATE,
