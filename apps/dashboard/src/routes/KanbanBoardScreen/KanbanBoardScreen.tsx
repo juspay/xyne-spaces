@@ -150,6 +150,7 @@ import type { Stage } from './KanbanBoardScreen.types';
 import {
   getStageColor,
   getStatusColumns,
+  getSharedBoardStages,
   groupTicketsByStage,
   groupTicketsByStatus,
   applyTicketFilters,
@@ -1254,6 +1255,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return null;
   }, [viewMode, boardId, filters.boards]);
 
+  const [multiBoardStages, multiBoardStagesResult] = useCachedQuery(
+    queries.getStagesByBoardIds({ boardIds: filters.boards ?? [] }),
+    { enabled: shouldShowBoardWiseView },
+  );
+  const sharedBoardStagesReady =
+    !shouldShowBoardWiseView || multiBoardStagesResult.type === 'complete';
+  const sharedBoardStages = useMemo(
+    () =>
+      shouldShowBoardWiseView && sharedBoardStagesReady
+        ? getSharedBoardStages(filters.boards ?? [], multiBoardStages ?? [])
+        : null,
+    [shouldShowBoardWiseView, sharedBoardStagesReady, filters.boards, multiBoardStages],
+  );
+
   // Get all boards for the project (needed for channel stage view and create ticket modal)
   // In my-tickets/user-tickets/group-tickets, fetch ALL boards (no project filter) since tickets can span projects
   const isMyTicketsView =
@@ -1515,16 +1530,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return getStatusColumns();
     }
 
-    // If multiple boards selected, use status-based columns
+    // If multiple boards selected, use their shared stages, else status-based columns
     if (shouldShowBoardWiseView) {
-      return getStatusColumns();
+      if (!sharedBoardStagesReady) return [];
+      return sharedBoardStages ?? getStatusColumns();
     }
 
     // If single board selected in filter, use its stages.
-    // Workspace-views always group by status (shouldUseStatusColumns), so never
-    // return board stage UUIDs here or columns/counts/drag mode would mismatch.
     if (
-      !isWorkspaceView &&
       filteredSingleBoardId &&
       stagesDataForFilteredBoard &&
       stagesDataForFilteredBoard.length > 0
@@ -1651,8 +1664,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ];
   }, [
     viewMode,
-    isWorkspaceView,
     shouldShowBoardWiseView,
+    sharedBoardStagesReady,
+    sharedBoardStages,
     filteredSingleBoardId,
     stagesDataForFilteredBoard,
     channelId,
@@ -3028,9 +3042,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [flowTicketNodes]);
 
   const shouldUseStatusColumns =
-    isWorkspaceView ||
-    (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
-    (channelId && viewMode === 'project' && channelViewType !== 'stage');
+    !filteredSingleBoardId &&
+    !sharedBoardStages &&
+    (isWorkspaceView ||
+      ['project', 'my-tickets'].includes(viewMode) ||
+      (channelId && viewMode === 'project' && channelViewType !== 'stage'));
 
   const navBaseArgs = useMemo<KanbanTicketsPageBaseArgs>(
     () => ({
@@ -3247,13 +3263,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Use drag and drop hook
   const dragDropMode = useMemo(() => {
+    if (sharedBoardStages) return 'stage';
     // For channel tickets: use view type to determine mode
     if (channelId && viewMode === 'project') {
       return channelViewType === 'stage' ? 'stage' : 'status';
     }
     // For other views
     return viewMode === 'board' || filteredSingleBoardId ? 'stage' : 'status';
-  }, [channelId, viewMode, channelViewType, filteredSingleBoardId]);
+  }, [sharedBoardStages, channelId, viewMode, channelViewType, filteredSingleBoardId]);
 
   const canReorder = !!filteredSingleBoardId;
   const setDragLocalTickets = useCallback<React.Dispatch<React.SetStateAction<Ticket[]>>>(value => {
@@ -3410,7 +3427,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const hasSearchTerm = searchTerm.trim().length > 0;
   // Also require deferredFilters to have caught up before enabling queries
-  const canUseKanbanColumnPagination = isKanbanLayout && workspaceViewReady && deferredFiltersReady;
+  const canUseKanbanColumnPagination =
+    isKanbanLayout && workspaceViewReady && deferredFiltersReady && sharedBoardStagesReady;
   const shouldFetchKanbanCounts = canUseKanbanColumnPagination && !hasSearchTerm;
   const kanbanCounts = useKanbanCounts({
     ...ticketsQueryParams,

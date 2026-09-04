@@ -91,6 +91,44 @@ export const getStatusColumns = (): Stage[] => {
   ];
 };
 
+interface BoardStageRow {
+  id: string;
+  boardId: string;
+  name: string;
+  sequenceNumber: number;
+  defaultTicketStatusV2: TicketStatusV2;
+}
+
+const normalizeStageName = (name: string): string => name.trim().toLowerCase();
+
+export const getSharedBoardStages = (
+  boardIds: string[],
+  stageRows: ReadonlyArray<BoardStageRow>,
+): Stage[] | null => {
+  const stagesByBoard = new Map<string, BoardStageRow[]>();
+  stageRows.forEach(row => {
+    const boardStages = stagesByBoard.get(row.boardId) ?? [];
+    if (!boardStages.some(s => normalizeStageName(s.name) === normalizeStageName(row.name))) {
+      boardStages.push(row);
+      stagesByBoard.set(row.boardId, boardStages);
+    }
+  });
+  const signature = (rows: BoardStageRow[]): string =>
+    rows.map(row => `${normalizeStageName(row.name)}::${row.defaultTicketStatusV2}`).join('\n');
+  const perBoard = boardIds.map(id => stagesByBoard.get(id));
+  const [first] = perBoard;
+  if (!first) return null;
+  const firstSignature = signature(first);
+  if (perBoard.some(rows => !rows || signature(rows) !== firstSignature)) return null;
+  return first.map(stage => ({
+    id: stage.id,
+    name: stage.name,
+    color: getStageColor(stage.name),
+    sequenceNumber: stage.sequenceNumber,
+    defaultTicketStatusV2: stage.defaultTicketStatusV2,
+  }));
+};
+
 /**
  * Filters tickets by board ID
  */
