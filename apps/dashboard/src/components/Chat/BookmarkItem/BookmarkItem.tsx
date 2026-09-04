@@ -276,20 +276,19 @@ export const BookmarkItem = ({
       {isActionToolbarVisible && (
         <div className='absolute top-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-sm p-1'>
           <Tooltip content='Mark as done'>
-            <Button
-              variant='ghost'
+            <button
               type='button'
               onClick={handleRemoveBookmark}
               className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
               aria-label='Mark as done'
               data-testid='bookmark-mark-as-done-btn'
-              trackId='mark_bookmark_done'
+              data-ph-capture-attribute-track-id='mark_bookmark_done'
               data-track-category='CHAT_BOOKMARK'
               data-track-name='Mark_Bookmark_Done'
               data-track-metadata={JSON.stringify({ entityId })}
             >
               <Check size={16} className='text-muted-foreground' strokeWidth={1.33} />
-            </Button>
+            </button>
           </Tooltip>
           <Tooltip content={reminderActionLabel}>
             <div>

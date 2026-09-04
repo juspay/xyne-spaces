@@ -4,7 +4,6 @@ import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessa
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Pencil, Trash2, Check, X } from 'lucide-react';
-import { Button } from '../ui/Button/Button';
 
 const markdownPlugins = [remarkGfm];
 
@@ -193,18 +192,17 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
           {showDeleteConfirm && (
             <div className='flex items-center gap-1'>
               <span className='text-xs text-red-600'>Delete?</span>
-              <Button
-                variant='ghost'
+              <button
                 onClick={handleDelete}
                 disabled={isDeleting}
                 className='h-auto p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-950 rounded transition-colors disabled:opacity-50'
                 title='Confirm delete'
-                trackId='memory_confirm_delete_document'
+                data-ph-capture-attribute-track-id='memory_confirm_delete_document'
                 data-track-category='Memory'
                 data-track-name='ConfirmDeleteDocument'
               >
                 <Check size={14} />
-              </Button>
+              </button>
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 className='p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors'
@@ -471,18 +469,17 @@ const EditableSection: React.FC<{
             </span>
           )}
           <div className='ml-auto flex items-center gap-0.5'>
-            <Button
-              variant='ghost'
+            <button
               onClick={onSave}
               disabled={isUpdating}
               className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded transition-colors disabled:opacity-50'
               title='Save'
-              trackId='memory_save_field_edit'
+              data-ph-capture-attribute-track-id='memory_save_field_edit'
               data-track-category='Memory'
               data-track-name='SaveEdit'
             >
               <Check size={12} />
-            </Button>
+            </button>
             <button
               onClick={onCancel}
               className='p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors'
@@ -568,18 +565,17 @@ const EditableMetadataRow: React.FC<{
               data-track-category='Memory'
               data-track-name='MetadataInput'
             />
-            <Button
-              variant='ghost'
+            <button
               onClick={onSave}
               disabled={isUpdating}
               className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
               title='Save'
-              trackId='memory_save_metadata_edit'
+              data-ph-capture-attribute-track-id='memory_save_metadata_edit'
               data-track-category='Memory'
               data-track-name='SaveMetadataEdit'
             >
               <Check size={12} />
-            </Button>
+            </button>
             <button
               onClick={onCancel}
               className='p-0.5 text-muted-foreground hover:text-foreground rounded'
@@ -680,18 +676,17 @@ const ReviewStatusRow: React.FC<{
                 </button>
               );
             })}
-            <Button
-              variant='ghost'
+            <button
               onClick={onSave}
               disabled={isUpdating}
               className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
               title='Save'
-              trackId='memory_save_status_edit'
+              data-ph-capture-attribute-track-id='memory_save_status_edit'
               data-track-category='Memory'
               data-track-name='SaveStatusEdit'
             >
               <Check size={12} />
-            </Button>
+            </button>
             <button
               onClick={onCancel}
               className='p-0.5 text-muted-foreground hover:text-foreground rounded'

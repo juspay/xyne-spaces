@@ -6,7 +6,6 @@ import type { BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
 import { TicketPriority } from '@xyne/shared';
 import * as Select from '@radix-ui/react-select';
-import { Button } from '../../ui/Button/Button';
 
 const PRIORITIES = [
   TicketPriority.CRITICAL,
@@ -243,9 +242,8 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
               <div className='flex items-center justify-between px-4 py-3'>
                 <div className='flex items-center gap-3'>
                   {/* Toggle */}
-                  <Button
+                  <button
                     type='button'
-                    variant='ghost'
                     role='switch'
                     aria-checked={isActive}
                     onClick={() => !disabled && handleToggleActive(priority)}
@@ -258,7 +256,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                     data-track-category='BOARD_SLA_SETTINGS'
                     data-track-name='TOGGLE_SLA_PRIORITY'
                     data-track-metadata={JSON.stringify({ priority })}
-                    trackId='toggle_sla_priority'
+                    data-ph-capture-attribute-track-id='toggle_sla_priority'
                   >
                     <span
                       className={cn(
@@ -266,7 +264,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                         isActive ? 'translate-x-4' : 'translate-x-0',
                       )}
                     />
-                  </Button>
+                  </button>
 
                   <div className='flex items-center gap-2'>
                     {getPriorityIcon(priority as TicketPriority)}
@@ -533,19 +531,18 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
 
                   {/* Save */}
                   <div className='flex justify-end'>
-                    <Button
+                    <button
                       type='button'
-                      variant='ghost'
                       onClick={() => handleSave(priority)}
                       disabled={disabled || !boardId}
                       className='px-3 py-1.5 text-sm font-medium text-white bg-[#6276be] rounded-lg hover:bg-[#4f62a8] dark:hover:bg-[#7986d0] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
                       data-track-category='BOARD_SLA_SETTINGS'
                       data-track-name='SAVE_SLA_POLICY'
                       data-track-metadata={JSON.stringify({ priority })}
-                      trackId='save_sla_policy'
+                      data-ph-capture-attribute-track-id='save_sla_policy'
                     >
                       Save
-                    </Button>
+                    </button>
                   </div>
                 </div>
               )}

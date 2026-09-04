@@ -1,6 +1,5 @@
 import { Phone, X } from 'lucide-react';
 import type { ReactElement } from 'react';
-import { Button } from '../../ui/Button/Button';
 
 interface IncomingCallActionsProps {
   callId: string;
@@ -47,19 +46,18 @@ export function IncomingCallActions({
   return (
     <div className='flex items-start justify-center gap-6'>
       <div className='flex flex-col items-center'>
-        <Button
+        <button
           type='button'
-          variant='ghost'
           onClick={onReject}
           aria-label='Decline call'
           className={`${CIRCLE} ${DECLINE_COLORS}`}
-          trackId='reject_incoming_call'
+          data-ph-capture-attribute-track-id='reject_incoming_call'
           data-track-category='CALLS_NOTIFICATIONS'
           data-track-name='REJECT_INCOMING_CALL'
           data-track-metadata={trackMetadata}
         >
           <X className='h-[22px] w-[22px]' strokeWidth={2} />
-        </Button>
+        </button>
         {/* The Switch-call pill carries its label inline, so a lone caption
             under the circle beside it reads as a stray. The button keeps its
             aria-label either way. */}
@@ -67,38 +65,36 @@ export function IncomingCallActions({
       </div>
 
       {isInActiveCall ? (
-        <Button
+        <button
           type='button'
-          variant='ghost'
           onClick={onAccept}
           className={
             'flex h-14 cursor-pointer items-center gap-[9px] rounded-full border-none ' +
             'px-[26px] text-sm font-semibold transition-colors duration-[120ms] ease-out ' +
             `focus-visible:outline-none ${ACCEPT_COLORS}`
           }
-          trackId='accept_incoming_call'
+          data-ph-capture-attribute-track-id='accept_incoming_call'
           data-track-category='CALLS_NOTIFICATIONS'
           data-track-name='ACCEPT_INCOMING_CALL'
           data-track-metadata={trackMetadata}
         >
           <Phone className='h-[22px] w-[22px]' strokeWidth={2} />
           <span>Switch call</span>
-        </Button>
+        </button>
       ) : (
         <div className='flex flex-col items-center'>
-          <Button
+          <button
             type='button'
-            variant='ghost'
             onClick={onAccept}
             aria-label='Accept call'
             className={`${CIRCLE} ${ACCEPT_COLORS}`}
-            trackId='accept_incoming_call'
+            data-ph-capture-attribute-track-id='accept_incoming_call'
             data-track-category='CALLS_NOTIFICATIONS'
             data-track-name='ACCEPT_INCOMING_CALL'
             data-track-metadata={trackMetadata}
           >
             <Phone className='h-[22px] w-[22px]' strokeWidth={2} />
-          </Button>
+          </button>
           <span className={LABEL}>Accept</span>
         </div>
       )}
