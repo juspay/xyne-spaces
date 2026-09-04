@@ -584,7 +584,7 @@ const CalendarWeekView = ({
                     slot => !!slot.startsAt && dayKey(new Date(slot.startsAt)) === colDateKey,
                   );
 
-                  const positions = computeEventPositions(allEvents);
+                  const positions = computeEventPositions(allEvents, day);
 
                   return (
                     <DroppableDayColumn

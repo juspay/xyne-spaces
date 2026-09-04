@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import {
@@ -29,6 +30,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { useNowWithBoundary } from '../../../hooks/useNowWithBoundary';
 import { roomActor } from '../../../machines/roomMachine';
 import { callService } from '../../../services/Call/callService';
+import { useRouteContext } from '../../../hooks/useRouteContext';
 import { cn } from '../../../utils/classNames';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { formatRelativeTime, formatTimeAmPm, formatTimeUntil } from '../../../utils/dateUtils';
@@ -124,7 +126,7 @@ function CallDetailHeader({
   onClose: () => void;
 }): ReactElement {
   return (
-    <header className='flex h-12 shrink-0 items-center gap-1 overflow-hidden px-2.5'>
+    <header className='flex shrink-0 items-center gap-1 overflow-hidden py-3 pl-2 pr-3'>
       <Button
         variant='ghost'
         size='sm'
@@ -229,6 +231,15 @@ function CallCreatorLine({
 
 // ── Participants ─────────────────────────────────────────────────────────────
 
+function GuestUserInitial({ name }: { name: string }): ReactElement {
+  const initial = name.trim().charAt(0).toUpperCase() || 'G';
+  return (
+    <div className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-sm font-semibold text-foreground/60'>
+      {initial}
+    </div>
+  );
+}
+
 function CallParticipantRow({
   userId,
   displayName,
@@ -247,6 +258,9 @@ function CallParticipantRow({
   attended: boolean | null;
 }): ReactElement {
   const user = useUser(isExternal ? '' : userId);
+  const navigate = useNavigate();
+  const { baseRoute } = useRouteContext();
+  const { channelId } = useParams<{ channelId?: string }>();
   const participantName = isExternal ? (displayName ?? email ?? 'Guest') : (user?.name ?? '...');
   const rsvp = getRsvpLabel(meetingStatus);
   const status =
@@ -256,17 +270,39 @@ function CallParticipantRow({
         ? { label: 'Attended', className: 'text-status-success' }
         : { label: 'Didn’t attend', className: 'text-muted-foreground' };
 
+  const canOpenProfile = !isExternal && !!channelId;
+
+  const handleOpenProfile = (): void => {
+    if (!canOpenProfile) return;
+    void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
+  };
+
   return (
-    <li className='flex min-h-12 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50'>
-      <div className='relative shrink-0'>
-        <Avatar userId={isExternal ? null : userId} size='md' showActiveStatus={false} rounded />
-        {isExternal && (
-          <span
-            className='absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-background bg-status-pending'
-            aria-hidden='true'
-          />
-        )}
-      </div>
+    <button
+      type='button'
+      className={cn(
+        'flex min-h-12 w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/50',
+        canOpenProfile && 'cursor-pointer',
+      )}
+      onClick={canOpenProfile ? handleOpenProfile : undefined}
+      onKeyDown={
+        canOpenProfile
+          ? event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleOpenProfile();
+              }
+            }
+          : undefined
+      }
+      data-track-category='Calendar'
+      data-track-name='CALL_DETAIL_PARTICIPANT_PROFILE'
+    >
+      {isExternal ? (
+        <GuestUserInitial name={participantName} />
+      ) : (
+        <Avatar userId={userId} size='md' showActiveStatus={false} rounded />
+      )}
 
       <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
         <span className='truncate text-sm font-semibold leading-tight text-foreground'>
@@ -276,7 +312,7 @@ function CallParticipantRow({
       </div>
 
       <span className={cn('shrink-0 text-xs font-semibold', status.className)}>{status.label}</span>
-    </li>
+    </button>
   );
 }
 
@@ -284,13 +320,14 @@ function ExternalAttendeeRow({ attendee }: { attendee: ExternalCalendarAttendee 
   const responseStatus = attendee.responseStatus;
   const statusLabel =
     responseStatus && responseStatus !== 'needsAction' ? responseStatus : 'Awaiting';
+  const attendeeName = attendee.displayName ?? attendee.email ?? 'Guest';
 
   return (
     <li className='flex min-h-12 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50'>
-      <Avatar userId={null} size='md' showActiveStatus={false} rounded />
+      <GuestUserInitial name={attendeeName} />
       <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
         <span className='truncate text-sm font-semibold leading-tight text-foreground'>
-          {attendee.displayName ?? attendee.email ?? 'Guest'}
+          {attendeeName}
         </span>
         <span className='truncate text-xs leading-tight text-muted-foreground'>
           {attendee.self ? 'You' : 'Invited'}
@@ -578,7 +615,7 @@ const CallDetailSidebarView = ({
         onClose={onClose}
       />
 
-      <div className='min-h-0 flex-1 overflow-y-auto px-4 pb-8 pt-1'>
+      <div className='shrink-0 px-4 pb-3 pt-1'>
         <CallCreatorLine
           organizerUserId={organizerUserId}
           externalOrganizerName={externalOrganizerName}
@@ -750,53 +787,56 @@ const CallDetailSidebarView = ({
           </section>
         )}
 
-        {/* ── Participants ── */}
+        {/* ── Participants heading — stays put; the list below scrolls on its own ── */}
         {(participants.length > 0 || externalAttendees.length > 0) && (
-          <section className='mt-6'>
-            <div className='flex items-baseline gap-2'>
-              <h2 className={SECTION_LABEL_CLASS}>Participants</h2>
-              <span className='text-xs text-muted-foreground'>
-                {isExternalCalendar ? externalAttendees.length : participants.length} invited
-              </span>
-            </div>
-
-            <ul className='mt-2 flex max-h-96 flex-col gap-1 overflow-y-auto overscroll-contain'>
-              {isExternalCalendar
-                ? externalAttendees.map((attendee, index) => (
-                    <ExternalAttendeeRow
-                      key={attendee.email ?? `attendee-${index}`}
-                      attendee={attendee}
-                    />
-                  ))
-                : participants.map(participant => (
-                    <CallParticipantRow
-                      key={participant.id}
-                      userId={participant.userId}
-                      displayName={participant.displayName}
-                      email={participant.email}
-                      isExternal={participant.isExternal}
-                      meetingStatus={
-                        participant.userId === currentUserId && localRsvp !== null
-                          ? localRsvp
-                          : (participant.meetingStatus ?? MeetingStatus.PENDING)
-                      }
-                      roleLabel={
-                        participant.userId === organizerUserId
-                          ? 'Organizer'
-                          : participant.userId === currentUserId
-                            ? 'You'
-                            : participant.isExternal
-                              ? 'External'
-                              : 'Invited'
-                      }
-                      attended={isEnded ? didAttend(participant) : null}
-                    />
-                  ))}
-            </ul>
-          </section>
+          <div className='mt-6 flex items-baseline gap-2'>
+            <h2 className={SECTION_LABEL_CLASS}>Participants</h2>
+            <span className='text-xs text-muted-foreground'>
+              {isExternalCalendar ? externalAttendees.length : participants.length} invited
+            </span>
+          </div>
         )}
+      </div>
 
-        {/* ── Where ── */}
+      <div className='min-h-0 flex-1 overflow-y-auto px-4 pb-4'>
+        {(participants.length > 0 || externalAttendees.length > 0) && (
+          <ul className='mt-2 flex flex-col gap-1'>
+            {isExternalCalendar
+              ? externalAttendees.map((attendee, index) => (
+                  <ExternalAttendeeRow
+                    key={attendee.email ?? `attendee-${index}`}
+                    attendee={attendee}
+                  />
+                ))
+              : participants.map(participant => (
+                  <CallParticipantRow
+                    key={participant.id}
+                    userId={participant.userId}
+                    displayName={participant.displayName}
+                    email={participant.email}
+                    isExternal={participant.isExternal}
+                    meetingStatus={
+                      participant.userId === currentUserId && localRsvp !== null
+                        ? localRsvp
+                        : (participant.meetingStatus ?? MeetingStatus.PENDING)
+                    }
+                    roleLabel={
+                      participant.userId === organizerUserId
+                        ? 'Organizer'
+                        : participant.userId === currentUserId
+                          ? 'You'
+                          : participant.isExternal
+                            ? 'External'
+                            : 'Invited'
+                    }
+                    attended={isEnded ? didAttend(participant) : null}
+                  />
+                ))}
+          </ul>
+        )}
+      </div>
+      {/* ── Where ── */}
+      <div className='shrink-0 px-4 pb-3'>
         <CallLocationSection
           originLabel={
             isGoogleCalendar

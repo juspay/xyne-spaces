@@ -247,6 +247,25 @@ export interface PositionableEvent {
 }
 
 /**
+ * Calls whose [startsAt, endsAt) interval overlaps `day` — includes calls
+ * that started the day before and spill past midnight into `day`, matching
+ * Google Calendar's day view (a cross-midnight call shows a clipped segment
+ * on both days it touches).
+ */
+export function getCallsOverlappingDay<
+  T extends { startsAt?: string | number | null; endsAt?: string | number | null },
+>(calls: T[], day: Date): T[] {
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+  return calls.filter(call => {
+    if (!call.startsAt) return false;
+    const startsAtMs = new Date(call.startsAt).getTime();
+    const endsAtMs = call.endsAt ? new Date(call.endsAt).getTime() : startsAtMs;
+    return startsAtMs < dayEnd && endsAtMs > dayStart;
+  });
+}
+
+/**
  * Google Calendar-style cluster algorithm.
  * Groups overlapping events into clusters, assigns each event a column within
  * its cluster, then returns `leftPct` and `widthPct` (0–100) so events sit
@@ -254,7 +273,10 @@ export interface PositionableEvent {
  *
  * Returns a Map keyed by event.id for O(1) lookup in the renderer.
  */
-export function computeEventPositions(dayCalls: PositionableEvent[]): Map<string, EventPosition> {
+export function computeEventPositions(
+  dayCalls: PositionableEvent[],
+  referenceDay: Date,
+): Map<string, EventPosition> {
   const result = new Map<string, EventPosition>();
   const valid = dayCalls.filter(c => c.startsAt);
   if (valid.length === 0) return result;
@@ -262,8 +284,16 @@ export function computeEventPositions(dayCalls: PositionableEvent[]): Map<string
   type Item = { id: string; startMins: number; endMins: number };
 
   const items: Item[] = valid.map(call => {
-    const startMins = minutesSinceMidnight(new Date(call.startsAt!));
-    const rawEnd = call.endsAt ? minutesSinceMidnight(new Date(call.endsAt)) : startMins + 60;
+    const startDate = new Date(call.startsAt!);
+    const startMins = isSameDay(startDate, referenceDay) ? minutesSinceMidnight(startDate) : 0;
+
+    const endDate = call.endsAt ? new Date(call.endsAt) : null;
+    const rawEnd = endDate
+      ? isSameDay(endDate, referenceDay)
+        ? minutesSinceMidnight(endDate)
+        : 24 * 60
+      : startMins + 60;
+
     return { id: call.id, startMins, endMins: Math.max(rawEnd, startMins + 15) };
   });
 

@@ -30,8 +30,15 @@ export interface XyneCalendarCallPillProps {
   past?: boolean;
   compact?: boolean;
   showCompactMetadata?: boolean;
+  /** Call started before the day being rendered — clipped at the top edge. */
+  continuesFromPreviousDay?: boolean;
+  /** Call ends after the day being rendered — clipped at the bottom edge. */
+  continuesToNextDay?: boolean;
   className?: string;
 }
+
+const HATCH_BACKGROUND =
+  'repeating-linear-gradient(135deg, color-mix(in hsl, currentColor 55%, transparent) 0, color-mix(in hsl, currentColor 55%, transparent) 1px, transparent 1px, transparent 6px)';
 
 const formatTime = (value: CalendarCallTime | null | undefined): string => {
   if (value === null || value === undefined) return '';
@@ -65,6 +72,8 @@ const XyneCalendarCallPillComponent = ({
   past = false,
   compact = false,
   showCompactMetadata = false,
+  continuesFromPreviousDay = false,
+  continuesToNextDay = false,
   className,
 }: XyneCalendarCallPillProps): ReactElement => {
   const timeRange = getTimeRange(startsAt, endsAt);
@@ -84,7 +93,7 @@ const XyneCalendarCallPillComponent = ({
   return (
     <div
       className={cn(
-        'group flex w-full cursor-pointer items-center overflow-hidden rounded-xl border transition-all',
+        'group relative flex w-full cursor-pointer items-center overflow-hidden rounded-xl border transition-all',
         variant === 'past'
           ? 'border-border bg-muted/60 text-muted-foreground'
           : variant === 'highlighted'
@@ -94,9 +103,25 @@ const XyneCalendarCallPillComponent = ({
               : 'border-primary bg-background text-foreground',
         isPast && variant !== 'past' && 'opacity-60 hover:opacity-90',
         'hover:shadow-sm',
+        continuesFromPreviousDay && 'rounded-t-none border-t-0',
+        continuesToNextDay && 'rounded-b-none border-b-0',
         className,
       )}
     >
+      {continuesFromPreviousDay && (
+        <span
+          aria-hidden='true'
+          className='pointer-events-none absolute inset-x-0 top-0 h-3'
+          style={{ backgroundImage: HATCH_BACKGROUND }}
+        />
+      )}
+      {continuesToNextDay && (
+        <span
+          aria-hidden='true'
+          className='pointer-events-none absolute inset-x-0 bottom-0 h-3'
+          style={{ backgroundImage: HATCH_BACKGROUND }}
+        />
+      )}
       <Button
         type='button'
         variant='ghost'
