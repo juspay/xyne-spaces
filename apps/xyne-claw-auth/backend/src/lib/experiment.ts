@@ -225,6 +225,9 @@ export function buildLedgerMarkdown(
   appendGroup("Open conjectures", groups.conjecture);
   appendGroup("Proved", groups.proved);
   appendGroup("Refuted", groups.refuted);
+  if (run.finalReport?.trim()) {
+    lines.push(`## Final report`, ``, run.finalReport.trim(), ``);
+  }
   return lines.join("\n").trimEnd();
 }
 
@@ -292,17 +295,19 @@ export function buildFindingsMarkdown(
   return lines.join("\n").trimEnd();
 }
 
-export async function postExperimentNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; finalReport?: string | null }): Promise<void> {
+export async function postExperimentNotice(run: ExperimentRun): Promise<void> {
   if (!run.orgId) return;
   const agent = await agentRepository.findBySlug(run.agentSlug, run.orgId);
   if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
   const appToken = decryptStoredField(agent.spacesAppToken);
+  const [findings, reviews] = await Promise.all([
+    experimentRepository.listFindings(run.id),
+    experimentRepository.listReviews(run.id),
+  ]);
   await spacesAppFetch("/chat/postMessage", {
     channelId: run.channelId,
     conversationId: run.conversationId,
-    markdownText: run.finalReport?.trim()
-      ? `**/experiment ended**\n\n${run.finalReport.trim()}`
-      : "**/experiment ended**\n\n(experiment ended without final report)",
+    markdownText: `**/experiment ended**\\n\\n${buildLedgerMarkdown(run, findings, reviews)}`,
     userId: agent.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
   }, appToken);
@@ -310,7 +315,7 @@ export async function postExperimentNotice(run: { channelId: string; conversatio
 
 export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
   const remaining = formatRemaining(run.deadlineAt);
-  const sandboxId = /(?:^|\s)sandboxId=([^\s]+)/.exec(run.sandboxNote ?? "")?.[1];
+  const sandboxId = /(?:^|\\s)sandboxId=([^\\s]+)/.exec(run.sandboxNote ?? "")?.[1];
   // The sandbox is ephemeral and WILL recycle across a multi-hour run, taking
   // every generated file with it. The one durable record of what already exists
   // is the delivered-artifact list — surface it so a fresh sandbox rehydrates
@@ -325,7 +330,7 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
     ? `YOUR SANDBOX: ${sandboxId}. This experiment has ONE machine. Reuse this sandbox for every command — do NOT create a new one. Only create a new sandbox if this one is provably unreachable, and if you do, immediately record the new id with experiment-ledger action=sandbox-note.`
     : "";
   const finalInstruction = run.status === "finishing"
-    ? "\n\nDeadline reached - call end-experiment with your final report now. First deliver (sandbox-deliver-files) any proof artifact that has not yet been attached to this thread."
+    ? "\\n\\nDeadline reached - call end-experiment with your final report now. First deliver (sandbox-deliver-files) any proof artifact that has not yet been attached to this thread."
     : "";
   // EXIT RULE — must match what end-experiment actually enforces for this run's
   // kind. It did not: every epoch was told the time-boxed rule, so an
@@ -357,40 +362,17 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
     // source was being recorded as proof. So this prompt separates the two
     // tiers explicitly and the ledger refuses `proved` without an observation.
     run.kind === "security"
-      ? `Read the ledger below before doing anything. You are hunting exploitable defects, and there are TWO tiers — keep them apart or the report is worthless.
-
-LEAD (status=conjecture): you read the code and the defect looks real. Cite file:line. This is where most findings belong.
-CONFIRMED (status=proved): you EXECUTED it and captured what came back — the request you sent, the status code or output you observed, and where you verified the effect (a row that changed, a document returned, a measured timing). A script that greps source and asserts a pattern is present is NOT a confirmation; it proves the code says what you already read.
-
-Before proposing a fix, check whether a CORRECT implementation already exists nearby — the same call done safely elsewhere in the repo. Across earlier runs that was the single most common shape: the safe sibling existed and was simply not used. Name it, because it is also the cheapest fix.
-
-DEFENDED is a first-class result. If you try it and a guard stops you, close it as refuted with what stopped you. A finding you cannot execute stays a conjecture — never promote it because it looks obvious.
-
-Deliver ONE markdown report with a STABLE filename, extended each epoch, with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry.`
+      ? `Read the ledger below before doing anything. You are hunting exploitable defects, and there are TWO tiers — keep them apart or the report is worthless.\n\nLEAD (status=conjecture): you read the code and the defect looks real. Cite file:line. This is where most findings belong.\nCONFIRMED (status=proved): you EXECUTED it and captured what came back — the request you sent, the status code or output you observed, and where you verified the effect (a row that changed, a document returned, a measured timing). A script that greps source and asserts a pattern is present is NOT a confirmation; it proves the code says what you already read.\n\nBefore proposing a fix, check whether a CORRECT implementation already exists nearby — the same call done safely elsewhere in the repo. Across earlier runs that was the single most common shape: the safe sibling existed and was simply not used. Name it, because it is also the cheapest fix.\n\nDEFENDED is a first-class result. If you try it and a guard stops you, close it as refuted with what stopped you. A finding you cannot execute stays a conjecture — never promote it because it looks obvious.\n\nDeliver ONE markdown report with a STABLE filename, extended each epoch, with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry.`
       : run.kind === "framework"
-      ? `Read the ledger below before doing anything. You are looking for FRAMEWORK OPPORTUNITIES: STRUCTURAL gaps that make this codebase harder to extend safely than it should be — convention drift (one concept done several inconsistent ways), missing paved paths (a common need solved ad-hoc everywhere), change-amplification (adding one feature touches N files for lack of a seam), boilerplate, and plain duplication. Duplication is only one shape — do NOT reduce this to finding copy-paste. Pick or advance ONE candidate per epoch.
-
-TAG every opportunity with your OWN word for its shape (kebab-case), reusing a tag already in the ledger if it fits. A candidate is only proved when its note carries: a \`Tag:\` line; at least one \`file.ext:LINE\` where the gap lives; and a \`Prevents:\` line naming the concrete bug, drift, or change-amplification the framework would have stopped. The ledger enforces all three. The \`Prevents:\` line is the real bar — if you cannot name what it prevents, it is taste; refute it. A VARYING pattern (five different auth checks) is a valid convention-drift opportunity even though the code is not identical — do not refute it for that.
-
-Refuting is real progress: a wrong extraction is more expensive than the duplication it replaces.
-
-Deliver ONE markdown report, GROUPED BY TAG: each opportunity with its file:line evidence, the proposed abstraction, its Prevents, and the migration cost. The report MUST also include a Tag Index table summarizing every tag used: tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost. Extend the same file each epoch rather than starting a new one.`
+      ? `Read the ledger below before doing anything. You are looking for FRAMEWORK OPPORTUNITIES: STRUCTURAL gaps that make this codebase harder to extend safely than it should be — convention drift (one concept done several inconsistent ways), missing paved paths (a common need solved ad-hoc everywhere), change-amplification (adding one feature touches N files for lack of a seam), boilerplate, and plain duplication. Duplication is only one shape — do NOT reduce this to finding copy-paste. Pick or advance ONE candidate per epoch.\n\nTAG every opportunity with your OWN word for its shape (kebab-case), reusing a tag already in the ledger if it fits. A candidate is only proved when its note carries: a \\`Tag:\\` line; at least one \\`file.ext:LINE\\` where the gap lives; and a \\`Prevents:\\` line naming the concrete bug, drift, or change-amplification the framework would have stopped. The ledger enforces all three. The \\`Prevents:\\` line is the real bar — if you cannot name what it prevents, it is taste; refute it. A VARYING pattern (five different auth checks) is a valid convention-drift opportunity even though the code is not identical — do not refute it for that.\n\nRefuting is real progress: a wrong extraction is more expensive than the duplication it replaces.\n\nDeliver ONE markdown report, GROUPED BY TAG: each opportunity with its file:line evidence, the proposed abstraction, its Prevents, and the migration cost. The report MUST also include a Tag Index table summarizing every tag used: tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost. Extend the same file each epoch rather than starting a new one.`
       : run.kind === "repo-history"
-      ? `Read the ledger below before doing anything. You are reconstructing the coding SPEC of this repo — the rules and decisions someone would need to rebuild it — by walking git history OLDEST→NEWEST.
-
-CURSOR: the ledger records how far you have walked. Establish the frontier with \`git log <initial-sha>..HEAD --reverse --oneline\` (oldest first). Each epoch, take the NEXT BATCH of commits after the cursor (a sensible chunk — ~20-50 ordinary commits, or a SINGLE squash/merge commit on its own since it is one decision), read their diffs, and advance the cursor. A squash-merge is one big diff with no granular commits — pull the PR discussion for its WHY rather than parsing the whole diff blind.
-
-EXTRACT DECISIONS, NOT DIFFS. For each batch record the coding RULE it establishes (the convention, invariant, or "always/never do X"), not a changelog of what changed. TAG each by theme (kebab-case: error-handling, provider-fallback, security, naming, …), reusing an existing tag when it fits. An entry is only proved when its note carries: a \`Rule:\` line (the durable instruction); the \`sha\` it derives from; and its theme \`Tag:\`.
-
-RECONCILE AGAINST HEAD — this is the correctness bar. History is full of dead ends: a rule set at an early commit is often REVERSED or REWRITTEN later (a "fix" commit, not always a revert). When a later batch overturns a rule already in the ledger, AMEND the existing entry — do not append a second contradictory one. Superseded rules move to a GRAVEYARD section with a \`Supersedes:\`/why-it-died line; only rules still live in the current code stay in Current Rules. The final doc must not contain a rule that HEAD contradicts.
-
-Deliver ONE self-contained .html decision-log (no network, no JavaScript — it must render offline) with a STABLE filename, extended every epoch, three sections: CURRENT RULES (reconciled to HEAD, grouped by tag) / LINEAGE (which sha introduced/changed each) / GRAVEYARD (tried-and-abandoned, with why). Send it with sandbox-deliver-files.`
+      ? `Read the ledger below before doing anything. You are reconstructing the coding SPEC of this repo — the rules and decisions someone would need to rebuild it — by walking git history OLDEST→NEWEST.\n\nCURSOR: the ledger records how far you have walked. Establish the frontier with \\`git log <initial-sha>..HEAD --reverse --oneline\\` (oldest first). Each epoch, take the NEXT BATCH of commits after the cursor (a sensible chunk — ~20-50 ordinary commits, or a SINGLE squash/merge commit on its own since it is one decision), read their diffs, and advance the cursor. A squash-merge is one big diff with no granular commits — pull the PR discussion for its WHY rather than parsing the whole diff blind.\n\nEXTRACT DECISIONS, NOT DIFFS. For each batch record the coding RULE it establishes (the convention, invariant, or "always/never do X"), not a changelog of what changed. TAG each by theme (kebab-case: error-handling, provider-fallback, security, naming, …), reusing an existing tag when it fits. An entry is only proved when its note carries: a \\`Rule:\\` line (the durable instruction); the \\`sha\\` it derives from; and its theme \\`Tag:\\`.\n\nRECONCILE AGAINST HEAD — this is the correctness bar. History is full of dead ends: a rule set at an early commit is often REVERSED or REWRITTEN later (a "fix" commit, not always a revert). When a later batch overturns a rule already in the ledger, AMEND the existing entry — do not append a second contradictory one. Superseded rules move to a GRAVEYARD section with a \\`Supersedes:\\`/why-it-died line; only rules still live in the current code stay in Current Rules. The final doc must not contain a rule that HEAD contradicts.\n\nDeliver ONE self-contained .html decision-log (no network, no JavaScript — it must render offline) with a STABLE filename, extended every epoch, three sections: CURRENT RULES (reconciled to HEAD, grouped by tag) / LINEAGE (which sha introduced/changed each) / GRAVEYARD (tried-and-abandoned, with why). Send it with sandbox-deliver-files.`
       : `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
     `PROOF DURABILITY: the sandbox is temporary. Any artifact that exists only inside the sandbox is LOST when it recycles. In the SAME epoch you create a proof artifact you MUST call sandbox-deliver-files to attach it to the thread, and record the DELIVERED filename in the ledger's proofArtifactPath. A finding whose proof was never delivered does not count as proved.`,
     `RECOVERY: previously delivered proof attachments can be restored instead of rebuilt: use spaces-thread-attachments to find them, then spaces-fetch-attachment to fetch them into a fresh workspace/sandbox.`,
     deliveredLine,
     exitInstruction,
-    run.sandboxNote?.trim() ? `\nSandbox note:\n${run.sandboxNote.trim()}` : "",
+    run.sandboxNote?.trim() ? `\\nSandbox note:\\n${run.sandboxNote.trim()}` : "",
     finalInstruction,
     ``,
     ledgerMarkdown,
