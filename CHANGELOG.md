@@ -1,3 +1,10 @@
+## [1.275.0](https://github.com/juspay/xyne-spaces/compare/v1.274.1...v1.275.0) (2026-09-04)
+
+
+### Features
+
+* bulk ticket tag relabel endpoint ([#656](https://github.com/juspay/xyne-spaces/issues/656)) ([f2f6744](https://github.com/juspay/xyne-spaces/commit/f2f6744493b576b76b022f681e3eb11de17c8a96))
+
 ## [1.274.1](https://github.com/juspay/xyne-spaces/compare/v1.274.0...v1.274.1) (2026-09-04)
 
 
