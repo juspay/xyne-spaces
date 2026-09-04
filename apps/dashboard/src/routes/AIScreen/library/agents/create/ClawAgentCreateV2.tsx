@@ -309,17 +309,6 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
               }}
             />
 
-            <SubagentCapabilityRow
-              selection={state.tools}
-              onSelectionChange={tools =>
-                update({ tools: { ...tools, callableAgents: state.tools.callableAgents } })
-              }
-              suggestContext={{
-                systemPrompt: state.systemPrompt,
-                description: state.description,
-              }}
-            />
-
             {/* Delegation is a live grant against an existing agent, so this row
                 only appears once the agent exists (edit, not create). */}
             {agent && (
@@ -332,6 +321,17 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 }
               />
             )}
+
+            <SubagentCapabilityRow
+              selection={state.tools}
+              onSelectionChange={tools =>
+                update({ tools: { ...tools, callableAgents: state.tools.callableAgents } })
+              }
+              suggestContext={{
+                systemPrompt: state.systemPrompt,
+                description: state.description,
+              }}
+            />
 
             <BuiltinCapabilityRow
               selection={state.tools}
