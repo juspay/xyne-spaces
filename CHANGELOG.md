@@ -9,6 +9,20 @@
 
 ### Bug Fixes
 
+* fixing doc upload when filling stage update forms ([#1526](https://github.com/juspay/xyne-spaces/issues/1526)) ([bb027fe](https://github.com/juspay/xyne-spaces/commit/bb027fe1d26bf1a824508de645aa84e6c65163be))
+* link replacement permission fix ([#1525](https://github.com/juspay/xyne-spaces/issues/1525)) ([cb55ec6](https://github.com/juspay/xyne-spaces/commit/cb55ec671be9381e80570f38e128195d75db532c))
+
+## [1.268.0-release-20260903.5](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.4...v1.268.0-release-20260903.5) (2026-09-04)
+
+
+### Features
+
+* integrated workflow-sdk ([#1516](https://github.com/juspay/xyne-spaces/issues/1516)) ([cb65fcc](https://github.com/juspay/xyne-spaces/commit/cb65fcc382f77529b64c73b70167222686cc5b9a))
+* pnpm lock push ui fix ([#1520](https://github.com/juspay/xyne-spaces/issues/1520)) ([6e49852](https://github.com/juspay/xyne-spaces/commit/6e4985243dc3f861218539dfde92d2d2661110e9))
+
+
+### Bug Fixes
+
 * link replacement permission fix ([#1525](https://github.com/juspay/xyne-spaces/issues/1525)) ([cb55ec6](https://github.com/juspay/xyne-spaces/commit/cb55ec671be9381e80570f38e128195d75db532c))
 
 ## [1.268.0-release-20260903.5](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.4...v1.268.0-release-20260903.5) (2026-09-03)
