@@ -90,3 +90,41 @@ test("skips the lookup entirely when no userId is wired through", async () => {
   expect(fetchSpy).not.toHaveBeenCalled();
   expect(ref.value).toEqual({ serverTypes: ["github"] });
 });
+
+test("refuses to promise a card for a connector the catalog does not have", async () => {
+  mockAvailability({ success: true, connected: [], known: true, existing: [], catalogKnown: true });
+
+  const ref: SuggestConnectorsRef = {};
+  const out = await callTool(ref, { serverTypes: ["figma"] }, "user-1");
+
+  expect(ref.value).toBeUndefined();
+  expect(out.content[0]?.text).toContain("not available on Xyne yet");
+  expect(out.content[0]?.text).toContain("NO card will be shown");
+  expect(out.details?.["unavailable"]).toEqual(["figma"]);
+});
+
+test("keeps only the connectors that exist when some of them do", async () => {
+  mockAvailability({
+    success: true,
+    connected: [],
+    known: true,
+    existing: ["github"],
+    catalogKnown: true,
+  });
+
+  const ref: SuggestConnectorsRef = {};
+  const out = await callTool(ref, { serverTypes: ["figma", "github"] }, "user-1");
+
+  expect(ref.value).toEqual({ serverTypes: ["github"] });
+  expect(out.content[0]?.text).toContain("github");
+  expect(out.content[0]?.text).not.toContain("figma");
+});
+
+test("falls open to the old behaviour when the catalog answer is missing", async () => {
+  mockAvailability({ success: true, connected: [], known: true });
+
+  const ref: SuggestConnectorsRef = {};
+  await callTool(ref, { serverTypes: ["figma"] }, "user-1");
+
+  expect(ref.value).toEqual({ serverTypes: ["figma"] });
+});

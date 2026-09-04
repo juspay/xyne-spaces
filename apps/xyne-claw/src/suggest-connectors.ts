@@ -18,6 +18,11 @@
  * catalog and drops anything it does not recognise. Nothing the model writes
  * reaches the card's title or description, so it cannot invent an integration
  * or misdescribe what one does.
+ *
+ * The tool checks the catalog BEFORE promising a card. It used to answer "cards
+ * will be shown" unconditionally, so a request for a connector we do not carry
+ * (prod: figma) had the model write "hit Connect on the card" over a card the
+ * server then silently dropped. Unknown types are now reported back instead.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -48,9 +53,16 @@ const AVAILABILITY_TIMEOUT_MS = 2000;
 interface ConnectorAvailability {
   connected: string[];
   known: boolean;
+  existing: string[];
+  catalogKnown: boolean;
 }
 
-const UNKNOWN_AVAILABILITY: ConnectorAvailability = { connected: [], known: false };
+const UNKNOWN_AVAILABILITY: ConnectorAvailability = {
+  connected: [],
+  known: false,
+  existing: [],
+  catalogKnown: false,
+};
 
 async function fetchAvailability(
   userId: string | undefined,
@@ -66,11 +78,21 @@ async function fetchAvailability(
       signal: AbortSignal.timeout(AVAILABILITY_TIMEOUT_MS),
     });
     if (!res.ok) return UNKNOWN_AVAILABILITY;
-    const body = (await res.json()) as { connected?: unknown; known?: unknown };
+    const body = (await res.json()) as {
+      connected?: unknown;
+      known?: unknown;
+      existing?: unknown;
+      catalogKnown?: unknown;
+    };
     if (body.known !== true || !Array.isArray(body.connected)) return UNKNOWN_AVAILABILITY;
+    const catalogKnown = body.catalogKnown === true && Array.isArray(body.existing);
     return {
       connected: body.connected.filter((t): t is string => typeof t === "string"),
       known: true,
+      existing: catalogKnown
+        ? (body.existing as unknown[]).filter((t): t is string => typeof t === "string")
+        : [],
+      catalogKnown,
     };
   } catch (err) {
     log.warn(
@@ -102,20 +124,29 @@ export function buildSuggestConnectorsTool(
       "    GitHub or Bitbucket repo or PR, a Figma file, a Notion page, a Jira ticket.",
       "  • a task needs an account you have no working tools for (e.g. summarising a Google",
       "    Doc with no Google tools available),",
-      "  • the user asks to connect something by name (\"connect Figma\").",
+      "  • the user asks to connect something by name (\"connect Figma\"),",
+      "  • a tool you tried FAILED with a permission / auth error (401, 403, \"access denied\").",
+      "    That means the shared org account cannot reach THIS user\'s data, and their own",
+      "    connection is the fix. Call it even though tools for that service exist.",
       "",
       "Do NOT call it when:",
-      "  • you already have working tools for that service — an admin may have connected it",
-      "    org-wide, so tools can work without the user ever connecting anything,",
+      "  • you have working tools for that service and they are WORKING — an admin may have",
+      "    connected it org-wide, so tools can work without the user connecting anything,",
       "  • the user merely mentions a product by name, or the name appears in a task handed",
       "    to you by another agent,",
       "  • you are only explaining what a connector does.",
       "",
-      "The server resolves each type against the catalog, fills in the name, description and",
-      "connected state, and DROPS any connector that is already usable — including ones an",
-      "admin shared org-wide — unless the USER asked to connect it by name. It reads that",
-      "intent from the user\'s own message, not from you. So a card may not appear: never say",
-      "\"the card above\" or tell the user to press Connect. Say what you need and why.",
+      "The server resolves each type against the catalog and fills in the name, description",
+      "and connected state — nothing you write reaches the card. It DROPS a connector the",
+      "user has already connected themselves. One shared org-wide is dropped too, UNLESS a",
+      "tool call actually failed against it this turn, or the USER asked for it by name —",
+      "read from their own message, not from your claim.",
+      "",
+      "The tool result tells you exactly what will render. Follow it literally:",
+      "  • it names the connectors whose cards will appear → you may point at them,",
+      "  • it says a connector is NOT available → say so plainly; there is no card to press,",
+      "  • it says something is already connected → do not tell the user to connect it again.",
+      "Never refer to a card the result did not promise.",
       "",
       "This does not end your turn. Call it at most once per reply.",
     ].join("\n"),
@@ -181,17 +212,36 @@ export function buildSuggestConnectorsTool(
       }
 
       const title = typeof p["title"] === "string" ? p["title"].trim().slice(0, 120) : "";
-      ref.value = { serverTypes, ...(title ? { title } : {}), ...(listAll ? { listAll: true } : {}) };
+      const availability = listAll
+        ? UNKNOWN_AVAILABILITY
+        : await fetchAvailability(userId, serverTypes);
+
+      const renderable =
+        listAll || !availability.catalogKnown
+          ? serverTypes
+          : serverTypes.filter((t) => availability.existing.includes(t));
+
+      if (!listAll && availability.catalogKnown && renderable.length === 0) {
+        log.info(`[suggest-connectors] no catalog entry for: ${serverTypes.join(", ")}`);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `No connector is available for ${serverTypes.join(", ")}. NO card will be shown. Tell the user plainly that this connector is not available on Xyne yet — do NOT tell them to press Connect or refer to a card.`,
+            },
+          ],
+          details: { serverTypes, unavailable: serverTypes },
+        };
+      }
+
+      ref.value = { serverTypes: renderable, ...(title ? { title } : {}), ...(listAll ? { listAll: true } : {}) };
       log.info(
         listAll
           ? "[suggest-connectors] queued roster listing"
           : `[suggest-connectors] queued ${serverTypes.length}: ${serverTypes.join(", ")}`,
       );
 
-      const availability = listAll
-        ? UNKNOWN_AVAILABILITY
-        : await fetchAvailability(userId, serverTypes);
-      const connected = availability.connected.filter((t) => serverTypes.includes(t));
+      const connected = availability.connected.filter((t) => renderable.includes(t));
 
       const stateNote = connected.length
         ? ` ${connected.join(", ")} ${connected.length === 1 ? "is" : "are"} ALREADY CONNECTED and the card shows it that way — do NOT tell the user to press Connect or link an account for ${connected.length === 1 ? "it" : "them"}; say what you can already do with ${connected.length === 1 ? "it" : "them"}.`
@@ -205,10 +255,10 @@ export function buildSuggestConnectorsTool(
             type: "text" as const,
             text: listAll
               ? "A connector list with a Browse button will be shown with your reply. Do NOT list the connectors in your text — say at most one short line."
-              : `Connector cards for ${serverTypes.join(", ")} will be shown with your reply. Do NOT list or describe these connectors in your text — say at most one short line about why they help.${stateNote}`,
+              : `Connector cards for ${renderable.join(", ")} will be shown with your reply. Do NOT list or describe these connectors in your text — say at most one short line about why they help.${stateNote}`,
           },
         ],
-        details: { serverTypes, listAll, ...(availability.known ? { connected } : {}) },
+        details: { serverTypes: renderable, listAll, ...(availability.known ? { connected } : {}) },
       };
     },
   };

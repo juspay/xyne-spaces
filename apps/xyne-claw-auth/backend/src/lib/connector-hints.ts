@@ -65,6 +65,26 @@ export const CONNECTOR_HINTS: readonly ConnectorHint[] = [
   { serverType: "mixpanel", domains: ["mixpanel.com"], keywords: ["mixpanel"] },
   { serverType: "bigquery", keywords: ["bigquery"] },
   { serverType: "databricks", domains: ["databricks.com"], keywords: ["databricks"] },
+  { serverType: "reddit", domains: ["reddit.com"], keywords: ["reddit"] },
+  { serverType: "sentry", domains: ["sentry.io"], keywords: ["sentry"] },
+  { serverType: "twitter", domains: ["twitter.com", "x.com"], keywords: ["twitter", "tweet"] },
+  { serverType: "mongodb", domains: ["mongodb.com"], keywords: ["mongodb", "mongo"] },
+  { serverType: "clickhouse", domains: ["clickhouse.com"], keywords: ["clickhouse"] },
+  { serverType: "miro", domains: ["miro.com"], keywords: ["miro"] },
+  { serverType: "calendly", domains: ["calendly.com"], keywords: ["calendly"] },
+  { serverType: "docusign", domains: ["docusign.com", "docusign.net"], keywords: ["docusign"] },
+  { serverType: "egnyte", domains: ["egnyte.com"], keywords: ["egnyte"] },
+  { serverType: "excalidraw", domains: ["excalidraw.com"], keywords: ["excalidraw"] },
+  { serverType: "honeycomb", domains: ["honeycomb.io"], keywords: ["honeycomb"] },
+  { serverType: "customerio", domains: ["customer.io"], keywords: ["customer.io", "customerio"] },
+  { serverType: "attio", domains: ["attio.com"], keywords: ["attio"] },
+  { serverType: "mailerlite", domains: ["mailerlite.com"], keywords: ["mailerlite"] },
+  { serverType: "jotform", domains: ["jotform.com"], keywords: ["jotform"] },
+  { serverType: "webflow", domains: ["webflow.com"], keywords: ["webflow"] },
+  { serverType: "wix", domains: ["wix.com"], keywords: ["wix"] },
+  { serverType: "jenkins", keywords: ["jenkins"] },
+  { serverType: "kibana", keywords: ["kibana"] },
+  { serverType: "rapidapi-linkedin", domains: ["linkedin.com"], keywords: ["linkedin"] },
 ];
 
 /** Finds http(s) URLs; the host itself is then parsed, never regex-matched. */
@@ -182,6 +202,18 @@ const SHOW_CONNECTOR_INTENT =
  * report this: it has an incentive to claim explicit intent so its card is
  * shown, and has been observed doing so for plain task requests.
  */
+const ROSTER_INTENT =
+  /\b(show|see|view|open|display|list|find|browse|bring up|pull up|what|which|any)\b[^.?!\n]{0,60}\b(connector|connectors|mcp|mcps|integration|integrations)\b/i;
+
+export function wantsConnectorRoster(text: string): boolean {
+  if (!text.trim()) return false;
+  if (!ROSTER_INTENT.test(text)) return false;
+  return connectorTypesFromText(text, {
+    includeKeywords: true,
+    includeConnectKeywords: true,
+  }).length === 0;
+}
+
 export function connectorTypesUserAskedFor(text: string): string[] {
   if (!text.trim()) return [];
   if (!CONNECT_INTENT.test(text) && !SHOW_CONNECTOR_INTENT.test(text)) return [];

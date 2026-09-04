@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { availableServerTypesSafe } from "../lib/connector-availability.js";
+import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("connectors-internal");
@@ -34,5 +35,26 @@ connectorsInternalRouter.post("/available", async (req: Request, res: Response) 
     return;
   }
 
-  res.json({ success: true, connected: serverTypes.filter((t) => available.has(t)), known: true });
+  let existing: string[] = [];
+  try {
+    const rows = await prisma.mcpServer.findMany({
+      where: { type: { in: serverTypes }, enabled: true },
+      select: { type: true },
+    });
+    existing = rows.map((r) => r.type);
+  } catch (err) {
+    log.warn(
+      `[connectors-internal] catalog lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    res.json({ success: true, connected: serverTypes.filter((t) => available.has(t)), known: true });
+    return;
+  }
+
+  res.json({
+    success: true,
+    connected: serverTypes.filter((t) => available.has(t)),
+    existing: serverTypes.filter((t) => existing.includes(t)),
+    catalogKnown: true,
+    known: true,
+  });
 });

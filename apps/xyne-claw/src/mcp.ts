@@ -96,6 +96,15 @@ export function applyTrustedMcpBindings(
   return bindings ? { ...params, ...bindings } : params;
 }
 
+export class McpAuthServiceError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "McpAuthServiceError";
+    this.status = status;
+  }
+}
+
 async function authFetch<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
   const url = `${SERVER.authServiceUrl}${path}`;
   const res = await fetch(url, {
@@ -109,7 +118,7 @@ async function authFetch<T>(path: string, sessionToken: string, init?: RequestIn
   });
   const body = (await res.json()) as AuthResponse<T>;
   if (!body.success || body.data === undefined) {
-    throw new Error(body.error ?? `Auth service error: ${res.status}`);
+    throw new McpAuthServiceError(body.error ?? `Auth service error: ${res.status}`, res.status);
   }
   return body.data;
 }
@@ -229,6 +238,27 @@ export async function injectForwardedFiles(
   return { params: rewritten, forwarded };
 }
 
+async function callMcpWithBlockedCapture<T>(
+  path: string,
+  sessionToken: string,
+  init: RequestInit,
+  serverType: string,
+  onConnectorBlocked?: (serverType: string, status: number) => void,
+): Promise<T> {
+  try {
+    return await authFetch<T>(path, sessionToken, init);
+  } catch (err) {
+    if (err instanceof McpAuthServiceError && isCredentialRejection(err.status)) {
+      onConnectorBlocked?.(serverType, err.status);
+    }
+    throw err;
+  }
+}
+
+function isCredentialRejection(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 export async function loadMcpToolsForUser(
   sessionId: string,
   sessionToken: string,
@@ -248,6 +278,7 @@ export async function loadMcpToolsForUser(
   // execution identity stable across context compaction and prevents a model
   // from omitting or replacing trusted run bindings.
   trustedToolBindings?: TrustedMcpToolBindings,
+  onConnectorBlocked?: (serverType: string, status: number) => void,
 ): Promise<{
   groups: McpToolGroup[];
   cleanup: () => Promise<void>;
@@ -323,7 +354,7 @@ export async function loadMcpToolsForUser(
             }
           }
           callParams = applyTrustedMcpBindings(callParams, trustedBindings);
-          const result = await authFetch<{
+          const result = await callMcpWithBlockedCapture<{
             content: string;
             citations?: import("xyne-claw-shared").Citation[];
             pendingAction?: Record<string, unknown>;
@@ -345,6 +376,8 @@ export async function loadMcpToolsForUser(
                 agentSlug,
               }),
             },
+            server.serverType,
+            onConnectorBlocked,
           );
 
           if (result.pendingAction) {
