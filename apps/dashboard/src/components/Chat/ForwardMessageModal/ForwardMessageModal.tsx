@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Badge } from '../../ui/Badge';
-import { X, Hash, Lock, Users } from 'lucide-react';
+import { X, Hash, Lock, Users, Loader2 } from 'lucide-react';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
 import {
@@ -20,8 +20,13 @@ import {
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
-import { formatRelativeTimestamp } from '../../../utils/dateUtils';
+import {
+  formatFullTimestamp,
+  formatRelativeTime,
+  formatRelativeTimestamp,
+} from '../../../utils/dateUtils';
 import HuddleIcon from '../../icons/HuddleIcon';
+import AIAgentIcon from '../../icons/AIAgentIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
@@ -54,8 +59,25 @@ import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { logger, Event } from '../../../utils/logger';
+import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
+import { createMarkdownComponents } from '../../../utils/markdownComponents';
 import { RecordingShareContent } from '../../ui/MessageBubble/RecordingShareContent';
 import { useRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
+import { useQuery as useReactQuery } from '@tanstack/react-query';
+import { fetchChannelClawAgents } from '../../../services/channelClawAgentService';
+import { useCacConfig } from '@xyne/shared/hooks';
+import {
+  useAgentConversationPreview,
+  useShareAgentConversation,
+  useShareAgentConversationStatus,
+} from '../../../hooks/useShareAgentConversation';
+import type { ShareApiError } from '../../../services/claw/shareAgentConversationService';
+import {
+  buildConversationShareSubmission,
+  canShareWholeConversation,
+  isShareableTarget,
+  type ForwardMode,
+} from './forwardMode';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -67,6 +89,7 @@ import { useRecordingShareMessage } from '../../ui/MessageBubble/recordingShareM
 export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   message,
   channelId,
+  channelScopeType,
   onCancel,
   onSuccess,
 }) => {
@@ -78,6 +101,30 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const navigate = useNavigate();
   const zero = useZero();
+  const [forwardMode, setForwardMode] = useState<ForwardMode>('message');
+  const [addAgent, setAddAgent] = useState(true);
+  const [shareOperationId, setShareOperationId] = useState(() => uuidv4());
+  const channelAgentsQuery = useReactQuery({
+    queryKey: ['channel-claw-agents', channelId],
+    queryFn: () => fetchChannelClawAgents(channelId),
+    enabled: channelScopeType === ChannelScopeType.DM,
+    staleTime: 30_000,
+  });
+  const channelAgents = channelAgentsQuery.data ?? [];
+  const dmAgent = channelAgents.length === 1 ? channelAgents[0] : undefined;
+  const { config: sharingEnabled } = useCacConfig<boolean>({
+    key: 'share_agent_conversation_enabled',
+    fallbackConfig: true,
+  });
+  const showForwardModes = canShareWholeConversation(
+    channelScopeType,
+    channelAgents.length,
+    sharingEnabled,
+  );
+  const shareMutation = useShareAgentConversation();
+  useEffect(() => {
+    if (!showForwardModes && forwardMode === 'conversation') setForwardMode('message');
+  }, [forwardMode, showForwardModes]);
 
   // Focus the combobox input *after* the dialog open animation settles. Focusing
   // it synchronously during open (e.g. via the dialog's auto-focus) gets stolen
@@ -114,6 +161,56 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
       const firstTarget = selectedTargets[0];
       if (!firstTarget) return;
+
+      if (forwardMode === 'conversation') {
+        const isShareDestination =
+          firstTarget.type === 'channel' || firstTarget.type === 'group_dm';
+        if (!isShareDestination || !dmAgent) return;
+        try {
+          const result = await shareMutation.mutateAsync(
+            buildConversationShareSubmission(
+              firstTarget.id,
+              dmAgent.agentSlug,
+              message.conversationId,
+              addAgent && (shareStatus?.canAddAgent ?? false),
+              true,
+              shareOperationId,
+              value.optionalMessageText.trim() ? value.optionalMessageHtml : '',
+            ),
+          );
+          logger.info(Event.MESSAGE_FORWARDED, {
+            originalMessageId: message.messageId,
+            targetType: firstTarget.type,
+            targetChannelId: firstTarget.id,
+            forwardMode: 'conversation',
+          });
+          const isGroupDmTarget = firstTarget.type === 'group_dm';
+          const targetKind = isGroupDmTarget ? 'group' : 'channel';
+          const targetLabel = isGroupDmTarget ? firstTarget.name : `#${firstTarget.name}`;
+          if (result.reusedExisting)
+            toast.info(`This conversation was already shared to that ${targetKind}.`);
+          else toast.success(`Shared ${result.sharedMessageCount} message(s) to ${targetLabel}`);
+          onSuccess?.();
+          void navigate(`/chat/dir/${firstTarget.id}`);
+        } catch (error) {
+          const apiError = (error as { response?: { data?: ShareApiError } })?.response?.data;
+          logger.error(Event.MESSAGE_FORWARD_FAILED, {
+            originalMessageId: message.messageId,
+            targetType: firstTarget.type,
+            targetChannelId: firstTarget.id,
+            forwardMode: 'conversation',
+            error: error instanceof Error ? error.message : String(error),
+          });
+          if (
+            apiError?.code === 'RESHARE_CONFIRMATION_REQUIRED' ||
+            apiError?.code === 'NO_NEW_MESSAGES'
+          ) {
+            await shareStatusQuery.refetch();
+          }
+          toast.error(apiError?.error ?? 'Failed to share conversation. Please try again.');
+        }
+        return;
+      }
 
       if (firstTarget.type === 'channel') {
         // Forward to channel using mutator
@@ -326,6 +423,68 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   ); // Merge visible channel data with all channels
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
+  const selectedConversationChannel =
+    forwardMode === 'conversation' &&
+    (selectedTargets[0]?.type === 'channel' || selectedTargets[0]?.type === 'group_dm')
+      ? selectedTargets[0]
+      : undefined;
+  const previewQuery = useAgentConversationPreview({
+    agentSlug: dmAgent?.agentSlug,
+    sourceConversationId: message.conversationId,
+    enabled: forwardMode === 'conversation',
+  });
+  const preview = previewQuery.data;
+  const shareStatusQuery = useShareAgentConversationStatus({
+    channelId: selectedConversationChannel?.id,
+    agentSlug: dmAgent?.agentSlug,
+    sourceConversationId: forwardMode === 'conversation' ? message.conversationId : undefined,
+    activePathTipMessageId: preview?.tipMessageId ?? null,
+  });
+  const shareStatus = shareStatusQuery.data;
+  const previewMarkdownComponents = useMemo(
+    () => createMarkdownComponents(`share-preview-${message.messageId}`),
+    [message.messageId],
+  );
+  const noNewMessages =
+    !!shareStatus && shareStatus.previouslyShared && !shareStatus.hasNewSinceLastShare;
+  const agentLabel = dmAgent?.name ?? dmAgent?.agentSlug ?? 'this agent';
+  const destinationNoun =
+    shareStatus?.channelScopeType === ChannelScopeType.GROUP_DM ? 'group' : 'channel';
+  const lastSharedLabel = shareStatus?.lastSharedAt ? (
+    <>
+      shared it{' '}
+      <Tooltip content={formatFullTimestamp(new Date(shareStatus.lastSharedAt))} side='top'>
+        <span className='underline decoration-dotted underline-offset-2'>
+          {formatRelativeTime(new Date(shareStatus.lastSharedAt))}
+        </span>
+      </Tooltip>
+    </>
+  ) : (
+    'shared it here'
+  );
+  const isReShare = !!shareStatus?.previouslyShared && !noNewMessages;
+  const conversationCanSubmit =
+    forwardMode !== 'conversation' ||
+    (!!selectedConversationChannel && !!shareStatus && !noNewMessages && !shareMutation.isPending);
+  const confirmedForChannelId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (confirmedForChannelId.current === selectedConversationChannel?.id) return;
+    confirmedForChannelId.current = selectedConversationChannel?.id;
+    setAddAgent(true);
+  }, [selectedConversationChannel?.id]);
+
+  const handleForwardModeChange = (nextMode: ForwardMode): void => {
+    setForwardMode(nextMode);
+    setSelectedTargets([]);
+    form.reset();
+    inputBoxRef.current?.clearContent();
+    setAddAgent(true);
+    setShareOperationId(uuidv4());
+    setInputValue('');
+    setIsInitialOpen(true);
+    setComboboxOpen(true);
+    setTimeout(() => comboboxInputRef.current?.focus(), 0);
+  };
 
   // Determine current selection mode based on selected targets
   const selectionMode: SelectionMode = useMemo(() => {
@@ -467,9 +626,12 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         const defaults: DropdownListItemType[] = [];
 
         // Recent 1:1 DMs ranked by MFU affinity, recency tie-break (up to 5)
-        const recentDMs = rankChannelsByAffinity(
-          allChannels.filter(channel => channel.scopeType === ChannelScopeType.DM),
-        ).slice(0, 5);
+        const recentDMs =
+          forwardMode === 'message'
+            ? rankChannelsByAffinity(
+                allChannels.filter(channel => channel.scopeType === ChannelScopeType.DM),
+              ).slice(0, 5)
+            : [];
 
         recentDMs.forEach(channel => {
           // Self-DM ("notes to self") — only the current user is a participant.
@@ -504,7 +666,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
         // Recent GROUP_DMs ranked by MFU affinity, recency tie-break (up to 5)
         const recentGroupDMs = rankChannelsByAffinity(
-          allChannels.filter(channel => channel.scopeType === ChannelScopeType.GROUP_DM),
+          allChannels.filter(
+            channel =>
+              channel.scopeType === ChannelScopeType.GROUP_DM &&
+              (forwardMode === 'message' || isShareableTarget(channel)),
+          ),
         ).slice(0, 5);
 
         recentGroupDMs.forEach(channel => {
@@ -521,7 +687,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
         // Recent DEFAULT channels ranked by MFU affinity, recency tie-break (up to 5)
         const recentChannels = rankChannelsByAffinity(
-          allChannels.filter(channel => channel.scopeType === ChannelScopeType.DEFAULT),
+          allChannels.filter(channel => isShareableTarget(channel)),
         ).slice(0, 5);
 
         recentChannels.forEach(channel => {
@@ -548,26 +714,29 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         ? new Set(selectedTargets.find(t => t.type === 'group_dm')?.memberIds ?? [])
         : new Set<string>();
 
-    const suggestedUsers: DropdownListItemType[] = rankedUsers
-      .filter(
-        currUser =>
-          // Self is a valid target only as a solo "notes to self" pick. Hide it once
-          // anything else is selected (in a DM/group the current user is implicit).
-          !(currUser.id === currentUser?.id && selectionMode !== 'none') &&
-          !selectedUserIds.has(currUser.id) &&
-          !groupDmMemberIds.has(currUser.id),
-      )
-      // Bound the visible list: rankUsersWithMfu can recover weighted matches past the 20 cap.
-      .slice(0, 20)
-      .map(currUser => ({
-        leftSlot: <Avatar userId={currUser.id} size='sm' />,
-        label: getForwardUserLabel(currUser),
-        description: currUser.email,
-        value: currUser.id,
-      }));
+    const suggestedUsers: DropdownListItemType[] =
+      forwardMode === 'conversation'
+        ? []
+        : rankedUsers
+            .filter(
+              currUser =>
+                // Self is a valid target only as a solo "notes to self" pick. Hide it once
+                // anything else is selected (in a DM/group the current user is implicit).
+                !(currUser.id === currentUser?.id && selectionMode !== 'none') &&
+                !selectedUserIds.has(currUser.id) &&
+                !groupDmMemberIds.has(currUser.id),
+            )
+            // Bound the visible list: rankUsersWithMfu can recover weighted matches past the 20 cap.
+            .slice(0, 20)
+            .map(currUser => ({
+              leftSlot: <Avatar userId={currUser.id} size='sm' />,
+              label: getForwardUserLabel(currUser),
+              description: currUser.email,
+              value: currUser.id,
+            }));
 
     const suggestedChannels: DropdownListItemType[] = rankChannelsByAffinity(
-      channelsSuggestions.filter(currChannel => currChannel.scopeType === ChannelScopeType.DEFAULT),
+      channelsSuggestions.filter(currChannel => isShareableTarget(currChannel)),
     ).map(currChannel => ({
       leftSlot:
         currChannel.visibility === ChannelVisibility.PUBLIC ? (
@@ -582,7 +751,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     // Full-name participant matching + MFU affinity via the shared cmd+K group-DM matcher
     // (getDMNames(...).search feeds both displayName and raw name per participant).
     const groupDmChannels = allChannels.filter(
-      channel => channel.scopeType === ChannelScopeType.GROUP_DM,
+      channel =>
+        channel.scopeType === ChannelScopeType.GROUP_DM &&
+        (forwardMode === 'message' || isShareableTarget(channel)),
     );
     const suggestedGroupDMs: DropdownListItemType[] = filterChannelsBySearchableNames(
       groupDmChannels.map(channel => ({
@@ -622,6 +793,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     usersById,
     currentUser,
     affinityVersion,
+    forwardMode,
   ]);
 
   const onInputValueChangeHandler = (queryString: string) => {
@@ -652,6 +824,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     // Check if the selected value is a channel
     const selectedChannel = allChannels.find(c => c.id === selectedValue);
     if (selectedChannel) {
+      if (forwardMode === 'conversation' && !isShareableTarget(selectedChannel)) return;
       if (selectedChannel.scopeType === ChannelScopeType.GROUP_DM) {
         const memberIds = parseDMParticipantIds(selectedChannel).filter(
           id => id !== currentUser?.id,
@@ -689,7 +862,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     >
       {/* Header */}
       <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-border'>
-        <h2 className='text-lg font-semibold text-foreground'>Forward message</h2>
+        <h2 className='text-lg font-semibold text-foreground'>
+          {forwardMode === 'conversation' ? 'Share conversation' : 'Forward message'}
+        </h2>
         <button
           type='button'
           className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
@@ -701,6 +876,37 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           <span className='sr-only'>Close</span>
         </button>
       </div>
+
+      {showForwardModes && (
+        <div
+          className='grid grid-cols-2 gap-2 px-6 pt-4'
+          role='radiogroup'
+          aria-label='Forward mode'
+        >
+          <button
+            type='button'
+            role='radio'
+            aria-checked={forwardMode === 'message'}
+            className={`rounded-md border px-3 py-2 text-sm ${forwardMode === 'message' ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground'}`}
+            onClick={() => handleForwardModeChange('message')}
+            data-track-category='FORWARD_MESSAGE_MODAL'
+            data-track-name='SELECT_THIS_MESSAGE_MODE'
+          >
+            This message
+          </button>
+          <button
+            type='button'
+            role='radio'
+            aria-checked={forwardMode === 'conversation'}
+            className={`rounded-md border px-3 py-2 text-sm ${forwardMode === 'conversation' ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground'}`}
+            onClick={() => handleForwardModeChange('conversation')}
+            data-track-category='FORWARD_MESSAGE_MODAL'
+            data-track-name='SELECT_WHOLE_CONVERSATION_MODE'
+          >
+            Whole conversation
+          </button>
+        </div>
+      )}
 
       <div className='px-6 py-4 space-y-2'>
         {selectedTargets.length > 0 && (
@@ -748,27 +954,36 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             })}
           </div>
         )}
-        {selectionMode !== 'channel' && totalMemberCount < 9 && (
-          <Combobox
-            ref={comboboxInputRef}
-            label='Forward to'
-            onInputValueChange={onInputValueChangeHandler}
-            onValueChange={onValueChangeHandler}
-            queryString={inputValue}
-            placeholder={
-              selectionMode === 'users' || selectionMode === 'group_dm'
-                ? 'Add more users...'
-                : 'Search channels or users...'
-            }
-            items={dropdownListItems}
-            value={null}
-            hintText='Select a channel or one or more users to forward this message'
-            onBlur={() => setIsInitialOpen(false)}
-            open={comboboxOpen}
-            onOpenChange={setComboboxOpen}
-            autoHighlight={true}
-          />
-        )}
+        {(forwardMode === 'conversation'
+          ? selectedTargets.length === 0
+          : selectionMode !== 'channel') &&
+          totalMemberCount < 9 && (
+            <Combobox
+              ref={comboboxInputRef}
+              label={forwardMode === 'conversation' ? 'Share to' : 'Forward to'}
+              onInputValueChange={onInputValueChangeHandler}
+              onValueChange={onValueChangeHandler}
+              queryString={inputValue}
+              placeholder={
+                forwardMode === 'conversation'
+                  ? 'Search channels or group DMs...'
+                  : selectionMode === 'users' || selectionMode === 'group_dm'
+                    ? 'Add more users...'
+                    : 'Search channels or users...'
+              }
+              items={dropdownListItems}
+              value={null}
+              hintText={
+                forwardMode === 'conversation'
+                  ? 'Select an active channel or group DM to share this conversation'
+                  : 'Select a channel or one or more users to forward this message'
+              }
+              onBlur={() => setIsInitialOpen(false)}
+              open={comboboxOpen}
+              onOpenChange={setComboboxOpen}
+              autoHighlight={true}
+            />
+          )}
         {(selectionMode === 'users' || selectionMode === 'group_dm') && totalMemberCount >= 9 && (
           <p className='text-xs text-muted-foreground mt-1.5'>
             Maximum 9 recipients reached. Remove someone to add another.
@@ -776,11 +991,83 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         )}
         {selectionMode === 'channel' && (
           <p className='text-xs text-muted-foreground mt-1.5'>
-            Message will be forwarded to the selected channel
+            {forwardMode === 'conversation'
+              ? 'Conversation will be shared to the selected destination'
+              : 'Message will be forwarded to the selected channel'}
           </p>
         )}
       </div>
       <div className='px-6 py-4 space-y-4'>
+        {forwardMode === 'conversation' &&
+          selectedConversationChannel &&
+          shareStatusQuery.isError && (
+            <div className='rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive'>
+              {(shareStatusQuery.error as unknown as { response?: { data?: ShareApiError } })
+                ?.response?.data?.error ?? 'This channel cannot receive the shared conversation.'}
+            </div>
+          )}
+        {forwardMode === 'conversation' &&
+          selectedConversationChannel &&
+          shareStatusQuery.isLoading && (
+            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+              <Loader2 className='animate-spin' size={14} /> Checking channel…
+            </div>
+          )}
+        {forwardMode === 'conversation' && selectedConversationChannel && shareStatus && (
+          <div className='flex flex-col gap-3'>
+            {shareStatus.previouslyShared && (
+              <div className='rounded-md bg-warning/15 px-3 py-2 text-sm text-warning'>
+                {noNewMessages ? (
+                  <div className='flex flex-col'>
+                    <span className='text-xs font-medium'>Nothing new to share</span>
+                    <span className='text-xs'>
+                      This conversation hasn&apos;t changed since you {lastSharedLabel}.
+                    </span>
+                  </div>
+                ) : (
+                  <div className='flex flex-col'>
+                    <span className='text-xs font-medium'>Already shared here</span>
+                    <span className='text-xs'>
+                      You {lastSharedLabel}. Sharing again creates a new, separate thread.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+            {shareStatus.channelScopeType === ChannelScopeType.GROUP_DM ? (
+              <div className='text-xs text-warning'>
+                Only members of this group can view this shared conversation.
+              </div>
+            ) : shareStatus.channelVisibility === 'PRIVATE' ? (
+              <div className='text-xs text-warning'>
+                Only members of this channel can view this shared conversation.
+              </div>
+            ) : (
+              <div className='text-xs text-warning'>
+                Everyone in the workspace can view this shared conversation.
+              </div>
+            )}
+            <div className='flex items-center gap-2 text-sm'>
+              <input
+                type='checkbox'
+                data-track-category='FORWARD_MESSAGE_MODAL'
+                data-track-name='ADD_AGENT_WHILE_SHARING_CONVERSATION'
+                disabled={!shareStatus.canAddAgent}
+                checked={shareStatus.agentInChannel || (shareStatus.canAddAgent && addAgent)}
+                onChange={event => setAddAgent(event.target.checked)}
+              />
+              <span className={shareStatus.canAddAgent ? undefined : 'text-muted-foreground'}>
+                {shareStatus.agentInChannel
+                  ? `${agentLabel} is already present in the ${destinationNoun}.`
+                  : shareStatus.canAddAgent
+                    ? `Also add ${agentLabel} to this ${destinationNoun}`
+                    : shareStatus.agentInstalled
+                      ? `You do not have permission to add ${agentLabel} to this ${destinationNoun}.`
+                      : 'This agent is not installed as an app and cannot be added to a channel.'}
+              </span>
+            </div>
+          </div>
+        )}
         {/* Optional message with InputBox */}
         <div
           onKeyDownCapture={e => {
@@ -801,7 +1088,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           <InputBox
             ref={inputBoxRef}
             id='forward-message-optional'
-            placeholder='Add a note to the forwarded message...'
+            placeholder={
+              forwardMode === 'conversation'
+                ? 'Add a note for the people you are sharing with...'
+                : 'Add a note to the forwarded message...'
+            }
             onSendMessage={() => {
               // Handled by the wrapper div's onKeyDown
             }}
@@ -809,13 +1100,17 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               form.setFieldValue('optionalMessageHtml', html);
               form.setFieldValue('optionalMessageText', text);
             }}
-            mentionItems={mentionResults}
-            onMentionSearch={searchMentions}
-            channelItems={channelMentionItems}
-            onChannelSearch={handleChannelMentionSearch}
+            {...(forwardMode === 'message'
+              ? {
+                  mentionItems: mentionResults,
+                  onMentionSearch: searchMentions,
+                  channelItems: channelMentionItems,
+                  onChannelSearch: handleChannelMentionSearch,
+                }
+              : {})}
             features={{
               richText: true,
-              mentions: true,
+              mentions: forwardMode === 'message',
               commands: false,
               fileAttachments: false,
               emojiPicker: true,
@@ -826,70 +1121,121 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           />
         </div>
 
-        {/* Message preview */}
-        <div>
-          <span className='block text-sm font-medium text-foreground mb-1.5'>Message preview</span>
-          <div className='bg-muted rounded-md p-3 border border-border max-h-[200px] overflow-y-auto'>
-            <div className='flex gap-3'>
-              <div className='flex-shrink-0'>
-                {isCallMessage ? (
-                  <div className='w-10 h-10 rounded-md flex items-center justify-center bg-accent'>
-                    <HuddleIcon color='hsl(var(--muted-foreground))' size={20} />
-                  </div>
-                ) : (
-                  <Avatar userId={message.senderId} size='md' />
-                )}
-              </div>
-              <div className='flex-1 min-w-0'>
-                <div className='flex items-baseline gap-2 mb-1'>
-                  <h4 className='text-sm font-semibold text-foreground'>
-                    {isCallMessage ? 'Xyne Call' : getUserDisplayName(sender)}
-                  </h4>
-                  <span className='text-xs text-muted-foreground'>
-                    {formatRelativeTimestamp(message.createdAt)}
-                  </span>
-                </div>
-                {recordingShare ? (
-                  <RecordingShareContent
-                    recordingShare={recordingShare}
-                    className='flex min-w-0 flex-col gap-1'
-                    renderNote={noteHtml => (
-                      <div
-                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(noteHtml)}`}
-                      >
-                        <RenderMessageWithHTML message={noteHtml} />
+        {forwardMode === 'conversation' && (
+          <div>
+            <span className='block text-sm font-medium text-foreground mb-1.5'>
+              Conversation preview
+            </span>
+            <div className='bg-muted rounded-md p-3 border border-border max-h-[200px] overflow-y-auto'>
+              {previewQuery.isLoading ? (
+                <span className='flex items-center gap-2 text-sm text-muted-foreground'>
+                  <Loader2 className='animate-spin' size={14} /> Loading conversation…
+                </span>
+              ) : preview ? (
+                <div className='flex flex-col gap-2'>
+                  {preview.turns.map((turn, index) => (
+                    <div key={`${turn.role}-${index}`} className='flex gap-3'>
+                      <div className='flex-shrink-0'>
+                        {turn.userId ? (
+                          <Avatar userId={turn.userId} size='md' />
+                        ) : (
+                          <div className='flex h-10 w-10 items-center justify-center rounded-md bg-accent'>
+                            <AIAgentIcon />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  />
-                ) : previewContent ? (
-                  <div
-                    className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
-                  >
-                    <RenderMessageWithHTML message={previewContent} />
-                  </div>
-                ) : null}
-                {/* Attachments - hide when using optionalText (it's either optionalText OR content with attachments) */}
-                {!useOptionalText && message.attachments && message.attachments.length > 0 && (
-                  <div className='mt-2'>
-                    <div className='flex flex-wrap gap-2'>
-                      {message.attachments.map(attachment => (
-                        <div key={attachment.id} className='flex-shrink-0'>
-                          <MessageAttachment attachment={attachment} compact />
-                        </div>
-                      ))}
+                      <div className='min-w-0 flex-1'>
+                        <h4 className='text-sm font-semibold text-foreground'>{turn.name}</h4>
+                        <MarkdownMessageRenderer
+                          content={turn.content}
+                          markdownComponents={previewMarkdownComponents}
+                        />
+                      </div>
                     </div>
-                    <p className='text-xs text-muted-foreground mt-1'>
-                      {message.attachments.length}{' '}
-                      {message.attachments.length === 1 ? 'attachment' : 'attachments'} will be
-                      forwarded
-                    </p>
-                  </div>
-                )}
-              </div>
+                  ))}
+                  {preview.previewTruncated ? (
+                    <span className='text-xs text-muted-foreground'>
+                      …and more. The full conversation will be shared.
+                    </span>
+                  ) : null}
+                </div>
+              ) : (
+                <span className='text-sm text-muted-foreground'>
+                  This conversation could not be loaded.
+                </span>
+              )}
             </div>
           </div>
-        </div>
-
+        )}
+        {forwardMode === 'message' && (
+          <>
+            {/* Message preview */}
+            <div>
+              <span className='block text-sm font-medium text-foreground mb-1.5'>
+                Message preview
+              </span>
+              <div className='bg-muted rounded-md p-3 border border-border max-h-[200px] overflow-y-auto'>
+                <div className='flex gap-3'>
+                  <div className='flex-shrink-0'>
+                    {isCallMessage ? (
+                      <div className='w-10 h-10 rounded-md flex items-center justify-center bg-accent'>
+                        <HuddleIcon color='hsl(var(--muted-foreground))' size={20} />
+                      </div>
+                    ) : (
+                      <Avatar userId={message.senderId} size='md' />
+                    )}
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <div className='flex items-baseline gap-2 mb-1'>
+                      <h4 className='text-sm font-semibold text-foreground'>
+                        {isCallMessage ? 'Xyne Call' : getUserDisplayName(sender)}
+                      </h4>
+                      <span className='text-xs text-muted-foreground'>
+                        {formatRelativeTimestamp(message.createdAt)}
+                      </span>
+                    </div>
+                    {recordingShare ? (
+                      <RecordingShareContent
+                        recordingShare={recordingShare}
+                        className='flex min-w-0 flex-col gap-1'
+                        renderNote={noteHtml => (
+                          <div
+                            className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(noteHtml)}`}
+                          >
+                            <RenderMessageWithHTML message={noteHtml} />
+                          </div>
+                        )}
+                      />
+                    ) : previewContent ? (
+                      <div
+                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
+                      >
+                        <RenderMessageWithHTML message={previewContent} />
+                      </div>
+                    ) : null}
+                    {/* Attachments - hide when using optionalText (it's either optionalText OR content with attachments) */}
+                    {!useOptionalText && message.attachments && message.attachments.length > 0 && (
+                      <div className='mt-2'>
+                        <div className='flex flex-wrap gap-2'>
+                          {message.attachments.map(attachment => (
+                            <div key={attachment.id} className='flex-shrink-0'>
+                              <MessageAttachment attachment={attachment} compact />
+                            </div>
+                          ))}
+                        </div>
+                        <p className='text-xs text-muted-foreground mt-1'>
+                          {message.attachments.length}{' '}
+                          {message.attachments.length === 1 ? 'attachment' : 'attachments'} will be
+                          forwarded
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
         {/* Action buttons */}
         <div className='flex justify-end gap-3 pt-2'>
           <Button
@@ -905,13 +1251,25 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           <Button
             type='submit'
             loading={form.state.isSubmitting}
-            disabled={selectedTargets.length === 0 || form.state.isSubmitting}
+            disabled={
+              selectedTargets.length === 0 || form.state.isSubmitting || !conversationCanSubmit
+            }
             data-track-category='FORWARD_MESSAGE_MODAL'
-            data-track-name='FORWARD_MESSAGE'
-            data-track-metadata={JSON.stringify({ targetCount: selectedTargets })}
+            data-track-name={
+              forwardMode === 'conversation' ? 'SHARE_WHOLE_CONVERSATION' : 'FORWARD_MESSAGE'
+            }
+            data-track-metadata={JSON.stringify({ targetCount: selectedTargets.length })}
             trackId='forward_message'
           >
-            {form.state.isSubmitting ? 'Forwarding...' : 'Forward'}
+            {form.state.isSubmitting || shareMutation.isPending
+              ? forwardMode === 'conversation'
+                ? 'Sharing...'
+                : 'Forwarding...'
+              : forwardMode === 'conversation'
+                ? isReShare
+                  ? 'Share again'
+                  : 'Share conversation'
+                : 'Forward'}
           </Button>
         </div>
       </div>

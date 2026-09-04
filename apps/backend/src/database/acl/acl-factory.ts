@@ -143,6 +143,8 @@ export class ACLFactory {
       return new ActivitiesACL(ctx, prisma)
     case 'agent':
       return new AgentsACL(ctx, prisma)
+    case 'agentConversationShare':
+      return new BaseQueryACL(ctx, prisma)
     case 'agentStep':
       return new AgentStepsACL(ctx, prisma)
     case 'agentToolsMapping':
