@@ -5951,11 +5951,14 @@ export function createMutators(
             : null;
           const boardEtaManagement = parseBoardEtaManagement(etaBoard?.metadata ?? null, etaBoard?.boardType ?? BoardType.DEFAULT);
 
-          // Stage-only moves are gated only once a board has opted into automatic ETA
-          // management (stage moves can now trigger auto-recompute) - scoped the same way as
-          // the nonLinear.transition / ticketStageEta.update gates, so boards not using this
-          // feature see no behavior change.
-          const isStageChangingGated = isStageChanging && boardEtaManagement.autoRecomputeEnabled;
+          // Stage-only moves are gated because a move can trigger auto-recompute, so an
+          // ungated one is an indirect way to change the due date. The assignee is exempt:
+          // they are the one doing the work, and requiring a configured role just to progress
+          // their own ticket would break the normal workflow. Any other controlled change in
+          // the same call (eta/assignee/board) still gates them normally via the flags below.
+          const isActorAssignee = ticket.assignedTo === authData.sub;
+          const isStageChangingGated =
+            isStageChanging && boardEtaManagement.autoRecomputeEnabled && !isActorAssignee;
 
           if ((isAssigneeChanging || isEtaChanging || isBoardChanging || isStageChangingGated) && ticket.userGroupId) {
             const permission = await canUserModifyTicketControl(
@@ -7157,9 +7160,9 @@ export function createMutators(
           }
 
           // This mutator changes Ticket.eta the same way ticket.update's eta-changing path
-          // does, but has never been gated by ticketControlRoleIds. Close that gap the same
-          // way nonLinear.transition's new gate is scoped - only once a board has opted into
-          // autoRecomputeEnabled - so boards not using this feature see no behavior change.
+          // does, but has never been gated by ticketControlRoleIds. Close that gap. No
+          // assignee exemption here, unlike the two stage-move gates: editing a stage
+          // deadline IS an ETA change, which is exactly what the role gate exists to restrict.
           if (boardEtaManagement.autoRecomputeEnabled && ticket.userGroupId) {
             const permission = await canUserModifyTicketControl(
               authData.sub,
@@ -17577,12 +17580,16 @@ export function createMutators(
           }
           const boardEtaManagement = parseBoardEtaManagement(board.metadata, board.boardType);
 
-          // Stage moves can now trigger automatic ETA extension once a board opts into
-          // autoRecomputeEnabled - gate them the same way ticket.update gates assignee/eta/
-          // board changes, so a user who can't otherwise touch ETA can't do it indirectly by
-          // moving the ticket. Scoped to boards that actually opted in, so this never changes
-          // behavior for boards that don't use this feature.
-          if (boardEtaManagement.autoRecomputeEnabled && ticket.userGroupId) {
+          // Stage moves can trigger automatic ETA extension, so gate them the same way
+          // ticket.update gates assignee/eta/board changes - a user who can't otherwise touch
+          // ETA shouldn't be able to do it indirectly by moving the ticket. The assignee is
+          // exempt for the same reason as in ticket.update: progressing their own ticket is
+          // the normal workflow, not a way around the ETA restriction.
+          if (
+            boardEtaManagement.autoRecomputeEnabled &&
+            ticket.userGroupId &&
+            ticket.assignedTo !== authData.sub
+          ) {
             const permission = await canUserModifyTicketControl(
               authData.sub,
               ticket.userGroupId,

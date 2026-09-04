@@ -272,11 +272,14 @@ const BoardRolesConfigScreen = ({
       ? (board as { boardType?: string }).boardType
       : null;
 
-  // Automatic due-date management is only offered for linear (DEFAULT) and non-linear
-  // boards - Release and Flow boards defer it entirely this release (PRD board-type-scope
-  // table), so the toggle would have nothing to control on those.
+  // Offered for every board type whose forecast can actually act on the flag. RELEASE is
+  // included because routeResolution forecasts it identically to DEFAULT, so automation is
+  // live there and needs a way to be turned off. FLOW is excluded: its route always resolves
+  // NOT_APPLICABLE, so the toggle would control nothing.
   const showAutoRecomputeToggle =
-    boardType === BoardType.DEFAULT || boardType === BoardType.NON_LINEAR;
+    boardType === BoardType.DEFAULT ||
+    boardType === BoardType.NON_LINEAR ||
+    boardType === BoardType.RELEASE;
 
   const handleToggleAutoRecompute = useCallback(
     async (next: boolean) => {
