@@ -21,11 +21,41 @@
 
 /** base template name → its rotation variants (identical goldens, N snapshots). */
 const ROTATION_SETS: Record<string, readonly string[]> = {
+  // 6-way (a-f), widened from 4 on 2026-09-02. e/f were tried on 2026-08-31 and
+  // pulled the same day, but for a reason that no longer applies: `cursors`
+  // defaulted to 0, so every claw pod began its round-robin at `a` and never
+  // reached the tail. Measured with the 6-way set in place:
+  //   rot-a 4 PVCs, rot-b 4, rot-c 3, rot-d 1, rot-e 0, rot-f 0
+  // The two newest variants took ZERO traffic while a/b/c throttled. That is
+  // fixed — the cursor now seeds at a random offset (see `cursors` below) — so
+  // added variants actually receive clones.
+  //
+  // CORRECTION (2026-09-02): an earlier version of this comment claimed failed
+  // clones retry "every 12-30s with no backoff". That is wrong. The CSI
+  // external-provisioner DOES back off exponentially; gaps of 5m+ were observed
+  // between retries on a stuck PVC. Do not go hunting for a missing backoff.
+  //
+  // What actually sustains a storm: a failed clone retries FOREVER, and every
+  // attempt counts against the source snapshot's GCP operation limit. One PVC
+  // that has been retrying for ~40 min will re-throttle a brand-new snapshot
+  // within minutes of it becoming ready. Two consequences, both learned the
+  // hard way on 2026-09-02:
+  //   1. Rotating snapshots UNDER THE SAME NAME hands the fresh resource
+  //      straight back to the stuck clients. Rotate to NEW names, or drain
+  //      first. A snapshot with a new name that nothing was waiting on bound in
+  //      ~25s while same-name rotations kept failing.
+  //   2. Stuck PVCs must be DELETED. They never recover on their own, and while
+  //      they exist no amount of added capacity helps.
+  // More variants divide the per-snapshot rate; they do not cap retries. The
+  // real fix is for a clone that has failed N times to be recreated rather than
+  // retried indefinitely — until that exists, a big enough burst still wins.
   "agent-workspace-gvisor-template": [
     "agent-workspace-gvisor-template-a",
     "agent-workspace-gvisor-template-b",
     "agent-workspace-gvisor-template-c",
     "agent-workspace-gvisor-template-d",
+    "agent-workspace-gvisor-template-e",
+    "agent-workspace-gvisor-template-f",
   ],
   // euler: 2-way (not 4). It storms the most of any pool — 5 times between
   // 2026-08-11 and 2026-08-18, every one a RESOURCE_OPERATION_RATE_EXCEEDED on
@@ -77,6 +107,45 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "credit-workspace-template-a",
     "credit-workspace-template-b",
   ],
+  // hyperswitch: 2-way. Stormed THREE times in 24h on 2026-08-26/27, each a
+  // RESOURCE_OPERATION_RATE_EXCEEDED on whichever single snapshot it pointed at
+  // (v6 -> v7 -> v8). Cutting a fresh snapshot bought roughly one working pod
+  // each time before the new snapshot's budget went too — measured: v8 was 20
+  // minutes old with three PVCs already throttled on it. Claim volume is LOW
+  // (2 claims/hour), so this is not load: it is the retry loop. A failed clone
+  // retries every 12-30s, and the unlettered pool kept spawning replacements
+  // that could not bind, so retry traffic alone held the source above its
+  // ceiling. Rotation breaks that by giving retries a different snapshot.
+  //
+  // Clones are 80Gi (vs euler/credit at 200Gi), so a/b is cheap; add c/d if
+  // Doc Agent fan-out starts arriving concurrently.
+  //
+  // Infra side is created by:
+  //   BASE_TEMPLATE=hyperswitch-workspace-template BASE_WARMPOOL=hyperswitch-warmpool \
+  //   GOLDEN_PVC=hyperswitch-golden-pvc SNAP_PREFIX=hyperswitch-golden-snap-rot \
+  //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  // xyne-cli: 2-way. NOT over-provisioning -- the warmpool is replicas:1. On
+  // 2026-08-31 SEVEN concurrent LIVE sessions (pods carrying claim-uid) each
+  // CoW-cloned the single xyne-cli-golden-snap-v7, blew the per-source ceiling
+  // with RESOURCE_OPERATION_RATE_EXCEEDED, and the 12-30s clone retries then
+  // held it there: 6 of 8 pods stuck Pending with unbound PVCs, which reads as
+  // "no node capacity" but is purely the snapshot op-rate.
+  //
+  // Clones are 20Gi -- the SMALLEST golden in the cluster -- so a/b is the
+  // cheapest rotation set we run. Add c/d if concurrent CLI usage keeps growing.
+  //
+  // Infra side is created by:
+  //   BASE_TEMPLATE=xyne-cli-workspace-template BASE_WARMPOOL=xyne-cli-warmpool \
+  //   GOLDEN_PVC=xyne-cli-golden-pvc SNAP_PREFIX=xyne-cli-golden-snap-rot \
+  //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  "xyne-cli-workspace-template": [
+    "xyne-cli-workspace-template-a",
+    "xyne-cli-workspace-template-b",
+  ],
+  "hyperswitch-workspace-template": [
+    "hyperswitch-workspace-template-a",
+    "hyperswitch-workspace-template-b",
+  ],
 };
 
 // Per-base round-robin cursor. Process-local (each claw pod has its own), which
@@ -91,7 +160,8 @@ const cursors: Record<string, number> = {};
 export function rotateTemplate(base: string): string {
   const variants = ROTATION_SETS[base];
   if (!variants || variants.length === 0) return base;
-  const n = cursors[base] ?? 0;
+  // Seed at a random offset rather than 0 — see the note on `cursors` above.
+  const n = cursors[base] ?? Math.floor(Math.random() * variants.length);
   cursors[base] = n + 1;
   return variants[n % variants.length]!;
 }

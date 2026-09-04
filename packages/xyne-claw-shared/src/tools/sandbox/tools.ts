@@ -32,6 +32,39 @@ function isCredentialPath(p: string): boolean {
 }
 
 const SESSION_STORE = new Map<string, Session>();
+
+// Single-flight for sandbox-repo-setup, keyed by (user, conversation).
+//
+// A cold claim takes 5-7 min (warm pool is 2 replicas; past that each claim
+// cold-boots a Kata microVM). The model does not know that, so on "destroy this
+// one and get a new one" it fired three setups 20:42/20:44:55/20:45:37 that ran
+// CONCURRENTLY, exhausted the warm pool and turned one request into ~9 min of
+// churn (measured 2026-08-29). Prompt guidance cannot make this safe — a second
+// call is never what the user wanted, so it is coalesced onto the first here:
+// the later callers await the same provisioning and get the same session back
+// instead of claiming more pods.
+const REPO_SETUP_INFLIGHT = new Map<string, Promise<string>>();
+
+function withRepoSetupSingleFlight(tool: ToolDefinition): ToolDefinition {
+  const run = tool.execute.bind(tool);
+  return {
+    ...tool,
+    async execute(params, context) {
+      const key = context ? storeKeyFromContext(context) : undefined;
+      if (!key) return run(params, context);
+      const inflight = REPO_SETUP_INFLIGHT.get(key);
+      if (inflight) return inflight;
+      const started = (async () => run(params, context))();
+      REPO_SETUP_INFLIGHT.set(key, started);
+      void started
+        .catch(() => undefined)
+        .finally(() => {
+          if (REPO_SETUP_INFLIGHT.get(key) === started) REPO_SETUP_INFLIGHT.delete(key);
+        });
+      return started;
+    },
+  };
+}
 interface SessionOwner {
   userId: string;
   conversationId: string;
@@ -201,13 +234,32 @@ export function isStaleSessionError(err: unknown): boolean {
   return STALE_PATTERNS.some((re) => re.test(msg));
 }
 
+/**
+ * The conversation identity the SANDBOX is keyed by — which is NOT always the
+ * conversation the SESSION lives under. Two overrides fold in here, and this is
+ * the single chokepoint both `storeKeyFromContext` and `ownerFromContext` read,
+ * so the store key and the ownership check can never disagree:
+ *
+ *   meta.sandboxConversationId — generic explicit override. A run whose session
+ *     lives under a synthetic conversation (the PR review room's
+ *     `review-room_<sha>`) but which must REUSE the parent run's already-warm
+ *     sandbox passes the parent's raw conversationId here. Without it the room
+ *     run keys a different, empty sandbox and pays a cold repo setup.
+ *   meta.sdlcWikiRun — the original special case, kept verbatim.
+ */
+export function sandboxConversationIdFromMeta(
+  meta: Record<string, string> | undefined,
+): string | undefined {
+  const override = meta?.["sandboxConversationId"]?.trim();
+  if (override) return override;
+  const executionId = meta?.["sdlcExecutionId"]?.trim();
+  if (meta?.["sdlcWikiRun"] === "true" && executionId) return `chat-sdlc-wiki-${executionId}`;
+  return meta?.["conversationId"]?.trim();
+}
+
 function ownerFromContext(context: { meta?: Record<string, string> } | undefined): SessionOwner | undefined {
   const userId = context?.meta?.["userId"]?.trim();
-  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
-  const conversationId =
-    context?.meta?.["sdlcWikiRun"] === "true" && executionId
-      ? `chat-sdlc-wiki-${executionId}`
-      : context?.meta?.["conversationId"]?.trim();
+  const conversationId = sandboxConversationIdFromMeta(context?.meta);
   if (!userId || !conversationId) return undefined;
   return {
     userId,
@@ -217,14 +269,9 @@ function ownerFromContext(context: { meta?: Record<string, string> } | undefined
 }
 
 function storeKeyFromContext(context: { meta?: Record<string, string> } | undefined): string | undefined {
-  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
-  const conversationId =
-    context?.meta?.["sdlcWikiRun"] === "true" && executionId
-      ? `chat-sdlc-wiki-${executionId}`
-      : context?.meta?.["conversationId"];
   return buildSandboxStoreKey(
     context?.meta?.["userId"],
-    conversationId,
+    sandboxConversationIdFromMeta(context?.meta),
     context?.meta?.["agentSlug"],
   );
 }
@@ -703,10 +750,16 @@ export const sandboxCreate: ToolDefinition = {
 export const sandboxRun: ToolDefinition = {
   slug: "sandbox-run",
   name: "Sandbox Run Command",
-  description: 
-    "**PREFERRED**: Run shell commands in an isolated Kata/QEMU microVM sandbox. " +
+  description:
+    "**PREFERRED** for SHORT commands: run shell commands in an isolated Kata/QEMU microVM sandbox. " +
     "Use this instead of bash for better isolation, safety, and clean environment. " +
-    "Ideal for git clone, npm install, build processes, file operations, and any command execution. " +
+    "Ideal for greps, file reads/edits, git status/log/diff, and any command that finishes in well under 60s. " +
+    "BATCH related steps into ONE call (chain with && or ;) — each call costs a full model round-trip, so " +
+    "many single-line calls are the dominant cost of a long sandbox session. " +
+    "DO NOT use it for long work — installs (pnpm/npm/yarn add|install), builds, tsc typechecks, and test " +
+    "suites routinely exceed the timeout (default 60000ms). This call is SYNCHRONOUS: when the timeout is " +
+    "hit the call returns an error, the work is abandoned, and re-running the same command just burns the " +
+    "timeout again. For anything that may take more than ~60s use sandbox-run-detached + sandbox-poll-job. " +
     "Auto-detects existing sessions or creates fresh sandboxes as needed.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
@@ -719,11 +772,17 @@ export const sandboxRun: ToolDefinition = {
       },
       cmd: {
         type: "string",
-        description: "Shell command to execute",
+        description:
+          "Shell command to execute. BATCH related steps into ONE call — every invocation costs a full " +
+          "model round-trip (~5-10s), so 20 one-line calls waste minutes versus a single chained command. " +
+          "Chain with && (stop on first failure) or ; (always continue), use a heredoc for multi-line " +
+          "scripts, and echo section markers so you can read one combined output, e.g. " +
+          "`cd /workspace/repo && echo '== branch ==' && git branch --show-current && echo '== status ==' && git status --short`. " +
+          "Only split into separate calls when a later step genuinely depends on reading the earlier output first.",
       },
       timeoutMs: {
         type: "number",
-        description: "Command timeout in milliseconds (default: 60000)",
+        description: "Command timeout in milliseconds (default: 60000). On timeout the call returns an error and the work is abandoned — raise this only for commands you are confident finish sooner; otherwise use sandbox-run-detached.",
       },
     },
     required: ["cmd"],
@@ -739,6 +798,7 @@ export const sandboxRun: ToolDefinition = {
 
     // Try explicit sessionId first
     const explicitSessionId = params["sessionId"] as string | undefined;
+    let replacedDeadSession: string | null = null;
     if (explicitSessionId) {
       const session = SESSION_STORE.get(explicitSessionId);
       if (!session) return `Error: Session ${explicitSessionId} not found.`;
@@ -754,20 +814,21 @@ export const sandboxRun: ToolDefinition = {
       } catch (err) {
         if (isStaleSessionError(err)) {
           evictSession(session);
-          return `Error: Session ${explicitSessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+          replacedDeadSession = explicitSessionId;
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/aborted due to timeout|operation was aborted/i.test(msg)) {
+            return `Error: Command exceeded the ${timeoutMs}ms sandbox-run timeout and was abandoned (the VM is still alive; the command may still be running). Do NOT just retry the same command with sandbox-run — it will time out again. Re-run it with sandbox-run-detached and poll with sandbox-poll-job, or pass a larger timeoutMs if you are sure it finishes sooner. DO NOT attempt to destroy the session.`;
+          }
+          return `Error: ${redactSecrets(msg)}`;
         }
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-          return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
-        }
-        return `Error: ${redactSecrets(msg)}`;
       }
     }
 
     // Try auto-resolve from conversation context
     const conversationId = context.meta?.["conversationId"];
     const storeKey = storeKeyFromContext(context);
-    if (conversationId) {
+    if (conversationId && !replacedDeadSession) {
       const session = storeKey ? SESSION_STORE.get(storeKey) : undefined;
       if (session) {
         if (!isSessionOwnedByContext(session, storeKey, context)) {
@@ -781,13 +842,14 @@ export const sandboxRun: ToolDefinition = {
         } catch (err) {
           if (isStaleSessionError(err)) {
             evictSession(session, storeKey);
-            return `Error: Sandbox session for this conversation died (pod replaced). Call sandbox-repo-setup to re-provision.`;
+            replacedDeadSession = session.id;
+          } else {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/aborted due to timeout|operation was aborted/i.test(msg)) {
+              return `Error: Command exceeded the ${timeoutMs}ms sandbox-run timeout and was abandoned (the VM is still alive; the command may still be running). Do NOT just retry the same command with sandbox-run — it will time out again. Re-run it with sandbox-run-detached and poll with sandbox-poll-job, or pass a larger timeoutMs if you are sure it finishes sooner. DO NOT attempt to destroy the session.`;
+            }
+            return `Error: ${redactSecrets(msg)}`;
           }
-          const msg = err instanceof Error ? err.message : String(err);
-          if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-            return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
-          }
-          return `Error: ${redactSecrets(msg)}`;
         }
       }
     }
@@ -803,8 +865,20 @@ export const sandboxRun: ToolDefinition = {
       const oneShotTemplate = pinnedTemplate ? rotateTemplate(pinnedTemplate) : pinnedTemplate;
       const client = makeClient(context.config, oneShotTemplate);
       const result = await client.exec(cmd, { timeoutMs });
-      return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
+      return redactAndStringify({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        ...(replacedDeadSession
+          ? {
+              note: `Previous sandbox session ${replacedDeadSession} was dead (pod replaced); this command ran on a fresh one-shot VM from the pinned template. Repo state is the template baseline — if you need a specific branch or the services running, call sandbox-repo-setup once and reuse the session it returns.`,
+            }
+          : {}),
+      });
     } catch (err) {
+      if (replacedDeadSession) {
+        return `Error: Sandbox session ${replacedDeadSession} was dead (pod replaced) and the fallback one-shot VM also failed: ${sandboxErr(err)}`;
+      }
       return sandboxErr(err);
     }
   },
@@ -817,8 +891,11 @@ export const sandboxRunDetached: ToolDefinition = {
   slug: "sandbox-run-detached",
   name: "Sandbox Run Detached",
   description:
-    "Start a long-running command in the background inside a sandbox session. " +
-    "Returns immediately with a jobId. Use sandbox-poll-job to check completion.",
+    "**USE THIS FOR ANY LONG COMMAND (>~60s).** Starts the command in the background inside a sandbox " +
+    "session and returns immediately with a jobId; poll it with sandbox-poll-job. This is the correct tool " +
+    "for dependency installs (pnpm/npm/yarn add|install), builds, tsc typechecks, lint, and test suites — " +
+    "sandbox-run would time out on these and lose the work, while a detached job keeps running to " +
+    "completion. Prefer starting the job, doing other useful work, then polling.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1482,7 +1559,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       additionalProperties: { type: "string" },
     };
   }
-  return {
+  const tool: ToolDefinition = {
     slug: config.slug,
     name: config.name,
     description: config.description,
@@ -1787,14 +1864,45 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // brand-new sandbox whose tree mutations all come from automated
         // boot scripts — never user work. Interactive re-calls hit the
         // reuse path (above) which leaves the tree alone.
-        const branchJobId = await session.commands.runDetached(
+        // ALWAYS FETCH — never skip freshness. But only do the DESTRUCTIVE part
+        // (reset --hard + checkout) when it would actually change something.
+        //
+        // Why: after a PVC clone from a snapshot, git sees stat-dirty index
+        // entries, so `git reset --hard` rewrites the worktree and every file
+        // gets a new mtime — even when content is byte-identical. Build systems
+        // key on mtime, so that silently destroys the golden's most expensive
+        // artifact. Measured 2026-08-29 on hyperswitch: 2113 .rs files restamped
+        // at claim time, the prebuilt 4.85GB `router` (built 20:10) ended up
+        // OLDER than its sources (20:52), and the prebake began a ~24-min
+        // rebuild for a checkout that was literally `main -> main`.
+        //
+        // The trade this AVOIDS: skipping the fetch would keep the cache but
+        // silently pin the agent to whatever commit the golden baked, so a stale
+        // golden would serve stale code under the right branch name. Fetching
+        // first keeps that honest — when the branch really has moved we take the
+        // reset+checkout and the rebuild is legitimate work, not waste.
+        const fetchState = await session.commands.run(
           `cd ${config.workDir} && ` +
-          `git reset --hard HEAD 2>/dev/null; git clean -fd 2>/dev/null; ` +
-          `(if git fetch origin ${branchName} 2>/dev/null; then ` +
-          `git checkout -B ${branchName} FETCH_HEAD; else ` +
-          `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
-        );
-        await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
+          `git fetch origin ${branchName} 2>/dev/null && ` +
+          `test "$(git rev-parse HEAD 2>/dev/null)" = "$(git rev-parse FETCH_HEAD 2>/dev/null)" && ` +
+          `test -z "$(git status --porcelain 2>/dev/null)" && echo current || echo stale`,
+          60_000,
+        ).catch(() => ({ stdout: "stale" }) as { stdout: string });
+        if ((fetchState.stdout ?? "").trim() === "current") {
+          log.push(
+            `${branchName} already at origin tip with a clean tree — skipping reset/checkout ` +
+            `(a reset here restamps every file and forces a full rebuild).`,
+          );
+        } else {
+          const branchJobId = await session.commands.runDetached(
+            `cd ${config.workDir} && ` +
+            `git reset --hard HEAD 2>/dev/null; git clean -fd 2>/dev/null; ` +
+            `(if git fetch origin ${branchName} 2>/dev/null; then ` +
+            `git checkout -B ${branchName} FETCH_HEAD; else ` +
+            `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
+          );
+          await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
+        }
 
         // Prebake (entrypoint runs npm ci × 3 + nix build .#xyne-space-services
         // in the background) drops /tmp/prebake-done when it finishes. Wait
@@ -1825,6 +1933,19 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // this once services-up is present AND the backend dev log shows a fatal
         // startup error — a crash, not slow progress.
         const CRASH_GRACE_MS = 8 * 60_000;
+        // DETERMINISTIC failures get a much shorter grace. A config-schema
+        // rejection can never resolve by waiting — the backend re-reads the
+        // same .env.local and fails identically every time — so holding the
+        // agent for the full CRASH_GRACE_MS buys nothing. Measured 2026-08-29:
+        // a claim whose mounted Secret still carried
+        //     LIVEKIT_API_KEY=devkey
+        // ("must not be the published development key") burned ~12 min before
+        // reporting anything, 8 of which was this grace, and then handed the
+        // agent a sandbox with no backend/dashboard. Slow-but-progressing
+        // templates (hyperswitch cargo cold build, 25-35 min) never emit these
+        // patterns, so they keep the long grace below.
+        const FATAL_GRACE_MS = 90_000;
+        const FATAL_PATTERNS = "Config validation error|must not be the published|is required";
         const startedWaitAt = Date.now();
         while (Date.now() < prebakeDeadline) {
           try {
@@ -1835,6 +1956,19 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             if ((probe.stdout ?? "").trim() === "done") {
               prebakeDone = true;
               break;
+            }
+            // Deterministic config rejections: check from ~90s. These cannot
+            // clear by waiting, so there is nothing to be gained by the long
+            // grace — and the agent gets an actionable message instead of a
+            // silent "Executing tools…".
+            const waited = Date.now() - startedWaitAt;
+            if (waited > FATAL_GRACE_MS && waited <= CRASH_GRACE_MS) {
+              const fatal = await session.commands.run(
+                `grep -iE "${FATAL_PATTERNS}" /tmp/prebake-backend-dev.log 2>/dev/null | tail -4`,
+                8_000,
+              ).catch(() => ({ stdout: "" }) as { stdout: string });
+              const f = (fatal.stdout ?? "").trim();
+              if (f) { backendCrash = f; break; }
             }
             // Fast-fail on a DEFINITIVE backend crash so a bad golden bake (e.g.
             // env-schema drift: "DATABASE_URL is required") surfaces in ~8 min,
@@ -2024,6 +2158,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       });
     },
   };
+  return withRepoSetupSingleFlight(tool);
 }
 
 // Read-only git for the shared sbx-git sandbox: read ANY branch by ref without

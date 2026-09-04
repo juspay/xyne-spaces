@@ -206,7 +206,16 @@ export const scheduledJobControl: ToolDefinition = {
     }
 
     const requestedJobId = String(params["jobId"] ?? "").trim();
-    const currentScheduledJobId = meta["scheduledJobId"];
+    // meta.scheduledJobId is the primary signal, but it has been observed
+    // missing on genuinely scheduled runs (2026-08-29: run 9feed6bf,
+    // triggerSource=scheduled with scheduledJobId on the AgentRun row, still
+    // failed to resolve jobId='current'). The scheduler names every such run
+    // `scheduled_<jobId>_<firedAt>` (scheduled-jobs-worker.ts), so recover the
+    // id from the conversation when the meta key did not survive the dispatch.
+    const conversationJobId = /^scheduled_(.+)_\d+$/.exec(
+      String(meta["conversationId"] ?? ""),
+    )?.[1];
+    const currentScheduledJobId = meta["scheduledJobId"] ?? conversationJobId;
     const jobId =
       requestedJobId === "current" ? currentScheduledJobId : requestedJobId;
     if (!jobId) {
