@@ -116,8 +116,13 @@ class PostHogService {
         enable_heatmaps: true,
         // Detect rage clicks / dead clicks for friction analysis.
         rageclick: true,
-        // Persist identity across reloads.
-        persistence: 'localStorage+cookie',
+        // Persist identity across reloads. Must be localStorage only: the
+        // 'localStorage+cookie' mode ships a URL-encoded JSON blob in a
+        // ph_*_posthog Cookie header on EVERY same-domain request; Cloud
+        // Armor's sqli-v422-stable ruleset (sensitivity 1) flags those JSON
+        // payloads as SQL injection and 403s the whole app for that browser.
+        // localStorage keeps persistence without ever sending state over HTTP.
+        persistence: 'localStorage',
         // Record the full session so the journey can be replayed.
         disable_session_recording: false,
         session_recording: {
