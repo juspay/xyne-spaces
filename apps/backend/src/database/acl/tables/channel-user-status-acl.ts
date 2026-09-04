@@ -28,7 +28,7 @@ export class ChannelUserStatusACL extends BaseQueryACL<
   async canCreate(data: Prisma.ChannelUserStatusUncheckedCreateInput): Promise<boolean> {
     const channel = await this.prisma.channel.findFirst({
       where: { id: data.channelId, workspaceId: this.ctx.workspaceId },
-      select: { addUserPolicy: true },
+      select: { id: true, scopeType: true },
     })
     if (!channel) return false
     const participant = await this.prisma.channelParticipant.findFirst({
@@ -36,7 +36,16 @@ export class ChannelUserStatusACL extends BaseQueryACL<
       select: { role: true },
     })
     if (!participant) return false
-    if ((channel.addUserPolicy ?? 'EVERYONE') === 'ADMINS_ONLY' && participant.role !== 'ADMIN') {
+
+    // addUserPolicy only governs adding *other* users to a regular channel.
+    // Adding yourself and group DM membership are out of its scope.
+    if (data.userId === this.ctx.userId || channel.scopeType === 'GROUP_DM') return true
+
+    const channelStats = await this.prisma.channelStats.findUnique({
+      where: { channelId: data.channelId },
+      select: { addUserPolicy: true },
+    })
+    if ((channelStats?.addUserPolicy ?? 'EVERYONE') === 'ADMINS_ONLY' && participant.role !== 'ADMIN') {
       return false
     }
     return true

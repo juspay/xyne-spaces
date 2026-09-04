@@ -49,7 +49,7 @@ import {
 import { commitAndSyncCanvasArtifact } from './sdlcBaselineCanvasSync';
 import { requireSdlcProjectAccess } from './sdlcProjectAccess';
 import { isTrackInChannel, trackIdsForChannel } from './sdlcChannelMembership';
-import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
+import { SDLC_ARTIFACT_CANVAS_ROLE, sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
 import { ensureLink } from './entityLinkService';
 import { BASELINE_CAPABILITIES } from './sdlcProgressiveGate';
 import type {
@@ -903,7 +903,16 @@ export class SdlcHubService implements SdlcHub {
               isCollaborative: true,
               metadata: {} as Prisma.InputJsonValue,
               participants: {
-                create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
+                // PRDs and Tech Docs are collaborative for the whole repository
+                // channel; baselines keep the read-only default (editing them is gated to channel admins).
+                create:
+                  input.kind === 'BASELINE'
+                    ? sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId)
+                    : sdlcChannelCanvasParticipant(
+                        actor.workspaceId,
+                        repo.channelId,
+                        SDLC_ARTIFACT_CANVAS_ROLE
+                      ),
               },
             },
           });
