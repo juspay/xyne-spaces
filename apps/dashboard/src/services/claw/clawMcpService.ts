@@ -5,6 +5,7 @@ import type {
   UserConnection,
 } from './clawMcpTypes';
 import { clawApiRequest } from './clawRequest';
+import { currentOAuthReturnTo } from '../../routes/AIScreen/library/shared/pickers/mcp/oauthReturnTo';
 
 /** All registered MCP servers/connectors (the catalog). */
 export function listMcpServers(): Promise<McpServer[]> {
@@ -48,7 +49,7 @@ export async function deleteAgentMcpConnection(
 export async function startMcpOAuth(userId: string, serverType: string): Promise<string> {
   const data = await clawApiRequest<{ authUrl: string }>(
     `/users/${encodeURIComponent(userId)}/oauth/${encodeURIComponent(serverType)}/authorize`,
-    { method: 'POST', body: JSON.stringify({}), userId },
+    { method: 'POST', body: JSON.stringify({ returnTo: currentOAuthReturnTo() }), userId },
   );
   return data.authUrl;
 }
