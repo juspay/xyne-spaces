@@ -44,7 +44,6 @@ export const sdlcChatLayout = (input: {
 export const sdlcChatNavigationSearch = (input: {
   currentSearch: string;
   destinationSearch?: string;
-  destinationHasConversations: boolean;
 }): string => {
   const current = new URLSearchParams(input.currentSearch);
   const destination = new URLSearchParams(input.destinationSearch ?? '');
@@ -59,7 +58,8 @@ export const sdlcChatNavigationSearch = (input: {
   }
 
   destination.delete('conversation');
-  if (currentLayout.activeTab === 'conversations' && input.destinationHasConversations) {
+  destination.delete('selectedTab');
+  if (currentLayout.activeTab === 'conversations') {
     destination.set('discussion', '1');
     destination.set('chat', 'conversations');
   } else {
@@ -87,12 +87,13 @@ export const shouldStartFreshSdlcAssistant = (input: {
   input.actorRepositoryId !== input.repositoryId;
 
 export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
-  repoQueryComplete: boolean;
+  /** Both the channel and the entity links, since the context needs both. */
+  dataLoaded: boolean;
   discussionOpen: boolean;
   selectedConversationId: string | null;
   discussionContextResolved: boolean;
 }): boolean =>
-  input.repoQueryComplete &&
+  input.dataLoaded &&
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;

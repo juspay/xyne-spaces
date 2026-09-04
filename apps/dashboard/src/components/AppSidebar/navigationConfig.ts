@@ -30,6 +30,7 @@ import {
   Bot,
   RocketShip,
   type PikaIconProps,
+  Tag,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
 
@@ -62,6 +63,7 @@ export interface NavigationItem {
   label: string;
   icon: PikaIcon;
   iconSize?: number;
+  popout?: boolean;
 }
 
 // Adapts XyneAISidebarIcon — a plain {color?, size?: number} SVG component,
@@ -82,50 +84,77 @@ const XyneAINavIcon: PikaIcon = ({ size, color }) =>
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
-  { path: '/ai', label: 'Xyne AI', icon: XyneAINavIcon },
-  { path: '/chat/dir', label: 'Chat', icon: Hashtag },
-  { path: '/chat/dm', label: 'DMs', icon: ChatDefault },
-  { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn },
-  { path: '/calls', label: 'Calls', icon: PhoneDefault },
-  { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon },
-  { path: '/projects', label: 'Tickets', icon: TicketToken },
-  { path: '/sdlc', label: 'SDLC', icon: Atom },
-  { path: '/support', label: 'Support', icon: Troubleshoot },
-  { path: '/chat/canvas', label: 'My Canvas', icon: FileText },
-  { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn },
-  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer },
-  { path: '/user-groups', label: 'User Groups', icon: UserThree },
-  { path: '/resource-access', label: 'User Management', icon: UserShield, iconSize: 18 },
-  { path: '/roles', label: 'Roles', icon: ShieldCheck, iconSize: 18 },
-  { path: '/workspace-management', label: 'Workspace Management', icon: Settings01 },
-  { path: '/organisations', label: 'Organisations', icon: BuildingApartmentTwo },
-  { path: '/analytics', label: 'Analytics', icon: GraphTrendLine },
-  { path: '/forms', label: 'Forms', icon: ClipboardDefault },
-  { path: '/browser', label: 'Browser', icon: Globe },
-  { path: '/apps', label: 'Apps', icon: Grid02 },
-  { path: '/guide', label: 'User Guide', icon: QuestionMarkCircle },
-  { path: '/product-insights', label: 'Insights', icon: Piechart01 },
-  { path: '/knowledge-base', label: 'Knowledge Base', icon: Notebook },
-  { path: '/memory', label: 'Context', icon: Database },
-  { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01 },
-  { path: '/listProjects', label: 'List Projects', icon: FolderDefault },
-  { path: '/releaseManager', label: 'Release Manager', icon: RocketShip },
-  { path: '/jira-migration', label: 'Jira Migration', icon: SwapArrowHorizontal, iconSize: 18 },
-  { path: '/migration/confluence', label: 'Confluence Migration', icon: Notebook, iconSize: 18 },
+  { path: '/ai', label: 'Xyne AI', icon: XyneAINavIcon, popout: true },
+  { path: '/chat/dir', label: 'Chat', icon: Hashtag, popout: true },
+  { path: '/chat/dm', label: 'DMs', icon: ChatDefault, popout: true },
+  { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn, popout: true },
+  { path: '/calls', label: 'Calls', icon: PhoneDefault, popout: true },
+  { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon, popout: true },
+  { path: '/projects', label: 'Tickets', icon: TicketToken, popout: true },
+  { path: '/sdlc', label: 'SDLC', icon: Atom, popout: true },
+  { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
+  { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
+  { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
+  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
+  { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
+  {
+    path: '/resource-access',
+    label: 'User Management',
+    icon: UserShield,
+    iconSize: 18,
+    popout: true,
+  },
+  { path: '/roles', label: 'Roles', icon: ShieldCheck, iconSize: 18, popout: true },
+  { path: '/workspace-management', label: 'Workspace Management', icon: Settings01, popout: true },
+  { path: '/tag-review', label: 'Tag Review', icon: Tag, iconSize: 18, popout: true },
+  { path: '/organisations', label: 'Organisations', icon: BuildingApartmentTwo, popout: true },
+  { path: '/analytics', label: 'Analytics', icon: GraphTrendLine, popout: true },
+  { path: '/forms', label: 'Forms', icon: ClipboardDefault, popout: true },
+  { path: '/browser', label: 'Browser', icon: Globe, popout: true },
+  { path: '/apps', label: 'Apps', icon: Grid02, popout: true },
+  { path: '/guide', label: 'User Guide', icon: QuestionMarkCircle, popout: true },
+  { path: '/product-insights', label: 'Insights', icon: Piechart01, popout: true },
+  { path: '/knowledge-base', label: 'Knowledge Base', icon: Notebook, popout: true },
+  { path: '/memory', label: 'Context', icon: Database, popout: true },
+  { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01, popout: true },
+  { path: '/listProjects', label: 'List Projects', icon: FolderDefault, popout: true },
+  { path: '/releaseManager', label: 'Release Manager', icon: RocketShip, popout: true },
+  {
+    path: '/jira-migration',
+    label: 'Jira Migration',
+    icon: SwapArrowHorizontal,
+    iconSize: 18,
+    popout: true,
+  },
+  {
+    path: '/migration/confluence',
+    label: 'Confluence Migration',
+    icon: Notebook,
+    iconSize: 18,
+    popout: true,
+  },
   {
     path: '/migration/whatsapp',
     label: 'WhatsApp Migration',
     icon: ChatChatting,
     iconSize: 18,
+    popout: true,
   },
-  { path: '/slack-migration', label: 'Slack Migration', icon: SwapArrowHorizontal, iconSize: 18 },
-  { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom },
-  { path: '/claw-agents', label: 'Claw Agents', icon: Bot },
+  {
+    path: '/slack-migration',
+    label: 'Slack Migration',
+    icon: SwapArrowHorizontal,
+    iconSize: 18,
+    popout: true,
+  },
+  { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
+  { path: '/claw-agents', label: 'Claw Agents', icon: Bot, popout: true },
 ];
 
 // Core items that are always in the toolbar. Users cannot remove these — their
 // toggle is locked on in the customize UI.
 export const REQUIRED_TOOLBAR_PATHS: string[] = [
+  '/ai',
   '/chat/dir',
   '/chat/dm',
   '/calls',
@@ -184,7 +213,7 @@ export const filterNavItemsByPermission = (
     let hasAccess = true;
     if (requiresAccess) {
       if (resourceName === 'SDLC') {
-        // Any tier (READ/WRITE/ADMIN) unlocks the SDLC screen.
+        // Any tier (READ/WRITE/ADMIN) unlocks the screen.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
       } else if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
         hasAccess = permissions.some(

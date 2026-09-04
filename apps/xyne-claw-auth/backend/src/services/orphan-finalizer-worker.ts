@@ -1,4 +1,5 @@
 import { CONFIG } from "../config.js";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { finalizeOrphanedRun } from "./orphan-run-finalizer.js";
@@ -45,7 +46,7 @@ async function runtimeHasAnyActiveRuns(): Promise<boolean> {
     const body = (await res.json().catch(() => ({}))) as { activeRuns?: unknown };
     return typeof body.activeRuns === "number" ? body.activeRuns > 0 : true;
   } catch (err) {
-    log.warn(`[orphan-finalizer] runtime readiness check failed; skipping: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[orphan-finalizer] runtime readiness check failed; skipping: ${errMsg(err)}`);
     return true;
   }
 }
@@ -88,7 +89,7 @@ async function tickOnce(): Promise<void> {
     }
     log.info(`[metric] name=orphan_finalizer_finalized kind=count value=${finalized}`);
   } catch (err) {
-    log.error("[orphan-finalizer] tick failed:", err instanceof Error ? err.message : String(err));
+    log.error("[orphan-finalizer] tick failed:", errMsg(err));
   } finally {
     running = false;
   }

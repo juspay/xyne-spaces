@@ -32,6 +32,7 @@
  */
 
 import { readFile, unlink } from "node:fs/promises";
+import { errMsg } from "../lib/errors.js";
 import { join } from "node:path";
 import type { Prisma } from "@prisma/client";
 import { bankIdForAgent, buildRetainMission, getMemoryProvider } from "xyne-claw-shared";
@@ -284,14 +285,14 @@ async function createBatchReviews(
         logger.error("[memory-cron] Auto-curation failed for batch — batch left as 'pending' for retry", {
           agentSlug,
           batchId: batch.id,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
     } catch (err) {
       logger.error("[memory-cron] Failed to create batch row", {
         orgId,
         agentSlug,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     }
   }
@@ -342,7 +343,7 @@ async function runBatchCuration(
       logger.error("[memory-cron] Auto-curate failed for session", {
         batchId,
         sessionId: sid,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
       failedSessions.push(sid);
     }
@@ -426,7 +427,7 @@ export async function backfillBatches(
       logger.error("[memory-cron] Backfill day failed", {
         agentSlug,
         dateStr,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
       skippedDays.push(dateStr);
     }
@@ -492,7 +493,7 @@ async function runMemorySync(): Promise<void> {
     });
   } catch (err) {
     logger.error("[memory-cron] Batch creation pass failed — will retry tomorrow", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 
@@ -514,7 +515,7 @@ async function runMemorySync(): Promise<void> {
       } catch (err) {
         logger.error("[memory-cron] Retention sweep failed", {
           agentSlug,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
     }
@@ -610,7 +611,7 @@ async function ingestRecallHits(dateStr: string): Promise<void> {
     await unlink(file).catch(() => {});
   } catch (err) {
     logger.error("[memory-cron] Failed to bulk-insert recall hits — leaving file for next run", {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
       dateStr,
       rows: rows.length,
     });
@@ -645,7 +646,7 @@ function scheduleNextRun(): void {
       }
     } catch (err) {
       logger.error("[memory-cron] Unhandled error in nightly sync", {
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     } finally {
       scheduleNextRun();
@@ -901,7 +902,7 @@ export async function persistSubsystemReviews(
           agentSlug: transcript.agentSlug,
           sessionId: transcript.sessionId,
           subsystem: c.subsystem,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
     }

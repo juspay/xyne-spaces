@@ -6,6 +6,7 @@ import { Check, ChevronDown, SmilePlus, X } from 'lucide-react';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
 import Input from '../ui/Input/Input';
+import { DatePicker } from '../ui/DatePicker/DatePicker';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { DEFAULT_STATUS_EMOJI, EXPIRY_OPTIONS, calculateExpiryTime } from '../../utils/statusUtils';
@@ -25,6 +26,12 @@ const STATUS_SUGGESTIONS = [
 ];
 
 const RECENT_STATUSES_KEY = 'xyne_recent_statuses';
+
+const getStartOfToday = (): Date => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
 
 interface RecentStatus {
   emoji: string;
@@ -456,15 +463,17 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
               />
 
               {isEditingMode && (
-                <button
+                <Button
+                  variant='ghost'
                   onClick={handleClearStatus}
-                  className='flex-shrink-0 flex items-center gap-1 text-muted-foreground hover:text-muted-foreground'
+                  trackId='clear_user_status'
+                  className='h-auto p-0 flex-shrink-0 flex items-center gap-1 text-muted-foreground hover:text-muted-foreground hover:bg-transparent'
                   data-track-category='Update_User_Status_Modal'
                   data-track-name='Clear_Status_In_Modal'
                 >
                   <span className='text-xs opacity-60'>(Clear status)</span>
                   <X className='size-4' />
-                </button>
+                </Button>
               )}
             </div>
 
@@ -507,18 +516,15 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             {/* Custom Date/Time Picker */}
             {showDatePicker && (
               <div className='flex items-center gap-2'>
-                <div className='px-3 py-2 border border-input rounded-lg flex-1 bg-background'>
-                  <Input
-                    type='date'
-                    value={customDate ? customDate.toISOString().split('T')[0] : ''}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      const date = e.target.value ? new Date(e.target.value) : undefined;
-                      setCustomDate(date);
-                    }}
-                    min={new Date().toISOString().split('T')[0]}
-                    className='w-full border-none p-0 focus:ring-0'
-                  />
-                </div>
+                <DatePicker
+                  selectedDate={customDate ?? null}
+                  onSelect={date => setCustomDate(date ?? undefined)}
+                  minDate={getStartOfToday()}
+                  showClearButton={false}
+                  placeholder='Select date'
+                  inputClassName='h-9 flex-1 w-full'
+                  contentClassName='z-[100]'
+                />
 
                 <div className='px-3 py-2 border border-input rounded-lg bg-background'>
                   <Input
@@ -547,6 +553,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 onClick={() => {
                   void handleSave();
                 }}
+                trackId='save_user_status'
                 disabled={!selectedEmoji && !statusText.trim()}
                 className='ml-auto px-6 bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='Update_User_Status_Modal'

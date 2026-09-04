@@ -151,7 +151,13 @@ export const OrganizationsTab = (): ReactElement => {
       <div className='space-y-4'>
         <div className='flex gap-3 items-center'>
           <h3 className='text-sm font-medium text-foreground flex-1'>Link New Organization</h3>
-          <Button onClick={() => setShowCreateDialog(true)} variant='outline' className='gap-2'>
+          <Button
+            onClick={() => setShowCreateDialog(true)}
+            data-track-category='workspace-management'
+            data-track-name='OPEN_CREATE_ORG_DIALOG'
+            variant='outline'
+            className='gap-2'
+          >
             <Plus className='w-4 h-4' />
             Create New
           </Button>
@@ -176,6 +182,8 @@ export const OrganizationsTab = (): ReactElement => {
                 variant='ghost'
                 size='sm'
                 onClick={() => setShowCreateDialog(false)}
+                data-track-category='workspace-management'
+                data-track-name='CLOSE_CREATE_ORG_DIALOG'
                 className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
                 disabled={isCreatingOrg}
               >
@@ -227,12 +235,16 @@ export const OrganizationsTab = (): ReactElement => {
                 variant='outline'
                 disabled={isCreatingOrg}
                 onClick={() => setShowCreateDialog(false)}
+                data-track-category='workspace-management'
+                data-track-name='CANCEL_CREATE_ORG'
                 size='sm'
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleCreateOrg}
+                data-track-category='workspace-management'
+                data-track-name='CREATE_ORG'
                 disabled={!newOrgName.trim() || isCreatingOrg}
                 className='gap-2'
                 size='sm'
@@ -266,7 +278,13 @@ export const OrganizationsTab = (): ReactElement => {
                 width='100%'
               />
             </div>
-            <Button onClick={handleAddOrg} disabled={!selectedOrgId} className='gap-2'>
+            <Button
+              onClick={handleAddOrg}
+              data-track-category='workspace-management'
+              data-track-name='ADD_ORG_TO_WORKSPACE'
+              disabled={!selectedOrgId}
+              className='gap-2'
+            >
               <Plus className='w-4 h-4' />
               Add
             </Button>
@@ -318,6 +336,8 @@ export const OrganizationsTab = (): ReactElement => {
                     variant='ghost'
                     size='sm'
                     onClick={() => handleRemoveOrg(org.orgId, org.name)}
+                    data-track-category='workspace-management'
+                    data-track-name='OPEN_REMOVE_ORG_CONFIRM'
                     disabled={removingOrgId === org.orgId}
                     className='text-destructive hover:text-destructive hover:bg-destructive/10'
                   >
@@ -378,6 +398,8 @@ export const OrganizationsTab = (): ReactElement => {
                 setShowRemoveDialog(false);
                 setOrgToRemove(null);
               }}
+              data-track-category='workspace-management'
+              data-track-name='CANCEL_REMOVE_ORG'
               disabled={removingOrgId === orgToRemove?.orgId}
             >
               Cancel
@@ -385,6 +407,8 @@ export const OrganizationsTab = (): ReactElement => {
             <Button
               variant='destructive'
               onClick={confirmRemoveOrg}
+              data-track-category='workspace-management'
+              data-track-name='CONFIRM_REMOVE_ORG'
               disabled={removingOrgId === orgToRemove?.orgId}
               className='gap-2'
             >

@@ -14,10 +14,16 @@ export class WorkspacesACL extends BaseQueryACL<'workspaces'> {
       return denyGuestSelect(query, 'id');
     }
 
+    // The caller's own workspace is always readable, even when their org_members row
+    // belongs to a different org than the one owning the workspace (cross-org members
+    // joined via users, e.g. external collaborators). Mirrors the Prisma WorkspacesACL.
     return query
       .where('status', '=', Status.ACTIVE)
-      .whereExists('orgMembers', (om) =>
-        om.where('memberId', '=', this.ctx.memberId)
+      .where(({ or, cmp, exists }) =>
+        or(
+          cmp('id', '=', this.ctx.workspaceId),
+          exists('orgMembers', (om) => om.where('memberId', '=', this.ctx.memberId)),
+        ),
       );
   }
 }

@@ -2,6 +2,7 @@ import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
 import { User } from '@xyne/shared';
 import { Hash, Lock, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
 import {
@@ -38,6 +39,10 @@ interface SearchParticipantsProps {
   onSelectChannel?: (channelId: string) => void;
 }
 
+// Below this many rows the flat user list renders normally; above it we
+// window the rows so only the visible ones mount (avatar + presence + status).
+const VIRTUALIZE_THRESHOLD = 30;
+
 export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   options,
   selectedUsers,
@@ -59,6 +64,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   const lastPillRef = useRef<HTMLDivElement>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // Get real-time online users for presence indicators
   const onlineUserIds = useUsersPresence('ONLINE');
@@ -142,6 +148,16 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       item => item.type === 'channel' || !selectedUserIds.has(item.user.id),
     );
   }, [mergedItems, selectedUserIds]);
+
+  // Virtualize only the plain user-list path (custom field / assignee-style pickers).
+  // Merged user+channel callers keep their existing small-list rendering.
+  const isVirtualized = !mergedItems && filteredOptions.length > VIRTUALIZE_THRESHOLD;
+  const rowVirtualizer = useVirtualizer({
+    count: isVirtualized ? filteredOptions.length : 0,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 36,
+    overscan: 12,
+  });
 
   const findUserById = useCallback(
     (id: string): User | undefined => {
@@ -227,7 +243,10 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
     [searchQuery, selectedUsers, focusedIndex, handleRemove, setIsOpen, isOpen],
   );
 
-  const renderUserItem = (user: User): React.ReactElement => {
+  const renderUserItem = (
+    user: User,
+    virtual?: { index: number; style: React.CSSProperties },
+  ): React.ReactElement => {
     const displayName = getUserDisplayName(user);
     const deactivated = isUserDeactivated(user);
     const isCurrentUser = currentUserId && user.id === currentUserId;
@@ -235,6 +254,8 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       <BaseCombobox.Item
         key={user.id}
         value={user.id}
+        index={virtual?.index}
+        style={virtual?.style}
         className={cn(
           'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
         )}
@@ -307,6 +328,20 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       onOpenChange={(isOpen: boolean) => setIsOpen?.(isOpen)}
       value={null}
       onValueChange={handleSelect}
+      {...(isVirtualized
+        ? { items: filteredOptions.map(u => u.id), virtualized: true, filter: null }
+        : {})}
+      onItemHighlighted={(itemValue, details) => {
+        // Keep the keyboard-highlighted row scrolled into the virtual window.
+        if (
+          !isVirtualized ||
+          itemValue === null ||
+          itemValue === undefined ||
+          details.reason === 'pointer'
+        )
+          return;
+        if (details.index >= 0) rowVirtualizer.scrollToIndex(details.index);
+      }}
     >
       <div
         ref={containerRef}
@@ -364,19 +399,46 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                   </BaseCombobox.Empty>
                 ) : (
                   <BaseCombobox.List
+                    ref={listRef}
                     className={cn(
                       'overflow-y-auto overscroll-contain py-1 m-1.5 outline-none cursor-pointer',
                       'max-h-[min(13rem,var(--available-height))] data-[empty]:p-0 space-y-1',
                       'no-scrollbar',
                     )}
                   >
-                    {filteredMergedItems
-                      ? filteredMergedItems.map(item =>
-                          item.type === 'user'
-                            ? renderUserItem(item.user)
-                            : renderChannelItem(item.channel),
-                        )
-                      : filteredOptions.map(user => renderUserItem(user))}
+                    {isVirtualized ? (
+                      <div
+                        style={{
+                          position: 'relative',
+                          width: '100%',
+                          height: rowVirtualizer.getTotalSize(),
+                        }}
+                      >
+                        {rowVirtualizer.getVirtualItems().map(vi => {
+                          const user = filteredOptions[vi.index];
+                          if (!user) return null;
+                          return renderUserItem(user, {
+                            index: vi.index,
+                            style: {
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              height: vi.size,
+                              transform: `translateY(${vi.start}px)`,
+                            },
+                          });
+                        })}
+                      </div>
+                    ) : filteredMergedItems ? (
+                      filteredMergedItems.map(item =>
+                        item.type === 'user'
+                          ? renderUserItem(item.user)
+                          : renderChannelItem(item.channel),
+                      )
+                    ) : (
+                      filteredOptions.map(user => renderUserItem(user))
+                    )}
                   </BaseCombobox.List>
                 )}
               </BaseCombobox.Popup>
@@ -419,6 +481,8 @@ const UserPill = forwardRef<
         size='icon'
         variant='ghost'
         onClick={handleClick}
+        data-track-category='ENTITY_PICKER'
+        data-track-name='REMOVE_USER_CHIP'
         className='ml-1 hover:bg-accent rounded p-0.5 size-4'
         aria-label={`Remove ${getUserDisplayName(user)} from list`}
       >

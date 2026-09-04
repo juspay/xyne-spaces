@@ -4,6 +4,7 @@
  * the shared Slack run pipeline replying with the umbrella bot token.
  */
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../../../lib/errors.js";
 import { createLogger } from "../../../logger.js";
 import { getSurfaceAdapter } from "../../../lib/surface-adapter.js";
 import {
@@ -74,7 +75,7 @@ router.post("/commands", async (req: Request, res: Response) => {
     }).catch(async (error) => {
       log.error("[surfaces-slack] asynchronous command dispatch failed", {
         command,
-        error: error instanceof Error ? error.message : String(error),
+        error: errMsg(error),
       });
       const responseUrl = field("response_url");
       if (!responseUrl) return;

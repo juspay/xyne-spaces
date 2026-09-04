@@ -17,11 +17,12 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import {
   fetchUserMessages,
-  fetchUserHostedCalls,
+  fetchUserCalls,
   fetchUserCanvases,
 } from "./userMemoryFetcher.js";
 import { assembleConversationUnits, isContextAssemblerEnabled } from "./contextAssembler.js";
@@ -53,14 +54,14 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
       isContextAssemblerEnabled()
         ? assembleConversationUnits(userId, window)
         : fetchUserMessages(userId, window)] as const,
-    ["calls", () => fetchUserHostedCalls(userId, window)] as const,
+    ["calls", () => fetchUserCalls(userId, window)] as const,
     ["canvases", () => fetchUserCanvases(userId, window)] as const,
   ]) {
     let records;
     try {
       records = await fetcher();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       logger.warn("[daily] fetch failed", { userId, source, err: message });
       await recordPipelineEvent({
         userId,
@@ -89,7 +90,7 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
         logger.warn("[daily] curator batch failed", {
           userId,
           source,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
     }
@@ -113,13 +114,13 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
           });
         } catch (err) {
           ok = false;
-          logger.warn("[daily] twin_feedback curator batch failed", { userId, err: err instanceof Error ? err.message : String(err) });
+          logger.warn("[daily] twin_feedback curator batch failed", { userId, err: errMsg(err) });
         }
       }
       if (ok) await markTwinFeedbackLearned(ids);
     }
   } catch (err) {
-    logger.warn("[daily] twin_feedback assembly failed", { userId, err: err instanceof Error ? err.message : String(err) });
+    logger.warn("[daily] twin_feedback assembly failed", { userId, err: errMsg(err) });
   }
 
   return { candidates: total };
@@ -147,14 +148,14 @@ async function runDigitalTwinDailySync(): Promise<void> {
       await synthesizeSoulFilesForUser(u.id, "daily").catch((err) => {
         logger.warn("[daily] soul synthesis failed", {
           userId: u.id,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       });
     } catch (err) {
       totalErrors += 1;
       logger.error("[daily] user processing failed", {
         userId: u.id,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     }
   }
@@ -189,7 +190,7 @@ function scheduleNextRun(): void {
         logger.info("[daily] skipped — another replica is running tonight's sync");
       }
     } catch (err) {
-      logger.error("[daily] unhandled error", { err: err instanceof Error ? err.message : String(err) });
+      logger.error("[daily] unhandled error", { err: errMsg(err) });
     } finally {
       scheduleNextRun();
     }

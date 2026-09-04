@@ -124,6 +124,17 @@ const ago = (ts: number): string => {
   return `${Math.round(h / 24)}d ago`;
 };
 
+// Human-readable ingest duration, e.g. "7m 12s".
+const fmtDuration = (ms: number): string => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600),
+    m = Math.floor((s % 3600) / 60),
+    sec = s % 60;
+  if (h) return `${h}h ${m}m ${sec}s`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
+};
+
 // Pipeline stages; position derived from status (and phase when stopped/failed).
 const STAGES = ['Collect', 'Approve', 'Ingest', 'Done'] as const;
 const activeStage = (j: MigrationJobView): number => {
@@ -394,6 +405,16 @@ function JobCard({
         <PhaseProgress job={job} />
       </div>
 
+      {job.status === 'COMPLETED' && typeof job.ingestDurationMs === 'number' && (
+        <div className='mt-3 flex items-start gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400'>
+          <Info className='mt-0.5 size-3.5 shrink-0' />
+          <span>
+            Ingested {job.stats.messages.toLocaleString()} messages in{' '}
+            <span className='font-medium tabular-nums'>{fmtDuration(job.ingestDurationMs)}</span>
+          </span>
+        </div>
+      )}
+
       {job.status === 'FAILED' && job.error && (
         <div className='mt-3 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive'>
           <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
@@ -413,13 +434,19 @@ function JobCard({
       )}
 
       {job.issues && job.issues.length > 0 && (
-        <div className='mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400'>
-          <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
-          <span className='break-words'>
-            {job.issues.length} conversation{job.issues.length > 1 ? 's' : ''} not fully migrated —{' '}
-            {job.issues[0]?.reason}
-            {job.issues.length > 1 ? ` (+${job.issues.length - 1} more)` : ''}
-          </span>
+        <div className='mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400'>
+          <div className='flex items-center gap-2 font-medium'>
+            <TriangleAlert className='size-3.5 shrink-0' />
+            {job.issues.length} conversation{job.issues.length > 1 ? 's' : ''} not fully migrated
+          </div>
+          <ul className='mt-1.5 space-y-1 pl-5'>
+            {job.issues.map((issue, i) => (
+              <li key={`${issue.conversationId}-${i}`} className='break-words'>
+                <span className='font-medium'>{issue.label ?? issue.conversationId}</span>
+                <span className='text-amber-600/70 dark:text-amber-400/70'> — {issue.reason}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -512,6 +539,8 @@ function GuideRail({
                     href={SLACK_APP_INSTALL_URL}
                     target='_blank'
                     rel='noreferrer'
+                    data-track-category='SLACK_MIGRATION'
+                    data-track-name='OPEN_SLACK_APP_INSTALL_PAGE'
                     className='inline-flex items-center gap-0.5 font-medium text-primary hover:underline'
                   >
                     Slack app install page
@@ -696,6 +725,28 @@ export default function SlackMigration(): React.JSX.Element {
     [refresh],
   );
 
+  const [exporting, setExporting] = useState(false);
+  const onExportHistory = useCallback(async (): Promise<void> => {
+    setExporting(true);
+    setError(null);
+    try {
+      const jobs = await slackMigrationApi.exportHistory();
+      const blob = new Blob([JSON.stringify(jobs, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `slack-migration-history-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
   const activeDm = useMemo(() => mine.find(m => m.type === 'DM'), [mine]);
 
   return (
@@ -793,11 +844,14 @@ export default function SlackMigration(): React.JSX.Element {
                         <Button
                           disabled={busy || unreachable || !token.trim()}
                           loading={busy}
+                          trackId='slack_migration_submit_dm'
                           onClick={() =>
                             void run(() => slackMigrationApi.submitDm(token.trim())).then(ok => {
                               if (ok) setToken('');
                             })
                           }
+                          data-track-category='SLACK_MIGRATION'
+                          data-track-name='SUBMIT_DM_MIGRATION'
                         >
                           Migrate my DMs
                         </Button>
@@ -823,6 +877,8 @@ export default function SlackMigration(): React.JSX.Element {
                           placeholder='C0…'
                           value={channel.slackChannelId}
                           onChange={e => setChannel({ ...channel, slackChannelId: e.target.value })}
+                          data-track-category='SLACK_MIGRATION'
+                          data-track-name='SLACK_CHANNEL_ID_INPUT'
                           className='font-mono'
                         />
                       </div>
@@ -838,6 +894,8 @@ export default function SlackMigration(): React.JSX.Element {
                           placeholder='Destination channel'
                           value={channel.xyneChannelId}
                           onChange={e => setChannel({ ...channel, xyneChannelId: e.target.value })}
+                          data-track-category='SLACK_MIGRATION'
+                          data-track-name='XYNE_CHANNEL_ID_INPUT'
                           className='font-mono'
                         />
                       </div>
@@ -864,6 +922,8 @@ export default function SlackMigration(): React.JSX.Element {
                     <Checkbox
                       checked={channel.announceInSlack}
                       onChange={c => setChannel({ ...channel, announceInSlack: c })}
+                      data-track-category='SLACK_MIGRATION'
+                      data-track-name='ANNOUNCE_IN_SLACK_TOGGLE'
                       label='Post a “Migrated to Xyne Spaces” notice in the Slack channel when it’s done'
                       size='md'
                     />
@@ -879,6 +939,9 @@ export default function SlackMigration(): React.JSX.Element {
                           !channel.xyneChannelId.trim()
                         }
                         loading={busy}
+                        data-track-category='SLACK_MIGRATION'
+                        data-track-name='SUBMIT_CHANNEL_MIGRATION'
+                        trackId='slack_migration_submit_channel'
                         onClick={() =>
                           void run(() => slackMigrationApi.submitChannel(channel)).then(ok => {
                             if (ok)
@@ -920,14 +983,16 @@ export default function SlackMigration(): React.JSX.Element {
                 <section className='space-y-4'>
                   <div className='flex items-center justify-between'>
                     <h2 className='text-sm font-semibold text-foreground'>Admin control panel</h2>
-                    <a
-                      href={slackMigrationApi.exportUrl}
-                      target='_blank'
-                      rel='noreferrer'
-                      className='text-xs font-medium text-primary hover:underline'
+                    <button
+                      type='button'
+                      onClick={() => void onExportHistory()}
+                      disabled={exporting}
+                      data-track-category='SLACK_MIGRATION'
+                      data-track-name='EXPORT_HISTORY'
+                      className='text-xs font-medium text-primary hover:underline disabled:opacity-50'
                     >
-                      Export history
-                    </a>
+                      {exporting ? 'Exporting…' : 'Export history'}
+                    </button>
                   </div>
                   {ingest && <IngestionControl status={ingest} busy={busy} run={run} />}
                   {all.length === 0 ? (
@@ -987,7 +1052,10 @@ function IngestionControl({
               variant='outline'
               size='sm'
               disabled={busy}
+              trackId='slack_migration_stop_ingestion'
               onClick={() => void run(() => slackMigrationApi.stopIngestion())}
+              data-track-category='SLACK_MIGRATION'
+              data-track-name='STOP_INGESTION'
             >
               <Square className='size-3.5' />
               Stop ingestion
@@ -996,7 +1064,10 @@ function IngestionControl({
             <Button
               size='sm'
               disabled={busy}
+              trackId='slack_migration_start_ingestion'
               onClick={() => void run(() => slackMigrationApi.startIngestion())}
+              data-track-category='SLACK_MIGRATION'
+              data-track-name='START_INGESTION'
             >
               <Play className='size-3.5' />
               Start ingestion
@@ -1037,7 +1108,10 @@ function OwnerActions({
           size='sm'
           disabled={busy}
           loading={pending === 'resume'}
+          trackId='slack_migration_resume_own'
           onClick={() => act('resume', () => slackMigrationApi.resumeMine(job.id))}
+          data-track-category='SLACK_MIGRATION'
+          data-track-name='RESUME_OWN_JOB'
         >
           <RotateCcw className='size-3.5' />
           Resume
@@ -1049,7 +1123,10 @@ function OwnerActions({
           size='sm'
           disabled={busy}
           loading={pending === 'remove'}
+          trackId='slack_migration_remove_own'
           onClick={() => act('remove', () => slackMigrationApi.removeMine(job.id))}
+          data-track-category='SLACK_MIGRATION'
+          data-track-name='DELETE_OWN_JOB'
           className='text-destructive hover:text-destructive'
         >
           <Trash2 className='size-3.5' />
@@ -1084,7 +1161,10 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'approve'}
+          trackId='slack_migration_approve'
           onClick={() => act('approve', () => slackMigrationApi.approve(job.id))}
+          data-track-category='SLACK_MIGRATION'
+          data-track-name='APPROVE_JOB'
         >
           <Check className='size-3.5' />
           Approve
@@ -1096,7 +1176,10 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'stop'}
+          trackId='slack_migration_stop'
           onClick={() => act('stop', () => slackMigrationApi.stop(job.id))}
+          data-track-category='SLACK_MIGRATION'
+          data-track-name='STOP_JOB'
         >
           <Square className='size-3.5' />
           Stop
@@ -1108,7 +1191,10 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'resume'}
+          trackId='slack_migration_resume_admin'
           onClick={() => act('resume', () => slackMigrationApi.resume(job.id))}
+          data-track-category='SLACK_MIGRATION'
+          data-track-name='RESUME_JOB'
         >
           <RotateCcw className='size-3.5' />
           Resume
@@ -1119,7 +1205,10 @@ function AdminActions({
         size='sm'
         disabled={busy}
         loading={pending === 'remove'}
+        trackId='slack_migration_remove_admin'
         onClick={() => act('remove', () => slackMigrationApi.remove(job.id))}
+        data-track-category='SLACK_MIGRATION'
+        data-track-name='DELETE_JOB'
         className='text-destructive hover:text-destructive'
       >
         <Trash2 className='size-3.5' />

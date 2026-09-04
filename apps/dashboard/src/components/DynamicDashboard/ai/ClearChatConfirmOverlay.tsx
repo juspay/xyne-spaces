@@ -34,10 +34,21 @@ export const ClearChatConfirmOverlay = ({
         </div>
       </div>
       <div className='flex items-center justify-end gap-2 mt-5'>
-        <Button variant='secondary' onClick={onCancel}>
+        <Button
+          variant='secondary'
+          onClick={onCancel}
+          data-track-category='DYNAMIC_DASHBOARD'
+          data-track-name='CANCEL_CLEAR_AI_CHAT'
+        >
           Cancel
         </Button>
-        <Button variant='destructive' onClick={onConfirm}>
+        <Button
+          variant='destructive'
+          onClick={onConfirm}
+          trackId='clear_ai_chat_history'
+          data-track-category='DYNAMIC_DASHBOARD'
+          data-track-name='CONFIRM_CLEAR_AI_CHAT'
+        >
           Clear history
         </Button>
       </div>

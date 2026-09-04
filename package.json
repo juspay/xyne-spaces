@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.228.0",
+  "version": "1.274.1",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -138,6 +138,10 @@
             {
               "type": "chore",
               "release": false
+            },
+            {
+              "type": null,
+              "release": "patch"
             }
           ]
         }
@@ -170,6 +174,13 @@
       [
         "@semantic-release/npm",
         {
+          "npmPublish": false,
+          "pkgRoot": "apps/backend"
+        }
+      ],
+      [
+        "@semantic-release/npm",
+        {
           "npmPublish": false
         }
       ],
@@ -180,6 +191,7 @@
           "assets": [
             "package.json",
             "apps/dashboard/package.json",
+            "apps/backend/package.json",
             "CHANGELOG.md"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]",
@@ -205,8 +217,6 @@
       }
     },
     "overrides": {
-      "@earendil-works/pi-agent-core": "0.80.7",
-      "@earendil-works/pi-ai": "0.80.7",
       "@excalidraw/excalidraw": "0.18.1",
       "@excalidraw/excalidraw>react": "^19.2.1",
       "@excalidraw/excalidraw>react-dom": "^19.2.1",

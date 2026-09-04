@@ -13,22 +13,22 @@ import {
   BaseTicketType,
 } from '@xyne/shared';
 import {
-  ListFilter,
+  FilterLines as ListFilter,
   ChevronRight,
-  BarChart3,
-  User,
-  Users,
-  Calendar,
+  BarchartDefault as BarChart3,
+  UserDefault as User,
+  UserTwo as Users,
+  CalendarDefault as Calendar,
   ChevronDown,
-  BarChart4Icon,
-  Search,
+  BarchartDefault as BarChart4Icon,
+  SearchDefault as Search,
   Tag,
-  Hash,
-  X,
+  Hashtag as Hash,
+  MultipleCrossCancelDefault as X,
   Circle,
-  Loader2,
-  Layers,
-} from 'lucide-react';
+  Spinner as Loader2,
+  LayerTwo as Layers,
+} from '@xyne/icons';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { Button } from '../../ui/Button';
@@ -125,6 +125,7 @@ export const TicketFiltersDropdown = ({
   selectedBoardName,
   onBoardDropdownOpenChange,
   onSourceChannelsOpenChange,
+  onFiltersDropdownOpenChange,
   isTicketsSyncing = false,
   isNonLinearBoard = false,
   channelId,
@@ -175,6 +176,7 @@ export const TicketFiltersDropdown = ({
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
+  const submenuPointerDownTargetRef = useRef<EventTarget | null>(null);
 
   const [ticketTypesResult] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
@@ -806,7 +808,13 @@ export const TicketFiltersDropdown = ({
               </Popover.Content>
             </Popover.Root>
           )}
-          <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
+          <Popover.Root
+            open={isOpen}
+            onOpenChange={open => {
+              setIsOpen(open);
+              onFiltersDropdownOpenChange?.(open);
+            }}
+          >
             <Popover.Trigger asChild>
               <Button
                 variant='outline'
@@ -830,6 +838,11 @@ export const TicketFiltersDropdown = ({
               sideOffset={6}
               className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
               onInteractOutside={e => {
+                if (e.target === submenuPointerDownTargetRef.current) {
+                  submenuPointerDownTargetRef.current = null;
+                  e.preventDefault();
+                  return;
+                }
                 const target = e.target;
                 if (target instanceof Element && target.closest('[data-filter-submenu="true"]')) {
                   e.preventDefault();
@@ -889,6 +902,9 @@ export const TicketFiltersDropdown = ({
               <div
                 ref={submenuRef}
                 data-filter-submenu='true'
+                onPointerDownCapture={e => {
+                  submenuPointerDownTargetRef.current = e.target;
+                }}
                 className='fixed z-[60]'
                 style={{
                   left:
@@ -989,15 +1005,17 @@ export const TicketFiltersDropdown = ({
                       >
                         Cancel
                       </button>
-                      <button
+                      <Button
+                        variant='ghost'
                         data-track-category='saved-views'
                         data-track-name='confirm-save-view'
+                        trackId='save_ticket_view'
                         onClick={handleSaveView}
                         disabled={!viewName.trim() || isSaving}
                         className='text-sm font-semibold px-4 h-8 rounded-[8px] bg-primary text-white disabled:opacity-50 disabled:cursor-not-allowed'
                       >
                         Save
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </Popover.Content>

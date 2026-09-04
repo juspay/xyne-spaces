@@ -1,4 +1,4 @@
-import { ReactElement, MouseEvent as ReactMouseEvent } from 'react';
+import { ReactElement, Fragment, MouseEvent as ReactMouseEvent } from 'react';
 import { Command } from 'cmdk';
 import { Eye } from 'lucide-react';
 import {
@@ -18,19 +18,21 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import Avatar from '../../ui/Avatar/Avatar';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { useUser } from '../../../hooks/useUsers';
-import { isUserDeactivated } from '../../../utils/userDisplayName';
+import { isUserDeactivated, getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { TicketPriority } from '@xyne/shared';
 
 interface SearchResultItemProps {
   result: DisplaySearchResult;
   channelDisplayName?: string | undefined;
   /**
    * Channel the result belongs to, resolved by the parent against its existing
-   * `allChannels` lookup (no per-row lookup here). `icon` is whatever the parent's
-   * shared `getChannelIcon` returns — hashtag / lock / DM avatar — so the tag
-   * follows the same public-vs-private logic as every other channel glyph.
+   * `allChannels` lookup (no per-row lookup here). The row leads this segment with
+   * the word "in", so the parent omits `icon` for plain public channels — a
+   * hashtag would only repeat the word — and sends one whenever the glyph still
+   * carries something the word cannot: private lock, DM avatar, group.
    */
-  channelTag?: { name: string; icon: ReactElement } | undefined;
+  channelTag?: { name: string; icon?: ReactElement | undefined } | undefined;
   onSelect: (result: DisplaySearchResult) => Promise<void> | void;
   onPreview?: (result: DisplaySearchResult) => void;
   isSelected?: boolean;
@@ -78,7 +80,10 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
 };
 
 const utcToIst = (utcString?: string): string => {
-  if (!utcString) return '';
+  // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
+  // treat it as absent — otherwise it parses to an Invalid Date and every card
+  // that doesn't pre-guard renders the string "Invalid Date".
+  if (!utcString || utcString === 'N/A') return '';
 
   const dateUtc = new Date(`${utcString} UTC`);
 
@@ -98,6 +103,207 @@ const SelectedBadge = (): ReactElement => (
     <CheckTickSingle size={10} />
   </span>
 );
+
+// Second-line metadata row shared by ticket + file result cards. Renders a
+// muted, single-line list of pre-filtered segments separated by a middot. The
+// caller omits empty segments, so the separator never dangles. Uses only
+// existing text / avatar / channel-tag constructs — no new icons.
+//
+// `trailing` (the channel) closes the row without a middot in front of it: it
+// reads as a phrase — "in design" — and a separator would break that.
+const MetaLine = ({
+  segments,
+  trailing,
+}: {
+  segments: ReactElement[];
+  trailing?: ReactElement | undefined;
+}): ReactElement | null => {
+  if (segments.length === 0 && !trailing) return null;
+  return (
+    <div className='flex items-center gap-1.5 text-xs text-muted-foreground min-w-0 overflow-hidden'>
+      {segments.map((seg, i) => (
+        <Fragment key={i}>
+          {i > 0 && <span className='shrink-0 text-muted-foreground/70'>·</span>}
+          {seg}
+        </Fragment>
+      ))}
+      {trailing}
+    </div>
+  );
+};
+
+// Channel a result belongs to, on both ticket and file rows. Reads as a phrase —
+// "in design" — so it leads with the word rather than a hashtag glyph. Renders
+// whatever icon the parent sent (private lock, DM avatar, group); plain public
+// channels carry none, since the glyph would only repeat the word.
+const ChannelSegment = ({
+  channelTag,
+}: {
+  channelTag: { name: string; icon?: ReactElement | undefined };
+}): ReactElement => (
+  <span className='flex min-w-0 items-center gap-1'>
+    <span className='shrink-0'>in</span>
+    {channelTag.icon && (
+      <span className='flex h-3.5 w-3.5 shrink-0 items-center justify-center'>
+        {channelTag.icon}
+      </span>
+    )}
+    {/* `ch` ≈ one "0" glyph, so this caps the name near 30 characters instead of
+        letting it take whatever the row has spare. It's a ceiling, not a width:
+        a narrow row still shrinks it further and truncates. */}
+    <span className='min-w-0 max-w-[30ch] truncate'>{channelTag.name}</span>
+  </span>
+);
+
+const asTicketPriority = (priority?: string): TicketPriority | null => {
+  const normalized = priority?.toUpperCase();
+  if (!normalized) return null;
+  return (Object.values(TicketPriority) as string[]).includes(normalized)
+    ? (normalized as TicketPriority)
+    : null;
+};
+
+// The metadata row is text-only — no status dot, priority glyph or avatar. The
+// segments stay separate components so the row keeps its middot separators and
+// per-segment truncation rules.
+const TicketStatusSegment = ({ status }: { status?: string }): ReactElement | null => {
+  if (!status) return null;
+  return <span className='shrink-0 whitespace-nowrap'>{status}</span>;
+};
+
+const TicketPrioritySegment = ({ priority }: { priority?: string }): ReactElement | null => {
+  // Still gated on a known priority so an unrecognised value renders nothing
+  // rather than leaking a raw string into the row.
+  if (!asTicketPriority(priority)) return null;
+  return <span className='shrink-0 whitespace-nowrap'>{priority}</span>;
+};
+
+const TicketAssigneeSegment = ({
+  assigneeId,
+  assigneeName,
+}: {
+  assigneeId?: string | undefined;
+  assigneeName?: string | undefined;
+}): ReactElement => {
+  // Resolve through the user store so this reads the same as the file row's
+  // uploader — `searchContext.assigneeName` is the stored name, which ignores a
+  // user's displayName. Falls back to it when the id isn't in the store.
+  const assignee = useUser(assigneeId || '');
+  const resolved = assignee ? getUserDisplayName(assignee) : '';
+  const name = (resolved && resolved !== 'Unknown' ? resolved : assigneeName) || 'Unassigned';
+
+  return <span className='min-w-0 max-w-[30ch] truncate'>{name}</span>;
+};
+
+const AttachmentSearchResultItem = ({
+  result,
+  channelTag,
+  itemLabel,
+  onSelect,
+  onPreview,
+  isSelected,
+  onItemMouseDown,
+}: {
+  result: DisplaySearchResult;
+  channelTag?: { name: string; icon?: ReactElement | undefined } | undefined;
+  /** Title with highlight markup stripped, computed once by the parent. */
+  itemLabel: string;
+  onSelect: (result: DisplaySearchResult) => Promise<void> | void;
+  onPreview?: ((result: DisplaySearchResult) => void) | undefined;
+  isSelected: boolean;
+  onItemMouseDown?: ((e: ReactMouseEvent, result: DisplaySearchResult) => void) | undefined;
+}): ReactElement => {
+  // `result.avatar` carries the file's ownerId (see transformFile in the backend
+  // resultTransform); resolve it to a display name via the same user store the
+  // rest of Cmd+K uses.
+  const uploaderId = result.avatar;
+  const uploader = useUser(uploaderId || '');
+  const handleMouseDown = onItemMouseDown
+    ? (e: ReactMouseEvent) => onItemMouseDown(e, result)
+    : undefined;
+
+  const rawTs = result.metadata.timestamp;
+  const createdAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+
+  const uploaderName = uploader ? getUserDisplayName(uploader) : '';
+  const shouldShowUploader = !!uploaderId && !!uploader && uploaderName !== 'Unknown';
+
+  const metaSegments: ReactElement[] = [];
+  if (shouldShowUploader) {
+    // Reads the same as the file card on the full search screen.
+    metaSegments.push(
+      // The prefix is held outside the cap so the 30ch applies to the name itself
+      // rather than being eaten by "Uploaded by ".
+      <span key='uploader' className='flex min-w-0 items-center gap-1'>
+        <span className='shrink-0'>Uploaded by</span>
+        <span className='min-w-0 max-w-[30ch] truncate'>{uploaderName}</span>
+      </span>,
+    );
+  }
+  return (
+    <Command.Item
+      key={result.id}
+      value={`backend-${result.type}-${result.id}`}
+      data-result-id={result.id}
+      data-result-type={result.type}
+      data-item-label={itemLabel}
+      onSelect={() => void onSelect(result)}
+      onMouseDownCapture={handleMouseDown}
+      className='flex w-full items-stretch gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+    >
+      <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
+      <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+        {/* `truncate` on the element that holds the text — `*:truncate` alone only
+            reaches direct element children, so a highlighted title (which renders
+            as several nodes) would overflow past the timestamp and eye instead. */}
+        <span className='block min-w-0 truncate *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
+          <RenderMessageWithHTML message={result.title} />
+        </span>
+        <MetaLine
+          segments={metaSegments}
+          trailing={channelTag ? <ChannelSegment channelTag={channelTag} /> : undefined}
+        />
+      </div>
+      {/* Right column mirrors the left one's two rows: the action lines up with
+          the title, the timestamp with the metadata line. The action keeps its
+          slot even when this row has no preview button (transcripts, selected
+          rows) so the timestamp stays put and every row's right edge matches. */}
+      <div className='flex shrink-0 flex-col items-end justify-between gap-0.5'>
+        <span className='flex h-[18px] w-7 items-center justify-center'>
+          {isSelected ? (
+            <SelectedBadge />
+          ) : (
+            onPreview &&
+            result.searchContext?.internalUrl &&
+            result.searchContext?.subApp?.toUpperCase() !== 'TRANSCRIPT' && (
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  onPreview(result);
+                }}
+                className='p-1 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-none focus-visible:ring-0'
+                title='Preview file'
+                data-track-category='GLOBAL_SEARCH'
+                data-track-name='PREVIEW_SEARCH_RESULT'
+                data-track-metadata={JSON.stringify({
+                  resultId: result.id,
+                  resultType: result.type,
+                })}
+              >
+                <Eye size={14} />
+              </button>
+            )
+          )}
+        </span>
+        {createdAt && (
+          <span className='whitespace-nowrap text-xs leading-none text-muted-foreground'>
+            {createdAt}
+          </span>
+        )}
+      </div>
+    </Command.Item>
+  );
+};
 
 const UserSearchResultItem = ({
   result,
@@ -252,11 +458,16 @@ const SearchResultItem = ({
                     <RenderMessageWithHTML message={deskTicketSubtitle} />
                   </div>
                 )}
-                {/* Line 3: sender on the left, timestamp on the right */}
+                {/* Line 3: sender + recipients, then the channel as a trailing
+                    "in <name>" phrase — same construct the ticket and file rows
+                    use — with the timestamp on the right. */}
                 <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-                  <span className='min-w-0 truncate'>
-                    {senderName}
-                    {recipientCount > 0 && ` +${recipientCount} more`}
+                  <span className='flex min-w-0 items-center gap-1.5'>
+                    <span className='min-w-0 max-w-[30ch] truncate'>
+                      {senderName}
+                      {recipientCount > 0 && ` +${recipientCount} more`}
+                    </span>
+                    {channelTag && <ChannelSegment channelTag={channelTag} />}
                   </span>
                   <span className='whitespace-nowrap shrink-0'>
                     {utcToIst(result.metadata.timestamp)}
@@ -288,13 +499,19 @@ const SearchResultItem = ({
           <div className='flex items-center gap-1.5'>
             {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result)}
             <div className='flex-1 min-w-0'>
-              <div className='flex items-center gap-1.5 text-sm'>
-                <span className='font-medium text-foreground truncate'>
-                  {result.searchContext?.senderName}
+              {/* Sender / channel on the left, timestamp pinned right — same shape as
+                  the desk-mail row above and the ticket and file rows below. */}
+              <div className='flex items-center justify-between gap-2 text-sm'>
+                <span className='flex min-w-0 items-center gap-1.5'>
+                  <span className='font-medium text-foreground truncate'>
+                    {result.searchContext?.senderName}
+                  </span>
+                  <span className='shrink-0 text-xs text-muted-foreground'>{preposition}</span>
+                  <span className='text-xs font-medium text-foreground truncate'>
+                    {result.title}
+                  </span>
                 </span>
-                <span className='text-xs text-muted-foreground'>{preposition}</span>
-                <span className='text-xs font-medium text-foreground truncate'>{result.title}</span>
-                <span className='text-xs text-muted-foreground'>
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
                   {utcToIst(result.metadata.timestamp)}
                 </span>
               </div>
@@ -309,8 +526,38 @@ const SearchResultItem = ({
     }
 
     case 'ticket': {
-      // Single line: icon | ticketId | · | title | channel. Only the title truncates.
+      // Line 1: icon | ticketId | · | title. Line 2 (MetaLine): status · priority
+      // · assigned-to, closed by the channel as a trailing "in <name>" phrase.
+      // Only the title / channel / assignee truncate; every field reuses an
+      // existing construct (no new icons).
       const ticketId = result.searchContext?.xyneId;
+      const idSegment = result.subtitle?.split(' | ')[0];
+      const ticketIdHtml =
+        ticketId && idSegment?.includes('<hi>') && idSegment.replace(/<\/?hi>/g, '') === ticketId
+          ? idSegment
+          : undefined;
+      const rawTs = result.metadata.timestamp;
+      const createdAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+      const status = result.searchContext?.ticketStatus;
+      const priority = result.searchContext?.priority;
+      const assigneeId = result.searchContext?.assignedTo;
+      const assigneeName = result.searchContext?.assigneeName;
+
+      const metaSegments: ReactElement[] = [];
+      if (status) {
+        metaSegments.push(<TicketStatusSegment key='status' status={status} />);
+      }
+      if (priority) {
+        metaSegments.push(<TicketPrioritySegment key='priority' priority={priority} />);
+      }
+      metaSegments.push(
+        <TicketAssigneeSegment
+          key='assignee'
+          assigneeId={assigneeId}
+          assigneeName={assigneeName}
+        />,
+      );
+
       return (
         <Command.Item
           key={result.id}
@@ -322,85 +569,54 @@ const SearchResultItem = ({
           onMouseDownCapture={handleMouseDown}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          className='flex w-full items-center gap-3 h-10 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
+          className='flex w-full items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
         >
           <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
-          <div className='flex flex-1 items-center gap-1.5 min-w-0'>
-            {ticketId && (
-              <>
-                <span className='shrink-0 whitespace-nowrap text-[15px] leading-[1.2] tracking-[-0.1px] text-muted-foreground'>
-                  {ticketId}
-                </span>
-                <span className='shrink-0 text-[14px] font-medium leading-[1.2] tracking-[-0.28px] text-muted-foreground'>
-                  ·
-                </span>
-              </>
-            )}
-            <span className='min-w-0 *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
-              <RenderMessageWithHTML message={result.title} />
-            </span>
-            {/* The channel tag sits inside this group, not beside it: the design hugs it to
-                the truncated title (sharing the group's 6px gap) rather than flushing it to
-                the right edge of the row. */}
-            {channelTag && (
-              <span className='flex grow items-center gap-1 text-muted-foreground overflow-hidden'>
-                <span className='flex h-4 w-4 shrink-0 items-center justify-center'>
-                  {channelTag.icon}
-                </span>
-                <span className='text-[14px] font-medium leading-[1.2] tracking-[-0.28px] truncate'>
-                  {channelTag.name}
-                </span>
+          <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+            <div className='flex items-center gap-1.5 min-w-0'>
+              {ticketId && (
+                <>
+                  <span className='shrink-0 whitespace-nowrap text-[15px] leading-[1.2] tracking-[-0.1px] text-muted-foreground'>
+                    {ticketIdHtml ? <RenderMessageWithHTML message={ticketIdHtml} /> : ticketId}
+                  </span>
+                  <span className='shrink-0 text-[14px] font-medium leading-[1.2] tracking-[-0.28px] text-muted-foreground'>
+                    ·
+                  </span>
+                </>
+              )}
+              <span className='min-w-0 *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
               </span>
-            )}
+            </div>
+            <div className='flex min-w-0 items-center justify-between gap-2'>
+              <MetaLine
+                segments={metaSegments}
+                trailing={channelTag ? <ChannelSegment channelTag={channelTag} /> : undefined}
+              />
+              {createdAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {createdAt}
+                </span>
+              )}
+            </div>
           </div>
           {isSelected && <SelectedBadge />}
         </Command.Item>
       );
     }
 
-    case 'attachment': {
+    case 'attachment':
       return (
-        <Command.Item
-          key={result.id}
-          value={`backend-${result.type}-${result.id}`}
-          data-result-id={result.id}
-          data-result-type={result.type}
-          data-item-label={itemLabel}
-          onSelect={() => void onSelect(result)}
-          onMouseDownCapture={handleMouseDown}
-          className='flex w-full items-center gap-3 h-10 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
-        >
-          <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
-          <div className='flex flex-1 items-center gap-1.5 min-w-0'>
-            <span className='min-w-0 *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
-              <RenderMessageWithHTML message={result.title} />
-            </span>
-          </div>
-          {isSelected && <SelectedBadge />}
-          {!isSelected &&
-            onPreview &&
-            result.searchContext?.internalUrl &&
-            result.searchContext?.subApp?.toUpperCase() !== 'TRANSCRIPT' && (
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  onPreview(result);
-                }}
-                className='p-1.5 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-none focus-visible:ring-0'
-                title='Preview file'
-                data-track-category='GLOBAL_SEARCH'
-                data-track-name='PREVIEW_SEARCH_RESULT'
-                data-track-metadata={JSON.stringify({
-                  resultId: result.id,
-                  resultType: result.type,
-                })}
-              >
-                <Eye size={14} />
-              </button>
-            )}
-        </Command.Item>
+        <AttachmentSearchResultItem
+          result={result}
+          channelTag={channelTag}
+          itemLabel={itemLabel}
+          onSelect={onSelect}
+          onPreview={onPreview}
+          isSelected={isSelected}
+          onItemMouseDown={onItemMouseDown}
+        />
       );
-    }
 
     default:
       return (

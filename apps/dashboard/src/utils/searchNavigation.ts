@@ -212,7 +212,10 @@ export const navigateToMail = (result: DisplaySearchResult, navigate: NavigateFu
   params.set('conversationId', conversationId);
   if (ticketId) params.set('ticketId', ticketId);
   if (mailId) params.set('mail', mailId);
-  void navigate(`/support/${channelId}/${xyneId}?${params.toString()}`);
+
+  void navigate(`/support/${channelId}/${xyneId}?${params.toString()}`, {
+    state: { shouldNavigateBack: true },
+  });
 };
 
 /**
@@ -241,7 +244,7 @@ export const navigateToTicket = (
   // If EMAIL channel (Support/Desk ticket) AND has xyneId → Support view
   if (isDeskChannelType(channel?.type) && xyneId) {
     void navigate(`/support/${channelId}/${xyneId}`, {
-      state: { conversationId, ticketId },
+      state: { conversationId, ticketId, shouldNavigateBack: true },
     });
     return;
   }

@@ -1,83 +1,63 @@
 /**
- * Controlled tag vocabularies for the classifier.
+ * The built-in thread-type vocabulary — the BASE layer.
+ *
+ * Thread types are the only tag kind; the message-act vocabulary that used to sit alongside
+ * them is gone. A message now carries the thread types it is evidence for, which is how a
+ * thread's tag is traced back to what caused it.
+ *
+ * These entries are not seeded into any table. They are the base of the layered resolution
+ * in services/messageClassification/vocabulary.ts: rows in non_zero.thread_type_vocabulary
+ * override or suppress them per workspace, and a workspace with no rows sees exactly this.
+ * Editing a name here changes it for every workspace that has not overridden it.
+ *
+ * Do NOT look an entry up from this list to render a chip — use the resolved workspace
+ * vocabulary, or a workspace that renamed a type will still show the built-in label.
  *
  * Values are UPPER_SNAKE, deliberately unlike the lowercase-hyphenated shape people type
  * for free-form thread tags, so built-in and custom are distinguishable at a glance.
  */
 
-/** Message acts are never rendered — the classifier writes them, nothing displays them. */
-export interface ActEntry {
+/** One entry in the workspace's thread-type vocabulary. */
+export interface ThreadTypeEntry {
   name: string;
-  /** One-line definition, used to generate the classifier prompt. */
+  label: string;
+  color: string;
+  /**
+   * One line, for people. The chip's tooltip and the review row.
+   *
+   * Separate from `description` because the two are written for different readers and pull in
+   * opposite directions: prompt copy earns its length from the "NOT" clauses that stop the
+   * model on near-misses, and every one of those is noise to someone hovering a chip.
+   */
+  summary: string;
+  /**
+   * The classifier's instruction for this type — prompt copy, not a tooltip.
+   *
+   * Long on purpose. The NOT clauses matter as much as the definition: near-misses are what
+   * the model gets wrong, and each one is there because something was mistagged without it.
+   */
   description: string;
 }
 
-export interface VocabularyEntry extends ActEntry {
-  label: string;
-  color: string;
-}
-
 /**
- * What a message creates going forward. A message carries exactly one of these — when it
- * performs several acts, the strongest wins. Order here IS the precedence, strongest first.
- */
-export const MESSAGE_ACTS: readonly ActEntry[] = [
-  {
-    name: 'DECISION',
-    description:
-      'A choice among alternatives is made or announced by someone with authority to make it, binding what happens next.',
-  },
-  {
-    name: 'COMMITMENT',
-    description:
-      'A specific person takes on a specific obligation, optionally with a deadline.',
-  },
-  {
-    name: 'ESCALATION',
-    description:
-      'Raises urgency, severity or visibility: pulls in more senior people, or flags that something is stuck and needs intervention.',
-  },
-  {
-    name: 'QUESTION',
-    description:
-      'The sender wants information or a response. Creates an open expectation: someone now owes an answer.',
-  },
-  {
-    name: 'RESOLUTION',
-    description:
-      'Declares a piece of work finished or a problem no longer present. The claim of doneness, not the proof.',
-  },
-  {
-    name: 'STATUS_UPDATE',
-    description:
-      'Reports progress or state of ongoing work without completing it or creating anything new.',
-  },
-  {
-    name: 'ANSWER',
-    description:
-      'Supplies the information an earlier question asked for, and creates nothing new.',
-  },
-];
-
-/**
- * How a thread is classified, on two independent axes that share this one vocabulary.
+ * The thread types, in display order.
  *
- * The first seven are OUTCOME types — what "done" would mean for the thread. A thread
- * carries exactly one.
+ * One flat vocabulary: a thread carries every type that genuinely applies and nothing else —
+ * usually one, sometimes two or three. There is no partition and no per-thread cap.
  *
- * The rest are ANSWER types — what question the thread's content answers for someone who
- * was never in it. A thread carries any number, and most carry none: the bar is that a
- * reader could get their question answered by this thread alone, so tag what it answers,
- * not what it discusses.
+ * Two kinds of definition live here, distinguished by how they are phrased rather than by a
+ * field. A "done = …" definition describes the thread as a piece of WORK; the rest describe
+ * what a reader who was never in the thread could learn from it, and their bar is high —
+ * most threads clear none of them.
  *
- * The two are independent — a thread can be an ISSUE whose resolution is also a HOW_TO.
  * Descriptions are prompt copy, so the "not" clauses matter as much as the definitions:
  * near-misses are what the classifier gets wrong, and each one here is load-bearing.
  */
-export const THREAD_TYPES: readonly VocabularyEntry[] = [
+export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'ISSUE',
     label: 'Issue',
+    summary: 'Something is broken. Done when it is fixed and verified.',
     color: '#ef4444',
     description:
       'Something that should work is broken or degraded. Done = fixed and verified.',
@@ -85,6 +65,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'ALERT',
     label: 'Alert',
+    summary: 'A bot or monitoring check reported a problem.',
     color: '#f59e0b',
     description:
       'A bot or automated check (monitoring, QA, CI) opened the thread to report a problem. Done = acknowledged and resolved or deliberately suppressed.',
@@ -92,6 +73,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'QUESTION',
     label: 'Question',
+    summary: 'Someone wants information. Done when it is answered.',
     color: '#f97316',
     description:
       'The thread exists to get information; no defect, no action on a system. Done = answered.',
@@ -99,6 +81,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'REQUEST',
     label: 'Request',
+    summary: 'Asks someone to do something the system already supports.',
     color: '#3b82f6',
     description:
       'Asks someone to perform an action the system already supports. Done = action performed and confirmed.',
@@ -106,6 +89,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'FEATURE_REQUEST',
     label: 'Feature request',
+    summary: 'Asks for something that does not exist yet.',
     color: '#8b5cf6',
     description:
       'Asks for capability that does not exist; requires product evaluation. Done = accepted onto the roadmap or declined with reason.',
@@ -113,6 +97,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'DISCUSSION',
     label: 'Discussion',
+    summary: 'An open-ended exchange with no finish line.',
     color: '#6b7280',
     description:
       'Open-ended exchange with no inherent done state. The default when no other type fits.',
@@ -120,6 +105,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'ANNOUNCEMENT',
     label: 'Announcement',
+    summary: 'A broadcast — a release, deprecation or planned maintenance.',
     color: '#14b8a6',
     description:
       'One-to-many broadcast; nothing is owed by anyone. No done state. Covers dated ' +
@@ -128,10 +114,10 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
       'intention without commitment ("we should ship this next week").',
   },
 
-  // ─── Answer types — what a reader could learn from this thread ──────────────
   {
     name: 'HOW_TO',
     label: 'How-to',
+    summary: 'Explains how to do something, completely enough to follow.',
     color: '#0891b2',
     description:
       'Contains an actionable procedure — ordered steps, or a complete instruction a reader ' +
@@ -144,6 +130,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'WHAT_HAPPENED',
     label: 'What happened',
+    summary: 'An account of a specific past event, such as an incident.',
     color: '#b45309',
     description:
       'A narrative of a specific past event — incident recap, sequence of events, impact, ' +
@@ -155,6 +142,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'WHY_DECISION',
     label: 'Why (decision)',
+    summary: 'A decision and the reasoning behind it.',
     color: '#4f46e5',
     description:
       'States a decision AND the reasoning behind it. Fires on "we chose X over Y because…", ' +
@@ -165,17 +153,21 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'WHAT_IS',
     label: 'What is',
+    summary: 'Explains what something is — a term, feature or system.',
     color: '#059669',
     description:
       'Explains a concept, term, feature or system — a definition or explainer a newcomer ' +
       'could learn from. Answers a vocabulary question, not a task question. Fires on "X is…", ' +
       '"X means…", capability descriptions, jargon explanations, architecture explainers. NOT ' +
-      'when the term is merely USED rather than explained, NOT a one-word or purely contextual ' +
-      'reply.',
+      'when someone ASKS what something is and no one answers — a question is not an answer, ' +
+      'and an unanswered "what is X?" is the clearest case of what this must never fire on. ' +
+      'NOT when the term is merely USED rather than explained, NOT a one-word or purely ' +
+      'contextual reply.',
   },
   {
     name: 'KNOWN_ISSUE',
     label: 'Known issue',
+    summary: 'An acknowledged bug or limitation, and any workaround.',
     color: '#be123c',
     description:
       'An acknowledged bug or limitation, its status, and any workaround. Fires when the ' +
@@ -186,6 +178,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'REFERENCE',
     label: 'Reference',
+    summary: 'Exact values to look up: fields, error codes, formats.',
     color: '#334155',
     description:
       'Exact technical facts meant to be looked up: field lists, parameter names and types, ' +
@@ -197,6 +190,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'EXAMPLE',
     label: 'Example',
+    summary: 'A concrete, working instance you could copy and use.',
     color: '#65a30d',
     description:
       'A concrete, complete instance whose value is that it can be copied and used: a working ' +
@@ -207,6 +201,7 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
   {
     name: 'POLICY_LIMIT',
     label: 'Policy / limit',
+    summary: 'A rule or limit, stated with its actual value.',
     color: '#c026d3',
     description:
       'States an operative constraint together with its value: transaction limits, SLA ' +
@@ -215,52 +210,3 @@ export const THREAD_TYPES: readonly VocabularyEntry[] = [
       'being breached during an incident (that is WHAT_HAPPENED).',
   },
 ];
-
-/**
- * Sentinel the classifier may return for a message that performs no act. Deliberately NOT
- * in MESSAGE_ACTS: it is never stored and never rendered, it is mapped to an empty act
- * list. Asking the model to name a value is more reliable than asking it for [].
- */
-export const NO_ACT = 'NONE';
-
-/**
- * Tag names as a const tuple, strongest act first. Exported separately from MESSAGE_ACTS
- * because Zod's z.enum needs a literal tuple, and because precedence ordering is derived
- * from this array's order rather than stored on each entry.
- */
-export const MESSAGE_ACT_NAMES = [
-  'DECISION',
-  'COMMITMENT',
-  'ESCALATION',
-  'QUESTION',
-  'RESOLUTION',
-  'STATUS_UPDATE',
-  'ANSWER',
-] as const;
-
-/**
- * Thread types as a const tuple — z.enum needs a literal tuple. Order is display order, and
- * it is also the chip sort order via `rank()` in both mutator copies, so outcome types stay
- * first and answer types trail them.
- */
-export const THREAD_TYPE_NAMES = [
-  'ISSUE',
-  'ALERT',
-  'QUESTION',
-  'REQUEST',
-  'FEATURE_REQUEST',
-  'DISCUSSION',
-  'ANNOUNCEMENT',
-  'HOW_TO',
-  'WHAT_HAPPENED',
-  'WHY_DECISION',
-  'WHAT_IS',
-  'KNOWN_ISSUE',
-  'REFERENCE',
-  'EXAMPLE',
-  'POLICY_LIMIT',
-] as const;
-
-/** Built-in thread type by name; undefined for a free-form tag. */
-export const threadTypeEntry = (name: string): VocabularyEntry | undefined =>
-  THREAD_TYPES.find(entry => entry.name === name);

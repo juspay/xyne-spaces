@@ -145,8 +145,10 @@ export function RunHistory({
         {isError ? (
           <div className='py-16 text-center text-sm text-red-600'>
             Failed to load runs.
-            <button
+            <Button
+              variant='ghost'
               type='button'
+              trackId='automation_run_history_retry'
               data-track-category='automation-runs'
               data-track-name='run-history-retry'
               onClick={() => {
@@ -155,7 +157,7 @@ export function RunHistory({
               className='ml-2 underline hover:no-underline'
             >
               Retry
-            </button>
+            </Button>
           </div>
         ) : isLoading ? (
           <div className='flex flex-col'>
@@ -189,6 +191,8 @@ export function RunHistory({
                   onClick={() => {
                     void fetchNextPage();
                   }}
+                  data-track-category='automation-runs'
+                  data-track-name='LOAD_MORE_RUNS'
                 >
                   {isFetchingNextPage ? 'Loading…' : 'Load more'}
                 </Button>

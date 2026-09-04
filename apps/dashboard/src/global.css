@@ -907,25 +907,25 @@
     --chip-fg: var(--mention-current-user-color, var(--mention-color));
   }
 
-  /* cmd+K "active" row tier (Slack-style): once the user engages a row (ArrowUp/Down or hover)
-     the selection turns blue; the resting auto-selection stays gray. Theme-tuned per data-theme.
+  /* cmd+K selected-row highlight: gray for the selected row from the moment it's selected,
+     resting or keyboard-engaged alike, matching the mention picker's .cmdk-active-row.
      Result rows carry aria-selected + an aria-selected:bg-accent utility, so !important is needed
      to win over the utilities layer; mention rows use the .cmdk-active-row class directly.
      When a mention typeahead is open (data-mention-active) selection is owned by the mention list's
-     own .cmdk-active-row, so the aria-selected blue is suppressed to avoid a second highlighted row. */
-  [data-nav-active="true"]:not([data-mention-active="true"]) [cmdk-item][aria-selected="true"] {
-    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
+     own .cmdk-active-row, so the aria-selected gray is suppressed to avoid a second highlighted row. */
+  [cmdk-root]:not([data-mention-active="true"]) [cmdk-item][aria-selected="true"] {
+    background-color: hsl(var(--accent)) !important; /* gray, matches .cmdk-active-row */
   }
   .cmdk-active-row {
-    background-color: rgb(219 234 254); /* blue-100 */
+    background-color: hsl(var(--accent)); /* gray */
   }
   [data-theme="midnight"]
-    [data-nav-active="true"]:not([data-mention-active="true"])
+    [cmdk-root]:not([data-mention-active="true"])
     [cmdk-item][aria-selected="true"] {
-    background-color: hsl(var(--accent)) !important; /* gray, matches tabs/rows */
+    background-color: hsl(var(--accent)) !important; /* gray, matches .cmdk-active-row */
   }
   [data-theme="midnight"] .cmdk-active-row {
-    background-color: rgb(30 58 138 / 0.4); /* blue-900 @ 40% */
+    background-color: hsl(var(--accent)); /* gray */
   }
 
   /* Paragraph Adjacent Sibling */
@@ -1784,8 +1784,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   font-weight: 600;
 }
 
-.jp-message-html .search-result-highlight {
+.jp-message-html .search-result-highlight,
+mark.chat-text-highlight,
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) mark {
   background-color: var(--search-result-highlight-bg);
+  color: inherit;
   padding-left: 0;
   padding-right: 0;
   border-radius: 0.125rem;
@@ -2281,11 +2284,18 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    formatting toolbar, tooltips) is painted from these variables. They are
    normally set on the BlockNoteView root, but those menus render in a portal
    on <body>, so they fall out of that scope and land on the light defaults —
-   which is why the drag menu stayed white in midnight. Defining them at :root
-   fixes the portals, and because our own tokens already flip per theme this
-   single mapping serves light and midnight both.
+   which is why the drag menu stayed white in midnight. Because our own tokens
+   already flip per theme this single mapping serves light and midnight both.
+
+   It has to be set at both scopes. Portalled menus need :root; everything else
+   sits inside .bn-root, which BlockNote paints itself — a nearer ancestor, so
+   it won over :root and left the link toolbar, form popovers and the LaTeX
+   source popup on the stock light palette. The `html` prefix outranks
+   BlockNote's own [data-color-scheme] rule whatever order the sheets load in.
    ============================================================ */
-:root {
+:root,
+html .bn-root,
+html .bn-root[data-color-scheme] {
   --bn-colors-editor-text: hsl(var(--foreground));
   --bn-colors-editor-background: transparent;
   --bn-colors-menu-text: hsl(var(--popover-foreground));
@@ -2301,6 +2311,115 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   --bn-colors-shadow: hsl(var(--foreground) / 0.12);
   --bn-colors-border: hsl(var(--border));
   --bn-colors-side-menu: hsl(var(--muted-foreground));
+}
+
+/* These few surfaces are painted from literal colours rather than the palette
+   above, with their dark variant gated on BlockNote's own `.dark` class, so the
+   mapping cannot reach them: the LaTeX / diagram placeholder, the add-file
+   button, and the OK button on a source popup — which was a stock blue in every
+   theme. Repainted from app tokens. The `html` prefix outranks the stock rules. */
+html .bn-preview-placeholder,
+html [data-file-block] .bn-add-file-button {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+html
+  .bn-editor[contenteditable="true"]
+  .bn-preview-placeholder:not(.bn-preview-placeholder-error):hover,
+html .bn-editor[contenteditable="true"] [data-file-block] .bn-add-file-button:hover {
+  background-color: hsl(var(--accent));
+}
+
+html .bn-code-block-source-popup-ok-button {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+html .bn-code-block-source-popup-ok-button:hover {
+  background-color: hsl(var(--primary) / 0.9);
+}
+
+/* A file block lays its content out with flex, and the wrapper round the card is
+   an item that shrinks to fit, so the card would stop short of the column. */
+.bn-block-content[data-content-type="file"]
+  > .bn-file-block-content-wrapper:has(.canvas-file-card) {
+  width: 100%;
+  flex: 1 1 auto;
+}
+
+/* The link menu reads as a list, so it stacks and its buttons fill the width. */
+.canvas-link-menu {
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 11rem;
+  padding: 0.25rem;
+}
+
+.canvas-link-menu .mantine-Button-root {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  padding: 0.375rem 0.5rem;
+}
+
+.canvas-link-menu .mantine-Button-label {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.canvas-link-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  font-weight: 400;
+}
+
+/* The table keys, shown where the same actions live. A footer rather than a
+   badge per item: the menu's children replace its defaults wholesale and the
+   header and colour buttons are not exported, so appending is the only way to
+   add to it without dropping them. Excel uses these keys on both platforms. */
+.bn-table-handle-menu::after {
+  content: "Row \21E7 Space  ·  Column \2303 Space  ·  Insert \2303\21E7=  ·  Delete \2303-";
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+/* Shortcut badge, sat against the right edge like the slash menu's. */
+.canvas-link-menu-key {
+  margin-left: auto;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Portalled out of the editor, so it carries its own stacking and placement. */
+.canvas-pasted-link-toolbar {
+  position: fixed;
+  z-index: 60;
+}
+
+/* BlockNote ships no link styling of its own, and Tailwind's preflight resets
+   anchors to `color: inherit`, so canvas links rendered as plain body text.
+   Same treatment the chat and email composers already give theirs. */
+.bn-editor a {
+  color: var(--link-color);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.bn-editor a:hover {
+  color: var(--link-hover-color);
 }
 
 /* BlockNote menus cap out at `max-height: inherit`, which resolves to the whole
@@ -2756,6 +2875,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   .bn-block-outer
   .bn-block
   .bn-block-content[data-content-type="numberedListItem"]::before {
+  content: attr(data-index) ".";
   min-width: 24px;
   height: 1.55em;
   align-self: flex-start;
@@ -2895,6 +3015,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .canvas-surface .bn-editor .selectedCell:after {
   background: hsl(var(--ring) / 0.2);
 }
+/* Anchors the filter button to the block rather than the sideways-scrolling
+   wrapper, so it stays at the top right of a wide table. */
+.canvas-surface .bn-editor .bn-block-content[data-content-type="table"] {
+  position: relative;
+}
 /* Align the table grid's left edge with paragraphs/code blocks — BlockNote reserves a 9px
    left inset on .tableWrapper for the row handles; drop it so all blocks start at the same X. */
 .canvas-surface .bn-editor [data-content-type="table"] .tableWrapper {
@@ -3000,7 +3125,7 @@ img.inline-emoji,
 
 /* Base markdown content styling with text wrapping for overflow prevention.
    Typography sits in `components` so a surface that sets its own size on the
-   wrapper (e.g. AIChatThread's `text-[15px] leading-7`) still wins. */
+   wrapper still wins over this baseline. */
 @layer components {
   .bot-markdown-content,
   .bot-markdown-content-call-summary {
@@ -3814,9 +3939,9 @@ img.inline-emoji,
   line-height: 1.5;
 }
 
-/* Headless detailed summaries use muted body copy while section headings retain
+/* Recording summaries use muted generated body copy while section headings retain
    foreground contrast. List markers inherit this color from their content block. */
-.detailed-summary-canvas-editor
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
   .bn-editor
   .bn-block-content:is(
     [data-content-type="paragraph"],
@@ -3829,7 +3954,18 @@ img.inline-emoji,
   color: hsl(var(--muted-foreground)) !important;
 }
 
-.detailed-summary-canvas-editor .bn-editor .bn-block-content[data-content-type="heading"] {
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block-content[data-content-type="heading"] {
+  color: hsl(var(--foreground)) !important;
+}
+
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block-content[data-text-color="recording-summary-edited"],
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block:has(> .bn-block-content[data-text-color="recording-summary-edited"]) {
   color: hsl(var(--foreground)) !important;
 }
 
@@ -4110,23 +4246,15 @@ img.inline-emoji,
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* AI composer — match the page bg (overrides the component's own literal) */
-[data-theme="classic"] .ai-composer-wrapper,
-[data-theme="summer_breeze"] .ai-composer-wrapper {
-  background-color: hsl(var(--background));
-}
-
-/* AI composer dark mode overrides */
+/* AI composer dark mode shadows — surface/border come from the shared
+   chat-composer tokens the channel & thread input uses */
 [data-theme="midnight"] .ai-composer-wrapper {
-  border-color: #3a3a3a;
-  background-color: #1e1e1e;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.05),
     0 8px 24px -12px rgba(0, 0, 0, 0.3);
 }
 
 [data-theme="midnight"] .ai-composer-wrapper:focus-within {
-  border-color: #555;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.1),
     0 12px 30px -12px rgba(0, 0, 0, 0.4);

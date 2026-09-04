@@ -18,6 +18,7 @@ import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
+import { ShortcutHint } from '../ui/ShortcutHint';
 import { isStatusExpired } from '../../utils/statusUtils';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useSelf } from '../../hooks/useUsers';
@@ -194,13 +195,15 @@ const Settings = ({
             className='w-40 p-1'
           >
             <div className='space-y-0.5'>
-              <button
+              <Button
+                variant='ghost'
                 onClick={() => {
                   setLivePresenceStatus('ONLINE');
                   setPresencePopoverOpen(false);
                 }}
+                trackId='set_presence_online'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
-                data-track-category='SETTINGS'
+                data-track-category='Settings'
                 data-track-name='SetPresenceOnline'
               >
                 <div className='w-2 h-2 rounded-full bg-green-500' />
@@ -208,14 +211,16 @@ const Settings = ({
                 {livePresenceStatus !== 'AWAY' && (
                   <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant='ghost'
                 onClick={() => {
                   setLivePresenceStatus('AWAY');
                   setPresencePopoverOpen(false);
                 }}
+                trackId='set_presence_away'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
-                data-track-category='SETTINGS'
+                data-track-category='Settings'
                 data-track-name='SetPresenceAway'
               >
                 <div className='w-2 h-2 rounded-full border border-muted-foreground' />
@@ -223,7 +228,7 @@ const Settings = ({
                 {livePresenceStatus === 'AWAY' && (
                   <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
-              </button>
+              </Button>
             </div>
           </Popover>
         </div>
@@ -272,6 +277,7 @@ const Settings = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
+                trackId='clear_user_status'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
                 data-track-category='Settings'
@@ -284,6 +290,7 @@ const Settings = ({
             <div className='flex items-center p-1 gap-2 text-muted-foreground'>
               <SmilePlus className='size-4 flex-shrink-0' />
               <span className='text-xs truncate'>Set a status</span>
+              <ShortcutHint shortcut='global.setStatus' className='ml-auto text-xs' />
             </div>
           )}
         </div>
@@ -306,6 +313,7 @@ const Settings = ({
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 onClick={handleResumeNotifications}
+                trackId='resume_notifications'
                 data-track-category='Settings'
                 data-track-name='ResumeNotifications'
               >
@@ -345,19 +353,22 @@ const Settings = ({
             {!showCustomDatePicker ? (
               <div className='space-y-0.5'>
                 {pauseOptions.map(option => (
-                  <button
+                  <Button
                     key={option.minutes}
+                    variant='ghost'
                     onClick={e => {
                       e.stopPropagation();
                       handlePauseNotifications(option.minutes);
                     }}
+                    trackId='pause_notifications'
+                    trackProps={{ duration: option.minutes }}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='Settings'
                     data-track-name='PauseNotifications'
                     data-track-metadata={JSON.stringify({ duration: option.minutes })}
                   >
                     <span>{option.label}</span>
-                  </button>
+                  </Button>
                 ))}
                 <button
                   onClick={e => {
@@ -410,6 +421,7 @@ const Settings = ({
         >
           <Settings2 className='size-4' />
           Preferences
+          <ShortcutHint shortcut='global.openPreferences' className='ml-auto' />
         </Button>
       </div>
 
@@ -421,6 +433,7 @@ const Settings = ({
           variant='ghost'
           className='text-destructive w-full text-left hover:bg-transparent hover:text-destructive rounded-md'
           onClick={handleLogout}
+          trackId='logout'
           data-track-category='Settings'
           data-track-name='Logout'
         >

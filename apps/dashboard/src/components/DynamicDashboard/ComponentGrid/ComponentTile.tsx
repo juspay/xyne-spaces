@@ -255,7 +255,12 @@ const ComponentTile = ({
                 <Copy size={14} className='mr-2' />
                 Duplicate
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setDeleteOpen(true)} className='text-rose-600'>
+              <DropdownMenuItem
+                onClick={() => setDeleteOpen(true)}
+                data-track-category='DYNAMIC_DASHBOARD'
+                data-track-name='OPEN_DELETE_COMPONENT_CONFIRM'
+                className='text-rose-600'
+              >
                 <Trash2 size={14} className='mr-2' />
                 Delete
               </DropdownMenuItem>
@@ -317,6 +322,7 @@ const ComponentTile = ({
               onClick={() => {
                 void handleDelete();
               }}
+              trackId='delete_component'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Confirm_Delete_Component'
             >

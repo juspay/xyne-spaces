@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { asyncHandler, ok, badRequest, forbidden, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -25,120 +26,104 @@ const router = Router();
  *
  * Response: `{ success: true, data: [{ id, email, name }, ...] }`
  */
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const qRaw = req.query["q"];
-    const q = typeof qRaw === "string" ? qRaw.trim() : "";
-    const requesterId = getRequesterId(req);
-    const orgId = getOrgId(req)
-      ?? (requesterId
-        ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
-        : undefined);
-    if (!orgId) {
-      log.error(`[users] orgId is required; refusing global user typeahead requesterId=${requesterId ?? "none"} q=${q || "none"}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
-      return;
-    }
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  const qRaw = req.query["q"];
+  const q = typeof qRaw === "string" ? qRaw.trim() : "";
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req)
+    ?? (requesterId
+      ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
+      : undefined);
+  if (!orgId) {
+    log.error(`[users] orgId is required; refusing global user typeahead requesterId=${requesterId ?? "none"} q=${q || "none"}`);
+    throw badRequest("orgId is required");
+  }
 
-    const users = await prisma.user.findMany({
-      where: {
-        orgId,
-        ...(q
-          ? {
-              OR: [
-                { email: { contains: q, mode: "insensitive" as const } },
-                { name: { contains: q, mode: "insensitive" as const } },
-              ],
-            }
-          : {}),
-      },
-      select: { id: true, email: true, name: true },
-      orderBy: { name: "asc" },
-      take: 20,
+  const users = await prisma.user.findMany({
+    where: {
+      orgId,
+      ...(q
+        ? {
+            OR: [
+              { email: { contains: q, mode: "insensitive" as const } },
+              { name: { contains: q, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    },
+    select: { id: true, email: true, name: true },
+    orderBy: { name: "asc" },
+    take: 20,
+  });
+
+  ok(res, users);
+}));
+
+router.post("/", asyncHandler(async (req: Request, res: Response) => {
+  const { id, email, name, spacesToken } = req.body as {
+    id?: string;
+    email?: string;
+    name?: string;
+    spacesToken?: string;
+  };
+
+  if (!id || typeof id !== "string" || id.trim().length === 0) {
+    throw badRequest("id is required");
+  }
+
+  if (!email || typeof email !== "string" || email.trim().length === 0) {
+    throw badRequest("email is required");
+  }
+
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    throw badRequest("name is required");
+  }
+
+  const sessionUserId = req.headers["x-user-id"];
+  if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== id.trim()) {
+    throw forbidden("Body id does not match authenticated session");
+  }
+
+  // Org placement (§13): prefer the mapping-aware JIT path so a second-tenant
+  // user lands in the RIGHT org (via SurfaceTenantLink), not the default. It
+  // creates the row (with the mapped org + membership) if new, then we sync the
+  // client-supplied email/name. If JIT can't resolve the Spaces profile
+  // (transient DB miss / user not in Spaces), fall back to creating from the
+  // request body in the default org — preserves this endpoint's resilience.
+  let user;
+  const jitOk = await ensureUserExists(id.trim(), "require-auth");
+  if (jitOk) {
+    user = await prisma.user.update({
+      where: { id: id.trim() },
+      data: { email: email.trim(), name: name.trim() },
     });
-
-    res.json({ success: true, data: users });
-  } catch (err) {
-    log.error("[users] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+    // Gap 8: re-assert OrgMembership for a pre-existing user (ensureUserExists
+    // short-circuits without touching it when the row already exists). Idempotent.
+    await ensureOrgMembership(user.id, user.orgId);
+  } else {
+    // orgId is NOT NULL — a new user row must carry it at insert time.
+    const orgId = await getDefaultOrgId();
+    if (!orgId) {
+      log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
+      throw new HttpError(503, "Default organization not provisioned");
+    }
+    user = await prisma.user.upsert({
+      where: { id: id.trim() },
+      create: { id: id.trim(), email: email.trim(), name: name.trim(), orgId },
+      update: { email: email.trim(), name: name.trim() },
+    });
+    await ensureOrgMembership(user.id, orgId);
   }
-});
 
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const { id, email, name, spacesToken } = req.body as {
-      id?: string;
-      email?: string;
-      name?: string;
-      spacesToken?: string;
-    };
-
-    if (!id || typeof id !== "string" || id.trim().length === 0) {
-      res.status(400).json({ success: false, error: "id is required" });
-      return;
-    }
-
-    if (!email || typeof email !== "string" || email.trim().length === 0) {
-      res.status(400).json({ success: false, error: "email is required" });
-      return;
-    }
-
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      res.status(400).json({ success: false, error: "name is required" });
-      return;
-    }
-
-    const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== id.trim()) {
-      res.status(403).json({ success: false, error: "Body id does not match authenticated session" });
-      return;
-    }
-
-    // Org placement (§13): prefer the mapping-aware JIT path so a second-tenant
-    // user lands in the RIGHT org (via SurfaceTenantLink), not the default. It
-    // creates the row (with the mapped org + membership) if new, then we sync the
-    // client-supplied email/name. If JIT can't resolve the Spaces profile
-    // (transient DB miss / user not in Spaces), fall back to creating from the
-    // request body in the default org — preserves this endpoint's resilience.
-    let user;
-    const jitOk = await ensureUserExists(id.trim(), "require-auth");
-    if (jitOk) {
-      user = await prisma.user.update({
-        where: { id: id.trim() },
-        data: { email: email.trim(), name: name.trim() },
-      });
-      // Gap 8: re-assert OrgMembership for a pre-existing user (ensureUserExists
-      // short-circuits without touching it when the row already exists). Idempotent.
-      await ensureOrgMembership(user.id, user.orgId);
-    } else {
-      // orgId is NOT NULL — a new user row must carry it at insert time.
-      const orgId = await getDefaultOrgId();
-      if (!orgId) {
-        log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
-        res.status(503).json({ success: false, error: "Default organization not provisioned" });
-        return;
-      }
-      user = await prisma.user.upsert({
-        where: { id: id.trim() },
-        create: { id: id.trim(), email: email.trim(), name: name.trim(), orgId },
-        update: { email: email.trim(), name: name.trim() },
-      });
-      await ensureOrgMembership(user.id, orgId);
-    }
-
-    // Auto-configure xyne-spaces MCP connection if token provided
-    if (spacesToken && typeof spacesToken === "string") {
-      autoConfigureSpaces(user.id, spacesToken).catch((err) => {
-        log.error("[users] auto-configure xyne-spaces failed:", err);
-      });
-    }
-
-    res.json({ success: true, data: user });
-  } catch (err) {
-    log.error("[users] upsert error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  // Auto-configure xyne-spaces MCP connection if token provided
+  if (spacesToken && typeof spacesToken === "string") {
+    autoConfigureSpaces(user.id, spacesToken).catch((err) => {
+      log.error("[users] auto-configure xyne-spaces failed:", err);
+    });
   }
-});
+
+  ok(res, user);
+}));
 
 async function autoConfigureSpaces(userId: string, token: string): Promise<void> {
   const serverType = "xyne-spaces";
@@ -263,22 +248,28 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   }
 }
 
-router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
-    });
-
-    if (!user) {
-      res.status(404).json({ success: false, error: "User not found" });
-      return;
-    }
-
-    res.json({ success: true, data: user });
-  } catch (err) {
-    log.error("[users] get error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId =
+    getOrgId(req) ??
+    (requesterId
+      ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
+      : undefined);
+  if (!orgId) {
+    log.error(`[users] orgId is required; refusing cross-org user lookup requesterId=${requesterId ?? "none"} id=${req.params.id}`);
+    throw badRequest("orgId is required");
   }
-});
+
+  const user = await prisma.user.findFirst({
+    where: { id: req.params.id, orgId },
+    select: { id: true, email: true, name: true },
+  });
+
+  if (!user) {
+    throw notFound("User not found");
+  }
+
+  ok(res, user);
+}));
 
 export { router as usersRouter };

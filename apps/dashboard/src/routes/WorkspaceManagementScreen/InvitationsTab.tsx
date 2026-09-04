@@ -251,6 +251,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     setEntityType('');
                     setEntityId('');
                   }}
+                  data-track-category='workspace-management'
+                  data-track-name='SELECT_INVITE_ROLE_ADMIN'
                   className={cn(role === WorkspaceRole.ADMIN && 'bg-accent')}
                 >
                   Admin
@@ -261,12 +263,16 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     setEntityType('');
                     setEntityId('');
                   }}
+                  data-track-category='workspace-management'
+                  data-track-name='SELECT_INVITE_ROLE_MEMBER'
                   className={cn(role === WorkspaceRole.MEMBER && 'bg-accent')}
                 >
                   Member
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setRole(WorkspaceRole.GUEST)}
+                  data-track-category='workspace-management'
+                  data-track-name='SELECT_INVITE_ROLE_GUEST'
                   className={cn(role === WorkspaceRole.GUEST && 'bg-accent')}
                 >
                   Guest
@@ -275,6 +281,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             </DropdownMenu>
             <Button
               onClick={openConfirmDialog}
+              data-track-category='workspace-management'
+              data-track-name='OPEN_INVITE_CONFIRM'
               disabled={isSubmitting || !email.trim()}
               className='gap-2'
             >
@@ -296,7 +304,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                   setEntityId('');
                 }}
                 className='px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary min-w-[140px]'
-                data-track-category='WorkspaceManagement'
+                data-track-category='workspace-management'
                 data-track-name='SelectGuestInvitationEntityType'
               >
                 <option value=''>Select entity type...</option>
@@ -385,12 +393,16 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             <Button
               variant='outline'
               onClick={() => setShowConfirmDialog(false)}
+              data-track-category='workspace-management'
+              data-track-name='CANCEL_SEND_INVITATION'
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button
               onClick={() => void handleSendInvitation()}
+              data-track-category='workspace-management'
+              data-track-name='SEND_INVITATION'
               disabled={isSubmitting}
               className='gap-2'
             >
@@ -450,6 +462,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     variant='ghost'
                     size='sm'
                     onClick={() => handleRevokeInvitation(invitation.id)}
+                    data-track-category='workspace-management'
+                    data-track-name='REVOKE_INVITATION'
                     className='text-destructive hover:text-destructive hover:bg-destructive/10'
                   >
                     Revoke

@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { XyneAIStar } from '../../icons/xyne-ai';
+import { Button } from '../../ui/Button/Button';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
 
 export interface AIQuickRewriteAction {
@@ -152,17 +153,19 @@ export const AIComposerPanel = ({
               data-track-category='Support'
               data-track-name='AIComposerTextareaKeydown'
             />
-            <button
+            <Button
               type='button'
+              variant='ghost'
               onClick={submitInput}
               disabled={disabled || !value.trim()}
+              trackId='submit_ask_ai_instruction'
               className='p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0 mb-0.5'
               aria-label='Submit'
               data-track-category='Support'
               data-track-name='SubmitAskAIInstruction'
             >
               <ArrowRight size={14} />
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -246,14 +249,17 @@ export const AIRefineDropdown = ({
                   </p>
                 </div>
                 {QUICK_REWRITE_ACTIONS.map(action => (
-                  <button
+                  <Button
                     key={action.id}
                     type='button'
+                    variant='ghost'
                     disabled={disabled}
                     onClick={() => {
                       onQuickRewrite(action.id);
                       setOpen(false);
                     }}
+                    trackId='ai_quick_rewrite'
+                    trackProps={{ action: action.id }}
                     className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                     data-track-category='Support'
                     data-track-name='QuickRewrite'
@@ -261,7 +267,7 @@ export const AIRefineDropdown = ({
                   >
                     <span className='text-muted-foreground'>{action.icon}</span>
                     <span>{action.label}</span>
-                  </button>
+                  </Button>
                 ))}
 
                 <div className='border-t border-border my-1' />
@@ -290,13 +296,15 @@ export const AIRefineDropdown = ({
               <span>Help me draft</span>
             </button>
             {onRerunDraft && (
-              <button
+              <Button
                 type='button'
+                variant='ghost'
                 disabled={disabled}
                 onClick={() => {
                   onRerunDraft();
                   setOpen(false);
                 }}
+                trackId='ai_rerun_draft'
                 className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                 title={agentName ? `Rerun draft with ${agentName}` : 'Rerun draft'}
                 data-track-category='Support'
@@ -306,7 +314,7 @@ export const AIRefineDropdown = ({
                   <RefreshCw size={14} />
                 </span>
                 <span>Rerun draft</span>
-              </button>
+              </Button>
             )}
             {showSeeSources && onSeeSources && (
               <button

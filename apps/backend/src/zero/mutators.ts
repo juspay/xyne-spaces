@@ -7,6 +7,7 @@ import {
   MessageType,
   CallType,
   CallStatus,
+  CallVisibility,
   RecurringCallSeriesStatus,
   CallOrigin,
   InvitationResponse,
@@ -47,6 +48,7 @@ import {
   RCAStatus,
   SEVERITY,
   AttachmentEntityType,
+  AttachmentUploadStatus,
   AttributionConfidence,
   BaseTicketType,
   isReleaseTicket,
@@ -69,6 +71,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   WorkspaceRole,
   Status,
   OrgRole,
@@ -80,7 +83,6 @@ import {
   resolveCanvasHierarchy,
   parseFieldOptions,
   serializeFieldOptions,
-  VCSProviderType,
   ReleaseTrackingMode,
   parseRepliesMd,
   addReplyToData,
@@ -93,10 +95,24 @@ import {
   isDeskChannelType,
   deskTypeForChannelType,
   Platform,
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
-  sdlcDiscussionSchema,
+  entityLinkContextSchema,
+  updateSubTicketsMdFromZero,
+  linkSubTicketConversationToParentFromZero,
 } from '@xyne/shared';
-import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import {
+  normalizeThreadTypeName,
+  parseAppliedTags,
+  serializeAppliedTags,
+  type AppliedTag,
+} from '@xyne/shared';
+import {
+  getThreadTypeVocabulary,
+  recordVocabularyCandidate,
+} from '@/services/messageClassification/vocabulary';
 import {
   MessageArtifactStatus,
   parseSlashCommandArtifactMessage,
@@ -112,23 +128,30 @@ import {
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
+  ATTACHMENT_STILL_UPLOADING,
+  isAttachmentUploaded,
+  isAttachmentUploadInFlight,
+} from '@xyne/shared/zero/mutators';
+import {
   validateFieldBranches,
   validateUniqueFieldNames,
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions } from '@/utils/mentionParser';
+import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
+import { userAssignmentStateService } from '@/services/userAssignmentStateService';
 import { notificationService } from '@/services/notificationService';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
-import { resolveSdlcDiscussionOwnerId } from '@/sdlc/sdlcDiscussionOwner';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -973,6 +996,25 @@ export function createMutators(
   asyncTasks: Array<() => Promise<void>>,
   awaitedPostCommitTasks: Array<() => Promise<void>>,
 ) {
+  // Release-config edits are open to workspace/org ADMIN and OWNER by role, and
+  // to anyone individually granted RELEASE-MANAGER WRITE. Mirrors the HTTP
+  // authorizePrivilegedOrResource middleware.
+  const assertReleaseManageAccess = async (): Promise<void> => {
+    const isPrivileged =
+      authData.role === WorkspaceRole.ADMIN ||
+      authData.role === WorkspaceRole.OWNER ||
+      authData.orgRole === OrgRole.ADMIN ||
+      authData.orgRole === OrgRole.OWNER;
+    if (isPrivileged) return;
+    const resource = await repositories.resources.findByName('RELEASE-MANAGER');
+    if (
+      !resource ||
+      !(await repositories.resourceAccess.hasAccess(authData.sub, resource.id, AccessType.WRITE))
+    ) {
+      throw new Error('This endpoint requires administrator or owner privileges');
+    }
+  };
+
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -2432,7 +2474,7 @@ export function createMutators(
           messageId: z.string(),
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
-          sdlcDiscussion: sdlcDiscussionSchema.optional(),
+          entityLinkContext: entityLinkContextSchema.optional(),
         }),
         async ({
           tx,
@@ -2444,7 +2486,7 @@ export function createMutators(
             messageId,
             timestamp,
             attachmentIds,
-            sdlcDiscussion,
+            entityLinkContext,
           },
         }) => {
           if (content === '') {
@@ -2474,85 +2516,43 @@ export function createMutators(
             throw new Error('You need to be a participant for adding a conversations');
           }
 
-          if (sdlcDiscussion) {
-            const [repo, existingDiscussion] = await Promise.all([
-              tx.run(zql.repos.where('id', sdlcDiscussion.repoId).one()),
-              tx.run(
-                zql.sdlc_entity_links
-                  .where('repoId', sdlcDiscussion.repoId)
-                  .where('targetType', 'CONVERSATION')
-                  .where('targetId', conversationId)
-                  .where('relationType', 'DISCUSSION'),
-              ),
-            ]);
-            if (
-              !repo ||
-              repo.workspaceId !== authData.workspaceId ||
-              repo.channelId !== channelId
-            ) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
+          if (entityLinkContext) {
+            const existingDiscussion = await tx.run(
+              zql.sdlc_entity_links
+                .where('channelId', channelId)
+                .where('targetType', 'CONVERSATION')
+                .where('targetId', conversationId)
+                .where('relationType', 'DISCUSSION'),
+            );
             if (existingDiscussion.length > 0) {
               throw new Error('Conversation already has an SDLC discussion owner');
             }
-            if (sdlcDiscussion.ownerType === 'TRACK') {
-              const track = await tx.run(
-                zql.sdlc_tracks.where('id', sdlcDiscussion.ownerId).one(),
+            if (entityLinkContext.sourceType === 'TRACK') {
+              // A track has no scope column: its CHANNEL -> TRACK edge is the check.
+              const trackEdge = await tx.run(
+                zql.sdlc_entity_links
+                  .where('channelId', channelId)
+                  .where('targetType', 'TRACK')
+                  .where('targetId', entityLinkContext.sourceId)
+                  .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+                  .one(),
               );
-              if (!track || track.repoId !== repo.id) {
+              if (!trackEdge) {
                 throw new Error('Invalid SDLC discussion owner');
               }
             } else {
-            if (!sdlcDiscussion.surfaceType || !sdlcDiscussion.surfaceId) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
-            const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
-              {
-                workspaceId: authData.workspaceId,
-                repoId: repo.id,
-                channelId,
-                surfaceType: sdlcDiscussion.surfaceType,
-                surfaceId: sdlcDiscussion.surfaceId,
-              },
-              {
-                getCanvas: async id => {
-                  const canvas = await tx.run(zql.canvases.where('id', id).one());
-                  if (!canvas) return null;
-                  // Kind lives on the artifact row now; a canvas with no SDLC
-                  // artifact is not a valid discussion owner.
-                  const artifact = await tx.run(
-                    zql.sdlc_artifacts.where('artifactId', id).one(),
-                  );
-                  return { ...canvas, artifactType: artifact?.artifactType ?? '' };
-                },
-                getTicket: async id => {
-                  const ticket = await tx.run(zql.tickets.where('id', id).one());
-                  return ticket?.channelId ? { ...ticket, channelId: ticket.channelId } : null;
-                },
-                getPullRequest: async id =>
-                  (await tx.run(zql.pull_requests.where('id', id).one())) ?? null,
-                findLinkSource: async input => {
-                  const link = await tx.run(
-                    zql.sdlc_entity_links
-                      .where('repoId', input.repoId)
-                      .where('targetType', input.targetType)
-                      .where('targetId', input.targetId)
-                      .where('relationType', input.relationType)
-                      .one(),
-                  );
-                  if (
-                    !link ||
-                    (link.sourceType !== 'CANVAS' && link.sourceType !== 'TICKET')
-                  ) {
-                    return null;
-                  }
-                  return { sourceType: link.sourceType, sourceId: link.sourceId };
-                },
-              },
-            );
-            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerId) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
+              const [canvas, artifact] = await Promise.all([
+                tx.run(zql.canvases.where('id', entityLinkContext.sourceId).one()),
+                tx.run(zql.sdlc_artifacts.where('artifactId', entityLinkContext.sourceId).one()),
+              ]);
+              if (
+                !canvas ||
+                canvas.workspaceId !== authData.workspaceId ||
+                canvas.channelId !== channelId ||
+                !artifact
+              ) {
+                throw new Error('Invalid SDLC discussion owner');
+              }
             }
           }
 
@@ -2569,13 +2569,13 @@ export function createMutators(
             createdAt: now,
           });
 
-          if (sdlcDiscussion) {
+          if (entityLinkContext) {
             await tx.mutate.sdlc_entity_links.insert({
-              id: sdlcDiscussion.linkId,
+              id: entityLinkContext.linkId,
               workspaceId: authData.workspaceId,
-              repoId: sdlcDiscussion.repoId,
-              sourceType: sdlcDiscussion.ownerType,
-              sourceId: sdlcDiscussion.ownerId,
+              channelId,
+              sourceType: entityLinkContext.sourceType,
+              sourceId: entityLinkContext.sourceId,
               targetType: 'CONVERSATION',
               targetId: conversationId,
               relationType: 'DISCUSSION',
@@ -2605,7 +2605,7 @@ export function createMutators(
             // Explicit list from a pending-message-aware caller: transfer only
             // those ids, don't touch the draft row (client's clearContent owns it).
             if (attachmentIds.length > 0) {
-              message.hasAttachment = true;
+              let attachedCount = 0;
               for (const attachmentId of attachmentIds) {
                 const attachment = await tx.run(
                   zql.message_attachments.where('id', attachmentId).one(),
@@ -2615,6 +2615,15 @@ export function createMutators(
                   attachment.entityType === AttachmentEntityType.CHAT &&
                   attachment.entityId === messageId
                 ) {
+                  attachedCount++;
+                  continue;
+                }
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId },
+                    });
+                  }
                   continue;
                 }
                 await tx.mutate.message_attachments.update({
@@ -2623,7 +2632,9 @@ export function createMutators(
                   entityType: AttachmentEntityType.CHAT,
                   conversationId,
                 });
+                attachedCount++;
               }
+              message.hasAttachment = attachedCount > 0;
             }
           } else {
             // Legacy path: scan the current draft and transfer everything.
@@ -2639,18 +2650,28 @@ export function createMutators(
                 .where('entityId', draft.id)
                 .where('entityType', AttachmentEntityType.DRAFT));
 
+              let attachedCount = 0;
               for (const attachment of draftAttachments) {
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId: attachment.id },
+                    });
+                  }
+                  continue;
+                }
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
                   entityType: AttachmentEntityType.CHAT,
                   conversationId: conversationId,
                 });
+                attachedCount++;
               }
 
               await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              message.hasAttachment = draftAttachments.length > 0;
+              message.hasAttachment = attachedCount > 0;
             }
           }
 
@@ -3320,7 +3341,7 @@ export function createMutators(
             // Explicit list from a pending-message-aware caller: transfer only
             // those ids, don't touch the draft row (client's clearContent owns it).
             if (attachmentIds.length > 0) {
-              message.hasAttachment = true;
+              let attachedCount = 0;
               for (const attachmentId of attachmentIds) {
                 const attachment = await tx.run(
                   zql.message_attachments.where('id', attachmentId).one(),
@@ -3330,6 +3351,15 @@ export function createMutators(
                   attachment.entityType === AttachmentEntityType.CHAT &&
                   attachment.entityId === messageId
                 ) {
+                  attachedCount++;
+                  continue;
+                }
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId },
+                    });
+                  }
                   continue;
                 }
                 await tx.mutate.message_attachments.update({
@@ -3338,7 +3368,9 @@ export function createMutators(
                   entityType: AttachmentEntityType.CHAT,
                   conversationId,
                 });
+                attachedCount++;
               }
+              message.hasAttachment = attachedCount > 0;
             }
           } else {
             const draft = channelDrafts.find(d => d.conversationId === conversationId);
@@ -3348,18 +3380,28 @@ export function createMutators(
                 .where('entityId', draft.id)
                 .where('entityType', AttachmentEntityType.DRAFT));
 
+              let attachedCount = 0;
               for (const attachment of draftAttachments) {
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId: attachment.id },
+                    });
+                  }
+                  continue;
+                }
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
                   entityType: AttachmentEntityType.CHAT,
                   conversationId: conversationId,
                 });
+                attachedCount++;
               }
 
               await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              message.hasAttachment = draftAttachments.length > 0;
+              message.hasAttachment = attachedCount > 0;
             }
           }
 
@@ -4570,6 +4612,7 @@ export function createMutators(
             markedItems: [],
             recordingParticipants: '[]',
             xyneManaged: false,
+            visibility: CallVisibility.PRIVATE,
             metadata: {
               systemMessageId,
               conversationId,
@@ -4687,11 +4730,15 @@ export function createMutators(
                 },
               });
             } else {
-              // Just update status, keep existing metadata
+              // Just update status, keep existing metadata.
+              // Preserve startedAt across sessions of the same scheduled call: `endedAt` is only
+              // written when a prior session ended, so its presence means this is a rejoin and
+              // startedAt must keep the original first-join time. (startedAt itself is NOT NULL
+              // with a DB default of creation time, so it can't be used to detect "never joined".)
               await tx.mutate.calls.update({
                 id: call.id,
                 status: CallStatus.ACTIVE,
-                startedAt: now,
+                startedAt: call.endedAt ? call.startedAt : now,
                 lastActivityAt: now,
                 updatedAt: now,
               });
@@ -4995,9 +5042,6 @@ export function createMutators(
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
-          if (call.createdByUserId !== authData.sub) {
-            throw new Error('Only the call creator can admit participants');
-          }
           await tx.mutate.call_participants.update({
             id: participantId,
             response: InvitationResponse.ACCEPTED,
@@ -5010,9 +5054,6 @@ export function createMutators(
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
-          if (call.createdByUserId !== authData.sub) {
-            throw new Error('Only the call creator can decline participants');
-          }
           await tx.mutate.call_participants.update({
             id: participantId,
             response: InvitationResponse.DECLINED,
@@ -5848,14 +5889,13 @@ export function createMutators(
             }
           }
 
-          // ACL Business Logic: Check ticket transfer permission for assignedTo, userGroupId,
+          // ACL Business Logic: Check ticket transfer permission for assignedTo,
           // eta, stageName (which triggers stage ETA recalculation), or boardId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
-          const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
 
-          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
+          if ((isAssigneeChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
             // Get board to check if transfer is restricted
             const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
 
@@ -7008,6 +7048,23 @@ export function createMutators(
             updatedBy: authData.sub,
             updatedAt: timestamp,
           });
+
+          if (mappedTicketId !== undefined) {
+            const mappings = (await tx.run(
+              zql.ticket_sub_ticket_mappings.where('subTicketId', subTicketId),
+            )) as Array<{ ticketId: string }>;
+            for (const mapping of mappings) {
+              await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
+            }
+            if (mappedTicketId && mappings[0]) {
+              await linkSubTicketConversationToParentFromZero(
+                tx,
+                zql,
+                mappedTicketId,
+                mappings[0].ticketId,
+              );
+            }
+          }
         },
       ),
     },
@@ -7048,8 +7105,14 @@ export function createMutators(
             throw new Error('Project not found');
           }
 
+          // Only repositories that are in a hub block deletion: one registered
+          // and never added to a hub has nothing to detach.
           const attachedSdlcRepository = await tx.run(
-            zql.repos.where('projectId', projectId).where('channelId', 'IS NOT', null).one(),
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_MEMBERSHIP_RELATION)
+              .where('targetType', 'REPOSITORY')
+              .whereExists('channel', channel => channel.where('projectId', projectId))
+              .one(),
           );
           if (attachedSdlcRepository) {
             throw new Error('Detach SDLC repositories before deleting their project');
@@ -7068,7 +7131,6 @@ export function createMutators(
           projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
-          vcsProvider: z.nativeEnum(VCSProviderType),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
           applications: z.array(
@@ -7091,12 +7153,13 @@ export function createMutators(
             projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
-            vcsProvider,
             releaseTrackingMode,
             channelId,
             applications: rawApplications,
           },
         }) => {
+          await assertReleaseManageAccess();
+
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
@@ -7172,6 +7235,13 @@ export function createMutators(
           );
           if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
             throw new Error('All applications in a release group must use the same repository URL');
+          }
+
+          const vcsProvider = detectVcsProvider([...normalizedRepoUrls][0]);
+          if (!vcsProvider) {
+            throw new Error(
+              'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
+            );
           }
 
           if (!mainBoardName.trim()) {
@@ -7358,7 +7428,9 @@ export function createMutators(
             await tx.mutate.boards.update({
               id: existingMainBoard.id,
               name: mainBoardName.trim(),
-              vcsProvider,
+              // Keep the provider set at creation; re-inferring on edit would flip
+              // a GitHub-Enterprise-hosted board to BITBUCKET_SERVER.
+              vcsProvider: existingMainBoard.vcsProvider,
               releaseTrackingMode,
               updatedBy: authData.sub,
               updatedAt: Date.now(),
@@ -7747,8 +7819,12 @@ export function createMutators(
         },
       ),
       removeUsers: defineMutator(
-        z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
-        async ({ tx, args: { userGroupId, userIds } }) => {
+        z.object({
+          userGroupId: z.string(),
+          userIds: z.array(z.string()),
+          reassignTickets: z.boolean().optional(),
+        }),
+        async ({ tx, args: { userGroupId, userIds, reassignTickets } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -7766,12 +7842,37 @@ export function createMutators(
           );
 
           // Delete the found mappings
+          const removedUserIds: string[] = [];
           for (const mapping of mappingsToRemove) {
             if (mapping) {
               await tx.mutate.user_group_mappings.delete({
                 id: mapping.id,
               });
+              removedUserIds.push(mapping.userId);
             }
+          }
+
+          // Hand the removed members' open tickets off only once the delete has committed:
+          // a queued reassignment cannot be cancelled, so it must never run for a removal
+          // that rolled back. Same policy as the member pause flow - the group must allow it.
+          if (
+            reassignTickets &&
+            userGroup.reassignOnUnavailable === true &&
+            removedUserIds.length > 0
+          ) {
+            awaitedPostCommitTasks.push(async () => {
+              // Per-user guard: one failed enqueue must not skip the rest.
+              for (const removedUserId of removedUserIds) {
+                try {
+                  await ticketReassignmentQueue.scheduleReassignment(removedUserId, userGroupId);
+                } catch (error) {
+                  logger.error(
+                    `❌ [TICKET-REASSIGNMENT] Failed to schedule handoff for removed user ${removedUserId} in group ${userGroupId}:`,
+                    error
+                  );
+                }
+              }
+            });
           }
         },
       ),
@@ -7861,6 +7962,8 @@ export function createMutators(
           }
 
           if (board.boardType === BoardType.RELEASE) {
+            // Gate release-board edits like board.delete and the config-save mutator.
+            await assertReleaseManageAccess();
             if (projectId !== undefined && projectId !== board.projectId) {
               throw new Error('Release boards cannot be moved to another project');
             }
@@ -8206,6 +8309,10 @@ export function createMutators(
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          if (board.boardType === BoardType.RELEASE) {
+            await assertReleaseManageAccess();
           }
 
           const [ownedApplication, applicationBoardOwner] = await Promise.all([
@@ -9908,7 +10015,7 @@ export function createMutators(
           if (canvas.isCollaborative) {
             asyncTasks.push(async () => {
               try {
-                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[]);
+                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[], authData.sub);
               } catch (error) {
                 logger.error('[MUTATOR-CANVAS-VERSION-RESTORE] Failed to sync Y-Sweet:', error);
               }
@@ -10567,8 +10674,9 @@ export function createMutators(
           stateIds: z.record(z.string(), z.string()).optional(),
           complexityScoreId: z.string().optional(),
           mappingIds: z.record(z.string(), z.string()).optional(),
+          reassignUserIds: z.array(z.string()).optional(),
         }),
-        async ({ tx, args: { userGroupId, userStates, userMappings, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {} } }) => {
+        async ({ tx, args: { userGroupId, userStates, userMappings, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {}, reassignUserIds = [] } }) => {
           const now = timestamp;
 
           // Validate user group exists
@@ -10576,6 +10684,12 @@ export function createMutators(
           if (!userGroup) {
             throw new Error('User group not found');
           }
+
+          // Members opted in to a ticket handoff whose deactivation this save actually
+          // performs. Detected from the pre-write row rather than trusted from the client,
+          // so a stale opt-in for someone already inactive queues nothing.
+          const reassignOptIns = new Set(reassignUserIds);
+          const handoffTargets: string[] = [];
 
           // Update user assignment states
           for (const state of userStates) {
@@ -10591,6 +10705,14 @@ export function createMutators(
               throw new Error(`stateId is required for user ${state.userId}`);
             }
             const isActiveForAssignment = state.isActive;
+
+            if (
+              reassignOptIns.has(state.userId) &&
+              existingState?.isActiveForAssignment === true &&
+              !isActiveForAssignment
+            ) {
+              handoffTargets.push(state.userId);
+            }
 
             const stateData = {
               id: stateId,
@@ -10708,6 +10830,34 @@ export function createMutators(
                 });
               }
             }
+          }
+
+          // Hand off after the states commit, so members deactivated in this same save
+          // can't inherit each other's tickets and a rolled-back save queues nothing.
+          // The service re-checks workspace, the group's reassignOnUnavailable setting
+          // and membership against committed rows.
+          if (handoffTargets.length > 0) {
+            awaitedPostCommitTasks.push(async () => {
+              for (const targetUserId of handoffTargets) {
+                try {
+                  const result = await userAssignmentStateService.reassignMemberTicketsInGroup(
+                    targetUserId,
+                    userGroupId,
+                    authData.workspaceId,
+                  );
+                  if (!result.scheduled) {
+                    logger.warn(
+                      `⚠️ [TICKET-REASSIGNMENT] Handoff for deactivated user ${targetUserId} in group ${userGroupId} not scheduled: ${result.reason}`
+                    );
+                  }
+                } catch (error) {
+                  logger.error(
+                    `❌ [TICKET-REASSIGNMENT] Failed to schedule handoff for deactivated user ${targetUserId} in group ${userGroupId}:`,
+                    error
+                  );
+                }
+              }
+            });
           }
         },
       ),
@@ -10839,49 +10989,44 @@ export function createMutators(
       createLink: defineMutator(
         createSdlcLinkSchema.extend({
           id: z.string(),
-          repoId: z.string(),
+          channelId: z.string(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+          // Links belong to the hub. createSdlcLinkSchema already excludes the
+          // membership relation, so this cannot forge a CHANNEL -> REPOSITORY edge.
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', args.channelId)
               .where('userId', authData.sub)
-              .one()
+              .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           const sourceExists =
             args.sourceType === 'CANVAS'
               ? Boolean(
                   await tx.run(
-                    zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one()
-                  )
+                    zql.canvases.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                  ),
                 )
               : args.sourceType === 'TICKET'
                 ? Boolean(
                     await tx.run(
-                      zql.tickets
-                        .where('id', args.sourceId)
-                        .where('channelId', repo.channelId)
-                        .one()
-                    )
+                      zql.tickets.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                    ),
                   )
                 : args.sourceType === 'CHANNEL'
-                  ? args.sourceId === repo.channelId
+                  ? args.sourceId === args.channelId
                   : false;
           if (!sourceExists) {
-            throw new Error('Relationship source does not belong to this SDLC repository');
+            throw new Error('Relationship source does not belong to this SDLC hub');
           }
           await tx.mutate.sdlc_entity_links.insert({
             id: args.id,
             workspaceId: authData.workspaceId,
-            repoId: args.repoId,
+            channelId: args.channelId,
             sourceType: args.sourceType,
             sourceId: args.sourceId,
             targetType: args.targetType,
@@ -10890,66 +11035,77 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
-        }
+        },
       ),
       deleteLink: defineMutator(
-        z.object({ repoId: z.string(), linkId: z.string() }),
-        async ({ tx, args: { repoId, linkId } }) => {
-          const repo = await tx.run(zql.repos.where('id', repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+        z.object({ channelId: z.string(), linkId: z.string() }),
+        async ({ tx, args: { channelId, linkId } }) => {
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', channelId)
               .where('userId', authData.sub)
-              .one()
+              .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           const link = await tx.run(
-            zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one()
+            zql.sdlc_entity_links.where('id', linkId).where('channelId', channelId).one(),
           );
           if (!link) {
             throw new Error('SDLC relationship not found');
           }
+          // Structural edges are not content: repository membership is detached through
+          // the hub API, track membership only with the track. The mutation ACL agrees.
+          if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(link.relationType)) {
+            throw new Error('Structural SDLC edges are not deleted through the link API');
+          }
           await tx.mutate.sdlc_entity_links.delete({ id: linkId });
-        }
+        },
       ),
 
       createTrack: defineMutator(
         z.object({
           id: z.string(),
-          repoId: z.string(),
+          linkId: z.string(),
+          channelId: z.string(),
           name: z.string().trim().min(1).max(120),
           description: z.string().trim().max(2000).optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+          // Tracks belong to the hub, never to one repository in it.
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', args.channelId)
               .where('userId', authData.sub)
               .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           await tx.mutate.sdlc_tracks.insert({
             id: args.id,
             workspaceId: authData.workspaceId,
-            repoId: args.repoId,
             name: args.name,
             description: args.description,
             status: 'ACTIVE',
             createdBy: authData.sub,
             createdAt: args.timestamp,
             updatedAt: args.timestamp,
+          });
+          // The track carries no scope column; this edge is what places it in the hub.
+          await tx.mutate.sdlc_entity_links.insert({
+            id: args.linkId,
+            workspaceId: authData.workspaceId,
+            channelId: args.channelId,
+            sourceType: 'CHANNEL',
+            sourceId: args.channelId,
+            targetType: 'TRACK',
+            targetId: args.id,
+            relationType: SDLC_TRACK_MEMBERSHIP_RELATION,
+            createdBy: authData.sub,
+            createdAt: args.timestamp,
           });
         },
       ),
@@ -10966,13 +11122,20 @@ export function createMutators(
           if (!track) {
             throw new Error('SDLC track not found');
           }
-          const repo = await tx.run(zql.repos.where('id', track.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
+          const membership = await tx.run(
+            zql.sdlc_entity_links
+              .where('targetType', 'TRACK')
+              .where('targetId', args.trackId)
+              .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+              .one(),
+          );
+          if (!membership?.channelId) {
+            throw new Error('SDLC channel not found');
           }
+          const channelId = membership.channelId;
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', channelId)
               .where('userId', authData.sub)
               .one(),
           );
@@ -12165,33 +12328,92 @@ export function createMutators(
       setTypes: defineMutator(
         z.object({
           conversationId: z.string(),
-          // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
-          // add their own. Length-capped so a tag stays a label rather than a paragraph.
+          // Free-form, not z.enum: the workspace vocabulary is a starting point, and people
+          // type their own. Length-capped so a tag stays a label rather than a paragraph.
           types: z.array(z.string().trim().min(1).max(40)),
+          /**
+           * What a newly invented tag means. Stored as the vocabulary candidate's
+           * description, not on the thread — see the candidate write below.
+           */
+          note: z.string().trim().max(280).optional(),
+          timestamp: z.number(),
         }),
-        async ({ tx, ctx, args: { conversationId, types } }) => {
+        async ({ tx, ctx, args: { conversationId, types, note, timestamp } }) => {
           const conversation = await tx.run(
             zql.conversations.where('conversationId', conversationId).one(),
           );
           if (!conversation) throw new Error('Conversation not found');
 
-          // Built-in types first in vocabulary order, then custom ones alphabetically, so
-          // chips render in a stable order regardless of the order they were picked.
-          const rank = (name: string): number => {
-            const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
-            return i === -1 ? THREAD_TYPE_NAMES.length : i;
-          };
-          const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
-            (a, b) => rank(a) - rank(b) || a.localeCompare(b),
-          );
+          const existing = parseAppliedTags(conversation.threadType);
+          const byName = new Map(existing.map(tag => [tag.name, tag]));
 
+          // Normalise the names being ADDED, and only those. A name already on this thread is
+          // passed through untouched: the caller resends the full set on every edit, so
+          // normalising indiscriminately would silently rewrite tags applied long ago, on an
+          // edit that had nothing to do with them, leaving the same tag spelled two ways
+          // across the workspace.
+          const desired = [
+            ...new Set(
+              types
+                .map(raw => {
+                  const trimmed = raw.trim();
+                  return byName.has(trimmed) ? trimmed : normalizeThreadTypeName(trimmed);
+                })
+                .filter(Boolean),
+            ),
+          ];
 
-          // '[]' rather than null when cleared: null means "never classified" and the
-          // classifier would re-derive it on its next pass.
+          // A merge, never a replace. The caller sends the full desired set, but each tag
+          // already there keeps its own provenance — who applied it and when. Rewriting them all
+          // as freshly hand-applied would erase exactly the trail the tooltip exists to show.
+          const next: AppliedTag[] = [];
+          // Names THIS call applied fresh. Not the same as "every human tag on the thread":
+          // a tag someone else added survives the merge with their `by` intact, and sweeping
+          // those up would file a candidate crediting the wrong person every time anyone
+          // touched the thread's tags.
+          const addedNames: string[] = [];
+          for (const name of desired) {
+            const prior = byName.get(name);
+            if (prior && !prior.removed) {
+              next.push(prior);
+              continue;
+            }
+            next.push({ name, at: timestamp, by: ctx.userID });
+            addedNames.push(name);
+          }
+
+          // Dropped tags are tombstoned, not deleted: removal has to stay auditable, and a
+          // deleted tag would look unclassified to the classifier and come straight back.
+          const kept = new Set(desired);
+          for (const tag of existing) {
+            if (kept.has(tag.name)) continue;
+            next.push(
+              tag.removed ? tag : { ...tag, removed: true, at: timestamp, by: ctx.userID },
+            );
+          }
+
           await tx.mutate.conversations.update({
             conversationId,
-            threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+            threadType: serializeAppliedTags(next),
           });
+
+          // Backend copy only, like the refeed below: a free-form tag someone invented is
+          // recorded as a vocabulary candidate for an admin to promote or drop. The tag is
+          // already on the thread — this only governs whether the NAME becomes something the
+          // picker offers and the classifier may assign.
+          const workspaceIdForVocab = conversation.workspaceId;
+          if (workspaceIdForVocab && addedNames.length > 0) {
+            asyncTasks.push(async () => {
+              const vocabulary = await getThreadTypeVocabulary(workspaceIdForVocab);
+              const known = new Set(vocabulary.map(entry => entry.name));
+              for (const name of addedNames) {
+                if (known.has(name)) continue;
+                // The note describes the tag, so it lands on the candidate as its
+                // description — not copied onto every thread that carries the name.
+                await recordVocabularyCandidate(workspaceIdForVocab, name, ctx.userID, note);
+              }
+            });
+          }
 
           // Backend copy only. Zero collects no side-effect job for conversation updates
           // (SIDE_EFFECT_OPERATION_CONFIG lists insert/delete), and a thread's tags live on
@@ -12569,6 +12791,7 @@ export function createMutators(
                   position: index,
                   createdBy: authData.sub,
                   url: '', // Will be populated after upload completes
+                  uploadStatus: AttachmentUploadStatus.PENDING,
                   metadata: null,
                   conversationId: conversationId || null,
                   isDeleted: false,
@@ -14412,6 +14635,45 @@ export function createMutators(
         },
       ),
     },
+    viewAccess: {
+      grant: defineMutator(
+        z.object({
+          id: z.string(),
+          viewId: z.string(),
+          entityType: z.nativeEnum(ViewAccessEntityType),
+          entityId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, viewId, entityType, entityId, timestamp } }) => {
+          const existing = await tx.run(
+            zql.view_access
+              .where('viewId', viewId)
+              .where('entityType', entityType)
+              .where('entityId', entityId)
+              .one(),
+          );
+          if (existing) return;
+
+          await tx.mutate.view_access.insert({
+            workspaceId: authData.workspaceId,
+            id,
+            viewId,
+            entityType,
+            entityId,
+            sharedBy: authData.sub,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      revoke: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          await tx.mutate.view_access.delete({ id });
+        },
+      ),
+    },
     workspace: {
       update: defineMutator(
         z.object({
@@ -15179,6 +15441,9 @@ export function createMutators(
           metricsEnabled: z.boolean().optional(),
           frtStageNames: z.string().optional().nullable(),
           appWebhookDeliveryEnabled: z.boolean().optional(),
+          deskReportEnabled: z.boolean().optional(),
+          deskReportAgentSlug: z.string().optional().nullable(),
+          deskReportRangeDays: z.number().optional(),
         }),
         async ({
           tx,
@@ -15195,6 +15460,9 @@ export function createMutators(
             metricsEnabled,
             frtStageNames,
             appWebhookDeliveryEnabled,
+            deskReportEnabled,
+            deskReportAgentSlug,
+            deskReportRangeDays,
           },
         }) => {
           const existing = await tx.run(
@@ -15214,6 +15482,9 @@ export function createMutators(
               ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
               ...(frtStageNames !== undefined ? { frtStageNames } : {}),
               ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
+              ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
+              ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
+              ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
             });
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -15241,6 +15512,9 @@ export function createMutators(
               metricsEnabled: metricsEnabled ?? false,
               frtStageNames: frtStageNames ?? null,
               appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
+              deskReportEnabled: deskReportEnabled ?? false,
+              deskReportAgentSlug: deskReportAgentSlug ?? null,
+              deskReportRangeDays: deskReportRangeDays ?? 1,
             });
           }
         },

@@ -4,10 +4,12 @@ import { toast } from 'sonner';
 
 import { useTheme } from './useTheme';
 import { useAILandingDefault } from './useAILandingDefault';
+import { useAppModeCollapseSidebar } from './useAppModeCollapseSidebar';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
 import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOpen';
 import { useShowThreadTags } from './useShowThreadTags';
+import { useSummaryModelPreference } from './useSummaryModelPreference';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
@@ -42,11 +44,13 @@ export function usePreferencesState(enabled: boolean) {
   );
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
+  const { appModeCollapseSidebar, setAppModeCollapseSidebar } = useAppModeCollapseSidebar();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
     useDefaultFormattingToolbarOpen();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
+  const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
   const { searchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
@@ -135,6 +139,8 @@ export function usePreferencesState(enabled: boolean) {
     theme,
     changeTheme,
     aiLandingDefault,
+    appModeCollapseSidebar,
+    setAppModeCollapseSidebar,
     setAiLandingDefault,
     debugSettings,
     toggleSendIndicators,
@@ -143,6 +149,8 @@ export function usePreferencesState(enabled: boolean) {
     setDefaultFormattingToolbarOpen,
     showThreadTags,
     setShowThreadTags,
+    summaryModelPreference,
+    setSummaryModelPreference,
     setEnterSendsMessage,
     searchMode,
     showClawDashboard,

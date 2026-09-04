@@ -8,6 +8,7 @@
  */
 
 import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
+import type { UserQuestion } from "../tools/types.js";
 
 // ── Inlined FlowUI types (mirrors @xyne/shared) ──────────────────────────────
 
@@ -29,8 +30,15 @@ type FlowComponentType =
   | 'link'
   | 'plan'
   | 'agent'
+  | 'agent_summary'
+  | 'mcp_suggest'
   | 'mcpConfigure'
-  | 'pr';
+  | 'pr'
+  | 'user_question'
+  | 'code'
+  | 'diff'
+  | 'ticket'
+  | 'chart';
 
 interface FlowComponentStyle {
   padding?: string;
@@ -555,8 +563,7 @@ export function buildTwinApprovalFlow(params: TwinApprovalFlowParams): FlowDefin
  * User question — radio group with the agent's options + submit button.
  */
 export function buildUserQuestionFlow(
-  question: string,
-  options: string[],
+  questions: UserQuestion[],
   context: {
     questionId: string;
     agentSlug: string;
@@ -564,15 +571,31 @@ export function buildUserQuestionFlow(
     conversationId: string;
     userId: string;
   },
+  opts?: {
+    phase?: 'pending' | 'answered' | 'declined';
+    answers?: Record<string, string | string[]>;
+    notes?: Record<string, string>;
+    decidedAt?: string;
+  },
 ): FlowDefinition {
-  return new FlowBuilder(`user-question-${crypto.randomUUID()}`)
-    .addText('q', question)
-    .addSelect('answer', 'answer', {
-      label: 'Choose an option',
-      required: true,
-      options: options.map((opt) => ({ label: opt, value: opt })),
+  const phase = opts?.phase ?? 'pending';
+  return new FlowBuilder(`user-question-${context.questionId}`)
+    .addComponent({
+      id: 'questions',
+      type: 'user_question',
+      props: {
+        title: questions.length === 1 ? 'Question' : 'Questions',
+        questions,
+        phase,
+        ...(opts?.answers ? { answers: opts.answers } : {}),
+        ...(opts?.notes ? { notes: opts.notes } : {}),
+        ...(opts?.decidedAt ? { decidedAt: opts.decidedAt } : {}),
+        ...(phase === 'pending' ? {
+          submitAction: { type: 'submit', actionId: 'user-answer' },
+          dismissAction: { type: 'submit', actionId: 'dismiss-user-question' },
+        } : {}),
+      },
     })
-    .addButton('submit', 'Submit', { type: 'submit', actionId: 'user-answer' }, { variant: 'primary' })
     .setData({
       actionType: 'user-answer',
       questionId: context.questionId,
@@ -806,7 +829,7 @@ export function buildCloneApprovalFlow(
     .setTitle('Clone Request')
     .addText(
       'intro',
-      `*${context.requesterName}* wants to clone your agent *${context.agentName}*.\n\nA clone copies only the system prompt, tools, and skills into a new personal agent they own. Your app registration, credentials, and knowledge-base grants are NOT shared.${link}`,
+      `*${context.requesterName}* wants to clone your agent *${context.agentName}*.\n\nApproving gives them a personal copy carrying its prompt, tools, skills, behaviour settings and knowledge-base grants. Your app registration and your saved integration credentials are NOT shared — they will have to connect their own.${link}`,
     )
     .addDivider('d1')
     .addRow('actions', [
@@ -836,9 +859,10 @@ export function buildCloneApprovalFlow(
  * is included solely for the fail-closed caller check; flow-action re-reads the
  * real approver from the DB.
  */
-/** Rendering caps for the git-style diff card. FlowJSON has no native diff
- *  component, so each line is its own styled text node — cap the totals so a
- *  full-file rewrite can't emit thousands of components. */
+/** Rendering caps for the skill-update diff card, which predates the native
+ *  `diff` component and still renders each line as its own styled text node —
+ *  cap the totals so a full-file rewrite can't emit thousands of components.
+ *  New callers should emit a `diff` component (buildDiffFlow) instead. */
 const DIFF_CARD_MAX_HUNKS = 6;
 const DIFF_CARD_MAX_LINES = 60;
 const DIFF_LINE_MAX_CHARS = 160;
@@ -1020,6 +1044,243 @@ export function buildMcpConfigureFlow(context: {
       serverName: context.serverName,
       ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
       ...(context.spacesAppId ? { spacesAppId: context.spacesAppId } : {}),
+    })
+    .build();
+}
+
+const CODE_ARTIFACT_MAX_CHARS = 20_000;
+
+function clipArtifact(body: string, marker: string): string {
+  return body.length > CODE_ARTIFACT_MAX_CHARS
+    ? `${body.slice(0, CODE_ARTIFACT_MAX_CHARS)}\n${marker}`
+    : body;
+}
+
+export function buildCodeFlow(code: string, language?: string): FlowDefinition {
+  const lineCount = code.split('\n').length;
+  return new FlowBuilder(`code-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'code',
+      type: 'code',
+      props: {
+        code: clipArtifact(code, '… truncated'),
+        ...(language ? { language } : {}),
+      },
+    })
+    // Without fallbackText the stored message preview degrades to the literal
+    // "Flow JSON" — see the fallback chain in apps/backend chatController.
+    .setData({
+      kind: 'code',
+      fallbackText: `${language ? `${language} ` : ''}snippet · ${lineCount} line${lineCount === 1 ? '' : 's'}`,
+    })
+    .build();
+}
+
+export function buildDiffFlow(path: string, patch: string): FlowDefinition {
+  const firstMeaningfulLine = patch.split('\n').find((line) => line.trim() !== '') ?? '';
+  const headed =
+    firstMeaningfulLine.startsWith('diff --git ') || firstMeaningfulLine.startsWith('--- ');
+  const headedPatch = headed ? patch : `--- a/${path}\n+++ b/${path}\n${patch}`;
+  const lines = patch.split('\n');
+  const added = lines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
+  const removed = lines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+  return new FlowBuilder(`diff-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'diff',
+      type: 'diff',
+      props: {
+        path,
+        patch: clipArtifact(headedPatch, ' … diff truncated'),
+      },
+    })
+    .setData({ kind: 'diff', fallbackText: `${path} · +${added}/−${removed}` })
+    .build();
+}
+
+export interface TicketArtifact {
+  xyneId: string;
+  ticketId?: string;
+  title: string;
+  status: 'TODO' | 'STARTED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  stageName?: string;
+  eta?: string;
+  url: string;
+  channelId?: string;
+  conversationId?: string;
+  assigneeId?: string;
+}
+
+export function buildTicketFlow(ticket: TicketArtifact): FlowDefinition {
+  return new FlowBuilder(`ticket-${ticket.xyneId}`)
+    .addComponent({
+      id: 'ticket',
+      type: 'ticket',
+      props: {
+        phase: 'created',
+        xyneId: ticket.xyneId,
+        ...(ticket.ticketId ? { ticketId: ticket.ticketId } : {}),
+        title: ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        ...(ticket.stageName ? { stageName: ticket.stageName } : {}),
+        ...(ticket.eta ? { eta: ticket.eta } : {}),
+        ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
+        ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
+        ...(ticket.assigneeId ? { assigneeId: ticket.assigneeId } : {}),
+        url: ticket.url,
+      },
+    })
+    .build();
+}
+
+export function buildTicketProposalFlow(
+  ticket: {
+    title: string;
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    eta?: string;
+    assigneeId?: string;
+  },
+  action: {
+    serverType: string;
+    tool: string;
+    params: Record<string, unknown>;
+    userId: string;
+    signature: string;
+    agentSlug: string;
+    channelId?: string;
+    conversationId?: string;
+  },
+): FlowDefinition {
+  return new FlowBuilder(`ticket-proposal-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'ticket',
+      type: 'ticket',
+      props: {
+        phase: 'proposed',
+        title: ticket.title,
+        status: 'TODO',
+        priority: ticket.priority ?? 'MEDIUM',
+        ...(ticket.eta ? { eta: ticket.eta } : {}),
+        ...(ticket.assigneeId ? { assigneeId: ticket.assigneeId } : {}),
+        approveAction: { type: 'submit', actionId: 'approve-write', successMessage: 'Approved' },
+        approveContinueAction: { type: 'submit', actionId: 'approve-continue', successMessage: 'Approved — continuing' },
+        declineAction: { type: 'submit', actionId: 'decline-write' },
+      },
+    })
+    .setData({
+      actionType: 'write',
+      serverType: action.serverType,
+      tool: action.tool,
+      params: JSON.stringify(action.params),
+      userId: action.userId,
+      signature: action.signature,
+      agentSlug: action.agentSlug,
+      ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
+      ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
+    })
+    .build();
+}
+
+export interface ChartPoint {
+  label: string;
+  value: number;
+}
+
+export interface ChartSeriesPoint {
+  x: string;
+  y: number;
+  series?: string;
+}
+
+export type ChartArtifact =
+  | { type: 'bar'; points: ChartPoint[]; caption?: string }
+  | { type: 'pie'; points: ChartPoint[]; caption?: string }
+  | { type: 'donut'; points: ChartPoint[]; caption?: string }
+  | { type: 'line'; series: ChartSeriesPoint[]; caption?: string }
+  | { type: 'area'; series: ChartSeriesPoint[]; caption?: string };
+
+const CHART_MAX_CATEGORY_POINTS = 24;
+const CHART_MAX_SERIES_POINTS = 200;
+
+export function buildChartFlow(chart: ChartArtifact): FlowDefinition {
+  let props: Record<string, unknown>;
+  let pointCount: number;
+  if (chart.type === 'line' || chart.type === 'area') {
+    const series = chart.series.slice(0, CHART_MAX_SERIES_POINTS);
+    props = { type: chart.type, series };
+    pointCount = series.length;
+  } else {
+    const points = chart.points.slice(0, CHART_MAX_CATEGORY_POINTS);
+    props = { type: chart.type, points };
+    pointCount = points.length;
+  }
+  return new FlowBuilder(`chart-${crypto.randomUUID()}`)
+    .addComponent({
+      id: 'chart',
+      type: 'chart',
+      props: { ...props, ...(chart.caption ? { caption: chart.caption } : {}) },
+    })
+    // The caption carries the takeaway, so it's the best preview line we have;
+    // fall back to the shape when the agent omitted one.
+    .setData({
+      kind: 'chart',
+      fallbackText: chart.caption?.trim()
+        ? chart.caption.trim()
+        : `${chart.type} chart · ${pointCount} point${pointCount === 1 ? '' : 's'}`,
+    })
+    .build();
+}
+
+export interface McpSuggestConnector {
+  serverType: string;
+  name: string;
+  description?: string;
+  connected?: boolean;
+}
+
+/**
+ * Connector suggestions posted into a conversation.
+ *
+ * Rows carry display data only. The dashboard node resolves the live server id
+ * from the catalog when Connect is pressed, so a card that has been sitting in
+ * a thread cannot act on a connector that has since changed.
+ */
+export function buildMcpSuggestFlow(context: {
+  connectors: McpSuggestConnector[];
+  title?: string;
+  reason?: string;
+  browseAll?: boolean;
+  totalCount?: number;
+  screenKey: string;
+  agentSlug?: string;
+  userId: string;
+  conversationId?: string;
+  channelId?: string;
+}): FlowDefinition {
+  return new FlowBuilder(`mcp-suggest-${context.screenKey}`)
+    .addComponent({
+      id: 'mcp-suggest',
+      type: 'mcp_suggest',
+      props: {
+        ...(context.title ? { title: context.title } : {}),
+        ...(context.reason ? { reason: context.reason } : {}),
+        ...(context.browseAll ? { browseAll: true } : {}),
+        ...(context.totalCount !== undefined ? { totalCount: context.totalCount } : {}),
+        connectors: context.connectors.map((c) => ({
+          serverType: c.serverType,
+          name: c.name,
+          ...(c.description ? { description: c.description } : {}),
+          ...(c.connected !== undefined ? { connected: c.connected } : {}),
+        })),
+      },
+    })
+    .setData({
+      actionType: 'mcp-suggest',
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      userId: context.userId,
+      ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+      ...(context.channelId ? { channelId: context.channelId } : {}),
     })
     .build();
 }

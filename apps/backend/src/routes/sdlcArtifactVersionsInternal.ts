@@ -62,10 +62,21 @@ router.post(
     const trusted = binding(req);
     const body = req.body as Record<string, unknown>;
     const rawKinds = Array.isArray(body.kinds) ? body.kinds : [];
-    const kinds = rawKinds.filter((kind): kind is 'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC' =>
-      ['WIKI', 'BASELINE', 'PRD', 'TECH_DOC'].includes(String(kind))
-    );
-    if (kinds.length !== rawKinds.length) throw new AppError('Unsupported artifact kind', 400);
+    const mappedKinds = rawKinds.map((kind) => {
+      const value = String(kind);
+      if (value === 'PRD' || value === 'TECH_DOC') return 'ARTIFACT';
+      return value;
+    });
+    const kinds = [
+      ...new Set(
+        mappedKinds.filter((kind): kind is 'WIKI' | 'BASELINE' | 'ARTIFACT' =>
+          ['WIKI', 'BASELINE', 'ARTIFACT'].includes(kind)
+        )
+      ),
+    ];
+    if (kinds.length !== new Set(mappedKinds).size) {
+      throw new AppError('Unsupported artifact kind', 400);
+    }
     const artifacts = await store.listArtifacts({
       ...trusted,
       ...(kinds.length > 0 ? { kinds } : {}),

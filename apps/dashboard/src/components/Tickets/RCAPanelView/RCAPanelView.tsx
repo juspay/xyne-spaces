@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ClipboardCheck, Maximize2, Minimize2 } from 'lucide-react';
+import {
+  ClipboardCheck,
+  MaximizeTwoArrow as Maximize2,
+  MinimizeTwoArrow as Minimize2,
+} from '@xyne/icons';
 import { RCAStatus } from '@xyne/shared';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button';
@@ -234,16 +238,18 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
             Create a Root Cause Analysis to track the incident.
           </p>
         </div>
-        <button
+        <Button
           type='button'
+          variant='ghost'
           className='px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50'
           onClick={() => void handleCreateRCA()}
           disabled={isCreatingRCA}
+          trackId='rca_start_from_panel'
           data-track-category='RCA'
           data-track-name='StartRCAFromPanel'
         >
           {isCreatingRCA ? 'Creating...' : 'Start RCA'}
-        </button>
+        </Button>
       </div>
     );
   } else if (isReadOnlyView) {
@@ -376,10 +382,21 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
           <h3 className='text-lg font-semibold text-foreground'>Unsaved changes</h3>
           <p className='mt-2 text-sm text-muted-foreground'>{confirmDialog.message}</p>
           <div className='mt-6 flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={() => closeConfirmDialog(false)}>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => closeConfirmDialog(false)}
+              data-track-category='RCA'
+              data-track-name='CANCEL_RCA_CONFIRM'
+            >
               Skip Save
             </Button>
-            <Button type='button' onClick={() => closeConfirmDialog(true)}>
+            <Button
+              type='button'
+              onClick={() => closeConfirmDialog(true)}
+              data-track-category='RCA'
+              data-track-name='CONFIRM_RCA_ACTION'
+            >
               Save and Continue
             </Button>
           </div>

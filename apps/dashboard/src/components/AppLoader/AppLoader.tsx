@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useLoadingAnimationLog } from '../../hooks/useLoadingAnimationLog';
 import { Event } from '../../utils/logger';
 import { detectReactNativeWebView } from '../../utils/reactNativeBridge';
+import { AppLoaderMark } from './AppLoaderMark';
 
 const AppLoader = (): ReactElement => {
   const isNativeWebView = detectReactNativeWebView();
@@ -27,20 +28,7 @@ const AppLoader = (): ReactElement => {
         style={{ background: 'var(--root-bg)' }}
       >
         <div className='absolute inset-0 backdrop-blur-3xl'></div>
-        <img
-          src='/images/xyne_logo_loading.png'
-          alt='Xyne Logo'
-          className='h-[80px] w-[80px] z-[1100]'
-          loading='eager'
-          decoding='async'
-        />
-        <img
-          src='/images/spaces_logo_loading.png'
-          alt='Xyne Logo'
-          className='w-[120px] z-[1100]'
-          loading='eager'
-          decoding='async'
-        />
+        <AppLoaderMark size='lg' className='z-[1100]' />
       </motion.div>
     </AnimatePresence>
   );

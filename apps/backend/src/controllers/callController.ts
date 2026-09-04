@@ -26,6 +26,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
+import { isRecording } from '@/utils/callTypeUtils';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -48,6 +49,7 @@ import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
+import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 
@@ -67,8 +69,15 @@ const UpdateHeadlessRecordingSchema = z
     message: 'At least one recording field is required',
   });
 
+const UpdateCallLabelsSchema = z.object({
+  labels: z.array(z.string().trim().min(1).max(80)).max(50),
+});
+
 const RegenerateHeadlessSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
+  // Optional explicit model tier (e.g. the "Try the thinking model" button).
+  // Omitted → the creator's saved preference is used.
+  modelType: z.enum(['fast', 'thinking']).optional(),
 });
 
 export class CallController {
@@ -405,7 +414,14 @@ export class CallController {
         conversationId,
         artifactMessageId,
         sdlcLink,
+        summaryModelPreference,
       } = req.body;
+      // Recording summary LLM tier the client carried from its localStorage;
+      // stamped onto the detailed summary canvas so headless call-end
+      // auto-generation can honour a 'thinking' default. Anything but explicit
+      // 'thinking' is 'fast'.
+      const summaryModelPref: 'fast' | 'thinking' =
+        summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -459,6 +475,7 @@ export class CallController {
           undefined,
           undefined,
           req.user!.workspaceId,
+          { summaryModelPreference: summaryModelPref },
         );
         if (!detailedSummaryCanvasId) {
           throw new Error('Failed to create detailed summary canvas');
@@ -725,25 +742,15 @@ export class CallController {
         const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
         if (parsedSdlcLink.success) {
           const link = parsedSdlcLink.data;
-          const sdlcRepo = await db.repo.findFirst({
-            where: { id: link.repoId, channelId: channel.id },
-            select: { id: true },
-          });
-          const linkTargetValid = sdlcRepo
-            ? link.ownerType === 'CANVAS'
+          const linkTargetValid =
+            link.ownerType === 'CANVAS'
               ? Boolean(
                   await db.canvas.findFirst({
                     where: { id: link.ownerId, channelId: channel.id },
                     select: { id: true },
                   }),
                 )
-              : Boolean(
-                  await db.sdlcTrack.findFirst({
-                    where: { id: link.ownerId, repoId: link.repoId },
-                    select: { id: true },
-                  }),
-                )
-            : false;
+              : await isTrackInChannel(db, link.ownerId, channel.id);
           if (linkTargetValid) {
             validatedSdlcLink = link;
           } else {
@@ -1429,6 +1436,7 @@ export class CallController {
           title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
+          visibility: call.visibility,
           startedAt: call.startedAt,
           endedAt: call.endedAt,
           durationMs: call.endedAt
@@ -1463,6 +1471,17 @@ export class CallController {
             typeof callMetadata?.detailedSummaryReady === 'boolean'
               ? callMetadata.detailedSummaryReady
               : null,
+          // Explicit tri-state that layers on top of detailedSummaryReady:
+          // 'pending' during a live generation attempt, 'failed' when the
+          // final Bull retry gave up, 'ready' on success, null on older
+          // recordings that predate this field. The frontend prefers this
+          // over detailedSummaryReady when present.
+          detailedSummaryStatus:
+            callMetadata?.detailedSummaryStatus === 'pending' ||
+            callMetadata?.detailedSummaryStatus === 'ready' ||
+            callMetadata?.detailedSummaryStatus === 'failed'
+              ? (callMetadata.detailedSummaryStatus as 'pending' | 'ready' | 'failed')
+              : null,
           linkedTicketId:
             typeof callMetadata?.linkedTicketId === 'string'
               ? callMetadata.linkedTicketId
@@ -1473,6 +1492,13 @@ export class CallController {
               : null,
           // Google Docs exported from this recording's summary, newest first.
           googleDocs: readRecordingGoogleDocLinks(call.metadata),
+          // Which model tier produced the current summary. `null` for recordings
+          // generated before this feature — the frontend treats null as "offer the
+          // thinking-model upgrade" (only an explicit 'thinking' hides it).
+          summaryModelUsed:
+            callMetadata?.summaryModelUsed === 'fast' || callMetadata?.summaryModelUsed === 'thinking'
+              ? (callMetadata.summaryModelUsed as 'fast' | 'thinking')
+              : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
@@ -1628,8 +1654,61 @@ export class CallController {
   };
 
   /**
+   * PATCH /api/calls/:callId/labels
+   * Replace a call's labels. HEADLESS recordings keep their own endpoint
+   * (updateRecordingTitle) because they update title/markedItems/template in the
+   * same request; this one only ever touches labels.
+   */
+  updateCallLabels = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = UpdateCallLabelsSchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (!call || isRecording(call) || !workspaceId || call.workspaceId !== workspaceId) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const labels = await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels);
+      await repositories.calls.update(call.id, { labels });
+
+      // Echo the resolved ids: the caller optimistically holds the raw text it
+      // typed, and the detail screen has no live query to correct it from.
+      res.json({ success: true, labels });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        return;
+      }
+      logger.error('Failed to update call labels:', error);
+      res.status(500).json({ success: false, error: 'Failed to update labels' });
+    }
+  };
+
+  /**
    * POST /api/calls/recordings/:callId/generate-summary
-   * Replace a headless recording's visible summary using a built-in template.
+   * Kick off detailed-summary generation for a headless recording and return
+   * 202 immediately. Progress is observable through
+   * Call.metadata.detailedSummaryStatus ('pending' → 'ready' | 'failed'),
+   * which Zero replicates to the open screen; completion also notifies the
+   * owner (RECORDING_SUMMARY_READY). The underlying LLM call retries
+   * transient failures internally via callLlmRetry.
    */
   regenerateRecordingSummary = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
@@ -1658,26 +1737,71 @@ export class CallController {
         return;
       }
 
-      const result = await noteTakerTranscriptService.regenerateSummary(
-        call,
-        input.summaryTemplateId,
-      );
-      if (!result) {
-        res.status(404).json({
-          success: false,
-          error: 'Transcript is not available or summary generation failed',
+      // Fire-and-forget: the service owns every status transition ('pending'
+      // at start, 'ready'/'failed' at the end) plus the completion
+      // notification, so holding this HTTP request open for a minutes-long
+      // LLM run adds nothing except timeout risk.
+      void noteTakerTranscriptService
+        .regenerateSummary(call, input.summaryTemplateId, input.modelType)
+        .catch(error => {
+          logger.error(`[${callId}] Background summary regeneration threw`, error);
         });
-        return;
-      }
 
-      res.json({ success: true, ...result });
+      res.status(202).json({ success: true, status: 'pending' });
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ success: false, error: error.errors[0]?.message });
         return;
       }
-      logger.error(`[${callId}] Failed to regenerate recording summary`, error);
-      res.status(500).json({ success: false, error: 'Failed to regenerate recording summary' });
+      logger.error(`[${callId}] Failed to start recording summary regeneration`, error);
+      res.status(500).json({ success: false, error: 'Failed to start summary regeneration' });
+    }
+  };
+
+  /**
+   * POST /api/calls/recordings/:callId/generate-labels
+   * Generate topical labels for a headless recording on demand (list-view action),
+   * mirroring the auto-generation that normally runs off the transcript-ready webhook.
+   */
+  regenerateRecordingLabels = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const labelIds = await noteTakerTranscriptService.regenerateLabels(call);
+      if (labelIds === null) {
+        res.status(404).json({
+          success: false,
+          error: 'Transcript is not available',
+        });
+        return;
+      }
+
+      res.json({ success: true, labelIds });
+    } catch (error) {
+      logger.error(`[${callId}] Failed to generate recording labels`, error);
+      res.status(500).json({ success: false, error: 'Failed to generate recording labels' });
     }
   };
 

@@ -13,13 +13,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
+  AudioLines,
   Monitor,
   Smartphone,
   LayoutGrid,
   Shield,
   Eye,
   EyeOff,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
+import { ResolutionQualityHd, Spinner } from '@xyne/icons';
 import {
   NotificationLevel,
   MAX_NOTIFICATION_KEYWORDS,
@@ -32,6 +36,13 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { Switch } from '../../ui/Switch';
 import { RadioGroup, Radio } from '../../ui/RadioGroup';
 import { Button } from '../../ui/Button/Button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../ui/dropdown-menu';
+import { Tooltip } from '../../ui/Tooltip';
 
 import { usePlatform } from '../../../hooks/usePlatform';
 import type { Theme } from '../../../hooks/useTheme';
@@ -47,6 +58,7 @@ import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
+import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -59,6 +71,7 @@ import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
 } from '../../../hooks/useCallMediaQualitySettings';
+import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
@@ -73,6 +86,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
   { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
+  { id: 'recordings', label: 'Recordings', icon: <AudioLines className='size-4' /> },
   {
     id: 'messaging',
     label: 'Messaging',
@@ -115,27 +129,70 @@ const QualitySelect: FC<{
   label: string;
   value: CallMediaQuality;
   onChange: (value: CallMediaQuality) => void;
-}> = ({ id, label, value, onChange }) => (
-  <div className='flex items-center justify-between gap-4'>
-    <label htmlFor={id} className='text-sm font-medium text-foreground'>
-      {label}
-    </label>
-    <select
-      id={id}
-      value={value}
-      onChange={event => onChange(event.target.value as CallMediaQuality)}
-      className='h-8 min-w-32 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-      data-track-category='PREFERENCES'
-      data-track-name={id}
-    >
-      {CALL_MEDIA_QUALITY_OPTIONS.map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label} - {option.description}
-        </option>
-      ))}
-    </select>
-  </div>
-);
+  options?: typeof CALL_MEDIA_QUALITY_OPTIONS;
+  disabled?: boolean;
+  action?: ReactNode;
+}> = ({
+  id,
+  label,
+  value,
+  onChange,
+  options = CALL_MEDIA_QUALITY_OPTIONS,
+  disabled = false,
+  action,
+}) => {
+  const selected = options.find(option => option.value === value) ?? options[0];
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <span id={`${id}-label`} className='text-sm font-medium text-foreground'>
+        {label}
+      </span>
+      <div className='flex items-center gap-2'>
+        {action}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild disabled={disabled}>
+            <button
+              id={id}
+              type='button'
+              disabled={disabled}
+              aria-labelledby={`${id}-label ${id}`}
+              className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background'
+              data-track-category='PREFERENCES'
+              data-track-name={id}
+            >
+              <span className='truncate'>
+                {selected?.label}
+                {selected && (
+                  <span className='text-muted-foreground'> - {selected.description}</span>
+                )}
+              </span>
+              <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end' className='min-w-40'>
+            {options.map(option => (
+              <DropdownMenuItem
+                key={option.value}
+                onClick={() => onChange(option.value)}
+                className='flex items-center justify-between gap-3'
+                data-track-category='PREFERENCES'
+                data-track-name={`${id}-${option.value}`}
+              >
+                <span>
+                  {option.label}{' '}
+                  <span className='text-muted-foreground'>- {option.description}</span>
+                </span>
+                {option.value === value && (
+                  <Check className='size-3.5 shrink-0 text-primary' aria-hidden />
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+};
 
 // ─── Appearance ─────────────────────────────────────────────────────────────
 const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
@@ -219,16 +276,18 @@ const NotificationKeywordsCard: FC = () => {
           {keywords.map(keyword => (
             <Badge key={keyword} variant='primary' className='flex items-center gap-1.5 pr-1'>
               <span className='text-xs'>{keyword}</span>
-              <button
+              <Button
                 type='button'
+                variant='ghost'
                 onClick={() => removeKeyword(keyword)}
+                trackId='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
                 data-track-name='RemoveNotificationKeyword'
               >
                 <X className='h-3 w-3' />
-              </button>
+              </Button>
             </Badge>
           ))}
         </div>
@@ -278,9 +337,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                trackId='set_global_desktop_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -291,7 +353,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -304,9 +366,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                trackId='set_global_mobile_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -317,7 +382,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -469,6 +534,16 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const {
+    maxHeight: maxCameraHeight,
+    isDetecting,
+    detect: detectCameraQuality,
+  } = useMaxCameraHeight();
+  const videoQualityOptions = filterQualityOptionsByMax(
+    CALL_MEDIA_QUALITY_OPTIONS,
+    maxCameraHeight,
+    state.callVideoQuality,
+  );
 
   const handleDisconnectCalendar = async () => {
     setIsDisconnecting(true);
@@ -524,6 +599,30 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           label='Video'
           value={state.callVideoQuality}
           onChange={state.setCallVideoQuality}
+          options={videoQualityOptions}
+          disabled={maxCameraHeight === null}
+          action={
+            maxCameraHeight === null && (
+              <Tooltip content="Detect your camera's max supported resolution" side='top'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='iconSm'
+                  disabled={isDetecting}
+                  onClick={detectCameraQuality}
+                  aria-label='Detect camera quality'
+                  data-track-category='PREFERENCES'
+                  data-track-name='DetectCameraQuality'
+                >
+                  {isDetecting ? (
+                    <Spinner className='size-3.5 animate-spin' />
+                  ) : (
+                    <ResolutionQualityHd className='size-4' />
+                  )}
+                </Button>
+              </Tooltip>
+            )
+          }
         />
         <QualitySelect
           id='call-screen-share-quality'
@@ -574,6 +673,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           size='sm'
           disabled={isDisconnecting}
           onClick={() => void handleDisconnectCalendar()}
+          trackId='disconnect_calendar'
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
         >
@@ -583,6 +683,34 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
     </div>
   );
 };
+
+const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
+  <div className='space-y-6'>
+    <SectionHeader
+      title='Recordings'
+      subtitle='Configure how your recording summaries are generated'
+    />
+
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>LLM summary generation model</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Which model tier generates your recording summaries and titles. Fast is quicker; Thinking
+          is higher quality but slower.
+        </p>
+      </div>
+      <RadioGroup
+        value={state.summaryModelPreference}
+        onChange={value =>
+          state.setSummaryModelPreference(value === 'thinking' ? 'thinking' : 'fast')
+        }
+      >
+        <Radio value='fast'>Fast (default)</Radio>
+        <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
+      </RadioGroup>
+    </div>
+  </div>
+);
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
@@ -685,6 +813,21 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
         />
       </div>
       <DailyBriefToggle available={state.aiLandingDefault} />
+      <div className='mt-3 border-t border-border pt-3'>
+        <div className='flex items-center justify-between gap-4'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
+            <p className='mt-0.5 text-xs text-muted-foreground'>
+              Hide the sidebar when a chat is building an app
+            </p>
+          </div>
+          <Switch
+            id='app-mode-collapse-sidebar'
+            checked={state.appModeCollapseSidebar}
+            onCheckedChange={state.setAppModeCollapseSidebar}
+          />
+        </div>
+      </div>
     </div>
     <ClawOverlayToggle />
   </div>
@@ -828,6 +971,7 @@ const PasswordSection: FC = () => {
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
           className='w-full'
+          trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
         >
@@ -845,6 +989,8 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
       <div className='space-y-3'>
+        <IntentSuggestionsToggle />
+
         <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
           <p className='text-sm font-medium text-foreground'>Show send indicators</p>
           <Switch
@@ -976,6 +1122,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   availability: AvailabilitySection,
   voice: VoiceSection,
   calls: CallsSection,
+  recordings: RecordingsSection,
   messaging: MessagingSection,
   launch: LaunchSection,
   toolbar: ToolbarSection,

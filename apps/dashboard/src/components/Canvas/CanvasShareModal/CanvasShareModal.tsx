@@ -626,6 +626,8 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 size='sm'
                 disabled={guestInvite.isLoading || !guestInvite.email.trim()}
                 onClick={() => void guestInvite.sendInvite()}
+                data-track-category='CANVAS'
+                data-track-name='SEND_CANVAS_GUEST_INVITE'
                 className='gap-2'
               >
                 {guestInvite.isLoading ? (
@@ -737,7 +739,12 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
           {hasPendingChanges ? (
             <span className='text-xs italic text-muted-foreground'>Unsaved changes</span>
           ) : null}
-          <Button size='sm' onClick={handleDone}>
+          <Button
+            size='sm'
+            onClick={handleDone}
+            data-track-category='CANVAS'
+            data-track-name='DONE_CANVAS_SHARE'
+          >
             {hasPendingChanges ? 'Share' : 'Done'}
           </Button>
         </div>

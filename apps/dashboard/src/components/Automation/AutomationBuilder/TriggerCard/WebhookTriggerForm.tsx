@@ -43,14 +43,15 @@ export function WebhookTriggerForm({
   return (
     <div className='flex flex-col gap-5'>
       <Field
-        label='Request body'
-        description='JSON shape callers must POST. Declared keys are required on every call (extras allowed); a 400 is returned on mismatch. Downstream steps read these as {{trigger.body.*}}.'
+        label='Example payload'
+        description='Describe the JSON payload this webhook will receive. Use a field name and its type, for example { "ticketId": "string" }. Every field you add is required; requests that do not match return 400.'
         error={issuesAt.get('bodySchema')}
       >
         <SchemaJsonEditor
           value={bodySchema}
           onChange={next => setField('bodySchema', next)}
-          emptyHint='No body fields required — any JSON body is accepted.'
+          example={{ ticketId: 'string', event: 'string' }}
+          emptyHint='Add the fields your webhook expects, or leave this empty to accept any JSON payload.'
         />
       </Field>
 

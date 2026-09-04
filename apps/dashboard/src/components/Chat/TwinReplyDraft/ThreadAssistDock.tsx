@@ -16,8 +16,10 @@ import {
 } from '@xyne/icons';
 import { Button } from '../../ui/Button';
 import { Tooltip } from '../../ui/Tooltip';
+import Avatar from '../../ui/Avatar/Avatar';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { cn } from '../../../utils/classNames';
+import { useUser } from '../../../hooks/useUsers';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
 import {
@@ -27,6 +29,7 @@ import {
 } from '../../ui/TipTapExtensions/CitationMark';
 import { registerClawIcons } from '../XyneAISidebar/utils/clawCitationUrl';
 import type { ToolInvocation } from '../XyneAISidebar/utils/XyneAITypes';
+import { TwinReasoningPopover } from './TwinReasoningPopover';
 import type { TwinReplyDraftView, PostedTarget } from './twinReplyDraftApi';
 import type { AssistTab } from './useThreadAssist';
 
@@ -45,6 +48,8 @@ const swap = {
 } as const;
 
 export interface TwinSourceInfo {
+  /** Id of the person being replied to — resolves their real profile picture. */
+  userId?: string;
   name?: string;
   text?: string;
   onJump?: () => void;
@@ -65,7 +70,10 @@ interface ThreadAssistDockProps {
     decline: (draftId: string) => Promise<void>;
   };
   onPosted: (target: PostedTarget | null) => void;
-  onOpenReasoning: (draft: TwinReplyDraftView) => void;
+  onReasoningOpenChange: (draft: TwinReplyDraftView, open: boolean) => void;
+  reasoningOpen?: boolean;
+  /** Conversation the reasoning popover's debug tab reads its session from. */
+  conversationId: string;
   resolveSource?: (draft: TwinReplyDraftView) => TwinSourceInfo;
   attached?: boolean;
   onBeginEdit?: (draft: TwinReplyDraftView) => void;
@@ -82,7 +90,9 @@ export function ThreadAssistDock({
   recap,
   reply,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen = false,
+  conversationId,
   resolveSource,
   attached = true,
   onBeginEdit,
@@ -198,7 +208,9 @@ export function ThreadAssistDock({
                         approve={edited => reply.approve(selectedDraft.id, edited)}
                         decline={() => reply.decline(selectedDraft.id)}
                         onPosted={onPosted}
-                        onOpenReasoning={() => onOpenReasoning(selectedDraft)}
+                        onReasoningOpenChange={next => onReasoningOpenChange(selectedDraft, next)}
+                        reasoningOpen={reasoningOpen}
+                        conversationId={conversationId}
                         {...(onBeginEdit && { onBeginEdit: () => onBeginEdit(selectedDraft) })}
                       />
                     </motion.div>
@@ -445,46 +457,36 @@ function Pager({
   );
 }
 
-const AVATAR_COLORS = [
-  '#e11d48',
-  '#7c3aed',
-  '#0891b2',
-  '#d97706',
-  '#059669',
-  '#2563eb',
-  '#db2777',
-  '#4f46e5',
-];
-function avatarColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]!;
-}
-
+/**
+ * The person the twin is replying to, drawn with the shared `Avatar` so the photo
+ * and the identity colour agree with every other avatar in the app. This used to
+ * hash the display NAME into a private eight-colour palette, so the same person
+ * came out one colour here and a different one in the thread right above.
+ *
+ * `useUser` only resolves ids already in the loaded workspace roster, and Avatar
+ * handed an unknown id renders blank initials over a colour hashed from that id
+ * (handed none, it renders the CURRENT user). Either is a confidently wrong
+ * identity, so an unresolved sender falls back to a neutral initial: the colour
+ * is right or absent, never misleading.
+ */
 function SourceAvatar({
+  userId,
   name,
-  size = 16,
-  className,
 }: {
+  userId?: string | undefined;
   name?: string | undefined;
-  size?: number;
-  className?: string;
 }): ReactElement {
-  const label = (name ?? '').trim();
-  const initial = (label[0] ?? '?').toUpperCase();
+  const user = useUser(userId ?? '');
+  if (userId && user) {
+    // size-[18px] beats Avatar's own size-4 through tailwind-merge; `rounded`
+    // likewise beats its rounded-sm, and the image inherits that radius.
+    return (
+      <Avatar userId={userId} size='xs' showActiveStatus={false} className='size-[18px] rounded' />
+    );
+  }
+  const initial = ((name ?? '').trim()[0] ?? '?').toUpperCase();
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-full font-semibold uppercase leading-none text-white',
-        className,
-      )}
-      style={{
-        width: size,
-        height: size,
-        fontSize: Math.round(size * 0.52),
-        backgroundColor: avatarColor(label),
-      }}
-    >
+    <span className='inline-flex size-[18px] shrink-0 items-center justify-center rounded bg-muted text-[9px] font-semibold uppercase leading-none text-muted-foreground'>
       {initial}
     </span>
   );
@@ -624,7 +626,10 @@ function SourcePreview({ source }: { source: TwinSourceInfo }): ReactElement | n
       )}
     >
       <span className='w-[3px] shrink-0 self-stretch rounded-[2px] bg-[color:var(--mention-color)]' />
-      <SourceAvatar name={source.name} size={18} className='rounded' />
+      <SourceAvatar
+        {...(source.userId && { userId: source.userId })}
+        {...(source.name && { name: source.name })}
+      />
       <div className='flex min-w-0 flex-1 items-center gap-1.5'>
         {source.name && (
           <span className='max-w-[45%] shrink-0 truncate text-[13px] font-bold leading-[1.2] tracking-[-0.1px] text-foreground/90'>
@@ -691,7 +696,9 @@ function ReplyCard({
   approve,
   decline,
   onPosted,
-  onOpenReasoning,
+  onReasoningOpenChange,
+  reasoningOpen,
+  conversationId,
   onBeginEdit,
 }: {
   draft: TwinReplyDraftView;
@@ -700,7 +707,9 @@ function ReplyCard({
   approve: (edited?: string) => Promise<PostedTarget | null>;
   decline: () => Promise<void>;
   onPosted: (t: PostedTarget | null) => void;
-  onOpenReasoning: () => void;
+  onReasoningOpenChange: (open: boolean) => void;
+  reasoningOpen: boolean;
+  conversationId: string;
   onBeginEdit?: () => void;
 }): ReactElement {
   const [editing, setEditing] = useState(false);
@@ -780,37 +789,56 @@ function ReplyCard({
       </div>
 
       <div className='flex items-center gap-8 px-1'>
-        {draft.reasoning ? (
-          <Tooltip content='See why this reply was drafted' side='top' align='start'>
-            <button
-              onClick={onOpenReasoning}
-              aria-label='See why this reply was drafted'
-              data-track-category='twin-dock'
-              data-track-name='open-reasoning'
-              className='min-w-0 flex-1 truncate text-left text-xs font-medium text-foreground/40 transition-colors hover:text-foreground'
-            >
-              {footerNote}
-            </button>
-          </Tooltip>
-        ) : (
-          <span className='min-w-0 flex-1 truncate text-xs font-medium text-foreground/40'>
-            {footerNote}
-          </span>
-        )}
+        {/* Provenance only — plain text. It used to double as the reasoning
+            trigger, which made a full-width line of prose clickable and easy to
+            hit by accident; the "Why?" button below owns that job now. */}
+        <span className='min-w-0 flex-1 truncate text-xs font-medium text-foreground/40'>
+          {footerNote}
+        </span>
 
         <div className='flex shrink-0 items-center gap-2'>
           <div className='flex items-center'>
+            {draft.reasoning && (
+              // A non-modal popover rather than a drawer, so the thread stays
+              // readable behind it. No tooltip on the trigger: Radix owns the
+              // click here, and the label already says what it opens.
+              <TwinReasoningPopover
+                open={reasoningOpen}
+                onOpenChange={onReasoningOpenChange}
+                draft={draft}
+                conversationId={conversationId}
+                trigger={
+                  <button
+                    aria-label='See why this reply was drafted'
+                    aria-haspopup='dialog'
+                    aria-expanded={reasoningOpen}
+                    data-track-category='twin-dock'
+                    data-track-name='open-reasoning'
+                    // Same px-[9px] py-1.5 band as the icon buttons beside it, so
+                    // the four controls read as one row.
+                    className={cn(
+                      'flex items-center justify-center px-[9px] py-1.5 text-xs font-medium transition-colors hover:text-foreground',
+                      reasoningOpen ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    Why?
+                  </button>
+                }
+              />
+            )}
             <Tooltip content='Discard draft' side='top'>
-              <button
+              <Button
+                variant='ghost'
                 onClick={() => void decline()}
                 disabled={loading}
+                trackId='twin_decline_draft'
                 aria-label='Discard draft'
                 data-track-category='twin-dock'
                 data-track-name='decline'
                 className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
               >
                 <ChatCancel size={14} />
-              </button>
+              </Button>
             </Tooltip>
             {hasReply && (
               <Tooltip content={editing ? 'Cancel edit' : 'Edit draft'} side='top'>
@@ -829,7 +857,10 @@ function ReplyCard({
           </div>
           <Button
             size='sm'
-            onClick={() => void send()}
+            data-track-category='twin-dock'
+            data-track-name='send-draft'
+            trackId='twin_send_reply'
+            trackAction={send}
             disabled={loading}
             loading={loading}
             className='h-7 gap-1 rounded-lg px-[9px] text-[13px] font-medium'

@@ -9,6 +9,7 @@
  */
 
 import { spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { errMsg } from "./errors.js";
 import { getSpacesAuthForUser } from "./spaces-db.js";
 import { createLogger } from "../logger.js";
 
@@ -81,7 +82,7 @@ export async function fetchAccessibleKb(
     )) as { success?: boolean; collections?: KbCollectionNode[] } | null;
     return raw?.collections ?? [];
   } catch (err) {
-    log.warn(`[fetchAccessibleKb] failed userId=${userId} err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[fetchAccessibleKb] failed userId=${userId} err=${errMsg(err)}`);
     return null;
   }
 }

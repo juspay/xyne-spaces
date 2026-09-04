@@ -1,14 +1,18 @@
-import { BrowserWindow, shell, Menu, MenuItem, app, dialog } from 'electron';
+import { BrowserWindow, shell, Menu, MenuItem, app, dialog, screen } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
 import { getIsQuitting } from '../app/main';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
-import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
+import {
+  registerAppOwnedWindow,
+  setMainWindow as setInterceptorMainWindow,
+} from '../services/request-interceptor';
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
+import { callInvitePath } from '../utils/validation';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -37,6 +41,220 @@ async function confirmReloadWhileRecording(window: BrowserWindow): Promise<boole
 
   await stopRecordingForReload();
   return true;
+}
+
+const MAX_APP_WINDOWS = 3;
+const appWindows = new Set<BrowserWindow>();
+
+function isAppWindowUrl(rawUrl: string): boolean {
+  try {
+    return !new URL(rawUrl).pathname.startsWith('/newWindow/');
+  } catch {
+    return false;
+  }
+}
+
+function trackAppWindow(win: BrowserWindow): void {
+  appWindows.add(win);
+  win.once('closed', () => appWindows.delete(win));
+}
+
+const namedChildWindows = new Map<string, BrowserWindow>();
+
+const STANDALONE_WINDOW_PREFIX = 'xyne-window:';
+
+function standaloneWindowKey(frameName: string | undefined): string | null {
+  if (!frameName || !frameName.startsWith(STANDALONE_WINDOW_PREFIX)) return null;
+  return frameName.slice(STANDALONE_WINDOW_PREFIX.length).split('#')[0] || null;
+}
+
+function focusWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+function applyWindowPolicy(win: BrowserWindow): void {
+  // Mirrors 'open-in-browser-panel' so links sent to the external browser are
+  // logged too, not just the ones routed into the panel.
+  const notifyExternalOpen = (externalUrl: string): void => {
+    win.webContents.send('link-opened-external', externalUrl);
+  };
+
+  // Handle external links
+  win.webContents.setWindowOpenHandler((details) => {
+     try {
+      const url = details.url;
+
+
+      const urlObj = new URL(url);
+      const currentUrl = win.webContents.getURL();
+      const currentUrlObj = new URL(currentUrl || '');
+      const currentAppUrl = new URL(config.FRONTEND_URL);
+      const isInternalUrl = urlObj.origin === currentAppUrl.origin;
+      
+      // Only allow http(s) protocols
+      if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+        return { action: 'deny' };
+      }
+
+      // A call the app hosts itself — the router opens it, not a window or a
+      // browser panel showing the guest lobby.
+      const inviteWindowPath = callInvitePath(url);
+      if (inviteWindowPath) {
+        win.webContents.send('navigate-to', inviteWindowPath);
+        return { action: 'deny' };
+      }
+
+      if(currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+        shell.openExternal(url);
+        notifyExternalOpen(url);
+        return { action: 'deny' };
+      }
+
+
+
+      if (!isInternalUrl) {
+        const prefExternal = browserSettingsService.getSettings().openLinksExternally;
+        const modifier = details.disposition === 'background-tab';
+        const wantExternal = prefExternal !== modifier;
+        if (wantExternal) {
+          shell.openExternal(url);
+          notifyExternalOpen(url);
+        } else {
+          win.webContents.send('open-in-browser-panel', url);
+        }
+        return { action: 'deny' };
+      }
+      
+      // Internal URLs - allow new window
+      const windowKey = standaloneWindowKey(details.frameName);
+      if (windowKey) {
+        const existing = namedChildWindows.get(windowKey);
+        if (existing && !existing.isDestroyed()) {
+          focusWindow(existing);
+          return { action: 'deny' };
+        }
+        namedChildWindows.delete(windowKey);
+      }
+
+      if (isAppWindowUrl(url) && appWindows.size >= MAX_APP_WINDOWS) {
+        win.webContents.send('app-window-limit-reached', MAX_APP_WINDOWS);
+        log.info(`[WindowManager] app window limit (${MAX_APP_WINDOWS}) reached; denying ${url}`);
+        return { action: 'deny' };
+      }
+
+      if (urlObj.pathname.startsWith('/newWindow/create-ticket')) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            width: 900,
+            height: 820,
+            minWidth: 640,
+            minHeight: 600,
+          },
+        };
+      }
+      if (!urlObj.pathname.startsWith('/newWindow/')) {
+        const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            width: Math.min(1440, Math.round(width * 0.85)),
+            height: Math.min(900, Math.round(height * 0.85)),
+            minWidth: 800,
+            minHeight: 600,
+            titleBarStyle: 'hiddenInset',
+            trafficLightPosition: { x: 19, y: 20 },
+            webPreferences: {
+              nodeIntegration: false,
+              contextIsolation: true,
+              webviewTag: true,
+              preload: path.join(__dirname, '..', 'preload.js'),
+              backgroundThrottling: false,
+              spellcheck: true,
+            },
+          },
+        };
+      }
+
+      return { action: 'allow' };
+
+    } catch (error) {
+      log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
+      return { action: 'deny' };
+    }
+});
+
+  // Plain <a href> clicks bypass setWindowOpenHandler; intercept here to keep the app from being replaced.
+  win.webContents.on('will-navigate', (event, navUrl) => {
+    try {
+      const navUrlObj = new URL(navUrl);
+      if (navUrlObj.protocol !== 'http:' && navUrlObj.protocol !== 'https:') {
+        return;
+      }
+
+      // Checked before the same-origin allow below: an invite URL normally lives
+      // on the Spaces origin, so following it would replace the running app with
+      // the guest lobby.
+      const invitePath = callInvitePath(navUrl);
+      if (invitePath) {
+        event.preventDefault();
+        win.webContents.send('navigate-to', invitePath);
+        return;
+      }
+
+      const currentAppUrl = new URL(config.FRONTEND_URL);
+      const currentUrl = win.webContents.getURL();
+      const currentUrlObj = new URL(currentUrl || '');
+
+      // Allow in-app navigation (same origin as configured frontend or current page)
+      if (
+        navUrlObj.origin === currentAppUrl.origin ||
+        navUrlObj.origin === currentUrlObj.origin
+      ) {
+        return;
+      }
+
+      // Mirror the mTLS branch from setWindowOpenHandler
+      if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+        event.preventDefault();
+        shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
+        return;
+      }
+
+      event.preventDefault();
+      if (browserSettingsService.getSettings().openLinksExternally) {
+        shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
+      } else {
+        win.webContents.send('open-in-browser-panel', navUrl);
+      }
+    } catch (err) {
+      log.warn('[WindowManager] Failed to handle will-navigate:', navUrl, err);
+    }
+  });
+
+  win.webContents.on('did-create-window', (childWindow, details) => {
+    if (isAppWindowUrl(details.url)) {
+      trackAppWindow(childWindow);
+    }
+    registerAppOwnedWindow(childWindow);
+
+    const windowKey = standaloneWindowKey(details.frameName);
+    if (windowKey) {
+      namedChildWindows.set(windowKey, childWindow);
+      childWindow.on('closed', () => {
+        if (namedChildWindows.get(windowKey) === childWindow) {
+          namedChildWindows.delete(windowKey);
+        }
+      });
+    }
+
+    applyWindowPolicy(childWindow);
+  });
+
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -144,109 +362,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     options?.inactive ? mainWindow?.showInactive() : mainWindow?.show(),
   );
 
-  // Mirrors 'open-in-browser-panel' so links sent to the external browser are
-  // logged too, not just the ones routed into the panel.
-  const notifyExternalOpen = (externalUrl: string): void => {
-    mainWindow?.webContents.send('link-opened-external', externalUrl);
-  };
-
-  // Handle external links
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-     try {
-      const url = details.url;
-
-
-      const urlObj = new URL(url);
-      const currentUrl = mainWindow?.webContents.getURL();
-      const currentUrlObj = new URL(currentUrl || '');
-      const currentAppUrl = new URL(config.FRONTEND_URL);
-      const isInternalUrl = urlObj.origin === currentAppUrl.origin;
-      
-      // Only allow http(s) protocols
-      if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
-        return { action: 'deny' };
-      }
-
-      if(currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
-        shell.openExternal(url);
-        notifyExternalOpen(url);
-        return { action: 'deny' };
-      }
-
-
-
-      if (!isInternalUrl) {
-        const prefExternal = browserSettingsService.getSettings().openLinksExternally;
-        const modifier = details.disposition === 'background-tab';
-        const wantExternal = prefExternal !== modifier;
-        if (wantExternal) {
-          shell.openExternal(url);
-          notifyExternalOpen(url);
-        } else {
-          mainWindow?.webContents.send('open-in-browser-panel', url);
-        }
-        return { action: 'deny' };
-      }
-      
-      // Internal URLs - allow new window
-      if (urlObj.pathname.startsWith('/newWindow/create-ticket')) {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            width: 900,
-            height: 820,
-            minWidth: 640,
-            minHeight: 600,
-          },
-        };
-      }
-      return { action: 'allow' };
-      
-    } catch (error) {
-      log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
-      return { action: 'deny' };
-    }
-});
-
-  // Plain <a href> clicks bypass setWindowOpenHandler; intercept here to keep the app from being replaced.
-  mainWindow.webContents.on('will-navigate', (event, navUrl) => {
-    try {
-      const navUrlObj = new URL(navUrl);
-      if (navUrlObj.protocol !== 'http:' && navUrlObj.protocol !== 'https:') {
-        return;
-      }
-
-      const currentAppUrl = new URL(config.FRONTEND_URL);
-      const currentUrl = mainWindow?.webContents.getURL();
-      const currentUrlObj = new URL(currentUrl || '');
-
-      // Allow in-app navigation (same origin as configured frontend or current page)
-      if (
-        navUrlObj.origin === currentAppUrl.origin ||
-        navUrlObj.origin === currentUrlObj.origin
-      ) {
-        return;
-      }
-
-      // Mirror the mTLS branch from setWindowOpenHandler
-      if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
-        event.preventDefault();
-        shell.openExternal(navUrl);
-        notifyExternalOpen(navUrl);
-        return;
-      }
-
-      event.preventDefault();
-      if (browserSettingsService.getSettings().openLinksExternally) {
-        shell.openExternal(navUrl);
-        notifyExternalOpen(navUrl);
-      } else {
-        mainWindow?.webContents.send('open-in-browser-panel', navUrl);
-      }
-    } catch (err) {
-      log.warn('[WindowManager] Failed to handle will-navigate:', navUrl, err);
-    }
-  });
+  applyWindowPolicy(mainWindow);
 
   log.info('✅ setWindowOpenHandler configured for main window');
 

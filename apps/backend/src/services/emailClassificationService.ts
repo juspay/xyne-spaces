@@ -100,12 +100,14 @@ export class EmailClassificationService {
 
     try {
       // Run category and priority classification in PARALLEL
-      const categoryPromise = this.runClassificationAgent(
-        config.classificationPrompt,
-        userMessage,
-        modelName,
-        config.ownerUserId,
-      );
+      const categoryPromise = config.classificationEnabled
+        ? this.runClassificationAgent(
+            config.classificationPrompt,
+            userMessage,
+            modelName,
+            config.ownerUserId,
+          )
+        : Promise.resolve(null);
 
       const priorityPromise = config.priorityClassificationEnabled
         ? this.classifyPriority(
@@ -123,15 +125,18 @@ export class EmailClassificationService {
         priorityPromise,
       ]);
 
-      const category = this.extractField(rawOutput, config.categoryField) ?? 'Other';
-      const subCategory = config.subCategoryField
+      // Empty category intentionally matches no user-group mapping (priority-only mode).
+      const category = rawOutput
+        ? (this.extractField(rawOutput, config.categoryField) ?? 'Other')
+        : '';
+      const subCategory = rawOutput && config.subCategoryField
         ? (this.extractField(rawOutput, config.subCategoryField) ?? null)
         : null;
 
       const result: ClassificationResult & { priority?: PriorityClassificationResult } = {
         category,
         subCategory,
-        rawOutput,
+        rawOutput: rawOutput ?? {},
       };
 
       if (priorityResult) {
@@ -523,6 +528,7 @@ export class EmailClassificationService {
       },
       defaultModel: modelName,
       temperature: 0.1,
+      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
     });
 
     logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
@@ -611,6 +617,7 @@ export class EmailClassificationService {
       },
       defaultModel: modelName,
       temperature: 0.1,
+      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
     });
 
     logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');

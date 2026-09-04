@@ -10,6 +10,7 @@ import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
 import { MetricsTab } from './tabs/MetricsTab';
 import { Inbox, Route, Zap, Bot, X, BarChart3 } from 'lucide-react';
+import { Button } from '../../ui/Button/Button';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -42,11 +43,17 @@ export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.Element
   { id: 'metrics', label: 'Metrics', icon: BarChart3 },
 ];
 
-export type AIFeaturesSubTabId = 'ai-draft' | 'knowledge' | 'attribution' | 'ai-sync';
+export type AIFeaturesSubTabId =
+  | 'ai-draft'
+  | 'knowledge'
+  | 'desk-report'
+  | 'attribution'
+  | 'ai-sync';
 
 export const AI_FEATURES_SUB_TABS: { id: AIFeaturesSubTabId; label: string }[] = [
   { id: 'ai-draft', label: 'AI Draft' },
   { id: 'knowledge', label: 'Knowledge' },
+  { id: 'desk-report', label: 'Desk Report' },
   { id: 'attribution', label: 'Attribution' },
   { id: 'ai-sync', label: 'AI Sync' },
 ];
@@ -222,7 +229,8 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                   >
                     Cancel
                   </button>
-                  <button
+                  <Button
+                    variant='ghost'
                     type='button'
                     onClick={() => void save()}
                     disabled={saving || !!saveBlockedReason}
@@ -230,9 +238,10 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                     className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='SaveAll'
+                    trackId='desk_settings_save'
                   >
                     {saving ? 'Saving…' : 'Save changes'}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

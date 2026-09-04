@@ -19,6 +19,8 @@ const EMPTY_ELIGIBILITY_CONFIG: TeamEligibilityConfig = { domains: [], teams: []
  * Single Superposition (CAC) key gating Xyne Call auto-injection eligibility
  * (see Xyne Call Link Auto-Injection PRD, FR-2). Value shape:
  *   { "domains": ["juspay.in"], "teams": ["Xyne"] }
+ * Both lists must be populated for the feature to act on anyone — an
+ * organizer must match an entry in each (see isTeamEligible).
  * Sourced from Superposition instead of a plain env var so it can be
  * toggled/rolled out without a redeploy. Missing, empty, malformed, or
  * unreachable config is treated as "feature disabled" — never throws.
@@ -49,21 +51,23 @@ export async function getTeamEligibilityConfig(): Promise<TeamEligibilityConfig>
 
 /**
  * Whether the given organizer is eligible for Xyne Call auto-injection:
- * eligible when either their email domain OR their UserProfile team
- * (case-insensitive) is present in the CAC-configured allowlist.
+ * eligible only when BOTH their email domain AND their UserProfile team
+ * (case-insensitive) are present in the CAC-configured allowlist. Fails
+ * closed — an organizer with no team, a domain outside the list, or either
+ * list left empty is not eligible.
  */
 export async function isTeamEligible(params: {
   email?: string | null;
   team?: string | null;
 }): Promise<boolean> {
   const { domains, teams } = await getTeamEligibilityConfig();
-  if (domains.length === 0 && teams.length === 0) return false;
+  if (domains.length === 0 || teams.length === 0) return false;
 
   const emailDomain = params.email?.trim().toLowerCase().split('@')[1];
-  if (emailDomain && domains.includes(emailDomain)) return true;
+  if (!emailDomain || !domains.includes(emailDomain)) return false;
 
   const team = params.team?.trim().toLowerCase();
-  if (team && teams.includes(team)) return true;
+  if (!team || !teams.includes(team)) return false;
 
-  return false;
+  return true;
 }

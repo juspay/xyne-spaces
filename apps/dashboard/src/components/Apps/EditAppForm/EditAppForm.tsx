@@ -86,6 +86,8 @@ const CommandRow = ({
           size='sm'
           className='h-7 w-7 p-0'
           onClick={() => onEdit(command)}
+          data-track-category='app-command'
+          data-track-name='EDIT_COMMAND'
           title='Edit command'
         >
           <Pencil size={13} />
@@ -96,6 +98,8 @@ const CommandRow = ({
           size='sm'
           className='h-7 w-7 p-0 text-destructive hover:text-destructive'
           onClick={() => onDelete(command.commandName)}
+          data-track-category='app-command'
+          data-track-name='DELETE_COMMAND'
           title='Delete command'
         >
           <Trash2 size={13} />
@@ -247,6 +251,8 @@ const CommandFormInline = ({
           size='sm'
           className='h-7'
           onClick={onCancel}
+          data-track-category='app-command'
+          data-track-name='CANCEL_COMMAND_FORM'
           disabled={saving}
         >
           <X size={13} className='mr-1' /> Cancel
@@ -256,6 +262,8 @@ const CommandFormInline = ({
           size='sm'
           className='h-7'
           onClick={() => void handleSave()}
+          data-track-category='app-command'
+          data-track-name='SAVE_COMMAND'
           disabled={saving}
         >
           <Check size={13} className='mr-1' />
@@ -310,6 +318,8 @@ const ShortcutRow = ({
           size='sm'
           className='h-7 w-7 p-0'
           onClick={() => onEdit(shortcut)}
+          data-track-category='app-shortcut'
+          data-track-name='EDIT_SHORTCUT'
           title='Edit shortcut'
         >
           <Pencil size={13} />
@@ -320,6 +330,8 @@ const ShortcutRow = ({
           size='sm'
           className='h-7 w-7 p-0 text-destructive hover:text-destructive'
           onClick={() => onDelete(shortcut.commandName)}
+          data-track-category='app-shortcut'
+          data-track-name='DELETE_SHORTCUT'
           title='Delete shortcut'
         >
           <Trash2 size={13} />
@@ -451,6 +463,8 @@ const ShortcutFormInline = ({
           size='sm'
           className='h-7'
           onClick={onCancel}
+          data-track-category='app-shortcut'
+          data-track-name='CANCEL_SHORTCUT_FORM'
           disabled={saving}
         >
           <X size={13} className='mr-1' /> Cancel
@@ -460,6 +474,8 @@ const ShortcutFormInline = ({
           size='sm'
           className='h-7'
           onClick={() => void handleSave()}
+          data-track-category='app-shortcut'
+          data-track-name='SAVE_SHORTCUT'
           disabled={saving}
         >
           <Check size={13} className='mr-1' />
@@ -666,6 +682,8 @@ const PermissionsSection = ({
             variant='outline'
             className='h-7 text-xs'
             onClick={() => void handleSave()}
+            data-track-category='Apps'
+            data-track-name='SAVE_APP'
             disabled={locked || !loaded}
           >
             {saving ? 'Saving…' : 'Save Permissions'}
@@ -677,6 +695,8 @@ const PermissionsSection = ({
               variant='default'
               className='h-7 text-xs'
               onClick={() => void handleActivate()}
+              data-track-category='Apps'
+              data-track-name='ACTIVATE_APP_INSTALL'
               disabled={activating || locked}
               title='Re-sync this install to activate pending permission changes'
             >
@@ -1420,6 +1440,8 @@ export const EditAppForm = ({
                       variant='outline'
                       size='sm'
                       onClick={handleUploadClick}
+                      data-track-category='Apps'
+                      data-track-name='UPLOAD_BOT_AVATAR'
                       disabled={isLoading || !canEditInstallSettings}
                       className='gap-1'
                       title='Upload bot profile picture'
@@ -1449,6 +1471,8 @@ export const EditAppForm = ({
                     variant='outline'
                     size='sm'
                     onClick={() => setShowCreateForm(true)}
+                    data-track-category='INCOMING_WEBHOOKS'
+                    data-track-name='OPEN_CREATE_WEBHOOK_FORM'
                     className='gap-1 w-full mt-2'
                   >
                     <Plus size={14} />
@@ -1607,6 +1631,8 @@ export const EditAppForm = ({
                       type='button'
                       size='sm'
                       onClick={() => void handleCreateWebhook()}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='CREATE_WEBHOOK'
                       disabled={
                         isCreating ||
                         !webhookName.trim() ||
@@ -1631,6 +1657,8 @@ export const EditAppForm = ({
                         setProjectBoards([]);
                         setSelectedBoardId('');
                       }}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='CANCEL_CREATE_WEBHOOK'
                     >
                       Cancel
                     </Button>
@@ -1759,6 +1787,8 @@ export const EditAppForm = ({
                       variant='outline'
                       size='sm'
                       onClick={() => handleCopyWebhookUrl(webhook.webhookUrl)}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='COPY_WEBHOOK_URL'
                       className='shrink-0'
                     >
                       <Copy size={14} />
@@ -1780,6 +1810,8 @@ export const EditAppForm = ({
                       size='sm'
                       disabled={!hasPrev}
                       onClick={() => fetchWebhooks(webhookOffset - WEBHOOK_PAGE_SIZE)}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='WEBHOOKS_PREV_PAGE'
                       className='h-7 w-7 p-0'
                     >
                       <ChevronLeft size={14} />
@@ -1790,6 +1822,8 @@ export const EditAppForm = ({
                       size='sm'
                       disabled={!hasNext}
                       onClick={() => fetchWebhooks(webhookOffset + WEBHOOK_PAGE_SIZE)}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='WEBHOOKS_NEXT_PAGE'
                       className='h-7 w-7 p-0'
                     >
                       <ChevronRight size={14} />
@@ -1817,6 +1851,8 @@ export const EditAppForm = ({
                       setEditingCommand(null);
                       setShowCommandForm(true);
                     }}
+                    data-track-category='app-command'
+                    data-track-name='OPEN_CREATE_COMMAND_FORM'
                   >
                     <Plus size={12} /> Add Command
                   </Button>
@@ -1878,6 +1914,8 @@ export const EditAppForm = ({
                       setEditingShortcut(null);
                       setShowShortcutForm(true);
                     }}
+                    data-track-category='app-shortcut'
+                    data-track-name='OPEN_CREATE_SHORTCUT_FORM'
                   >
                     <Plus size={12} /> Add Shortcut
                   </Button>
@@ -1935,7 +1973,14 @@ export const EditAppForm = ({
       </div>
 
       <div className='flex gap-2 justify-end p-4 border-t border-border bg-background shrink-0'>
-        <Button variant='outline' onClick={onCancel} disabled={isLoading} type='button'>
+        <Button
+          variant='outline'
+          onClick={onCancel}
+          data-track-category='Apps'
+          data-track-name='CANCEL_APP_FORM'
+          disabled={isLoading}
+          type='button'
+        >
           {activeSection === 'basic' ? 'Cancel' : 'Close'}
         </Button>
         {/* Save Changes only persists the Basic info fields (description + webhook URL); the other
@@ -1972,6 +2017,8 @@ export const EditAppForm = ({
               variant='outline'
               size='sm'
               onClick={() => setRevokeTargetId(null)}
+              data-track-category='Apps'
+              data-track-name='CANCEL_REVOKE_INSTALL'
             >
               Cancel
             </Button>

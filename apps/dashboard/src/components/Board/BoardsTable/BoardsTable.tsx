@@ -1,8 +1,8 @@
-/* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useMemo, useState } from 'react';
 import { Edit2, Copy, Check, Rocket, CornerDownRight } from 'lucide-react';
 import { BoardType } from '@xyne/shared';
 import { EmptyState } from '../EmptyState';
+import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import { Button } from '../../ui/Button';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
@@ -37,6 +37,12 @@ interface BoardsTableProps {
   // Fired on row click (outside the action buttons). Rows are styled
   // cursor-pointer, so without a handler they look clickable but do nothing.
   onBoardClick?: (board: BoardWithStages) => void;
+  // When set, the release group header shows "Workflow & Fields" (board field
+  // editor) instead of the repo-config edit — repo config lives elsewhere.
+  onWorkflowFields?: (board: BoardWithStages) => void;
+  // True while the boards query is still resolving. Distinguishes
+  // "still loading" from "genuinely no boards" so we don't flash the empty state.
+  loading?: boolean;
 }
 
 type RowKind =
@@ -53,6 +59,8 @@ export const BoardsTable = ({
   applicationBoardIds,
   applicationByBoardId,
   onBoardClick,
+  onWorkflowFields,
+  loading = false,
 }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
@@ -67,6 +75,24 @@ export const BoardsTable = ({
       .catch(() => {
         toast.error('Failed to copy board ID');
       });
+  };
+
+  // Release-manager mode (caller passes onWorkflowFields): the Boards tab edits
+  // every board *as a board* (workflow & fields) — repository and service config
+  // now live on the Repositories tab. Without onWorkflowFields (List Projects)
+  // the original per-type labels and repo/service routing are preserved.
+  const editBoardLabel = (board: BoardWithStages): string =>
+    board.boardType === BoardType.FLOW
+      ? 'Edit Plan'
+      : onWorkflowFields
+        ? 'Edit Board'
+        : getBoardEditLabel(board, applicationBoardIds);
+  const handleBoardEdit = (board: BoardWithStages): void => {
+    if (onWorkflowFields && board.boardType === BoardType.RELEASE) {
+      onWorkflowFields(board);
+    } else {
+      onEdit(board);
+    }
   };
 
   // Each release board with its app boards underneath, standalone boards last.
@@ -132,6 +158,10 @@ export const BoardsTable = ({
     return out;
   }, [boards, applicationByBoardId]);
 
+  if (loading) {
+    return <DelayedSpinner className='flex min-h-40 items-center justify-center py-8' />;
+  }
+
   if (boards?.length === 0) {
     return (
       <EmptyState
@@ -173,6 +203,8 @@ export const BoardsTable = ({
                   key={`group-${mainBoard.id}`}
                   className='bg-muted/40 hover:bg-muted transition-colors cursor-pointer'
                   onClick={onBoardClick ? () => onBoardClick(mainBoard) : undefined}
+                  data-track-category='Board'
+                  data-track-name='Open_Release_Group_Board_Row'
                 >
                   <td className='px-6 py-3 whitespace-nowrap'>
                     <div className='flex items-center gap-2'>
@@ -206,6 +238,8 @@ export const BoardsTable = ({
                         size='iconSm'
                         className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
                         onClick={e => handleCopyId(e, mainBoard.id)}
+                        data-track-category='Board'
+                        data-track-name='COPY_BOARD_ID'
                         title='Copy board ID'
                       >
                         {copiedBoardId === mainBoard.id ? <Check size={12} /> : <Copy size={12} />}
@@ -220,11 +254,14 @@ export const BoardsTable = ({
                   <td
                     className='px-6 py-3 whitespace-nowrap text-right text-sm font-medium'
                     onClick={e => e.stopPropagation()}
+                    data-track-category='Board'
+                    data-track-name='Board_Actions_Container'
+                    data-track-metadata={JSON.stringify({ boardId: mainBoard.id })}
                   >
                     <div className='flex items-center justify-end gap-2'>
                       <Button
                         variant='secondary'
-                        onClick={() => onEdit(mainBoard)}
+                        onClick={() => handleBoardEdit(mainBoard)}
                         data-testid='edit-board-button'
                         data-track-category='Board'
                         data-track-name='Edit_Board_Table'
@@ -234,7 +271,7 @@ export const BoardsTable = ({
                         })}
                       >
                         <Edit2 size={14} />
-                        {getBoardEditLabel(mainBoard, applicationBoardIds)}
+                        {editBoardLabel(mainBoard)}
                       </Button>
                     </div>
                   </td>
@@ -264,6 +301,8 @@ export const BoardsTable = ({
                   key={board.id}
                   className='hover:bg-muted transition-colors cursor-pointer'
                   onClick={onBoardClick ? () => onBoardClick(board) : undefined}
+                  data-track-category='Board'
+                  data-track-name='Open_App_Board_Row'
                 >
                   <td className='px-6 py-4 whitespace-nowrap'>
                     <div className='flex items-center gap-2 pl-6'>
@@ -297,6 +336,8 @@ export const BoardsTable = ({
                         size='iconSm'
                         className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
                         onClick={e => handleCopyId(e, board.id)}
+                        data-track-category='Board'
+                        data-track-name='COPY_BOARD_ID'
                         title='Copy board ID'
                       >
                         {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
@@ -311,11 +352,14 @@ export const BoardsTable = ({
                   <td
                     className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium'
                     onClick={e => e.stopPropagation()}
+                    data-track-category='Board'
+                    data-track-name='Board_Actions_Container'
+                    data-track-metadata={JSON.stringify({ boardId: board.id })}
                   >
                     <div className='flex items-center justify-end gap-2'>
                       <Button
                         variant='secondary'
-                        onClick={() => onEdit(board)}
+                        onClick={() => handleBoardEdit(board)}
                         data-testid='edit-board-button'
                         data-track-category='Board'
                         data-track-name='Edit_Board_Table'
@@ -325,7 +369,7 @@ export const BoardsTable = ({
                         })}
                       >
                         <Edit2 size={14} />
-                        {getBoardEditLabel(board, applicationBoardIds)}
+                        {editBoardLabel(board)}
                       </Button>
                     </div>
                   </td>
@@ -340,6 +384,8 @@ export const BoardsTable = ({
                 key={board.id}
                 className='hover:bg-muted transition-colors cursor-pointer'
                 onClick={onBoardClick ? () => onBoardClick(board) : undefined}
+                data-track-category='Board'
+                data-track-name='Open_Board_Row'
               >
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
@@ -365,6 +411,8 @@ export const BoardsTable = ({
                       size='iconSm'
                       className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
                       onClick={e => handleCopyId(e, board.id)}
+                      data-track-category='Board'
+                      data-track-name='COPY_BOARD_ID'
                       title='Copy board ID'
                     >
                       {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
@@ -408,7 +456,7 @@ export const BoardsTable = ({
                     )}
                     <Button
                       variant='secondary'
-                      onClick={() => onEdit(board)}
+                      onClick={() => handleBoardEdit(board)}
                       data-testid='edit-board-button'
                       data-track-category='Board'
                       data-track-name='Edit_Board_Table'
@@ -418,7 +466,7 @@ export const BoardsTable = ({
                       })}
                     >
                       <Edit2 size={14} />
-                      {getBoardEditLabel(board, applicationBoardIds)}
+                      {editBoardLabel(board)}
                     </Button>
                     {onCopyConfig && (
                       <Button

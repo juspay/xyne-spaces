@@ -16,6 +16,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "./errors.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -160,7 +161,7 @@ export function buildOAuthTokenRouter(providers: OAuthTokenProvider[]): Router {
         const sid = req.session?.sessionId;
         if (sid) {
           agentRunRepository.markUsedUserToken(sid).catch((e) =>
-            log.warn(`[oauth-token] markUsedUserToken failed for ${sid}:`, e instanceof Error ? e.message : String(e)),
+            log.warn(`[oauth-token] markUsedUserToken failed for ${sid}:`, errMsg(e)),
           );
         }
 

@@ -123,7 +123,7 @@ export function RecordingButton({
           <button
             onClick={() => handlePick(RecordingType.AUDIO_ONLY)}
             className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
-            data-track-category='call'
+            data-track-category='CALLS'
             data-track-name='start-recording-audio-only'
           >
             <Mic className='w-4 h-4 text-blue-400 flex-shrink-0' />
@@ -136,7 +136,7 @@ export function RecordingButton({
           <button
             onClick={() => handlePick(RecordingType.AUDIO_SCREEN)}
             className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
-            data-track-category='call'
+            data-track-category='CALLS'
             data-track-name='start-recording-audio-screen'
           >
             <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0' />

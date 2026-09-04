@@ -276,18 +276,20 @@ export const BookmarkItem = ({
       {isActionToolbarVisible && (
         <div className='absolute top-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-sm p-1'>
           <Tooltip content='Mark as done'>
-            <button
+            <Button
+              variant='ghost'
               type='button'
               onClick={handleRemoveBookmark}
               className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
               aria-label='Mark as done'
               data-testid='bookmark-mark-as-done-btn'
+              trackId='mark_bookmark_done'
               data-track-category='CHAT_BOOKMARK'
               data-track-name='Mark_Bookmark_Done'
               data-track-metadata={JSON.stringify({ entityId })}
             >
               <Check size={16} className='text-muted-foreground' strokeWidth={1.33} />
-            </button>
+            </Button>
           </Tooltip>
           <Tooltip content={reminderActionLabel}>
             <div>
@@ -406,10 +408,18 @@ export const BookmarkItem = ({
                 e.stopPropagation();
                 setIsCustomReminderModalOpen(false);
               }}
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='OPEN_CUSTOM_REMINDER'
             >
               Cancel
             </Button>
-            <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+            <Button
+              onClick={handleSaveCustomReminder}
+              trackId='save_bookmark_reminder'
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='SAVE_CUSTOM_REMINDER'
+              disabled={!customReminderDate}
+            >
               Save
             </Button>
           </div>

@@ -10,6 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
+import Highlight from '@tiptap/extension-highlight';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
@@ -70,6 +71,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
@@ -138,6 +140,67 @@ const MaxListDepthPlugin = Extension.create({
   },
 });
 
+/**
+ * When an ordered list is directly preceded by another ordered list of the same
+ * style, continue its numbering instead of restarting at 1.
+ *
+ * ProseMirror keeps split/pasted ordered lists as separate `<ol>` nodes, and the
+ * second one has no `start` attribute, so the browser renders it from 1 again.
+ * This happens when a middle list item is lifted out on Enter (splitting one list
+ * into two) or when two ordered lists end up adjacent. We reconcile the `start`
+ * attribute so the visible numbering stays continuous.
+ */
+const OrderedListContinuationPlugin = Extension.create({
+  name: 'orderedListContinuation',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('orderedListContinuation'),
+        appendTransaction: (transactions, _oldState, newState) => {
+          if (!transactions.some(tr => tr.docChanged)) return null;
+          const orderedList = newState.schema.nodes['orderedList'];
+          if (!orderedList) return null;
+
+          const tr = newState.tr;
+          let modified = false;
+
+          const visit = (parent: PMNode, contentStart: number) => {
+            let prev: { node: PMNode; effStart: number } | null = null;
+            parent.forEach((child, offset) => {
+              const childPos = contentStart + offset;
+              if (child.type === orderedList) {
+                let effStart = (child.attrs['start'] as number) ?? 1;
+                if (
+                  prev &&
+                  prev.node.type === orderedList &&
+                  (prev.node.attrs['type'] ?? null) === (child.attrs['type'] ?? null)
+                ) {
+                  const desired = prev.effStart + prev.node.childCount;
+                  if (((child.attrs['start'] as number) ?? 1) !== desired) {
+                    tr.setNodeMarkup(childPos, undefined, {
+                      ...child.attrs,
+                      start: desired,
+                    });
+                    modified = true;
+                  }
+                  effStart = desired;
+                }
+                prev = { node: child, effStart };
+              } else {
+                prev = null;
+              }
+              if (child.childCount) visit(child, childPos + 1);
+            });
+          };
+
+          visit(newState.doc, 0);
+          return modified ? tr : null;
+        },
+      }),
+    ];
+  },
+});
+
 // Eagerly start loading emoji data so it's ready for sync lookups
 preloadEmojiData();
 
@@ -194,6 +257,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideVoiceInput = false,
       compact = false,
       sendDisabled = false,
+      sendDisabledReason,
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
@@ -588,7 +652,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
           },
         }),
+        Highlight.configure({
+          HTMLAttributes: {
+            class: 'chat-text-highlight',
+          },
+        }),
         MaxListDepthPlugin,
+        OrderedListContinuationPlugin,
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
@@ -747,6 +817,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
+              // Keyboard sends are invisible to autocapture (click/change/submit
+              // only); emit it explicitly so keyboard vs button sends are visible.
+              posthogService.capture('message_send', {
+                trigger: 'keyboard',
+                keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
+              });
               void handleSend();
               return true;
             }
@@ -901,6 +977,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
+            // Keyboard sends are invisible to autocapture (click/change/submit
+            // only); emit it explicitly so keyboard vs button sends are visible.
+            posthogService.capture('message_send', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
             void handleSend();
             return true;
           }
@@ -1173,7 +1255,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const handleSend = useCallback(async () => {
-      if (!editor || isSending || sendDisabled) return;
+      if (!editor || isSending) return;
+      if (sendDisabled) {
+        // The button is disabled, but Enter still lands here — say why rather than
+        // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+        // tooltip carrying the same reason never opens.
+        if (sendDisabledReason) toast.warning(sendDisabledReason);
+        return;
+      }
 
       // If a voice stream is active, finalize it for send first: this strips any
       // unfinalized interim text and aborts the stream (discarding in-flight results)
@@ -1246,6 +1335,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const finalPlainText = editor?.getText().trim() || plainText;
 
         await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
         editor.commands.setContent('');
         setContent('');
         setAttachedCanvas(null);
@@ -1264,6 +1354,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       attachedCanvas,
       hasSendableContent,
       sendDisabled,
+      sendDisabledReason,
       commandItems,
       onCommandSelect,
       disableDraftUpload,
@@ -1496,7 +1587,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
           <div
-            className='flex items-center min-w-0'
+            className='flex items-center min-w-0 h-5 w-full bg-background px-[var(--composer-px)] pb-0.5'
             style={{ display: agentVisible ? 'flex' : 'none' }}
           >
             {agentSlot}
@@ -1541,6 +1632,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <button
                   type='button'
                   onClick={onCancelSlashCommandArtifact}
+                  data-track-category='CHAT_INPUT'
+                  data-track-name='CANCEL_SLASH_COMMAND_ARTIFACT'
                   className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
                   aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
                 >
@@ -1792,6 +1885,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             handleAttachClick();
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_FILE'
                         >
                           <Plus className='h-4 w-4' /> Upload Files
                           <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
@@ -1801,6 +1896,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsTranscriptSelectorOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_TRANSCRIPT'
                         >
                           <FileText className='h-4 w-4' /> Add Call Summary
                         </DropdownMenuItem>
@@ -1809,6 +1906,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsCanvasAttachmentModalOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_CANVAS'
                         >
                           <FileText className='h-4 w-4' /> Canvas
                         </DropdownMenuItem>
@@ -1860,6 +1959,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('@').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_USER_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
@@ -1882,6 +1983,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('#').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_CHANNEL_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
@@ -1901,6 +2004,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={() => setShowFormatToolbar(prev => !prev)}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='TOGGLE_FORMAT_TOOLBAR'
                         className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
@@ -1943,6 +2048,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={onCancel}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='CANCEL_EDITING'
                         className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
@@ -1976,7 +2083,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2028,6 +2135,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     onCreateTicket(editor?.getText().trim() || '');
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='CREATE_TICKET_FROM_INPUT'
                                 >
                                   <Ticket className='h-4 w-4' /> Create a ticket
                                 </DropdownMenuItem>
@@ -2038,6 +2147,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     openScheduleDialog();
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='OPEN_SCHEDULE_DIALOG'
                                 >
                                   <Clock className='h-4 w-4' /> Schedule message
                                 </DropdownMenuItem>
@@ -2057,7 +2168,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2103,6 +2214,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   void handleSend();
                                   setIsSendMenuOpen(false);
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='SEND_FROM_MENU'
                               >
                                 <ArrowUp className='h-4 w-4' /> Send now
                               </DropdownMenuItem>
@@ -2111,6 +2224,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   setIsSendMenuOpen(false);
                                   openScheduleDialog();
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='OPEN_SCHEDULE_DIALOG'
                               >
                                 <Clock className='h-4 w-4' /> Schedule message
                               </DropdownMenuItem>
@@ -2119,7 +2234,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         </div>
                       ) : (
                         <Tooltip
-                          content='Send message'
+                          content={sendDisabledReason ?? 'Send message'}
                           side='top'
                           delayDuration={1000}
                           skipDelayDuration={1000}

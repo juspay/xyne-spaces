@@ -15,16 +15,11 @@ export const SDLC_BASELINE_COUNT = SDLC_BASELINE_KINDS.length;
 export const sdlcBaselineKindSchema = z.enum(SDLC_BASELINE_KINDS);
 export type SdlcBaselineKind = z.infer<typeof sdlcBaselineKindSchema>;
 
-export const SDLC_ARTIFACT_KINDS = ["BASELINE", "PRD", "TECH_DOC"] as const;
+export const SDLC_ARTIFACT_KINDS = ["BASELINE"] as const;
 export const sdlcArtifactKindSchema = z.enum(SDLC_ARTIFACT_KINDS);
 export type SdlcArtifactKind = z.infer<typeof sdlcArtifactKindSchema>;
 
-export const SDLC_CANVAS_TYPES = [
-  "PRD",
-  "TECH_DOC",
-  "WIKI",
-  ...SDLC_BASELINE_KINDS,
-] as const;
+export const SDLC_CANVAS_TYPES = ["WIKI", ...SDLC_BASELINE_KINDS] as const;
 export type SdlcCanvasType = (typeof SDLC_CANVAS_TYPES)[number];
 
 export const BASELINE_CANVAS_TYPES: ReadonlySet<string> = new Set(
@@ -38,16 +33,12 @@ export function isBaselineCanvasType(
 }
 
 export function canvasTypeForSdlcArtifact(
-  kind: SdlcArtifactKind,
   baselineKind?: SdlcBaselineKind | null,
 ): SdlcCanvasType {
-  if (kind === "BASELINE") {
-    if (!baselineKind) {
-      throw new Error("Baseline artifacts require a baselineKind");
-    }
-    return baselineKind;
+  if (!baselineKind) {
+    throw new Error("Baseline artifacts require a baselineKind");
   }
-  return kind;
+  return baselineKind;
 }
 
 export const CANVAS_STATUS_ACTIVE = "ACTIVE";
@@ -131,8 +122,27 @@ export const SDLC_ENTITY_TYPES = [
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
 export type SdlcEntityType = z.infer<typeof sdlcEntityTypeSchema>;
 
-export const SDLC_RELATION_TYPES = [
-  "TECH_DOC",
+/**
+ * A CHANNEL -> REPOSITORY edge: the repository belongs to that hub. It shares a
+ * table with the content graph, so every read of that graph excludes it — grep
+ * this constant for those call sites. Written only by the hub endpoints.
+ */
+export const SDLC_MEMBERSHIP_RELATION = "REPOSITORY";
+
+/**
+ * A CHANNEL -> TRACK edge: the track belongs to that hub. Tracks carry no scope
+ * column of their own, so this edge is the only thing that places one.
+ */
+export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
+
+/** Structure, not content. Every read of the content graph excludes these. */
+export const SDLC_STRUCTURAL_RELATIONS = [
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+] as const;
+
+/** Relation types a user may create or delete through the generic link API. */
+export const SDLC_CONTENT_RELATION_TYPES = [
   "TICKET",
   "CONTEXT",
   "PULL_REQUEST",
@@ -142,7 +152,13 @@ export const SDLC_RELATION_TYPES = [
   "CALL",
 ] as const;
 
+export const SDLC_RELATION_TYPES = [
+  ...SDLC_CONTENT_RELATION_TYPES,
+  ...SDLC_STRUCTURAL_RELATIONS,
+] as const;
+
 export const sdlcRelationTypeSchema = z.enum(SDLC_RELATION_TYPES);
+export const sdlcContentRelationTypeSchema = z.enum(SDLC_CONTENT_RELATION_TYPES);
 export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 
 export const sdlcDiscussionSchema = z
@@ -167,6 +183,16 @@ export const sdlcDiscussionSchema = z
   });
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
+export const entityLinkContextSchema = z.object({
+  sourceType: z.enum(["CANVAS", "TRACK"]),
+  sourceId: z.string().min(1),
+  linkId: z.string().min(1),
+});
+export type EntityLinkContextInput = z.infer<typeof entityLinkContextSchema>;
+
+export const entityLinkOwnerSchema = entityLinkContextSchema.omit({ linkId: true });
+export type EntityLinkOwner = z.infer<typeof entityLinkOwnerSchema>;
+
 export const SDLC_TRACK_STATUSES = ["ACTIVE", "COMPLETED", "ARCHIVED"] as const;
 export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
 
@@ -176,7 +202,6 @@ export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
  * OWNER -> CALL [CALL] and OWNER -> CONVERSATION [DISCUSSION] links.
  */
 export const sdlcCallLinkSchema = z.object({
-  repoId: z.string().min(1),
   ownerType: z.enum(["CANVAS", "TRACK"]),
   ownerId: z.string().min(1),
 });
@@ -195,6 +220,21 @@ export const SDLC_SETUP_STATUSES = [
 
 export const sdlcSetupStatusSchema = z.enum(SDLC_SETUP_STATUSES);
 export type SdlcSetupStatus = z.infer<typeof sdlcSetupStatusSchema>;
+
+export const createSdlcChannelSchema = z.object({
+  projectId: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  // At least one: a hub with no repositories has no screen to render.
+  repoIds: z.array(z.string().min(1)).min(1).max(100),
+});
+export type CreateSdlcChannelInput = z.infer<typeof createSdlcChannelSchema>;
+
+export const addSdlcChannelRepositoriesSchema = z.object({
+  repoIds: z.array(z.string().min(1)).min(1).max(100),
+});
+export type AddSdlcChannelRepositoriesInput = z.infer<
+  typeof addSdlcChannelRepositoriesSchema
+>;
 
 export const attachSdlcRepositorySchema = z.object({
   projectId: z.string().min(1),
@@ -598,13 +638,16 @@ export type BootstrapSdlcRuntimeCredentialInput = z.infer<
 export const createSdlcClawArtifactSchema = z
   .object({
     repoId: z.string().min(1),
-    kind: sdlcArtifactKindSchema,
+    // The hub to write into. A repository sits in several, so it cannot be inferred.
+    channelId: z.string().min(1).optional(),
+    kind: sdlcArtifactKindSchema.optional(),
+    folderId: z.string().min(1).optional(),
     title: z.string().trim().min(1).max(255),
     markdown: z.string().min(1).max(5_000_000),
     baselineKind: sdlcBaselineKindSchema.optional(),
     setupExecutionId: z.string().min(1).optional(),
     workflowExecutionId: z.string().min(1).optional(),
-    parentCanvasId: z.string().min(1).optional(),
+    relatedCanvasIds: z.array(z.string().min(1)).optional(),
     trackId: z.string().min(1).optional(),
     generationCommit: z.string().trim().max(255).optional(),
     sourceReferences: sdlcSourceReferencesSchema,
@@ -622,17 +665,20 @@ export const createSdlcClawArtifactSchema = z
           "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
       });
     }
-    if ((value.kind === "PRD" || value.kind === "TECH_DOC") && !value.trackId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "PRD and Tech Doc artifacts require a track",
-      });
-    }
-    if (value.trackId && value.kind !== "PRD" && value.kind !== "TECH_DOC") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "trackId is only supported for PRD and Tech Doc artifacts",
-      });
+    const isArtifact = value.kind !== "BASELINE";
+    if (isArtifact) {
+      if (!value.folderId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Artifact creation requires a folderId (the artifact type)",
+        });
+      }
+      if (!value.trackId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Artifacts require a track",
+        });
+      }
     }
   });
 export type CreateSdlcClawArtifactInput = z.infer<
@@ -641,7 +687,6 @@ export type CreateSdlcClawArtifactInput = z.infer<
 
 export const updateSdlcClawArtifactSchema = z.object({
   repoId: z.string().min(1),
-  kind: z.enum(["PRD", "TECH_DOC"]),
   canvasId: z.string().min(1),
   title: z.string().trim().min(1).max(255).optional(),
   markdown: z.string().min(1).max(5_000_000),
@@ -685,16 +730,32 @@ export const createSdlcLinkSchema = z.object({
   sourceId: z.string().min(1),
   targetType: sdlcEntityTypeSchema,
   targetId: z.string().min(1),
-  relationType: sdlcRelationTypeSchema,
+  // Content relations only: membership is not a link a caller may forge.
+  relationType: sdlcContentRelationTypeSchema,
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
 
 export const createSdlcTrackSchema = z.object({
   repoId: z.string().min(1),
+  channelId: z.string().min(1).optional(),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).optional(),
 });
 export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
+
+export const createSdlcArtifactTypeSchema = z.object({
+  repoId: z.string().min(1),
+  channelId: z.string().min(1).optional(),
+  name: z.string().trim().min(1).max(80),
+});
+export type CreateSdlcArtifactTypeInput = z.infer<typeof createSdlcArtifactTypeSchema>;
+
+export const renameSdlcArtifactTypeSchema = z.object({
+  repoId: z.string().min(1),
+  folderId: z.string().min(1),
+  name: z.string().trim().min(1).max(80),
+});
+export type RenameSdlcArtifactTypeInput = z.infer<typeof renameSdlcArtifactTypeSchema>;
 
 export function inferRepositoryNameFromUrl(raw: string): string | null {
   const value = raw.trim().replace(/^git@([^:]+):/, "https://$1/");
@@ -705,4 +766,46 @@ export function inferRepositoryNameFromUrl(raw: string): string | null {
     .split("/")
     .filter(Boolean);
   return segments.length >= 3 ? segments.at(-1)! : null;
+}
+
+/** Where to open in an SDLC hub, as entity ids only — `buildSdlcPath` makes the route. */
+export interface SdlcNavTarget {
+  channelId: string;
+  canvasId?: string | null | undefined;
+  ticketId?: string | null | undefined;
+  conversationId?: string | null | undefined;
+  messageId?: string | null | undefined;
+  blockId?: string | null | undefined;
+  commentThreadId?: string | null | undefined;
+}
+
+/** The repository is chosen inside the screen; the workspace prefix by the caller. */
+export function buildSdlcPath(target: SdlcNavTarget): string {
+  const search = new URLSearchParams();
+  let section = "overview";
+
+  if (target.canvasId) {
+    section = "artifacts";
+    search.set("canvas", target.canvasId);
+    // CanvasScreen reads both straight off the URL to focus an inline comment.
+    if (target.blockId) search.set("blockId", target.blockId);
+    if (target.commentThreadId) search.set("commentThreadId", target.commentThreadId);
+  } else if (target.ticketId) {
+    section = "tickets";
+    search.set("ticket", target.ticketId);
+  }
+
+  // A discussion hangs off whatever was opened above, not a section of its own.
+  // Without a message to scroll to, opening the panel is a guess — every ticket
+  // notification carries the ticket's conversationId whether or not it is about one.
+  let hash = "";
+  if (target.conversationId && target.messageId) {
+    search.set("discussion", "1");
+    search.set("chat", "conversations");
+    search.set("conversation", target.conversationId);
+    hash = `#${new URLSearchParams({ origin: target.conversationId, messageId: target.messageId }).toString()}`;
+  }
+
+  const query = search.toString();
+  return `/sdlc/${encodeURIComponent(target.channelId)}/${section}${query ? `?${query}` : ""}${hash}`;
 }

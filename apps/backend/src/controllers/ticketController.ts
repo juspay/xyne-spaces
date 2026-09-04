@@ -5,11 +5,14 @@ import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { BoardRepository } from '../database/repositories/boardRepository';
+import { ResourceRepository } from '../database/repositories/resources';
+import { ResourceAccessRepository } from '../database/repositories/resourceAccess';
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { MessageRepository } from '../database/repositories/messageRepository';
 import { MessageAttachmentRepository, CreateMessageAttachmentInput } from '../database/repositories/messageAttachmentRepository';
 import { EmailRepository } from '../database/repositories/emailRepository';
+import { ReleaseRepository } from '../database/repositories/releaseRepository';
 import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import {
   CreateTicketRequest,
@@ -39,6 +42,8 @@ import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
+import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
+import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
@@ -67,6 +72,9 @@ import { BaseTicketType,
   MessageType,
   ConversationParticipation,
   BoardType,
+  WorkspaceRole,
+  OrgRole,
+  AccessType,
 } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
@@ -227,6 +235,7 @@ export class TicketController {
     metadata?: Record<string, any>;
     messageContent?: string;
     messageSubtype?: string;
+    entityLinkContext?: EntityLinkOwner;
   }): Promise<Ticket> {
     const {
       title,
@@ -242,9 +251,8 @@ export class TicketController {
       metadata = {},
       messageContent,
       messageSubtype = 'ai_ticket',
+      entityLinkContext,
     } = params;
-
-    const db = DatabaseClient.getInstance();
 
     const ticket = await prisma.$transaction(async (tx) => {
       // Get channelId from conversation
@@ -260,10 +268,13 @@ export class TicketController {
       // Generate xyneId using project-scoped format
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
+      const creationMessageId = randomUUID();
+
       // Create ticket
       const ticket = await this.ticketRepository.createTicket({
         title,
         description,
+        sourceMessageId: creationMessageId,
         createdBy,
         updatedBy,
         assignedTo: assignedTo || undefined,
@@ -279,9 +290,9 @@ export class TicketController {
 
       // Post ticket notification as SYSTEM message in conversation
       const now = new Date();
-      await db.message.create({
+      await tx.message.create({
         data: {
-          messageId: randomUUID(),
+          messageId: creationMessageId,
           conversationId,
           senderId: createdBy,
           workspaceId: channelWorkspaceId,
@@ -299,7 +310,7 @@ export class TicketController {
       });
 
       // Update conversation reply count and set ticketId
-      await db.conversation.update({
+      await tx.conversation.update({
         where: { conversationId },
         data: {
           replyCount: { increment: 1 },
@@ -309,13 +320,13 @@ export class TicketController {
       });
 
       // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
-      await db.conversationParticipant.updateMany({
+      await tx.conversationParticipant.updateMany({
         where: { conversationId },
         data: { lastReplyAt: now },
       });
 
       // Add/update ticket creator as MENTIONED participant (subscribed by default)
-      await db.conversationParticipant.upsert({
+      await tx.conversationParticipant.upsert({
         where: {
           conversationId_userId: {
             conversationId,
@@ -337,6 +348,15 @@ export class TicketController {
           isSubscribed: true,
         },
       });
+
+      const linkOwner = entityLinkContext ?? (await resolveInheritedOwner(tx, conversationId));
+      if (linkOwner) {
+        await linkCreatedEntities(
+          tx,
+          { owner: linkOwner, channelId, conversationId, ticketId: ticket.id },
+          { workspaceId: channelWorkspaceId, userId: createdBy },
+        );
+      }
 
       await this.channelRepository.updateLastActivity(channelId);
 
@@ -504,6 +524,7 @@ export class TicketController {
         closedAt,
         closedBy,
         sourceConversationId,
+        sourceMessageId,
         channelId,
         excludedChatAttachmentIds,
         draftAttachmentIds,
@@ -545,8 +566,34 @@ export class TicketController {
         }
       }
 
-      // Extract dynamic fields if present (support both string and string[] for MULTI_SELECT)
-      const dynamicFields = (req.body.dynamicFields as Record<string, string | string[]>) || {};
+      // Extract the entity-link owner stamp if present (multipart sends a JSON string).
+      let entityLinkOwner: EntityLinkOwner | undefined;
+      if (req.body.entityLinkContext) {
+        try {
+          const rawStamp =
+            typeof req.body.entityLinkContext === 'string'
+              ? JSON.parse(req.body.entityLinkContext)
+              : req.body.entityLinkContext;
+          entityLinkOwner = entityLinkOwnerSchema.parse(rawStamp);
+        } catch {
+          res.status(400).json({ error: 'Invalid entityLinkContext' });
+          return;
+        }
+      }
+
+      // Extract dynamic fields — multipart sends a JSON string, JSON sends an object.
+      let dynamicFields: Record<string, string | string[]> = {};
+      if (typeof req.body.dynamicFields === 'string') {
+        try {
+          dynamicFields =
+            (JSON.parse(req.body.dynamicFields) as Record<string, string | string[]>) || {};
+        } catch {
+          res.status(400).json({ error: 'dynamicFields is not valid JSON' });
+          return;
+        }
+      } else if (req.body.dynamicFields && typeof req.body.dynamicFields === 'object') {
+        dynamicFields = req.body.dynamicFields as Record<string, string | string[]>;
+      }
       const requiredFields = { title, description, projectId };
       for (const [field, value] of Object.entries(requiredFields)) {
         if (!value) {
@@ -558,6 +605,86 @@ export class TicketController {
       if (!channelId && !sourceConversationId) {
         res.status(400).json({ error: 'Either channelId or sourceConversationId is required' });
         return;
+      }
+
+      // Validate multi-repo release config before the ticket exists (and the 201
+      // is sent) — an incomplete repo would otherwise be silently dropped when
+      // persisting releaseRepos, quietly covering fewer repos than configured.
+      const rawReleaseRepos = dynamicFields?.['releaseRepos'];
+      if (rawReleaseRepos !== undefined) {
+        if (!req.user) {
+          res.status(401).json({ error: 'Authentication required' });
+          return;
+        }
+        const privileged =
+          req.user.role === WorkspaceRole.ADMIN ||
+          req.user.role === WorkspaceRole.OWNER ||
+          req.user.orgRole === OrgRole.ADMIN ||
+          req.user.orgRole === OrgRole.OWNER;
+        if (!privileged) {
+          const releaseResource = await new ResourceRepository().findByName('RELEASE-MANAGER');
+          const allowed = releaseResource
+            ? await new ResourceAccessRepository().hasAccess(req.user.id, releaseResource.id, AccessType.WRITE)
+            : false;
+          if (!allowed) {
+            res.status(403).json({ error: 'Release Manager write access is required to create a release.' });
+            return;
+          }
+        }
+        let parsedReleaseRepos: unknown;
+        try {
+          parsedReleaseRepos =
+            typeof rawReleaseRepos === 'string' ? JSON.parse(rawReleaseRepos) : rawReleaseRepos;
+        } catch {
+          res.status(400).json({ error: 'releaseRepos is not valid JSON' });
+          return;
+        }
+        if (Array.isArray(parsedReleaseRepos)) {
+          const incomplete = parsedReleaseRepos.filter((r: any) => {
+            const has = (key: string): boolean => Boolean(String(r?.[key] ?? '').trim());
+            return !(has('mainReleaseBoardId') && has('branch') && has('deployedCommit') && has('newCommit'));
+          });
+          if (incomplete.length > 0) {
+            res.status(400).json({
+              error: `Each release repo needs mainReleaseBoardId, branch, deployedCommit and newCommit; ${incomplete.length} repo(s) are incomplete.`,
+            });
+            return;
+          }
+          const isSha = (s: string): boolean => /^[0-9a-f]{7,40}$/i.test(s);
+          const invalid = parsedReleaseRepos.filter((r: any) => {
+            const deployed = String(r?.deployedCommit ?? '').trim();
+            const newCommit = String(r?.newCommit ?? '').trim();
+            return !isSha(deployed) || !isSha(newCommit) || deployed === newCommit;
+          });
+          if (invalid.length > 0) {
+            res.status(400).json({
+              error: `Each release repo needs a distinct valid deployed and new commit hash; ${invalid.length} repo(s) are invalid.`,
+            });
+            return;
+          }
+          const actorWorkspaceId = req.user.workspaceId;
+          const boardIds = [
+            ...new Set(
+              parsedReleaseRepos.map((r: any) => String(r?.mainReleaseBoardId ?? '').trim()).filter(Boolean),
+            ),
+          ];
+          const repoBoards = await db.board.findMany({
+            where: { id: { in: boardIds } },
+            select: { id: true, workspaceId: true, projectId: true, boardType: true },
+          });
+          const owned =
+            repoBoards.length === boardIds.length &&
+            repoBoards.every(
+              b => b.workspaceId === actorWorkspaceId && b.boardType === BoardType.RELEASE,
+            ) &&
+            new Set(repoBoards.map(b => b.projectId)).size <= 1;
+          if (!owned) {
+            res.status(403).json({
+              error: 'Release repositories must be release boards in your workspace and belong to one project.',
+            });
+            return;
+          }
+        }
       }
 
       // Unlimited nesting is reserved for FLOW run graphs. Normal boards keep
@@ -700,6 +827,24 @@ export class TicketController {
         }
       }
 
+      if (sourceMessageId) {
+        const sourceMessage = await this.messageRepository.findById(sourceMessageId);
+        if (!sourceMessage || sourceMessage.workspaceId !== req.user.workspaceId) {
+          res.status(400).json({ error: 'Source message not found' });
+          return;
+        }
+        const existingFromMessage = await prisma.ticket.findUnique({
+          where: { messageId: sourceMessageId },
+          select: { xyneId: true },
+        });
+        if (existingFromMessage) {
+          res.status(409).json({
+            error: `A ticket (${existingFromMessage.xyneId}) was already created from this message`,
+          });
+          return;
+        }
+      }
+
       // Auto-assign ticket if userGroupId is provided but assignedTo is not
       let finalAssignedTo = assignedTo;
       let pendingFullRoleAssignment = false;
@@ -795,6 +940,7 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
+            sourceMessageId: sourceMessageId ?? existingConversation.initialMessageId ?? undefined,
             ticketType: effectiveTicketType,
             stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
@@ -890,6 +1036,21 @@ export class TicketController {
 
           // If there were any excluded attachments, they remain as CHAT attachments
           // (they won't be deleted since the conversation still exists)
+
+          const linkOwner =
+            entityLinkOwner ?? (await resolveInheritedOwner(tx, conversationId));
+          if (linkOwner) {
+            await linkCreatedEntities(
+              tx,
+              {
+                owner: linkOwner,
+                channelId: channelIdFromConversation,
+                conversationId,
+                ticketId: ticket.id,
+              },
+              { workspaceId: existingConversationWorkspaceId, userId },
+            );
+          }
         } else {
           let doNotPostToChannel = false;
           if (fromTicketsTab) {
@@ -931,6 +1092,7 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
+            sourceMessageId: sourceMessageId ?? initialMessageId,
             ticketType: effectiveTicketType,
             stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
@@ -997,6 +1159,29 @@ export class TicketController {
               isSubscribed: true,
             },
           });
+
+          let newConversationLinkOwner = entityLinkOwner;
+          if (!newConversationLinkOwner && sourceMessageId) {
+            const stampSourceMessage = await this.messageRepository.findById(sourceMessageId);
+            if (stampSourceMessage?.conversationId) {
+              newConversationLinkOwner = (await resolveInheritedOwner(
+                tx,
+                stampSourceMessage.conversationId,
+              )) ?? undefined;
+            }
+          }
+          if (newConversationLinkOwner) {
+            await linkCreatedEntities(
+              tx,
+              {
+                owner: newConversationLinkOwner,
+                channelId: channelId!,
+                conversationId,
+                ticketId: ticket.id,
+              },
+              { workspaceId: newConversationWorkspaceId, userId },
+            );
+          }
         }
 
         // Get workspaceId from channel for attachments
@@ -1120,7 +1305,13 @@ export class TicketController {
 
       const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;
       if (ticketChannelId) {
-        await this.channelRepository.updateLastActivity(ticketChannelId);
+        try {
+          await this.channelRepository.updateLastActivity(ticketChannelId);
+        } catch (err) {
+          logger.warn(
+            `[createTicket] Skipped last-activity update for channel ${String(ticketChannelId).replace(/[\r\n]/g, '')}: ${(err instanceof Error ? err.message : String(err)).replace(/[\r\n]/g, '')}`,
+          );
+        }
       }
 
       // Create TicketTag records for each tag
@@ -1364,19 +1555,48 @@ export class TicketController {
         const newCommitId = String(dynamicFields?.['newCommitId'] ?? '').trim();
         const branch = String(dynamicFields?.['branch'] ?? '').trim();
 
+        let completeRepoRows: Array<{
+          workspaceId: string;
+          releaseId: string;
+          mainReleaseBoardId: string;
+          branch: string;
+          deployedCommit: string;
+          newCommit: string;
+        }> = [];
+        try {
+          const raw = dynamicFields?.['releaseRepos'];
+          const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (Array.isArray(parsed)) {
+            completeRepoRows = parsed
+              .map((r: any) => ({
+                workspaceId: ticket.workspaceId,
+                releaseId: ticket.id,
+                mainReleaseBoardId: String(r?.mainReleaseBoardId ?? '').trim(),
+                branch: String(r?.branch ?? '').trim(),
+                deployedCommit: String(r?.deployedCommit ?? '').trim(),
+                newCommit: String(r?.newCommit ?? '').trim(),
+              }))
+              .filter((r) => r.mainReleaseBoardId && r.branch && r.deployedCommit && r.newCommit);
+            await new ReleaseRepository().createReleaseRepositories(completeRepoRows);
+          }
+        } catch (e) {
+          logger.error(`[ReleaseTrigger] failed to persist release repos for ticket ${ticket.xyneId}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        const hasRepoRows = completeRepoRows.length > 0;
+        const hasScalarRange = Boolean(deployedCommitId && newCommitId && branch);
+
         // Make silent-skip visible — log which condition(s) failed so this can be
         // debugged without staring at code. WARN level so it shows up by default.
-        if (!this.commitAnalysisController || !releaseTicket || !deployedCommitId || !newCommitId || !branch) {
+        if (!this.commitAnalysisController || !releaseTicket || (!hasRepoRows && !hasScalarRange)) {
           const missing: string[] = [];
           if (!this.commitAnalysisController) missing.push('commitAnalysisController(not initialized — check Bitbucket env vars)');
           if (!releaseTicket) missing.push(`ticketType(=${ticket.ticketType}, want Release/Hotfix)`);
-          if (!deployedCommitId) missing.push('dynamicFields.deployedCommitId');
-          if (!newCommitId) missing.push('dynamicFields.newCommitId');
-          if (!branch) missing.push('dynamicFields.branch');
+          if (!hasRepoRows && !hasScalarRange) missing.push('no complete ReleaseRepository rows and no scalar deployedCommitId/newCommitId/branch');
           logger.warn(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: missing=${missing.join(', ')}`);
         }
 
-        if (this.commitAnalysisController && releaseTicket && deployedCommitId && newCommitId && branch) {
+        if (this.commitAnalysisController && releaseTicket && (hasRepoRows || hasScalarRange)) {
           // workspace + repoSlug are now derived inside commitAnalysisController
           // from Application.repoUrl on the resolved project. We pass empty
           // placeholders to satisfy the existing param shape; the controller
@@ -1416,6 +1636,13 @@ export class TicketController {
       if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
           const target = error.meta?.target as string[];
+          if (target && target.includes('messageId')) {
+            res.status(409).json({
+              error: 'A ticket was already created from this message',
+              code: 'DUPLICATE_SOURCE_MESSAGE',
+            });
+            return;
+          }
           if (target && target.includes('xyneId')) {
             res.status(409).json({
               error: 'Ticket ID conflict. Please try again.',

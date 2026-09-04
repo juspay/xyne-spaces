@@ -85,6 +85,7 @@ export const ticketTable = table("tickets")
     statusUpdatedAt: number(),
     merchantId: string().optional(),
     conversationId: string(),
+    messageId: string().optional(),
     channelId: string(),
     eta: number().optional(),
     firstRespondedAt: number().optional(),
@@ -441,6 +442,7 @@ export const userGroupTable = table("user_groups")
     rotationInterval: string().optional(),
     rotationStartDate: number().optional(),
     reassignOnUnavailable: boolean().optional(),
+    maxWorkload: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -565,6 +567,8 @@ export const scheduledMessageTable = table("scheduled_messages")
     messageContent: string(),
     channelId: string(),
     daysOfWeek: string(),
+    monthlyMode: string().optional(),
+    monthlyValue: number().optional(),
     scheduledTime: string(),
     isActive: boolean(),
     createdBy: string(),
@@ -594,6 +598,8 @@ export const userGroupMappingTable = table("user_group_mappings")
     responsibility: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
+    startOffset: number().optional(),
+    isNotified: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -773,6 +779,7 @@ export const prThreadLinkTable = table("pr_thread_links")
 export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_ingestion_batches_v2")
   .columns({
     id: string(),
+    orgId: string().optional(),
     reportDate: number(),
     source: string(),
     idempotencyKey: string(),
@@ -796,7 +803,7 @@ export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_in
 
 export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_user_ingestions_v2")
   .columns({
-    workspaceId: string().optional(),
+    orgId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -823,7 +830,7 @@ export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_use
 
 export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_summaries_v2")
   .columns({
-    workspaceId: string().optional(),
+    orgId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -851,7 +858,7 @@ export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_
 
 export const teamIntelligenceOrgSummaryV2Table = table("team_intelligence_org_summaries_v2")
   .columns({
-    workspaceId: string().optional(),
+    orgId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -1170,6 +1177,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(),
     initial_message_md: string().optional(),
     parent_message_md: string().optional(),
+    sub_tickets_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
     threadType: string().optional(),
@@ -1342,6 +1350,9 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
+    deskReportEnabled: boolean().optional(),
+    deskReportAgentSlug: string().optional(),
+    deskReportRangeDays: number().optional(),
   })
   .primaryKey("channelId");
 
@@ -1595,8 +1606,8 @@ export const notificationTable = table("notifications")
     id: string(),
     userId: string(),
     type: string(),
-    title: string(),
-    message: string(),
+    title: string().optional(),
+    message: string().optional(),
     status: string(),
     deliveryMethods: json<string[]>(),
     metadata: json().optional(),
@@ -1681,6 +1692,7 @@ export const callTable = table("calls")
     labels: json<string[]>(),
     markedItems: json<any[]>(),
     xyneManaged: boolean(),
+    visibility: string().optional(),
   })
   .primaryKey("id");
 
@@ -1992,7 +2004,8 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   .columns({
     id: string(),
     workspaceId: string(),
-    repoId: string(),
+    repoId: string().optional(),
+    channelId: string(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
@@ -2007,7 +2020,7 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
     artifactId: string(),
-    repoId: string(),
+    repoId: string().optional(),
     artifactType: string(),
     artifactStatus: string(),
     workflowExecutionId: string().optional(),
@@ -2024,7 +2037,7 @@ export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
     workspaceId: string(),
     id: string(),
-    repoId: string(),
+    repoId: string().optional(),
     name: string(),
     description: string().optional(),
     status: string(),
@@ -2311,6 +2324,20 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     testedAt: number().optional(),
     failureReason: string().optional(),
     isHotfix: boolean().optional(),
+    createdAt: number(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const releaseRepositoryTable = table("release_repositories")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    releaseId: string(),
+    mainReleaseBoardId: string(),
+    branch: string(),
+    deployedCommit: string(),
+    newCommit: string(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -2825,6 +2852,26 @@ export const tagsConfigTable = table("tags_config")
   })
   .primaryKey("id");
 
+export const threadTypeVocabularyTable = table("thread_type_vocabulary")
+  .columns({
+    id: string(),
+    scope: string(),
+    scopeId: string(),
+    workspaceId: string(),
+    name: string(),
+    label: string(),
+    summary: string(),
+    color: string(),
+    description: string(),
+    status: string(),
+    isDeleted: boolean(),
+    createdBy: string().optional(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const doclingAsyncFileTable = table("docling_async_files")
   .columns({
     workspaceId: string().optional(),
@@ -2906,6 +2953,82 @@ export const entityAliasTable = table("entity_aliases")
     normalizedForm: string(),
     count: number(),
     createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const executionItemTable = table("execution_items")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    conversationId: string(),
+    channelId: string(),
+    sourceMessageId: string(),
+    title: string(),
+    contextSummary: string().optional(),
+    status: string(),
+    requestedBy: json<string[]>(),
+    pendingOn: json<string[]>(),
+    createdAt: number(),
+    updatedAt: number(),
+    resolvedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const executionThreadStateTable = table("execution_thread_states")
+  .columns({
+    workspaceId: string(),
+    conversationId: string(),
+    watermarkCreatedAt: number(),
+    watermarkMsgId: string(),
+    consecutiveFailures: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("conversationId");
+
+export const executionItemMutationTable = table("execution_item_mutations")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    itemId: string(),
+    conversationId: string(),
+    op: string(),
+    actorType: string(),
+    actorId: string().optional(),
+    sourceMessageId: string().optional(),
+    payload: json().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const executionRunLogTable = table("execution_run_logs")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    conversationId: string(),
+    gatePassed: boolean(),
+    gateReason: string(),
+    windowSize: number(),
+    parserRan: boolean(),
+    proposedOps: json().optional(),
+    validOps: json().optional(),
+    droppedOps: json().optional(),
+    applied: json().optional(),
+    assessment: string().optional(),
+    error: string().optional(),
+    durationMs: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const radarTeamTable = table("radar_teams")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    ownerId: string(),
+    name: string(),
+    memberIds: json<string[]>(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -4055,6 +4178,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ["channelId"],
     destSchema: repoTable,
   }),
+  sdlcEntityLinks: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: sdlcEntityLinkTable,
+  }),
   collectionPermissions: many({
     sourceField: ["id"],
     destField: ["channelId"],
@@ -4486,6 +4614,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     sourceField: ["repoId"],
     destField: ["id"],
     destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 
@@ -5049,6 +5182,7 @@ export const schema = createSchema(
       stageApproversTable,
       applicationTable,
       applicationReleaseTicketTable,
+      releaseRepositoryTable,
       releaseEventTable,
       releaseChangeTable,
       releaseChangeTypeTable,
@@ -5084,10 +5218,16 @@ export const schema = createSchema(
       installedAppPermissionTable,
       tagTable,
       tagsConfigTable,
+      threadTypeVocabularyTable,
       doclingAsyncFileTable,
       doclingAsyncPartTable,
       entityTable,
       entityAliasTable,
+      executionItemTable,
+      executionThreadStateTable,
+      executionItemMutationTable,
+      executionRunLogTable,
+      radarTeamTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5346,6 +5486,7 @@ export type CollectionPermission = Row<typeof schema.tables.collection_permissio
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type Application = Row<typeof schema.tables.applications>;
 export type ApplicationReleaseTicket = Row<typeof schema.tables.application_release_tickets>;
+export type ReleaseRepository = Row<typeof schema.tables.release_repositories>;
 export type ReleaseEvent = Row<typeof schema.tables.release_events>;
 export type ReleaseChange = Row<typeof schema.tables.release_changes>;
 export type ReleaseChangeType = Row<typeof schema.tables.release_change_types>;
@@ -5381,7 +5522,13 @@ export type AppPermission = Row<typeof schema.tables.app_permission>;
 export type InstalledAppPermission = Row<typeof schema.tables.installed_app_permissions>;
 export type Tag = Row<typeof schema.tables.tags>;
 export type TagsConfig = Row<typeof schema.tables.tags_config>;
+export type ThreadTypeVocabulary = Row<typeof schema.tables.thread_type_vocabulary>;
 export type DoclingAsyncFile = Row<typeof schema.tables.docling_async_files>;
 export type DoclingAsyncPart = Row<typeof schema.tables.docling_async_parts>;
 export type Entity = Row<typeof schema.tables.entities>;
 export type EntityAlias = Row<typeof schema.tables.entity_aliases>;
+export type ExecutionItem = Row<typeof schema.tables.execution_items>;
+export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
+export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
+export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
+export type RadarTeam = Row<typeof schema.tables.radar_teams>;

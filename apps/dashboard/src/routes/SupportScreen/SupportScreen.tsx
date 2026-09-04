@@ -1,56 +1,4 @@
-import {
-  ChevronDown,
-  ChevronUp,
-  ChevronLeft,
-  ChevronRight,
-  RefreshCw,
-  X,
-  PanelRight,
-  ReplyAll,
-  ArrowLeft,
-  ArrowUp,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  LayoutGrid,
-  List,
-  Table2,
-  Columns3,
-  Check,
-  Tag,
-  Split,
-  Paperclip,
-  Link as LinkIcon,
-  Settings,
-  Plug,
-  Plus,
-  Wand2,
-  Sparkles,
-  Loader2,
-  Pencil,
-  Archive,
-  AlertCircle,
-  Users2,
-  Users,
-  Lock,
-  Hash,
-  Inbox,
-  CheckCheck,
-  Search,
-  GitMerge,
-  Mail,
-  MailOpen,
-  User,
-  ListFilter,
-  BarChart4Icon,
-  CalendarDays,
-  BarChart3,
-  Circle,
-  UserPlus,
-  Info as InfoIcon,
-  Ticket as TicketIcon,
-  Tag as TagIcon,
-  CalendarRange,
-} from 'lucide-react';
+import { ReplyAll, Split, Wand2, Archive, Plug, MailOpen, MoreHorizontal, Ban } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelType,
@@ -59,6 +7,7 @@ import {
   TicketReferenceRelation,
   NotificationLevel,
   AutoDraftStatus,
+  MailboxState,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -73,7 +22,57 @@ import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
-import { Hashtag, Star } from '@xyne/icons';
+import {
+  GridDashboard01,
+  LayoutGridTwoVertical as Columns3,
+  TicketToken as TicketIcon,
+  Hashtag,
+  Star,
+  ChevronRight,
+  Circle,
+  Tag,
+  CalendarDefault as CalendarRange,
+  MultipleCrossCancelDefault as X,
+  SidebarRightOpen as PanelRight,
+  KanbanBoard as LayoutGrid,
+  ListDefault as List,
+  GridTable as Table2,
+  CheckTickSingle as Check,
+  SparkleAi02 as Sparkles,
+  PencilEdit as Pencil,
+  UserTwo as Users,
+  SearchDefault as Search,
+  UserDefault as User,
+  FilterLines as ListFilter,
+  BarchartDefault as BarChart4Icon,
+  CalendarDefault as CalendarDays,
+  Tag as TagIcon,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  Refresh as RefreshCw,
+  ArrowLeft,
+  ArrowUp,
+  DoubleChevronUp as ChevronsDownUp,
+  DoubleChevronDown as ChevronsUpDown,
+  PaperclipSlant as Paperclip,
+  LinkChainHorizontal as LinkIcon,
+  Settings02 as Settings,
+  PlusDefault as Plus,
+  Spinner as Loader2,
+  AlertCircle,
+  UserThree as Users2,
+  LockClose as Lock,
+  Hashtag as Hash,
+  InboxDefault as Inbox,
+  CheckTickDouble as CheckCheck,
+  Merge as GitMerge,
+  EnvelopeDefault as Mail,
+  BarchartDefault as BarChart3,
+  UserPlus,
+  InformationCircle as InfoIcon,
+  FileText,
+} from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
@@ -125,6 +124,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from '../../components/ui/dropdown-menu';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine, clearTicketFilterParams } from '../../machines/ticketFiltersMachine';
@@ -195,7 +195,9 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
+import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
+import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -213,6 +215,13 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
+import {
+  COLLAPSIBLE_FILTER_IDS,
+  COLLAPSIBLE_FILTER_META,
+  DeskFilterTrigger,
+  type CollapsibleFilterId,
+} from './DeskFilterTrigger';
+import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
@@ -604,6 +613,7 @@ const SupportScreen = (): ReactElement => {
       const params = new URLSearchParams(searchParams);
       clearTicketFilterParams(params);
       params.delete('metrics');
+      params.delete('topics');
       params.delete('settings');
       const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
@@ -743,6 +753,7 @@ const SupportScreen = (): ReactElement => {
           ? (tagFilterConversationIds ?? [])
           : undefined,
       hasAiDraft: filters.hasAiDraft === true ? true : undefined,
+      hasSubTickets: filters.hasSubTickets === true ? true : undefined,
       userGroups:
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
@@ -849,22 +860,52 @@ const SupportScreen = (): ReactElement => {
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
   const hasPriorityFilter = !!(filters.priority && filters.priority.length > 0);
   const hasStagesFilter = !!(filters.stages && filters.stages.length > 0);
-  const hasMoreFiltersActive = !!(
-    filters.assigned ||
-    filters.hasAiDraft === true ||
-    (filters.aiCategory && filters.aiCategory.length > 0) ||
-    (filters.generatedTags && filters.generatedTags.length > 0) ||
-    (filters.userGroups && filters.userGroups.length > 0) ||
-    (filters.createdBy && filters.createdBy.length > 0) ||
-    filters.lastEmailAtStart !== undefined ||
-    filters.lastEmailAtEnd !== undefined ||
-    filters.createdDateStart !== undefined ||
-    filters.createdDateEnd !== undefined ||
-    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) ||
-    (!selectedLabel && !!filters.conversationLabelId)
-  );
+  const moreFiltersActiveCount =
+    (filters.assigned ? 1 : 0) +
+    (filters.hasAiDraft === true ? 1 : 0) +
+    (filters.hasSubTickets === true ? 1 : 0) +
+    (filters.aiCategory && filters.aiCategory.length > 0 ? 1 : 0) +
+    (filters.generatedTags && filters.generatedTags.length > 0 ? 1 : 0) +
+    (filters.userGroups && filters.userGroups.length > 0 ? 1 : 0) +
+    (filters.createdBy && filters.createdBy.length > 0 ? 1 : 0) +
+    (filters.lastEmailAtStart !== undefined || filters.lastEmailAtEnd !== undefined ? 1 : 0) +
+    (filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined ? 1 : 0) +
+    (filters.dynamicFields ? Object.keys(filters.dynamicFields).length : 0) +
+    (!selectedLabel && filters.conversationLabelId ? 1 : 0);
+  const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+
+  const {
+    rowRef: filterRowRef,
+    filterTwinRef,
+    staticLeftRef: filterStaticLeftRef,
+    actionsRestRef,
+    columnsWideTwinRef,
+    columnsNarrowTwinRef,
+    isColumnsLabelled,
+    collapsedFilterIds,
+    hasCollapsedFilters,
+    isFilterVisibleOnBar,
+  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' });
+
+  // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
+  // still announces itself instead of silently disappearing.
+  const collapsedActiveFilterCount = useMemo(() => {
+    const activeById: Record<CollapsibleFilterId, boolean> = {
+      assignee: hasAssigneeFilter,
+      priority: hasPriorityFilter,
+      stages: hasStagesFilter,
+    };
+    const foldedActive = collapsedFilterIds.filter(id => activeById[id]).length;
+    return foldedActive + moreFiltersActiveCount;
+  }, [
+    collapsedFilterIds,
+    hasAssigneeFilter,
+    hasPriorityFilter,
+    hasStagesFilter,
+    moreFiltersActiveCount,
+  ]);
 
   const handleFilterChange = useCallback(
     (key: keyof TicketFilters, value: unknown): void => {
@@ -956,12 +997,18 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
-  // Priority and Stages/Status are their own top-level popover buttons; the More-Filters
-  // menu carries the rest. The "Label" filter is hidden while a sidebar label view is
-  // active (`selectedLabel`): the whole list is already scoped to that label, so a second
-  // label picker is redundant.
+  // Assignee, Priority and Stages/Status are top-level popover buttons while the row has
+  // room for them, and fold in here (highest-priority first) once it doesn't — see
+  // `collapsedFilterIds`. The rest of the filters always live in this menu. The "Label"
+  // filter is hidden while a sidebar label view is active (`selectedLabel`): the whole list
+  // is already scoped to that label, so a second label picker is redundant.
   const filterMenuItems = useMemo(() => {
     const items = [
+      ...collapsedFilterIds.map(id => ({
+        id: id as string,
+        label: COLLAPSIBLE_FILTER_META[id].label,
+        icon: COLLAPSIBLE_FILTER_META[id].icon,
+      })),
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
       { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
@@ -979,7 +1026,7 @@ const SupportScreen = (): ReactElement => {
       items.push({ id: 'conversationLabel', label: 'Label', icon: TagIcon });
     }
     return items;
-  }, [deskDynamicFields, selectedLabel]);
+  }, [collapsedFilterIds, deskDynamicFields, selectedLabel]);
 
   const renderSubmenu = useCallback((): ReactElement | null => {
     if (!activeSubmenu) return null;
@@ -999,6 +1046,32 @@ const SupportScreen = (): ReactElement => {
       );
     }
     switch (activeSubmenu) {
+      case 'assignee':
+        return (
+          <UserSubmenu
+            key='assignee-submenu'
+            selectedUsers={filters.assignee || []}
+            onChange={(users: string[]) => handleFilterChange('assignee', users)}
+            label='Assignee'
+          />
+        );
+      case 'priority':
+        return (
+          <PrioritySubmenu
+            selectedPriorities={filters.priority || []}
+            onChange={(priorities: TicketPriority[]) => handleFilterChange('priority', priorities)}
+            availablePriorities={availablePriorities}
+          />
+        );
+      case 'stages':
+        return (
+          <StagesSubmenu
+            selectedStages={filters.stages || []}
+            onChange={(stages: string[]) => handleFilterChange('stages', stages)}
+            availableStages={availableStages}
+            isLoading={!!deskBoardId && channelBoardDetailDetails.type !== 'complete'}
+          />
+        );
       case 'aiCategory':
         return (
           <AICategorySubmenu
@@ -1150,15 +1223,35 @@ const SupportScreen = (): ReactElement => {
     handleCreatedDateRangeChange,
     handleDynamicFieldChange,
     availableAiCategories,
+    availablePriorities,
+    availableStages,
+    deskBoardId,
+    channelBoardDetailDetails.type,
     deskDynamicFields,
     selectedChannelId,
   ]);
+
+  useEffect(() => {
+    if (
+      activeSubmenu &&
+      COLLAPSIBLE_FILTER_IDS.includes(activeSubmenu as CollapsibleFilterId) &&
+      !collapsedFilterIds.includes(activeSubmenu as CollapsibleFilterId)
+    ) {
+      setActiveSubmenu(null);
+    }
+  }, [activeSubmenu, collapsedFilterIds]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  const metricsEnabled =
+    !!selectedChannelId &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.metricsEnabled;
+  const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
+  const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1310,8 +1403,13 @@ const SupportScreen = (): ReactElement => {
     const mailId = searchParams.get('mail');
     if (mailId) params.set('mail', mailId);
     const qs = params.toString();
+    // the router state the caller arrived with — `shouldNavigateBack` (set by cmd+K
+    // and the search results screen) decides where Back goes, and this effect always
+    // Read from `window.history` rather than `location.state`: this effect
+    const carriedState = (window.history.state as { usr?: Record<string, unknown> } | null)?.usr;
     void navigate(`${supportBase}/${selectedChannelId}/${xyneId}${qs ? `?${qs}` : ''}`, {
       replace: true,
+      state: carriedState,
     });
   }, [
     deeplinkConversationId,
@@ -1426,6 +1524,11 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     setIsMetricsOpen(searchParams.get('metrics') === 'open');
+    setIsTopicsOpen(searchParams.get('topics') === 'open');
+  }, [searchParams]);
+
+  useEffect(() => {
+    setIsReportOpen(searchParams.get('report') === 'open');
   }, [searchParams]);
 
   useEffect(() => {
@@ -1479,6 +1582,14 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+  // Mailbox folders are email-only, so other desk types get no folder filter on their list.
+  const selectedChannelHasMailboxFolders =
+    sortedEmailChannels.find(c => c.id === selectedChannelId)?.type === ChannelType.EMAIL;
+  // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
+  const canExploreTopics =
+    isSelectedChannelJoined &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.metricsEnabled;
 
   const metricsSelectableDesks = useMemo(
     () =>
@@ -1807,7 +1918,11 @@ const SupportScreen = (): ReactElement => {
         setShowMergeDialog(false);
         if (parentTicket) {
           void navigate(`${supportBase}/${parentTicket.channelId}/${parentTicket.xyneId}`, {
-            state: { conversationId: parentTicket.conversationId, ticketId: parentTicket.id },
+            state: {
+              conversationId: parentTicket.conversationId,
+              ticketId: parentTicket.id,
+              shouldNavigateBack: true,
+            },
           });
         }
       } catch (error: unknown) {
@@ -2114,6 +2229,7 @@ const SupportScreen = (): ReactElement => {
         state: {
           conversationId: ticketData.conversationId,
           ticketId: ticketData.id,
+          shouldNavigateBack: true,
         },
       });
     },
@@ -2241,7 +2357,10 @@ const SupportScreen = (): ReactElement => {
                   className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
                 };
     const isJoined = joinedChannelIds.has(c.id);
-    const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
+    // Labels apply to email and app desks; mailbox folders (Inbox / Starred / Spam /
+    // Drafts / Sent) stay email-only. Both share this one expandable subtree.
+    const hasMailboxFolders = c.type === ChannelType.EMAIL;
+    const canExpandDesk = isJoined && (hasMailboxFolders || c.type === ChannelType.APP);
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -2323,30 +2442,34 @@ const SupportScreen = (): ReactElement => {
         </div>
         {isExpanded && (
           <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-1'>
-            <DeskMailboxSidebar
-              activeFolder={
-                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
-                  ? selectedFolder.key
-                  : null
-              }
-              onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
-            />
-            <DeskDraftSubtree
-              activeFolder={
-                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
-                  ? selectedFolder.key === 'drafts'
-                    ? 'userDrafts'
-                    : selectedFolder.key === 'sent'
-                      ? 'userSent'
+            {hasMailboxFolders && (
+              <>
+                <DeskMailboxSidebar
+                  activeFolder={
+                    selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                      ? selectedFolder.key
                       : null
-                  : null
-              }
-              // Drafts and Sent are both folders on the ticket list (reply drafts / sent
-              // emails roll up to their tickets); route them through openMailbox for the
-              // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
-              onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
-              onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
-            />
+                  }
+                  onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
+                />
+                <DeskDraftSubtree
+                  activeFolder={
+                    selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                      ? selectedFolder.key === 'drafts'
+                        ? 'userDrafts'
+                        : selectedFolder.key === 'sent'
+                          ? 'userSent'
+                          : null
+                      : null
+                  }
+                  // Drafts and Sent are both folders on the ticket list (reply drafts / sent
+                  // emails roll up to their tickets); route them through openMailbox for the
+                  // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
+                  onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
+                  onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
+                />
+              </>
+            )}
             <DeskLabelsSidebar
               channelId={c.id}
               isMember={isJoined}
@@ -2628,7 +2751,11 @@ const SupportScreen = (): ReactElement => {
                               </span>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
-                              <DropdownMenuItem onClick={() => setShowRefetchDialog(true)}>
+                              <DropdownMenuItem
+                                onClick={() => setShowRefetchDialog(true)}
+                                data-track-category='Support'
+                                data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
+                              >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
                                   <span className='truncate'>Fetch latest emails</span>
@@ -2649,6 +2776,8 @@ const SupportScreen = (): ReactElement => {
                                 onClick={() => {
                                   if (!isDlMemberSyncing) setShowDlMemberSyncDialog(true);
                                 }}
+                                data-track-category='Support'
+                                data-track-name='OPEN_DL_MEMBER_SYNC_DIALOG'
                                 disabled={isDlMemberSyncing}
                               >
                                 <UserPlus size={14} className='mr-2 shrink-0' />
@@ -2720,35 +2849,85 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
+                      {isSelectedChannelJoined && metricsEnabled && (
+                        <Tooltip content='Desk metrics' side='bottom'>
+                          <button
+                            onClick={() => {
+                              const base = selectedChannelId
+                                ? `${supportBase}/${selectedChannelId}`
+                                : supportBase;
+                              if (isMetricsOpen) {
+                                void navigate(base, { replace: true });
+                              } else {
+                                void navigate(`${base}?metrics=open`);
+                              }
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isMetricsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenDeskMetrics'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <BarChart3 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.metricsEnabled && (
-                          <Tooltip content='Desk metrics' side='bottom'>
+                        channelPreference?.deskReportEnabled && (
+                          <Tooltip content='Desk report' side='bottom'>
                             <button
                               onClick={() => {
                                 const base = selectedChannelId
                                   ? `${supportBase}/${selectedChannelId}`
                                   : supportBase;
-                                if (isMetricsOpen) {
+                                if (isReportOpen) {
                                   void navigate(base, { replace: true });
                                 } else {
-                                  void navigate(`${base}?metrics=open`);
+                                  void navigate(`${base}?report=open`);
                                 }
                               }}
                               className={cn(
                                 'p-1.5 rounded transition-colors',
-                                isMetricsOpen
+                                isReportOpen
                                   ? 'bg-muted text-foreground'
                                   : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                               )}
                               data-track-category='Support'
-                              data-track-name='OpenDeskMetrics'
+                              data-track-name='OpenDeskReport'
                               data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                             >
-                              <BarChart3 size={16} />
+                              <FileText size={16} />
                             </button>
                           </Tooltip>
                         )}
+                      {canExploreTopics && (
+                        <Tooltip content='Topics explorer' side='bottom'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              const base = `${supportBase}/${selectedChannelId}`;
+                              if (isTopicsOpen) void navigate(base, { replace: true });
+                              else void navigate(`${base}?topics=open`);
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isTopicsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenTopicsExplorer'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <GridDashboard01 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -2776,8 +2955,80 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                   </div>
-                  <div className='flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'>
-                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                  <div
+                    ref={filterRowRef}
+                    className='relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'
+                  >
+                    {isSelectedChannelJoined && (
+                      <div
+                        aria-hidden
+                        className='pointer-events-none invisible absolute left-0 top-0 -z-10 flex items-center gap-2'
+                      >
+                        <div ref={filterTwinRef} className='flex items-center gap-2'>
+                          <DeskFilterTrigger id='assignee' active={hasAssigneeFilter} />
+                          <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
+                          <DeskFilterTrigger id='stages' active={hasStagesFilter} />
+                        </div>
+                        {viewMode === 'table' && (
+                          <>
+                            <div ref={columnsWideTwinRef} className='flex items-center'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <Columns3 className='w-3.5 h-3.5' />
+                                  <span className='font-medium'>Columns</span>
+                                </div>
+                              </Button>
+                            </div>
+                            <div ref={columnsNarrowTwinRef} className='flex items-center'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <Columns3 className='w-3.5 h-3.5' />
+                                </div>
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                        <div ref={filterStaticLeftRef} className='flex items-center gap-2'>
+                          {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                            <span className='p-1.5'>
+                              <Search size={16} />
+                            </span>
+                          )}
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            className='rounded-[10px] border-border text-muted-foreground'
+                          >
+                            <div className='flex items-center gap-1.5'>
+                              <ListFilter className='w-3 h-3 font-medium' />
+                              <span className='font-medium'>More Filters</span>
+                              <span className='w-1.5 h-1.5 rounded-full' />
+                            </div>
+                          </Button>
+                          {hasAnyFilterActive && (
+                            <Button
+                              variant='outline'
+                              size='sm'
+                              className='rounded-[10px] border-border text-muted-foreground'
+                            >
+                              <div className='flex items-center gap-1.5'>
+                                <X className='w-3 h-3' />
+                                <span className='font-medium'>Clear</span>
+                              </div>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className='flex items-center gap-2 min-w-0 flex-1 overflow-hidden'>
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Search emails' side='bottom'>
                           <button
@@ -2793,123 +3044,87 @@ const SupportScreen = (): ReactElement => {
                       )}
                       {isSelectedChannelJoined && (
                         <>
-                          <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('assignee') && (
+                            <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='assignee'
+                                  active={hasAssigneeFilter}
+                                  open={assigneeOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <User className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Assignee</span>
-                                  {hasAssigneeFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      assigneeOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
-                            >
-                              <UserSubmenu
-                                key='assignee-popover-submenu'
-                                selectedUsers={filters.assignee || []}
-                                onChange={(users: string[]) =>
-                                  handleFilterChange('assignee', users)
-                                }
-                                label='Assignee'
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <UserSubmenu
+                                  key='assignee-popover-submenu'
+                                  selectedUsers={filters.assignee || []}
+                                  onChange={(users: string[]) =>
+                                    handleFilterChange('assignee', users)
+                                  }
+                                  label='Assignee'
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
-                          <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('priority') && (
+                            <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='priority'
+                                  active={hasPriorityFilter}
+                                  open={priorityOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60]'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <BarChart4Icon className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Priority</span>
-                                  {hasPriorityFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      priorityOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60]'
-                            >
-                              <PrioritySubmenu
-                                selectedPriorities={filters.priority || []}
-                                onChange={(priorities: TicketPriority[]) =>
-                                  handleFilterChange('priority', priorities)
-                                }
-                                availablePriorities={availablePriorities}
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <PrioritySubmenu
+                                  selectedPriorities={filters.priority || []}
+                                  onChange={(priorities: TicketPriority[]) =>
+                                    handleFilterChange('priority', priorities)
+                                  }
+                                  availablePriorities={availablePriorities}
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
-                          <Popover.Root open={stagesOpen} onOpenChange={setStagesOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('stages') && (
+                            <Popover.Root open={stagesOpen} onOpenChange={setStagesOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='stages'
+                                  active={hasStagesFilter}
+                                  open={stagesOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60]'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <Circle className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Status</span>
-                                  {hasStagesFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      stagesOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60]'
-                            >
-                              <StagesSubmenu
-                                selectedStages={filters.stages || []}
-                                onChange={(stages: string[]) =>
-                                  handleFilterChange('stages', stages)
-                                }
-                                availableStages={availableStages}
-                                isLoading={
-                                  !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
-                                }
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <StagesSubmenu
+                                  selectedStages={filters.stages || []}
+                                  onChange={(stages: string[]) =>
+                                    handleFilterChange('stages', stages)
+                                  }
+                                  availableStages={availableStages}
+                                  isLoading={
+                                    !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
+                                  }
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
                           <Popover.Root open={moreFiltersOpen} onOpenChange={setMoreFiltersOpen}>
                             <Popover.Trigger asChild>
@@ -2923,10 +3138,18 @@ const SupportScreen = (): ReactElement => {
                               >
                                 <div className='flex items-center gap-1.5'>
                                   <ListFilter className='w-3 h-3 font-medium' />
-                                  <span className='font-medium'>More Filters</span>
-                                  {hasMoreFiltersActive && (
+                                  <span className='font-medium'>
+                                    {hasCollapsedFilters ? 'Filters' : 'More Filters'}
+                                  </span>
+                                  {hasCollapsedFilters ? (
+                                    collapsedActiveFilterCount > 0 && (
+                                      <span className='ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-semibold leading-none text-white'>
+                                        {collapsedActiveFilterCount}
+                                      </span>
+                                    )
+                                  ) : hasMoreFiltersActive ? (
                                     <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
+                                  ) : null}
                                 </div>
                               </Button>
                             </Popover.Trigger>
@@ -2999,12 +3222,34 @@ const SupportScreen = (): ReactElement => {
                                     aria-label='Has AI draft'
                                   />
                                 </div>
+                                <div
+                                  data-track-category='Support'
+                                  data-track-name='ToggleHasSubTickets'
+                                  data-track-metadata={JSON.stringify({
+                                    hasSubTickets: filters.hasSubTickets !== true,
+                                  })}
+                                >
+                                  <Switch
+                                    checked={filters.hasSubTickets === true}
+                                    onCheckedChange={checked =>
+                                      handleFilterChange(
+                                        'hasSubTickets',
+                                        checked ? true : undefined,
+                                      )
+                                    }
+                                    label='Has sub-tickets'
+                                    aria-label='Has sub-tickets'
+                                  />
+                                </div>
                               </div>
                               <div className='py-1'>
                                 {filterMenuItems.map(item => {
                                   const Icon = item.icon;
                                   const isActive = activeSubmenu === item.id;
                                   const isFilterActive =
+                                    (item.id === 'assignee' && hasAssigneeFilter) ||
+                                    (item.id === 'priority' && hasPriorityFilter) ||
+                                    (item.id === 'stages' && hasStagesFilter) ||
                                     (item.id === 'aiCategory' &&
                                       !!(filters.aiCategory && filters.aiCategory.length > 0)) ||
                                     (item.id === 'generatedTags' &&
@@ -3089,6 +3334,8 @@ const SupportScreen = (): ReactElement => {
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
                               onClick={() => setFilters({})}
+                              data-track-category='Support'
+                              data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
@@ -3100,7 +3347,6 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
-                      {/* Table column picker — built-in columns + the board's custom fields */}
                       {viewMode === 'table' && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
                           <Popover.Trigger asChild>
@@ -3108,10 +3354,14 @@ const SupportScreen = (): ReactElement => {
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                              title={isColumnsLabelled ? undefined : 'Columns'}
+                              aria-label='Columns'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                <span className='font-medium'>Columns</span>
+                                {/* Label yields before any filter folds — this is secondary
+                                    chrome, and the icon plus tooltip carries it fine. */}
+                                {isColumnsLabelled && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
                           </Popover.Trigger>
@@ -3193,103 +3443,107 @@ const SupportScreen = (): ReactElement => {
                           </Popover.Content>
                         </Popover.Root>
                       )}
-                      {/* View Toggle */}
-                      <div className='flex items-center border border-border rounded-lg overflow-hidden'>
-                        <button
-                          onClick={() => setViewMode('kanban')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'kanban'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Kanban View'
-                          data-track-category='Support'
-                          data-track-name='SetKanbanView'
-                        >
-                          <LayoutGrid size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('list')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'list'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='List View'
-                          data-track-category='Support'
-                          data-track-name='SetListView'
-                        >
-                          <List size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('table')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'table'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Table View'
-                          data-track-category='Support'
-                          data-track-name='SetTableView'
-                        >
-                          <Table2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('calendar')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'calendar'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Calendar View'
-                          data-track-category='Support'
-                          data-track-name='SetCalendarView'
-                        >
-                          <CalendarRange size={16} />
-                        </button>
-                      </div>
-                      {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
-                      {isSelectedChannelJoined && selectedChannelFull && (
-                        <CloudAgentDock buttonBehavior='floating' />
-                      )}
-                      {isSelectedChannelJoined &&
-                        selectedChannelId &&
-                        !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
-                          <Tooltip content='Compose new email' side='bottom'>
-                            <Button
-                              variant='default'
-                              size='sm'
-                              className='rounded-[10px] bg-primary hover:bg-primary/90 text-white'
-                              onClick={() => openNewCompose(selectedChannelId)}
-                              data-track-category='Support'
-                              data-track-name='OpenComposeEmail'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <Pencil size={14} />
-                              <span>Compose</span>
-                            </Button>
-                          </Tooltip>
+                      <div ref={actionsRestRef} className='flex items-center gap-2'>
+                        {/* View Toggle */}
+                        <div className='flex items-center border border-border rounded-lg overflow-hidden'>
+                          <button
+                            onClick={() => setViewMode('kanban')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'kanban'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Kanban View'
+                            data-track-category='Support'
+                            data-track-name='SetKanbanView'
+                          >
+                            <LayoutGrid size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('list')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'list'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='List View'
+                            data-track-category='Support'
+                            data-track-name='SetListView'
+                          >
+                            <List size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('table')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'table'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Table View'
+                            data-track-category='Support'
+                            data-track-name='SetTableView'
+                          >
+                            <Table2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('calendar')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'calendar'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Calendar View'
+                            data-track-category='Support'
+                            data-track-name='SetCalendarView'
+                          >
+                            <CalendarRange size={16} />
+                          </button>
+                        </div>
+                        {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
+                        {isSelectedChannelJoined && selectedChannelFull && (
+                          <CloudAgentDock buttonBehavior='floating' />
                         )}
-                      {ticketId && (
-                        <Button
-                          size='sm'
-                          variant='ghost'
-                          onClick={() => {
-                            const back = selectedChannelId
-                              ? `${supportBase}/${selectedChannelId}`
-                              : supportBase;
-                            void navigate(back);
-                          }}
-                          data-track-category='Support'
-                          data-track-name='CloseTicketPanel'
-                        >
-                          <PanelRight size={16} />
-                        </Button>
-                      )}
+                        {isSelectedChannelJoined &&
+                          selectedChannelId &&
+                          !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
+                            <Tooltip content='Compose new email' side='bottom'>
+                              <Button
+                                variant='default'
+                                size='sm'
+                                className='rounded-[10px] bg-primary hover:bg-primary/90 text-white'
+                                onClick={() => openNewCompose(selectedChannelId)}
+                                data-track-category='Support'
+                                data-track-name='OpenComposeEmail'
+                                data-track-metadata={JSON.stringify({
+                                  channelId: selectedChannelId,
+                                })}
+                              >
+                                <Pencil size={14} />
+                                <span>Compose</span>
+                              </Button>
+                            </Tooltip>
+                          )}
+                        {ticketId && (
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            onClick={() => {
+                              const back = selectedChannelId
+                                ? `${supportBase}/${selectedChannelId}`
+                                : supportBase;
+                              void navigate(back);
+                            }}
+                            data-track-category='Support'
+                            data-track-name='CloseTicketPanel'
+                          >
+                            <PanelRight size={16} />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3388,6 +3642,37 @@ const SupportScreen = (): ReactElement => {
                   availableDesks={metricsSelectableDesks}
                   customFieldDefinitions={deskDynamicFields}
                   availableStages={availableStages}
+                  onTicketClick={ticket => {
+                    void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                      state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
+                    });
+                  }}
+                />
+              )}
+              {isReportOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                <DeskReportPanel
+                  open
+                  onClose={() => {
+                    const base = selectedChannelId
+                      ? `${supportBase}/${selectedChannelId}`
+                      : supportBase;
+                    void navigate(base, { replace: true });
+                  }}
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
+                />
+              )}
+              {isTopicsOpen && selectedChannelId && canExploreTopics && (
+                <TopicsExplorer
+                  open
+                  onClose={() =>
+                    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
+                  }
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
+                  supportBase={supportBase}
+                  availableAiCategories={availableAiCategories}
+                  availableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -3485,6 +3770,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -3506,6 +3792,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -3513,7 +3800,11 @@ const SupportScreen = (): ReactElement => {
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
-                        mailboxFolder={selectedLabel ? undefined : selectedFolder.key}
+                        mailboxFolder={
+                          selectedLabel || !selectedChannelHasMailboxFolders
+                            ? undefined
+                            : selectedFolder.key
+                        }
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,
@@ -3532,6 +3823,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -3700,6 +3992,7 @@ const SupportScreen = (): ReactElement => {
           onOpenChange={setAutoLabelWizardOpen}
           channelId={selectedChannelId}
           isMember={isSelectedChannelJoined}
+          showKeepInInbox={selectedChannelHasMailboxFolders}
         />
       )}
 
@@ -3745,7 +4038,6 @@ const SupportScreen = (): ReactElement => {
 
 const TicketMetaRow = ({
   ticket,
-  boardId,
 }: {
   ticket:
     | {
@@ -3758,39 +4050,46 @@ const TicketMetaRow = ({
       }
     | undefined
     | null;
-  boardId: string | null;
 }): ReactElement | null => {
   const resolvedAssigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
   const assignee = useUser(resolvedAssigneeId);
   if (!ticket) return null;
-  const stage = ticket.stageName || 'To Do';
   const assigneeName = resolvedAssigneeId
     ? assignee
       ? getUserDisplayName(assignee)
       : '…'
     : 'Unassigned';
   return (
-    <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
-      <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
-      <StagePicker
-        ticketId={ticket.id}
-        stageName={ticket.stageName}
-        stageLabel={stage}
-        boardId={boardId}
-      />
-      <AssigneePicker
-        ticketId={ticket.id}
-        assignedTo={ticket.assignedTo}
-        channelId={ticket.channelId ?? undefined}
-        label={assigneeName}
-      />
-      {ticket.aiCategory && (
-        <span
-          className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'
-          title={`AI Category: ${ticket.aiCategory}`}
-        >
-          {ticket.aiCategory}
+    <div className='flex items-center flex-wrap gap-y-1 min-h-[24px]'>
+      <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
+        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
+          Priority
         </span>
+        <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
+      </div>
+      <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
+        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
+          Assignee
+        </span>
+        <AssigneePicker
+          ticketId={ticket.id}
+          assignedTo={ticket.assignedTo}
+          channelId={ticket.channelId ?? undefined}
+          label={assigneeName}
+        />
+      </div>
+      {ticket.aiCategory && (
+        <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
+          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
+            Type
+          </span>
+          <span
+            className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'
+            title={`AI Category: ${ticket.aiCategory}`}
+          >
+            {ticket.aiCategory}
+          </span>
+        </div>
       )}
     </div>
   );
@@ -3805,6 +4104,7 @@ type SupportTicketDetailProps = {
     aiCategory: string[] | undefined;
     conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
+    hasSubTickets: boolean | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
@@ -3836,6 +4136,19 @@ type SupportTicketDetailProps = {
     title: string;
     lastEmailAt?: number | null;
   }>;
+};
+
+type TicketReplyKind = 'app' | 'channel';
+
+/**
+ * Reply routing is per-ticket, not per-channel: an app-sourced ticket can live in ANY
+ * desk channel (e.g. EMAIL intake + a connected app), so channel.type alone can no
+ * longer pick the thread/composer. 'channel' = the channel-type chain, unchanged.
+ */
+const getTicketReplyKind = (ticketMetadata: unknown): TicketReplyKind => {
+  const deskSource = (ticketMetadata as { deskSource?: { type?: string } } | null | undefined)
+    ?.deskSource;
+  return deskSource?.type === 'app' ? 'app' : 'channel';
 };
 
 export const SupportTicketDetail = ({
@@ -3896,6 +4209,7 @@ export const SupportTicketDetail = ({
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
+    shouldNavigateBack?: boolean;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -3924,6 +4238,7 @@ export const SupportTicketDetail = ({
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
+  const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
@@ -3968,7 +4283,14 @@ export const SupportTicketDetail = ({
             : undefined,
         });
         if (sourceTicketXyneId && channelIdParam) {
-          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
+          // Same in-place swap as prev/next — the opener stays directly behind us.
+          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`, {
+            replace: true,
+            state: {
+              ...(routerState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
+              ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
+            },
+          });
         }
       } catch (err) {
         toast.error('Unmerge Failed', {
@@ -3977,7 +4299,14 @@ export const SupportTicketDetail = ({
         });
       }
     },
-    [channelIdParam, navigate, navBasePath, supportBase],
+    [
+      channelIdParam,
+      navigate,
+      navBasePath,
+      routerState?.shouldNavigateBack,
+      routerState?.returnToUrl,
+      supportBase,
+    ],
   );
 
   const [allEmails] = useCachedQuery(
@@ -4128,10 +4457,15 @@ export const SupportTicketDetail = ({
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
+    // Swap the ticket in place: pushing would bury the opener under the ticket chain
+    // and leave the back arrow one entry short of it.
     void navigate(`${navBasePath ?? supportBase}/${nextChannelId}/${t.xyneId}`, {
+      replace: true,
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
+        ...(routerState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
+        ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
   };
@@ -4187,20 +4521,26 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
-    // Ticket boards (Kanban, My Tickets) hand us the URL they came from, so
-    // "back" returns to that board instead of dumping the user in the channel
-    // inbox they never visited. Only same-origin paths are honoured — reject
-    // absolute URLs and the "//host" / "/\host" protocol-relative forms so
-    // router state can't drive an off-site redirect.
-    const returnToUrl = routerState?.returnToUrl;
-    if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
-      void navigate(returnToUrl);
+    // Every marker is stamped by the opener (desk list, Kanban, My Tickets, cmd+K,
+    // the search results screen) as it pushes this entry, so its page is one Back
+    // away — pop it rather than stacking a second copy.
+    // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
+    if (routerState?.shouldNavigateBack || routerState?.returnToUrl) {
+      void navigate(-1);
       return;
     }
     const base = navBasePath ?? supportBase;
     const back = channelIdParam ? `${base}/${channelIdParam}` : base;
-    void navigate(back);
-  }, [channelIdParam, navBasePath, navigate, onBack, routerState?.returnToUrl, supportBase]);
+    void navigate(back, { replace: true });
+  }, [
+    channelIdParam,
+    navBasePath,
+    navigate,
+    onBack,
+    routerState?.shouldNavigateBack,
+    routerState?.returnToUrl,
+    supportBase,
+  ]);
 
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
     const windowTarget = dir === 'forward' ? windowNext : windowPrev;
@@ -4436,6 +4776,8 @@ export const SupportTicketDetail = ({
   const zero = useZero();
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -4496,174 +4838,9 @@ export const SupportTicketDetail = ({
                   </span>
                 </TruncatedTooltip>
 
-                {/* One cluster so the actions wrap as a block rather than dribbling
-                    onto the next line one icon at a time. `[&>*]:shrink-0` keeps the
-                    1px dividers alive — their min-content size is 0, so they are the
-                    first thing flexbox would collapse. */}
-                <div className='flex flex-wrap items-center gap-2 min-w-0 [&>*]:shrink-0'>
-                  {/* Same self-gating trick as the row-2 pill box: the trailing divider
-                      is an `after:` pseudo and `empty:hidden` drops the whole group, so a
-                      SPAM ticket with no conversation (picker absent, and the 'actions'
-                      slot renders nothing in that state) cannot strand a leading divider. */}
-                  <div className="flex items-center gap-2 empty:hidden after:w-px after:h-4 after:shrink-0 after:bg-border after:content-['']">
-                    {conversationId && channelId && (
-                      <ConversationLabels
-                        conversationId={conversationId}
-                        channelId={channelId}
-                        isMember={isMember}
-                        slot='picker'
-                        appliedMappings={conversationLabelMappings ?? []}
-                      />
-                    )}
-                    {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
-                      <MailboxActions
-                        ticketId={mailboxTicketId}
-                        channelId={channelId}
-                        slot='actions'
-                        mailboxOverlay={mailboxOverlay}
-                      />
-                    )}
-                  </div>
-                  {emailCollapseState.canToggleAll && (
-                    <>
-                      <Tooltip
-                        side='bottom'
-                        delayDuration={300}
-                        content={
-                          <span className='flex items-center gap-2'>
-                            {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
-                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                              E
-                            </kbd>
-                          </span>
-                        }
-                      >
-                        <button
-                          type='button'
-                          onClick={emailCollapseState.toggleAll}
-                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                          data-track-category='Support'
-                          data-track-name={
-                            emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
-                          }
-                        >
-                          {emailCollapseState.anyExpanded ? (
-                            <ChevronsDownUp size={16} />
-                          ) : (
-                            <ChevronsUpDown size={16} />
-                          )}
-                        </button>
-                      </Tooltip>
-
-                      <div className='w-px h-4 bg-border' />
-                    </>
-                  )}
-
-                  {emails.length > 0 && (
-                    <>
-                      <Tooltip side='bottom' delayDuration={300} content='Summarize email thread'>
-                        <button
-                          type='button'
-                          onClick={() => {
-                            if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
-                              setShowEmailSummary(true);
-                              scrollThreadToTop();
-                              void fetchEmailSummary();
-                            } else if (emailSummaryState === 'done') {
-                              setShowEmailSummary(prev => {
-                                const next = !prev;
-                                if (next) scrollThreadToTop();
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={emailSummaryState === 'loading'}
-                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors'
-                          data-track-category='Support'
-                          data-track-name='SummarizeEmailThread'
-                        >
-                          {emailSummaryState === 'loading' ? (
-                            <Loader2 size={16} className='animate-spin' />
-                          ) : (
-                            <Wand2 size={16} />
-                          )}
-                        </button>
-                      </Tooltip>
-                      <div className='w-px h-4 bg-border' />
-                    </>
-                  )}
-
-                  <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        if (!channelId || !ticketIdParam) {
-                          toast.error('Cannot copy link');
-                          return;
-                        }
-                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
-                        void navigator.clipboard
-                          .writeText(url)
-                          .then(() => toast.success('Link copied'))
-                          .catch(() => toast.error('Failed to copy link'));
-                      }}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                      aria-label='Copy link to ticket'
-                      data-track-category='Support'
-                      data-track-name='CopyTicketLink'
-                    >
-                      <LinkIcon size={16} />
-                    </button>
-                  </Tooltip>
-                  <div className='w-px h-4 bg-border' />
-
-                  {channel && <CloudAgentDock buttonBehavior='floating' />}
-
-                  <Tooltip
-                    side='bottom'
-                    delayDuration={300}
-                    content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
-                  >
-                    <button
-                      type='button'
-                      onClick={() => setShowArchiveConfirmDialog(true)}
-                      disabled={!ticket || !!ticket.isArchived}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-                      aria-label='Archive ticket'
-                      data-track-category='Support'
-                      data-track-name='ArchiveTicket'
-                    >
-                      <Archive size={16} />
-                    </button>
-                  </Tooltip>
-                  {emails.length > 0 &&
-                    channel?.type !== ChannelType.SLACK &&
-                    channel?.type !== ChannelType.APP && (
-                      <>
-                        <div className='w-px h-4 bg-border' />
-                        <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
-                          <button
-                            type='button'
-                            onClick={() => {
-                              if (!ticket?.id) return;
-                              void zero.mutate(
-                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
-                              );
-                              goBackToTicketList();
-                            }}
-                            className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                            aria-label='Mark as unread'
-                            data-track-category='Support'
-                            data-track-name='MarkTicketUnread'
-                          >
-                            <MailOpen size={16} />
-                          </button>
-                        </Tooltip>
-                      </>
-                    )}
-                  <div className='w-px h-4 bg-border' />
-
-                  <div className='flex items-center gap-1'>
+                {/* Prev/Next + Status pill + ··· overflow menu */}
+                <div className='flex items-center gap-1.5 min-w-0 shrink-0'>
+                  <div className='flex items-center gap-0.5'>
                     <Tooltip
                       side='bottom'
                       delayDuration={300}
@@ -4709,69 +4886,300 @@ export const SupportTicketDetail = ({
                       </button>
                     </Tooltip>
                   </div>
-                  {!isRightPanelOpen && (
-                    <>
-                      <div className='w-px h-4 bg-border' />
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        onClick={() => setIsRightPanelOpen(true)}
-                        data-track-category='Support'
-                        data-track-name='OpenThreadPanel'
-                      >
-                        Open Thread
-                      </Button>
-                    </>
+                  {/* Status pill */}
+                  {ticket && (
+                    <div className='border border-border rounded-md overflow-hidden shrink-0'>
+                      <StagePicker
+                        ticketId={ticket.id}
+                        stageName={ticket.stageName}
+                        stageLabel={ticket.stageName || 'To Do'}
+                        boardId={boardId}
+                      />
+                    </div>
                   )}
+
+                  {/* ··· overflow menu */}
+                  <DropdownMenu
+                    open={moreMenuOpen}
+                    onOpenChange={open => {
+                      setMoreMenuOpen(open);
+                      if (!open) setLabelPickerOpen(false);
+                    }}
+                  >
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type='button'
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                        aria-label='More actions'
+                        data-track-category='Support'
+                        data-track-name='MoreMenu'
+                      >
+                        <MoreHorizontal size={18} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end' className={labelPickerOpen ? 'w-64' : 'w-56'}>
+                      {conversationId && channelId && (
+                        <>
+                          {!labelPickerOpen ? (
+                            <DropdownMenuItem
+                              onSelect={e => {
+                                e.preventDefault();
+                                setLabelPickerOpen(true);
+                              }}
+                              data-track-category='Support'
+                              data-track-name='OpenLabelPicker'
+                            >
+                              <TagIcon size={14} className='shrink-0' />
+                              Add label
+                            </DropdownMenuItem>
+                          ) : (
+                            <div className='py-1'>
+                              <div className='flex items-center justify-between px-3 py-1 text-xs font-medium text-foreground border-b border-border mb-1'>
+                                <span>Labels</span>
+                                <button
+                                  type='button'
+                                  onClick={() => setLabelPickerOpen(false)}
+                                  className='text-muted-foreground hover:text-foreground transition-colors'
+                                  data-track-category='Support'
+                                  data-track-name='CloseLabelPicker'
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                              <ConversationLabels
+                                conversationId={conversationId}
+                                channelId={channelId}
+                                isMember={isMember}
+                                slot='inline-picker'
+                                appliedMappings={conversationLabelMappings ?? []}
+                              />
+                            </div>
+                          )}
+                        </>
+                      )}
+                      <DropdownMenuSeparator />
+                      {!isRightPanelOpen && (
+                        <DropdownMenuItem
+                          onSelect={() => setIsRightPanelOpen(true)}
+                          data-track-category='Support'
+                          data-track-name='OpenThreadPanel'
+                        >
+                          <PanelRight size={14} className='shrink-0' />
+                          Open Thread
+                        </DropdownMenuItem>
+                      )}
+                      {emailCollapseState.canToggleAll && (
+                        <DropdownMenuItem
+                          onSelect={emailCollapseState.toggleAll}
+                          data-track-category='Support'
+                          data-track-name={
+                            emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
+                          }
+                        >
+                          {emailCollapseState.anyExpanded ? (
+                            <ChevronsDownUp size={14} className='shrink-0' />
+                          ) : (
+                            <ChevronsUpDown size={14} className='shrink-0' />
+                          )}
+                          {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
+                        </DropdownMenuItem>
+                      )}
+                      {emails.length > 0 && (
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                              setShowEmailSummary(true);
+                              scrollThreadToTop();
+                              void fetchEmailSummary();
+                            } else if (emailSummaryState === 'done') {
+                              setShowEmailSummary(prev => {
+                                const next = !prev;
+                                if (next) scrollThreadToTop();
+                                return next;
+                              });
+                            }
+                          }}
+                          disabled={emailSummaryState === 'loading'}
+                          data-track-category='Support'
+                          data-track-name='SummarizeEmailThread'
+                        >
+                          {emailSummaryState === 'loading' ? (
+                            <Loader2 size={14} className='animate-spin shrink-0' />
+                          ) : (
+                            <Wand2 size={14} className='shrink-0' />
+                          )}
+                          Summarize thread
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          if (!channelId || !ticketIdParam) {
+                            toast.error('Cannot copy link');
+                            return;
+                          }
+                          const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
+                          void navigator.clipboard
+                            .writeText(url)
+                            .then(() => toast.success('Link copied'))
+                            .catch(() => toast.error('Failed to copy link'));
+                        }}
+                        data-track-category='Support'
+                        data-track-name='CopyTicketLink'
+                      >
+                        <LinkIcon size={14} className='shrink-0' />
+                        Copy link
+                      </DropdownMenuItem>
+                      {emails.length > 0 &&
+                        channel?.type !== ChannelType.SLACK &&
+                        channel?.type !== ChannelType.APP && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              if (!ticket?.id) return;
+                              void zero.mutate(
+                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                              );
+                              goBackToTicketList();
+                            }}
+                            data-track-category='Support'
+                            data-track-name='MarkTicketUnread'
+                          >
+                            <MailOpen size={14} className='shrink-0' />
+                            Mark as unread
+                          </DropdownMenuItem>
+                        )}
+                      {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
+                        <>
+                          {(mailboxOverlay?.state ?? MailboxState.INBOX) ===
+                            MailboxState.ARCHIVED && (
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                void zero
+                                  .mutate(
+                                    mutators.ticketMailbox.setState({
+                                      id: uuidv4(),
+                                      ticketId: mailboxTicketId,
+                                      channelId,
+                                      state: MailboxState.INBOX,
+                                      timestamp: Date.now(),
+                                    }),
+                                  )
+                                  .server.catch(() => toast.error('Failed to move mail'));
+                              }}
+                              data-track-category='Support'
+                              data-track-name='MailboxToInbox'
+                            >
+                              <Inbox size={14} className='shrink-0' />
+                              Move to Inbox
+                            </DropdownMenuItem>
+                          )}
+                          {(mailboxOverlay?.state ?? MailboxState.INBOX) !== MailboxState.SPAM && (
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                void zero
+                                  .mutate(
+                                    mutators.ticketMailbox.setState({
+                                      id: uuidv4(),
+                                      ticketId: mailboxTicketId,
+                                      channelId,
+                                      state: MailboxState.SPAM,
+                                      timestamp: Date.now(),
+                                    }),
+                                  )
+                                  .server.catch(() => toast.error('Failed to report spam'));
+                              }}
+                              data-track-category='Support'
+                              data-track-name='MailboxSpam'
+                            >
+                              <Ban size={14} className='shrink-0' />
+                              Report spam
+                            </DropdownMenuItem>
+                          )}
+                        </>
+                      )}
+                      {channel && (
+                        <DropdownMenuItem
+                          onSelect={e => e.preventDefault()}
+                          className='p-0 focus:bg-transparent'
+                        >
+                          <CloudAgentDock buttonBehavior='floating' />
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => setShowArchiveConfirmDialog(true)}
+                        disabled={!ticket || !!ticket.isArchived}
+                        data-track-category='Support'
+                        data-track-name='ArchiveTicket'
+                        className='text-destructive focus:text-destructive'
+                      >
+                        <Archive size={14} className='shrink-0' />
+                        Archive ticket
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               <div className='flex flex-col gap-1 flex-shrink-0'>
-                <div className='pl-9 flex items-center gap-3 flex-wrap'>
-                  <TicketMetaRow ticket={ticket} boardId={boardId} />
+                <div className='pl-9 flex items-center gap-0 flex-wrap'>
+                  <TicketMetaRow ticket={ticket} />
                   {initiator && (
                     <div
-                      className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground whitespace-nowrap h-[24px]'
+                      className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'
                       title={
                         initiator.email
                           ? `Initiated by ${initiator.name} <${initiator.email}>`
                           : `Initiated by ${initiator.name}`
                       }
-                      aria-label={`Initiated by ${initiator.name}`}
                     >
-                      <Mail size={12} className='shrink-0 text-muted-foreground' />
-                      <span className='truncate max-w-[160px]'>{initiator.name}</span>
+                      <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
+                        Requester
+                      </span>
+                      <div className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground whitespace-nowrap h-[24px]'>
+                        <Mail size={12} className='shrink-0 text-muted-foreground' />
+                        <span className='truncate max-w-[160px]'>{initiator.name}</span>
+                      </div>
                     </div>
                   )}
 
-                  {/* Pills only — the picker trigger and the move actions live in the
-                      row-1 icon cluster. This is the metadata strip, so what lands here
-                      is state you read (which labels, which mailbox), not buttons you
-                      hunt for. Both slots render null when they have nothing to show
-                      (archived has no chip, zero labels has no chips), so the leading
-                      divider is a `before:` pseudo on this box and `empty:hidden` drops
-                      the whole thing — a real sibling element would strand a divider
-                      with nothing after it. */}
-                  {channelId && (conversationId || mailboxTicketId) && (
-                    <div className="flex items-center gap-1.5 flex-wrap min-h-[24px] empty:hidden before:w-px before:h-4 before:shrink-0 before:bg-border before:content-['']">
-                      {channel?.type === ChannelType.EMAIL && mailboxTicketId && (
-                        <MailboxActions
-                          ticketId={mailboxTicketId}
-                          channelId={channelId}
-                          slot='chip'
-                          mailboxOverlay={mailboxOverlay}
-                        />
-                      )}
-                      {conversationId && (
-                        <ConversationLabels
-                          conversationId={conversationId}
-                          channelId={channelId}
-                          isMember={isMember}
-                          slot='chips'
-                          appliedMappings={conversationLabelMappings ?? []}
-                        />
-                      )}
-                    </div>
-                  )}
+                  {/* Mailbox chip + label chips.
+                      Only render the VIEW label row when there is at least one visible
+                      chip: MailboxActions returns null for ARCHIVED state, and
+                      ConversationLabels chips returns null when there are no labels. */}
+                  {channelId &&
+                    (() => {
+                      const mailboxState = mailboxOverlay?.state ?? MailboxState.INBOX;
+                      const hasMailboxChip =
+                        channel?.type === ChannelType.EMAIL &&
+                        !!mailboxTicketId &&
+                        mailboxState !== MailboxState.ARCHIVED;
+                      const hasLabelChips =
+                        !!conversationId && (conversationLabelMappings?.length ?? 0) > 0;
+                      if (!hasMailboxChip && !hasLabelChips) return null;
+                      return (
+                        <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
+                          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
+                            View
+                          </span>
+                          {hasMailboxChip && mailboxTicketId && (
+                            <MailboxActions
+                              ticketId={mailboxTicketId}
+                              channelId={channelId}
+                              slot='chip'
+                              mailboxOverlay={mailboxOverlay}
+                            />
+                          )}
+                          {hasLabelChips && conversationId && (
+                            <ConversationLabels
+                              conversationId={conversationId}
+                              channelId={channelId}
+                              isMember={isMember}
+                              slot='chips'
+                              appliedMappings={conversationLabelMappings ?? []}
+                            />
+                          )}
+                        </div>
+                      );
+                    })()}
                 </div>
                 {ticket && (
                   <div className='pl-9'>
@@ -4974,7 +5382,8 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK ||
+                  {isAppSourcedTicket ||
+                  channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
@@ -5003,7 +5412,20 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              {isAppSourcedTicket ? (
+                conversationId ? (
+                  <SlackComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
+                    variant='app'
+                    // The ticket is app-sourced whatever the desk type, so the
+                    // channel preference alone decides whether the reply reaches
+                    // the app — matching appDeskService's outbound gate.
+                    recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
@@ -5178,11 +5600,15 @@ export const SupportTicketDetail = ({
                         <Button
                           variant='secondary'
                           onClick={() => setShowArchiveConfirmDialog(false)}
+                          data-track-category='Support'
+                          data-track-name='CANCEL_ARCHIVE_TICKET'
                         >
                           Cancel
                         </Button>
                         <Button
                           onClick={() => handleArchiveTicket()}
+                          data-track-category='Support'
+                          data-track-name='CONFIRM_ARCHIVE_TICKET'
                           disabled={!ticket || !!ticket.isArchived || isArchivingTicket}
                           loading={isArchivingTicket}
                           className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
@@ -5415,6 +5841,10 @@ const EmailThreadItem = ({
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
+  const emailRouterState = useLocation().state as {
+    shouldNavigateBack?: boolean;
+    returnToUrl?: string | null;
+  } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
   const ccList = email.cc || [];
@@ -5453,11 +5883,17 @@ const EmailThreadItem = ({
         });
 
         if (channelIdParam) {
+          // In-place swap like the ticket-level unmerge — the opener stays directly behind.
           void navigate(`/support/${channelIdParam}/${response.data.newTicket.xyneId}`, {
+            replace: true,
             state: {
               conversationId: response.data.newTicket.conversationId,
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
+              ...(emailRouterState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
+              ...(emailRouterState?.returnToUrl
+                ? { returnToUrl: emailRouterState.returnToUrl }
+                : {}),
             },
           });
         }
@@ -5487,7 +5923,7 @@ const EmailThreadItem = ({
       disabled={isDemerging}
       className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
       title={mergedSource ? 'Unmerge this ticket' : 'Unmerge this email to a new ticket'}
-      data-track-category='SUPPORT'
+      data-track-category='Support'
       data-track-name={mergedSource ? 'UnmergeTicket' : 'DemergeEmail'}
       data-track-metadata={JSON.stringify({
         emailId: email.id,

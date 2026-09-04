@@ -5,6 +5,7 @@ import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { Check, ChevronDown, ChevronLeft, SmilePlus, X } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
+import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import {
@@ -30,6 +31,12 @@ const STATUS_SUGGESTIONS = [
 ];
 
 const RECENT_STATUSES_KEY = 'xyne_recent_statuses';
+
+const getStartOfToday = (): Date => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
 
 interface RecentStatus {
   emoji: string;
@@ -139,6 +146,8 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
           variant='ghost'
           size='sm'
           onClick={() => setView('default')}
+          data-track-category='STATUS'
+          data-track-name='BACK_TO_STATUS_DEFAULT'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
           <ChevronLeft className='size-4' />
@@ -419,6 +428,8 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           variant='ghost'
           size='sm'
           onClick={() => setView('default')}
+          data-track-category='STATUS'
+          data-track-name='BACK_TO_STATUS_DEFAULT'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
           <X className='size-4' />
@@ -531,18 +542,15 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
       {/* Custom Date/Time Picker */}
       {showDatePicker && (
         <div className='flex items-center gap-2'>
-          <div className='px-3 py-2 border border-input rounded-lg flex-1 bg-background'>
-            <Input
-              type='date'
-              value={customDate ? customDate.toISOString().split('T')[0] : ''}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                const date = e.target.value ? new Date(e.target.value) : undefined;
-                setCustomDate(date);
-              }}
-              min={new Date().toISOString().split('T')[0]}
-              className='w-full border-none p-0 focus:ring-0'
-            />
-          </div>
+          <DatePicker
+            selectedDate={customDate ?? null}
+            onSelect={date => setCustomDate(date ?? undefined)}
+            minDate={getStartOfToday()}
+            showClearButton={false}
+            placeholder='Select date'
+            inputClassName='h-9 flex-1 w-full'
+            contentClassName='z-[100]'
+          />
 
           <div className='px-3 py-2 border border-input rounded-lg bg-background'>
             <Input
@@ -561,6 +569,8 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
         <Button
           variant='ghost'
           onClick={() => setView('default')}
+          data-track-category='STATUS'
+          data-track-name='CANCEL_SET_STATUS'
           className='text-foreground hover:bg-muted'
         >
           Cancel
@@ -569,6 +579,9 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           onClick={() => {
             void handleSave();
           }}
+          trackId='save_user_status'
+          data-track-category='STATUS'
+          data-track-name='SAVE_STATUS'
           disabled={!selectedEmoji && !statusText.trim()}
           className='ml-auto px-6 text-white disabled:opacity-50 disabled:cursor-not-allowed'
           style={{ backgroundColor: '#6276BE' }}

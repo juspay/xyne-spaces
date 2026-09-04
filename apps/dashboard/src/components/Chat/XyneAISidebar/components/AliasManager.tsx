@@ -2,6 +2,7 @@
 import { ReactElement, useState, useCallback } from 'react';
 import { X, Trash2, Edit2, Ban } from 'lucide-react';
 import type { ActivityAlias } from '../../../../hooks/useActivityAliases';
+import { Button } from '../../../ui/Button/Button';
 
 interface AliasManagerProps {
   isOpen: boolean;
@@ -51,6 +52,8 @@ export const AliasManager = ({
           </div>
           <button
             onClick={onClose}
+            data-track-category='XYNE_AI_SIDEBAR'
+            data-track-name='CLOSE_ALIAS_MANAGER'
             className='p-1 hover:bg-accent rounded transition-colors'
             type='button'
           >
@@ -123,6 +126,8 @@ export const AliasManager = ({
                         <div className='flex items-center justify-end gap-2'>
                           <button
                             onClick={() => onEdit(alias)}
+                            data-track-category='XYNE_AI_SIDEBAR'
+                            data-track-name='EDIT_ACTIVITY_ALIAS'
                             className='p-1.5 text-muted-foreground hover:text-primary hover:bg-muted rounded transition-colors'
                             title='Edit alias'
                             type='button'
@@ -131,15 +136,21 @@ export const AliasManager = ({
                           </button>
                           {confirmDeleteId === alias.id ? (
                             <div className='flex items-center gap-1'>
-                              <button
+                              <Button
+                                variant='ghost'
                                 onClick={() => handleConfirmDelete(alias.id)}
+                                trackId='confirm_delete_alias'
+                                data-track-category='XYNE_AI_SIDEBAR'
+                                data-track-name='CONFIRM_DELETE_ALIAS'
                                 className='px-2 py-1 text-xs font-medium text-destructive-foreground bg-destructive rounded hover:bg-destructive/90 transition-colors'
                                 type='button'
                               >
                                 Confirm
-                              </button>
+                              </Button>
                               <button
                                 onClick={handleCancelDelete}
+                                data-track-category='XYNE_AI_SIDEBAR'
+                                data-track-name='CANCEL_DELETE_ALIAS'
                                 className='px-2 py-1 text-xs font-medium text-muted-foreground bg-muted rounded hover:bg-accent transition-colors'
                                 type='button'
                               >
@@ -149,6 +160,8 @@ export const AliasManager = ({
                           ) : (
                             <button
                               onClick={() => handleDeleteClick(alias.id)}
+                              data-track-category='XYNE_AI_SIDEBAR'
+                              data-track-name='START_DELETE_ALIAS'
                               className='p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors'
                               title='Delete alias'
                               type='button'
@@ -170,6 +183,8 @@ export const AliasManager = ({
         <div className='flex justify-end px-4 py-3 border-t border-border bg-muted flex-shrink-0'>
           <button
             onClick={onClose}
+            data-track-category='XYNE_AI_SIDEBAR'
+            data-track-name='CLOSE_ALIAS_MANAGER'
             className='px-4 py-2 text-sm font-medium text-muted-foreground bg-background border border-border rounded-md hover:bg-muted transition-colors'
             type='button'
           >

@@ -48,6 +48,10 @@ export interface StreamOverrides {
   canvasIds?: string[];
   callIds?: string[];
   attachedContext?: AttachedContextItem[];
+  /** Display-only richer context set (KB pills incl. titles) to stamp on the
+   *  optimistic user message so it matches the persisted pills after reload.
+   *  Falls back to `attachedContext` when absent. Never sent to the backend. */
+  displayAttachedContext?: AttachedContextItem[];
 }
 
 interface UseXyneAIStreamParams {
@@ -79,6 +83,9 @@ interface UseXyneAIStreamParams {
   canvasIds?: string[];
   callIds?: string[];
   attachedContext?: AttachedContextItem[];
+  /** See StreamOverrides.displayAttachedContext — the richer set (with KB pills)
+   *  used only to render the just-sent message's pills. */
+  displayAttachedContext?: AttachedContextItem[];
   activities?: UserActivity[]; // User activities to include as context
   /** Selected claw agent slug. If set, the query is routed to that agent instead of Ask AI. */
   agentSlug?: string | null;
@@ -150,6 +157,7 @@ export const useXyneAIStream = ({
   canvasIds,
   callIds,
   attachedContext,
+  displayAttachedContext,
   activities,
   agentSlug,
   model,
@@ -330,6 +338,7 @@ export const useXyneAIStream = ({
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
       const eAttachedContext = ov?.attachedContext ?? attachedContext;
+      const eDisplayAttachedContext = ov?.displayAttachedContext ?? displayAttachedContext;
 
       // Build internal query with selection context format
       // Format: from canvas(canvas_id) ```selected_text```
@@ -370,6 +379,26 @@ export const useXyneAIStream = ({
           : msg,
       );
 
+      // Convert activities to attachedContext for v2 API
+      const activityContext =
+        activities && activities.length > 0 ? activitiesToAttachedContext(activities) : undefined;
+
+      // Merge with existing attachedContext — this is what we SEND to the
+      // backend (channels/tickets/canvases/calls + activities).
+      const combinedAttachedContext = activityContext
+        ? [...(eAttachedContext ?? []), ...activityContext]
+        : eAttachedContext;
+
+      // What we STAMP on the optimistic user message for its pills. Prefer the
+      // richer display set (adds KB collection/folder/file pills with titles)
+      // so the just-sent message matches the persisted pills shown after a
+      // reload; fall back to the sent set when no display set was provided.
+      const displayContextForMessage = eDisplayAttachedContext
+        ? activityContext
+          ? [...eDisplayAttachedContext, ...activityContext]
+          : eDisplayAttachedContext
+        : combinedAttachedContext;
+
       // Add user message (original query without internal formatting, but with selectionContexts for UI)
       // For regenerate: don't create a new user message — reuse the existing one.
       // The bot response branches as a new child of the same user message.
@@ -387,6 +416,9 @@ export const useXyneAIStream = ({
             ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
             ...(parentMessageId && { parentId: parentMessageId }),
             ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
+            ...(displayContextForMessage && displayContextForMessage.length > 0
+              ? { attachedContext: displayContextForMessage }
+              : {}),
           };
 
       // Create bot message with streaming state
@@ -415,15 +447,6 @@ export const useXyneAIStream = ({
       const allMessages = userMessage
         ? [...currentMessages, userMessage, botMessage]
         : [...currentMessages, botMessage];
-
-      // Convert activities to attachedContext for v2 API
-      const activityContext =
-        activities && activities.length > 0 ? activitiesToAttachedContext(activities) : undefined;
-
-      // Merge with existing attachedContext
-      const combinedAttachedContext = activityContext
-        ? [...(eAttachedContext ?? []), ...activityContext]
-        : eAttachedContext;
 
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
@@ -491,6 +514,7 @@ export const useXyneAIStream = ({
       canvasIds,
       callIds,
       attachedContext,
+      displayAttachedContext,
       activities,
       streamSessionKey,
       agentSlug,

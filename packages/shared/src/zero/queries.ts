@@ -17,6 +17,11 @@ import {
 } from './schema.js';
 import { z } from 'zod';
 import {
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+} from '../sdlc';
+import {
   ActivityClassification,
   AttachmentEntityType,
   CallStatus,
@@ -41,6 +46,8 @@ import {
   DelayedMessageStatus,
   RecapEntityType,
   UserResponsibility,
+  UserType,
+  ViewAccessEntityType,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -903,6 +910,7 @@ export const queries = defineQueries({
       channelId: z.string().optional(),
       projectId: z.string().optional(),
       boardId: z.string().optional(),
+      boardIds: z.array(z.string()).optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
       ...flowStepVisibilitySchemaShape,
@@ -915,6 +923,7 @@ export const queries = defineQueries({
         channelId,
         projectId,
         boardId,
+        boardIds,
         userId,
         groupId,
         excludeFlowSteps,
@@ -931,6 +940,11 @@ export const queries = defineQueries({
       // boardId implicitly scopes to project, so no need for separate projectId filter
       if (boardId && viewMode !== 'my-tickets') {
         query = query.where('boardId', boardId);
+      }
+      // Scope by selected boards server-side (mirrors kanbanTicketsPageV3) so a
+      // saved view spanning several boards stays bounded without a projectId.
+      if (!boardId && viewMode !== 'my-tickets' && boardIds?.length) {
+        query = query.where('boardId', 'IN', boardIds);
       }
       // Apply projectId filter ONLY if:
       // 1. No boardId exists (boardId is more specific and implies project)
@@ -1168,6 +1182,7 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
@@ -1180,7 +1195,7 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1216,6 +1231,10 @@ export const queries = defineQueries({
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
         );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       if (userGroups && userGroups.length > 0) {
@@ -1256,6 +1275,29 @@ export const queries = defineQueries({
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
         );
     },
+  ),
+  // Topics Explorer: one desk's tickets in a created-at window, rolled up client-side.
+  // Not supportTicketsPageV3 — that pulls emailDrafts, emailReads, userMailbox and
+  // formEntityValues per row, where this reads scalar columns and no relation at all.
+  // The window bounds the sync: the panel caps its range at 7 days and opens on one.
+  // channelId + isMember are forwarded to TicketsACL for membership gating.
+  topicsExplorerTickets: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      createdAtStart: z.number(),
+      createdAtEnd: z.number(),
+    }).refine(
+      args => args.createdAtStart <= args.createdAtEnd,
+      'createdAtStart must be less than or equal to createdAtEnd',
+    ),
+    ({ args: { channelId, createdAtStart, createdAtEnd } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where('createdAt', '>=', createdAtStart)
+        .where('createdAt', '<=', createdAtEnd)
+        .orderBy('createdAt', 'desc'),
   ),
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
   // channelId + isMember are forwarded to TicketsACL for membership gating.
@@ -1362,6 +1404,7 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
@@ -1377,7 +1420,7 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1409,6 +1452,10 @@ export const queries = defineQueries({
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
         );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       // Mailbox folder server-side filtering. Spam and Starred REQUIRE an overlay row, so they
@@ -2349,8 +2396,9 @@ export const queries = defineQueries({
       types: z.array(z.string()),
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
       isRead: z.boolean().optional(),
+      actorTypes: z.array(z.nativeEnum(UserType)).optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead } }) => {
+    ({ args: { limit, start, types, classification, isRead, actorTypes } }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -2367,6 +2415,16 @@ export const queries = defineQueries({
 
       if (isRead !== undefined) {
         query = query.where('isRead', isRead);
+      }
+
+      // Actor kind lives on users.userType, not on the activity row, so this has to
+      // reach through the `actor` relationship. Filtering here rather than on the
+      // client keeps `limit` meaningful — a client-side filter would page over all
+      // activities and hand back short or empty pages.
+      if (actorTypes && actorTypes.length > 0) {
+        query = query.whereExists('actor', (actor: any) =>
+          actor.where('userType', 'IN', actorTypes),
+        );
       }
 
       query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
@@ -2772,10 +2830,16 @@ export const queries = defineQueries({
     }),
     ({ args: { projectId, boardType } }) => {
       return zql.stages
-        .whereExists('board', b => {
+        .whereExists(
+        'board',
+        b => {
           const scoped = b.where('projectId', projectId);
           return boardType ? scoped.where('boardType', boardType) : scoped;
-        })
+        },
+        // boards-per-project is the selective side; without the flip the
+        // pipeline walks every stage in the workspace probing boards
+        { flip: true },
+      )
         .orderBy('boardId', 'asc')
         .orderBy('sequenceNumber', 'asc');
     },
@@ -3134,8 +3198,9 @@ export const queries = defineQueries({
       limit: z.number(),
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
+      conversationIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, limit, start, direction } }) => {
+    ({ ctx, args: { channelId, limit, start, direction, conversationIds } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
         .where(helpers =>
@@ -3153,6 +3218,10 @@ export const queries = defineQueries({
             ),
           ),
         );
+
+      if (conversationIds) {
+        query = query.where(helpers => helpers.cmp('conversationId', 'IN', conversationIds));
+      }
 
       // Apply ordering based on direction
       const orderDirection = direction === 'forward' ? 'desc' : 'asc';
@@ -3255,16 +3324,21 @@ export const queries = defineQueries({
       channelId: z.string(),
       isMember: z.boolean(),
       limit: z.number(),
+      conversationIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, limit } }) => {
-      return zql.conversations
+    ({ ctx, args: { channelId, limit, conversationIds } }) => {
+      let query = zql.conversations
         .where('channelId', channelId)
         .where(helpers =>
           helpers.or(
             helpers.cmp('doNotPostToChannel', 'IS', null),
             helpers.cmp('doNotPostToChannel', '=', false),
           ),
-        )
+        );
+      if (conversationIds) {
+        query = query.where(helpers => helpers.cmp('conversationId', 'IN', conversationIds));
+      }
+      return query
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
@@ -3638,45 +3712,64 @@ export const queries = defineQueries({
     },
   ),
   getAllRepos: defineQuery(() => zql.repos.orderBy('name', 'asc')),
-  getSdlcRepos: defineQuery(() =>
-    zql.repos
-      .where('projectId', 'IS NOT', null)
-      .where('channelId', 'IS NOT', null)
-      .related('project')
-      .related('channel', channel => channel.related('participants').related('channelStats'))
-      .related('setupExecution')
-      .related('sdlcEntityLinks')
+  /** SDLC hubs the viewer can reach, each with the repositories it covers. */
+  getSdlcChannels: defineQuery(({ ctx }) =>
+    zql.channels
+      .where('type', ChannelType.SDLC)
+      .where('isArchived', false)
+      // The channels ACL lets workspace admins and public channels through; a hub
+      // is only usable by its participants, and every write re-checks that.
+      .whereExists('participants', participant => participant.where('userId', ctx.userID))
+      .related('sdlcEntityLinks', link =>
+        link
+          .where('relationType', SDLC_MEMBERSHIP_RELATION)
+          .related('repo', repo => repo.related('project')),
+      )
       .orderBy('name', 'asc'),
   ),
-  getSdlcTracks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
-    zql.sdlc_tracks.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  getSdlcChannelById: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.channels
+      .where('id', channelId)
+      .where('type', ChannelType.SDLC)
+      .related('participants')
+      .related('channelStats')
+      .related('canvasFolders', folder =>
+        folder.related('canvases', canvas => canvas.related('sdlcArtifact')),
+      )
+      .related('sdlcEntityLinks', link =>
+        link
+          .where('relationType', SDLC_MEMBERSHIP_RELATION)
+          .related('repo', repo => repo.related('project').related('setupExecution')),
+      )
+      .one(),
   ),
-  getSdlcRepoByChannelId: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) => zql.repos.where('channelId', channelId).one(),
+  /** A hub's tracks. Tracks carry no scope column; the CHANNEL -> TRACK edge places them. */
+  getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.sdlc_tracks
+      .whereExists('sdlcEntityLinks', link =>
+        link
+          .where('channelId', channelId)
+          .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION),
+      )
+      .orderBy('createdAt', 'asc'),
   ),
   getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
     zql.repos
       .where('id', repoId)
       .where('projectId', 'IS NOT', null)
-      .where('channelId', 'IS NOT', null)
       .related('project')
-      .related('channel', channel =>
-        channel
-          .related('participants')
-          .related('channelStats')
-          .related('canvasFolders', folder =>
-            folder
-              .where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs'])
-              .related('canvases', canvas => canvas.related('sdlcArtifact')),
-          ),
-      )
       .related('setupExecution')
-      .related('sdlcEntityLinks')
       .one(),
   ),
-  getSdlcLinks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
-    zql.sdlc_entity_links.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  /**
+     * The content graph for a hub. Structural edges (repository and track membership)
+     * share this table — grep SDLC_STRUCTURAL_RELATIONS for every exclusion.
+     */
+  getSdlcLinks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.sdlc_entity_links
+      .where('channelId', channelId)
+      .where(helpers => helpers.cmp('relationType', 'NOT IN', [...SDLC_STRUCTURAL_RELATIONS]))
+      .orderBy('createdAt', 'asc'),
   ),
   sdlcTicketsByIds: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
@@ -3690,6 +3783,20 @@ export const queries = defineQueries({
           ),
         )
         .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc')),
+  ),
+  sdlcTicketsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where('rootId', 'IS', null)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('ticketType', 'IS', null),
+            helpers.cmp('ticketType', '!=', BaseTicketType.Support),
+          ),
+        ),
   ),
   sdlcDiscussionConversations: defineQuery(
     z.object({
@@ -3976,12 +4083,17 @@ export const queries = defineQueries({
         .related('devTicket', q => {
           let devTicket = q
             .one()
-            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc'));
+            // Only the latest PR is rendered (pullRequests[0]); limit keeps the
+            // relation from hydrating a ticket's full PR history.
+            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc').limit(1));
           if (includeColumnData) {
             devTicket = devTicket.related('workflows').related('tags').related('formEntityValues');
           }
           return devTicket;
         })
+        .related('subTicket', subTicket =>
+          subTicket.one().related('mappedTicket', mappedTicket => mappedTicket.one()),
+        )
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -4315,6 +4427,17 @@ export const queries = defineQueries({
       .related('values')
       .orderBy('createdAt', 'desc');
   }),
+
+  savedConfigsSharedWithUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.view_access
+        .where('entityType', ViewAccessEntityType.USER)
+        .where('entityId', userId)
+        .related('view', view => view.related('values'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   getWorkspaceById: defineQuery(
     z.object({ workspaceId: z.string() }),
