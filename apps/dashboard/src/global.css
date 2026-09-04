@@ -2714,6 +2714,11 @@ html .bn-code-block-source-popup-ok-button:hover {
   --canvas-content-width: 720px;
   /* Matches BlockNote's default .bn-editor padding-inline — the drag-handle / "+" gutter. */
   --canvas-gutter: 54px;
+  /* Trailing room under the last block: a canvas that ends exactly at the last
+     line reads as cramped, and this also gives somewhere to click past the end.
+     Clamped so a short viewport keeps a usable amount and a tall one does not
+     open a chasm. */
+  --canvas-bottom-space: clamp(96px, 25vh, 280px);
 }
 
 /* Centered reading column. .bn-editor keeps its inline padding as the
@@ -2722,11 +2727,83 @@ html .bn-code-block-source-popup-ok-button:hover {
   box-sizing: border-box;
   max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
   margin-inline: auto;
+  padding-bottom: var(--canvas-bottom-space);
   background-color: transparent;
   font-size: 15px;
   line-height: 1.55;
   font-weight: 450;
   color: hsl(var(--foreground));
+}
+
+/* Drag either edge to widen the reading column. Zero-height and sticky, so the
+   handles neither take part in the layout nor scroll away from the reader; each
+   one is a viewport tall so its fade runs end to end however long the document
+   is. Positioned off the same custom property the column is sized by, so they
+   stay on its edges as it changes with no measuring. */
+.canvas-surface .canvas-width-handles {
+  position: sticky;
+  top: 0;
+  height: 0;
+  z-index: 25;
+}
+
+.canvas-surface .canvas-width-handle {
+  position: absolute;
+  top: 0;
+  width: 16px;
+  height: var(--canvas-visible-height, 100vh);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.canvas-surface .canvas-width-handle--left {
+  left: calc(50% - var(--canvas-content-width) / 2 - var(--canvas-gutter) - 8px);
+}
+
+.canvas-surface .canvas-width-handle--right {
+  left: calc(50% + var(--canvas-content-width) / 2 + var(--canvas-gutter) - 8px);
+}
+
+/* Brightest where the hand is, falling away to nothing at both ends, so the
+   line reads as an edge of the page rather than a border drawn around it. */
+.canvas-surface .canvas-width-handle::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    hsl(var(--primary) / 0.7) 50%,
+    transparent 100%
+  );
+  /* Nothing at rest: the page is what the reader is looking at. The line only
+     appears once the pointer is on the edge that draws it. */
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.canvas-surface .canvas-width-handle:hover::before,
+.canvas-surface .canvas-width-handle:focus-visible::before,
+.canvas-surface .canvas-width-handles[data-dragging="true"] .canvas-width-handle::before {
+  opacity: 1;
+}
+
+.canvas-surface .canvas-width-handle:focus-visible {
+  outline: none;
+}
+
+/* A phone has no room to give and no pointer to drag with. */
+@media (max-width: 768px) {
+  .canvas-surface .canvas-width-handles {
+    display: none;
+  }
 }
 
 .canvas-surface .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item) {
@@ -2961,9 +3038,125 @@ html .bn-code-block-source-popup-ok-button:hover {
 .canvas-surface .bn-editor .canvas-highlighted-code .canvas-code-editor::selection {
   background: hsl(var(--primary) / 0.24);
 }
+/* The highlighted mirror and the editable text are two stacked copies of the
+   same characters, so any difference in glyph advance makes the caret drift
+   from the text you can see — a few px per token, compounding along the line.
+   hljs colours its tokens but also restyles them (keywords land on Inter 600),
+   and BlockNote's inline-content wrapper resets to the UI font, so neither
+   layer was actually monospace throughout. Pin the metrics on both; only
+   colour may vary between them. */
+.canvas-surface .bn-editor .canvas-highlighted-code,
+.canvas-surface .bn-editor .canvas-highlighted-code *,
+.canvas-surface .bn-editor .canvas-mermaid-source .canvas-code-editor,
+.canvas-surface .bn-editor .canvas-mermaid-source .canvas-code-editor *,
+.canvas-surface .bn-editor .canvas-math-source .canvas-code-editor,
+.canvas-surface .bn-editor .canvas-math-source .canvas-code-editor * {
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 450;
+  font-style: normal;
+  letter-spacing: normal;
+  font-variant-ligatures: none;
+  tab-size: 4;
+}
+
 /* Language dropdown (revealed on hover) picks up the theme text colour. */
 .canvas-surface .bn-editor [data-content-type="codeBlock"] > div > select {
   color: hsl(var(--muted-foreground));
+}
+
+/* A native select paints itself from the OS colour scheme, not our tokens, so
+   in the dark theme both the closed control and its popup came out white.
+   color-scheme is the only thing that redraws the popup. */
+.canvas-code-toolbar select {
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+}
+
+[data-theme="midnight"] .canvas-code-toolbar select,
+[data-theme="midnight"] .canvas-code-toolbar select option {
+  color-scheme: dark;
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+}
+
+/* Comment / Ask AI for a selected diagram or equation, sitting above the block
+   the way BlockNote's own toolbar does for a text selection. */
+.canvas-object-toolbar {
+  position: fixed;
+  z-index: 40;
+  transform: translate(-50%, -100%);
+}
+
+/* BlockNote tints a selected node with a blue pseudo-element. These blocks
+   carry their own outline in the app's primary colour, so the tint is turned
+   off for them outright rather than only while our own class is present:
+   ProseMirror's selected-node class is not always cleared from a node view, and
+   a stale one left the equation tinted blue while the diagram was outlined —
+   two blocks looking selected at once, in two different styles. */
+.canvas-surface .bn-editor [data-canvas-math]::after,
+.canvas-surface .bn-editor [data-canvas-mermaid]::after {
+  content: none;
+}
+
+/* A selected diagram or equation is an object, so it gets an outline rather
+   than a text highlight. The class comes from the extension's decoration. */
+.canvas-surface .bn-editor .canvas-object-selected [data-canvas-mermaid],
+.canvas-surface .bn-editor .canvas-object-selected [data-canvas-math],
+.canvas-surface .bn-editor .canvas-object-selected [data-canvas-embed],
+/* A divider has nothing inside it to outline, so the block itself carries it. */
+.canvas-surface .bn-editor .canvas-object-selected[data-content-type='divider'] {
+  outline: 2px solid hsl(var(--primary) / 0.7);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* First click selects the embed, second reaches the player. A cross-origin
+   frame never lets the click out, so without this an embedded video could not
+   be selected at all — and an embed that cannot be selected cannot be
+   commented on or asked about. */
+.canvas-surface .bn-editor .canvas-embed-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  cursor: pointer;
+}
+
+.canvas-surface .bn-editor .canvas-object-selected .canvas-embed-shield {
+  display: none;
+}
+
+/* The editable source has to stay laid out even while the preview is showing.
+   display:none removes it from the layout, and with it the only caret position
+   the block has — so there was nowhere to click between two previews, and no
+   way to walk onto the block with the keyboard to delete it. Zero-sized and
+   clipped, the way BlockNote's own source popup hides itself. */
+.canvas-surface .bn-editor .canvas-source-collapsed {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  height: 0;
+  width: 0;
+  overflow: clip;
+  color: transparent;
+  z-index: 0;
+}
+
+/* One mermaid preview renders inside two different blocks — the diagram block
+   and the mermaid code block — and each brought its own vertical padding, on
+   top of the my-4 MermaidBlock carries for chat. The same picture therefore sat
+   in a bigger gap as a code block (30/26) than as a diagram (19/19), so the
+   spacing down a canvas visibly stepped. Drop the component's own margin here
+   and let one rule set the rhythm for both.  */
+.canvas-surface .bn-editor [data-canvas-mermaid] > div:first-child {
+  margin-block: 0;
+}
+
+.canvas-surface .bn-editor [data-content-type="diagram"],
+.canvas-surface .bn-editor [data-content-type="codeBlock"]:has([data-canvas-mermaid]) {
+  padding-block: 14px 10px;
 }
 
 /* Mermaid renders its own unified Diagram/Code surface. Remove the generic
@@ -3043,6 +3236,7 @@ html .bn-code-block-source-popup-ok-button:hover {
  */
 .canvas-surface-preview {
   --canvas-gutter: 12px;
+  --canvas-bottom-space: 0px;
 }
 .canvas-surface-preview .bn-editor {
   padding-inline: var(--canvas-gutter);
@@ -3453,9 +3647,12 @@ img.inline-emoji,
 }
 
 /* --- Mermaid Diagram --- */
-[data-theme="midnight"] .mermaid-tab-active {
-  background-color: rgba(96, 165, 250, 0.15) !important;
-  color: #60a5fa !important;
+/* The selected view tab follows the app's primary colour rather than the blue
+   it used to hardcode, which belonged to no palette here. One rule for both
+   themes: the token already differs per theme. */
+.mermaid-tab-active {
+  background-color: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
 }
 
 /* --- 2D: Mention Styles --- */
