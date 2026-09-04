@@ -1666,6 +1666,7 @@ const SupportScreen = (): ReactElement => {
     channelId: string;
     conversationId: string;
     stageName?: string | null | undefined;
+    statusV2?: string | null | undefined;
     priority?: string | null | undefined;
     assignedTo?: string | null | undefined;
     userGroupId?: string | null | undefined;
@@ -1695,6 +1696,7 @@ const SupportScreen = (): ReactElement => {
       channelId: string;
       conversationId: string;
       stageName?: string | null | undefined;
+      statusV2?: string | null | undefined;
       priority?: string | null | undefined;
       assignedTo?: string | null | undefined;
       userGroupId?: string | null | undefined;
@@ -1716,6 +1718,7 @@ const SupportScreen = (): ReactElement => {
             channelId: row.channelId,
             conversationId: row.conversationId,
             stageName: row.stageName,
+            statusV2: row.statusV2,
             priority: row.priority,
             assignedTo: row.assignedTo,
             userGroupId: row.userGroupId,
@@ -1757,6 +1760,7 @@ const SupportScreen = (): ReactElement => {
         channelId: string;
         conversationId: string;
         stageName?: string | null | undefined;
+        statusV2?: string | null | undefined;
         priority?: string | null | undefined;
         assignedTo?: string | null | undefined;
         userGroupId?: string | null | undefined;
@@ -1779,6 +1783,7 @@ const SupportScreen = (): ReactElement => {
               channelId: row.channelId,
               conversationId: row.conversationId,
               stageName: row.stageName,
+              statusV2: row.statusV2,
               priority: row.priority,
               assignedTo: row.assignedTo,
               userGroupId: row.userGroupId,
@@ -1815,6 +1820,7 @@ const SupportScreen = (): ReactElement => {
             channelId: ticket.channelId ?? '',
             conversationId: ticket.conversationId ?? '',
             stageName: ticket.stageName,
+            statusV2: ticket.statusV2,
             priority: ticket.priority,
             assignedTo: ticket.assignedTo,
             userGroupId: ticket.userGroupId,
@@ -1865,7 +1871,11 @@ const SupportScreen = (): ReactElement => {
     () =>
       deskBoardGatesStageMoves
         ? []
-        : availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+        : availableStages.map(stage => ({
+            id: stage.name,
+            name: stage.name,
+            defaultTicketStatusV2: stage.status,
+          })),
     [availableStages, deskBoardGatesStageMoves],
   );
 
