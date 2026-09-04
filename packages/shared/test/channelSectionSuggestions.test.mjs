@@ -270,7 +270,7 @@ test('suggests only the first of two projects sharing a name', () => {
   });
 
   assert.equal(result.length, 1);
-  assert.equal(result[0].projectId, 'p1');
+  assert.equal(result[0].id, 'p1');
 });
 
 test('truncates long project names to the dialog limit', () => {
@@ -286,7 +286,7 @@ test('truncates long project names to the dialog limit', () => {
     statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
   });
 
-  const truncated = result.find(s => s.projectId === 'p1');
+  const truncated = result.find(s => s.id === 'p1');
   assert.equal(truncated.name.length, 50);
 });
 
@@ -374,4 +374,136 @@ test('orders suggestions by channel count then name', () => {
     result.map(s => s.name),
     ['Delta', 'Gamma', 'Alpha', 'Beta'],
   );
+});
+
+import {
+  computeActivitySectionSuggestions,
+  clampActiveWindowDays,
+} from '../dist/channelSectionSuggestions.js';
+
+const NOW = 1_700_000_000_000;
+const DAY = 24 * 60 * 60 * 1000;
+const daysAgo = n => NOW - n * DAY;
+
+const activityChannel = (id, lastActivityAt) => channel(id, 'p1', { lastActivityAt });
+
+const computeActivity = ({ channels, statuses, existingSectionNames = [], ...rest }) =>
+  computeActivitySectionSuggestions({
+    channels,
+    statuses,
+    existingSectionNames,
+    nowMs: NOW,
+    ...rest,
+  });
+
+test('splits candidates into Active and Quiet', () => {
+  const result = computeActivity({
+    channels: [
+      activityChannel('c1', daysAgo(1)),
+      activityChannel('c2', daysAgo(5)),
+      activityChannel('c3', daysAgo(90)),
+      activityChannel('c4', daysAgo(200)),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.kind),
+    ['active', 'dormant'],
+  );
+  assert.deepEqual(result[0].channelIds, ['c1', 'c2']);
+  assert.deepEqual(result[1].channelIds, ['c3', 'c4']);
+  assert.equal(result[0].name, 'Active');
+  assert.equal(result[1].name, 'Quiet');
+});
+
+test('respects a custom activity window', () => {
+  const channels = [
+    activityChannel('c1', daysAgo(1)),
+    activityChannel('c2', daysAgo(3)),
+    activityChannel('c3', daysAgo(40)),
+    activityChannel('c4', daysAgo(50)),
+  ];
+  const statuses = [status('c1'), status('c2'), status('c3'), status('c4')];
+
+  const wide = computeActivity({ channels, statuses, activeWindowDays: 60 });
+  assert.deepEqual(wide, []);
+
+  const narrow = computeActivity({ channels, statuses, activeWindowDays: 7 });
+  assert.deepEqual(narrow.find(s => s.kind === 'active').channelIds, ['c1', 'c2']);
+  assert.deepEqual(narrow.find(s => s.kind === 'dormant').channelIds, ['c3', 'c4']);
+});
+
+test('treats a missing lastActivityAt as dormant', () => {
+  const result = computeActivity({
+    channels: [
+      activityChannel('c1', daysAgo(1)),
+      activityChannel('c2', daysAgo(2)),
+      channel('c3', 'p1'),
+      channel('c4', 'p1'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+  });
+
+  assert.deepEqual(result.find(s => s.kind === 'dormant').channelIds, ['c3', 'c4']);
+});
+
+test('drops an activity bucket below the minimum', () => {
+  const result = computeActivity({
+    channels: [
+      activityChannel('c1', daysAgo(1)),
+      activityChannel('c2', daysAgo(2)),
+      activityChannel('c3', daysAgo(2)),
+      activityChannel('c4', daysAgo(300)),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.kind),
+    ['active'],
+  );
+});
+
+test('skips an activity bucket whose name is taken', () => {
+  const result = computeActivity({
+    channels: [
+      activityChannel('c1', daysAgo(1)),
+      activityChannel('c2', daysAgo(2)),
+      activityChannel('c3', daysAgo(300)),
+      activityChannel('c4', daysAgo(400)),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+    existingSectionNames: ['  active '],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.kind),
+    ['dormant'],
+  );
+});
+
+test('excludes starred, deleted and already sectioned channels from activity buckets', () => {
+  const result = computeActivity({
+    channels: [
+      activityChannel('c1', daysAgo(1)),
+      activityChannel('c2', daysAgo(1)),
+      activityChannel('c3', daysAgo(1)),
+    ],
+    statuses: [
+      status('c1'),
+      status('c2', { isStarred: true }),
+      status('c3', { sectionId: 'existing' }),
+    ],
+  });
+
+  assert.deepEqual(result, []);
+});
+
+test('clamps the activity window to the supported range', () => {
+  assert.equal(clampActiveWindowDays(0), 1);
+  assert.equal(clampActiveWindowDays(-5), 1);
+  assert.equal(clampActiveWindowDays(10_000), 365);
+  assert.equal(clampActiveWindowDays(Number.NaN), 30);
+  assert.equal(clampActiveWindowDays(45.4), 45);
 });

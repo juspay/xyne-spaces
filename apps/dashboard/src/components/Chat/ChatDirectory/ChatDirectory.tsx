@@ -60,7 +60,10 @@ import AddChannelForm from '../AddChannelForm/AddChannelForm';
 import AddSectionForm from '../AddSectionForm/AddSectionForm';
 import CreateSectionDialog from '../CreateSectionDialog/CreateSectionDialog';
 import ProjectSectionSuggestionCard from './ProjectSectionSuggestionCard';
-import SectionOrganizerDialog, { type OrganizerGroup } from './SectionOrganizerDialog';
+import SectionOrganizerDialog, {
+  type OrganizerGroup,
+  type OrganizerMode,
+} from './SectionOrganizerDialog';
 import ManageSectionChannelsDialog from './ManageSectionChannelsDialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Badge from '../../ui/Badge';
@@ -90,7 +93,9 @@ import {
   ChannelScopeType,
   isDeskChannelType,
   NotificationLevel,
+  DEFAULT_ACTIVE_WINDOW_DAYS,
   computeProjectSectionSuggestions,
+  computeActivitySectionSuggestions,
   getCandidateProjectIds,
 } from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
@@ -299,13 +304,31 @@ const ChatDirectory = ({
     () => localStorage.getItem(SECTION_SUGGESTION_DISMISSED_KEY) === 'true',
   );
   const [showOrganizer, setShowOrganizer] = useState(false);
+  const [organizerMode, setOrganizerMode] = useState<OrganizerMode>('project');
+  const [activeWindowDays, setActiveWindowDays] = useState(DEFAULT_ACTIVE_WINDOW_DAYS);
+  const [suggestionsNowMs, setSuggestionsNowMs] = useState(() => Date.now());
+
+  const suggestionChannels = useMemo(
+    () =>
+      suggestionDismissed
+        ? []
+        : (channelData ?? []).map(channel => ({
+            id: channel.id,
+            projectId: channel.projectId,
+            scopeType: channel.scopeType,
+            type: channel.type,
+            lastActivityAt: channel.channelStats?.lastActivityAt ?? channel.lastActivityAt ?? null,
+          })),
+    [channelData, suggestionDismissed],
+  );
+
   const candidateProjectIdsKey = useMemo(
     () =>
       getCandidateProjectIds({
-        channels: channelData ?? [],
+        channels: suggestionChannels,
         statuses: allChannelsUserStatus ?? [],
       }).join(','),
-    [channelData, allChannelsUserStatus],
+    [suggestionChannels, allChannelsUserStatus],
   );
   const projectsQuery = useMemo(
     () =>
@@ -318,18 +341,45 @@ const ChatDirectory = ({
     enabled: !suggestionDismissed && candidateProjectIdsKey.length > 0,
   });
 
-  const sectionSuggestions = useMemo(
-    () =>
-      computeProjectSectionSuggestions({
-        channels: channelData ?? [],
-        statuses: allChannelsUserStatus ?? [],
-        projects: projects ?? [],
-        existingSectionNames: (channelSections ?? []).map(section => section.name),
-      }),
-    [channelData, allChannelsUserStatus, projects, channelSections],
+  const existingSectionNames = useMemo(
+    () => (channelSections ?? []).map(section => section.name),
+    [channelSections],
   );
 
-  const showSuggestionCard = !suggestionDismissed && sectionSuggestions.length > 0;
+  const projectSuggestions = useMemo(
+    () =>
+      computeProjectSectionSuggestions({
+        channels: suggestionChannels,
+        statuses: allChannelsUserStatus ?? [],
+        projects: projects ?? [],
+        existingSectionNames,
+      }),
+    [suggestionChannels, allChannelsUserStatus, projects, existingSectionNames],
+  );
+
+  const activitySuggestions = useMemo(
+    () =>
+      computeActivitySectionSuggestions({
+        channels: suggestionChannels,
+        statuses: allChannelsUserStatus ?? [],
+        existingSectionNames,
+        nowMs: suggestionsNowMs,
+        activeWindowDays,
+      }),
+    [
+      suggestionChannels,
+      allChannelsUserStatus,
+      existingSectionNames,
+      suggestionsNowMs,
+      activeWindowDays,
+    ],
+  );
+
+  const sectionSuggestions =
+    organizerMode === 'activity' ? activitySuggestions : projectSuggestions;
+
+  const showSuggestionCard =
+    !suggestionDismissed && (projectSuggestions.length > 0 || activitySuggestions.length > 0);
 
   const channelsById = useMemo(
     () => new Map((channelData ?? []).map(channel => [channel.id, channel])),
@@ -975,7 +1025,11 @@ const ChatDirectory = ({
 
           {showSuggestionCard && (
             <ProjectSectionSuggestionCard
-              onAccept={() => setShowOrganizer(true)}
+              onAccept={() => {
+                setSuggestionsNowMs(Date.now());
+                setOrganizerMode(projectSuggestions.length > 0 ? 'project' : 'activity');
+                setShowOrganizer(true);
+              }}
               onDismiss={handleDismissSuggestion}
             />
           )}
@@ -1398,7 +1452,11 @@ const ChatDirectory = ({
             <SectionOrganizerDialog
               suggestions={sectionSuggestions}
               channelsById={channelsById}
-              existingNames={(channelSections ?? []).map(s => s.name)}
+              existingNames={existingSectionNames}
+              mode={organizerMode}
+              onModeChange={setOrganizerMode}
+              activeWindowDays={activeWindowDays}
+              onActiveWindowDaysChange={setActiveWindowDays}
               onCancel={() => setShowOrganizer(false)}
               onConfirm={handleCreateSections}
             />
