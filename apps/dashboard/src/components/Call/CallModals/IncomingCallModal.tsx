@@ -13,8 +13,8 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useUsers } from '../../../hooks/useUsers';
 import { IncomingCallCard } from '../IncomingCall/IncomingCallCard';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { buildCallNotificationBody } from '../IncomingCall/callNotificationBody';
 import {
-  buildCallNotificationBody,
   buildIncomingCallViewModel,
   isRingableCall,
   type IncomingCallRow,

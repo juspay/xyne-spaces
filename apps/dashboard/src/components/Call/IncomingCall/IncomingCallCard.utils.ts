@@ -11,6 +11,7 @@ import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import type {
   IncomingCallContextVM,
   IncomingCallIdentityVM,
+  IncomingCallPlace,
   IncomingCallRosterEntry,
   IncomingCallViewModel,
 } from './IncomingCallCard.types';
@@ -211,6 +212,11 @@ export function resolveDisplayChannel(
 // Context line
 // ---------------------------------------------------------------------------
 
+/** How the modal's context line spells a place: `#engineering`, `group DM`. */
+export function formatCallPlace(place: NonNullable<IncomingCallPlace>): string {
+  return place.kind === 'channel' ? `#${place.name}` : 'group DM';
+}
+
 function buildContext(input: {
   call: IncomingCallRow;
   channel: ChannelLike | undefined;
@@ -223,7 +229,12 @@ function buildContext(input: {
   const isScheduled = !isNullish(call.startsAt) || isCalendar;
   const isThread = call.callOrigin === CallOrigin.CONVERSATION;
   const isGroupDm = channel?.scopeType === ChannelScopeType.GROUP_DM;
-  const place = nameable ? `#${nameable.name}` : isGroupDm ? 'group DM' : null;
+  const place: IncomingCallPlace = nameable
+    ? { kind: 'channel', name: nameable.name }
+    : isGroupDm
+      ? { kind: 'group-dm' }
+      : null;
+  const placeText = place ? formatCallPlace(place) : null;
 
   // Precedence matters — these overlap, and a scheduled thread call has to read
   // as one sentence rather than pick a side.
@@ -232,7 +243,8 @@ function buildContext(input: {
     return {
       kind: isThread ? 'scheduled-thread' : isCalendar ? 'calendar' : 'scheduled',
       icon: 'calendar',
-      text: place ? `${prefix} in ${place}` : prefix,
+      place,
+      text: placeText ? `${prefix} in ${placeText}` : prefix,
     };
   }
 
@@ -240,20 +252,21 @@ function buildContext(input: {
     return {
       kind: 'thread',
       icon: 'thread',
-      text: place ? `Thread call in ${place}` : 'Thread call',
+      place,
+      text: placeText ? `Thread call in ${placeText}` : 'Thread call',
     };
   }
 
   if (nameable) {
-    return { kind: 'channel', icon: 'hash', text: `Call in ${place}` };
+    return { kind: 'channel', icon: 'hash', place, text: `Call in ${placeText}` };
   }
 
   if (isSolo) {
-    return { kind: 'direct', icon: 'user', text: 'Incoming call' };
+    return { kind: 'direct', icon: 'user', place, text: 'Incoming call' };
   }
 
   if (isGroupDm || channel) {
-    return { kind: 'group', icon: 'users', text: 'Group call' };
+    return { kind: 'group', icon: 'users', place, text: 'Group call' };
   }
 
   // Channel not synced yet, or nothing identifying at all. A generic line plus
@@ -261,6 +274,7 @@ function buildContext(input: {
   return {
     kind: call.channelId ? 'unknown' : 'group',
     icon: call.channelId ? 'hash' : 'users',
+    place,
     text: call.channelId ? 'Incoming call' : 'Group call',
   };
 }
@@ -348,28 +362,4 @@ export function buildIncomingCallViewModel(input: {
     isInActiveCall,
     invitedBy: myParticipant?.invitedBy ?? null,
   };
-}
-
-
-// ---------------------------------------------------------------------------
-// OS (Electron) notification body
-// ---------------------------------------------------------------------------
-
-/**
- * The body text for the desktop OS call notification. Scheduled calls reuse the
- * modal's own context line (e.g. `Scheduled call in #engineering`,
- * `Scheduled thread call in #engineering`); every other kind reads as
- * `<inviter> is inviting you to a call`. The modal renders a group DM as
- * `group DM`, but the product copy for this notification says `group`, so that
- * one phrase is normalized here without touching the modal line.
- */
-export function buildCallNotificationBody(
-  vm: Pick<IncomingCallViewModel, 'context'>,
-  callerName: string,
-): string {
-  const { kind, text } = vm.context;
-  if (kind === 'scheduled' || kind === 'scheduled-thread' || kind === 'calendar') {
-    return text.replace(/\bgroup DM\b/, 'group');
-  }
-  return `${callerName} is inviting you to a call`;
 }
