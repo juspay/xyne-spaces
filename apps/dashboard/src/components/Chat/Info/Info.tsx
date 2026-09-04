@@ -293,7 +293,13 @@ const Info = ({
   return (
     <div
       ref={popoverContainerRef}
-      className='overflow-clip h-[720px] bg-background flex flex-col'
+      className={cn(
+        'overflow-clip bg-background flex flex-col',
+        // The About tab is short; a fixed height leaves a large empty gap.
+        // Size to content there, and keep the fixed height on tabs that host
+        // a scroll viewport (Members' virtualized list needs a definite height).
+        activeTab === 'about' ? 'max-h-[720px]' : 'h-[720px]',
+      )}
       style={{ position: 'relative' }}
     >
       <div className='w-full flex items-start justify-between gap-2 p-4 pb-6'>
