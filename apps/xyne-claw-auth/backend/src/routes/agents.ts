@@ -9,6 +9,7 @@ import { validateSubagentInput, ValidationError as SubagentValidationError } fro
 import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
@@ -2804,7 +2805,10 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
     const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
     res.json({
       success: true,
-      data: { provider: config?.provider ?? "spaces" },
+      // `inherited` separates "never picked one" from an explicit "spaces" pick.
+      // Both report provider "spaces", but only the former follows the user's
+      // account-wide default harness (User.localHarnessDefaultProvider).
+      data: { provider: config?.provider ?? "spaces", inherited: !config },
     });
   } catch (err) {
     log.error("[agents] get user-config error:", err);
@@ -2815,8 +2819,15 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
 router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { provider } = req.body as { provider?: string };
-    if (!provider || !["spaces", "copilot", "claude", "codex"].includes(provider)) {
-      res.status(400).json({ success: false, error: "provider must be 'spaces', 'copilot', 'claude', or 'codex'" });
+    const allowedProviders = [
+      "spaces",
+      "copilot",
+      "claude",
+      "codex",
+      ...(CONFIG.localHarnessEnabled ? LOCAL_HARNESS_PROVIDERS : []),
+    ];
+    if (!provider || !allowedProviders.includes(provider)) {
+      res.status(400).json({ success: false, error: `provider must be one of: ${allowedProviders.join(", ")}` });
       return;
     }
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));

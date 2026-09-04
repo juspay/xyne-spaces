@@ -58,6 +58,7 @@ import { dailyBriefRouter } from "../routes/daily-brief.js";
 import { pendingQuestionsRouter } from "../routes/pending-questions.js";
 import { ttsRouter } from "../routes/tts.js";
 import { settingsRouter } from "../routes/settings.js";
+import { localHarnessBridgeRouter, localHarnessRouter } from "../routes/local-harness.js";
 import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
 import { memoryRouter } from "../routes/memory.js";
@@ -259,6 +260,10 @@ function mountRunAndWebhooks(app: Express): void {
 
 function mountWorkspace(app: Express): void {
   app.use(`${BASE}/settings`, requireAuth, requireNoAccessToken, settingsRouter);
+  // Local harness: device management is user-authed; the bridge router is
+  // device-token authed inside (requireDevice) and rate-limited per device.
+  app.use(`${BASE}/local-harness`, requireUserAuth, localHarnessRouter);
+  app.use(`${BASE}/local-harness-bridge`, localHarnessBridgeRouter);
   // allowReadAccessToken (NOT the hard barrier): CLI tokens carry runs:read so
   // the CLI can list/search/fetch its own runs (GET /runs/light, /runs/search,
   // /runs/:id). Reads pass with the scope; token writes are still rejected.
