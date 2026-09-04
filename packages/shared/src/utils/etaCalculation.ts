@@ -9,6 +9,14 @@
 const IST_OFFSET_HOURS = 5.5;
 
 /**
+ * Safety cap on the day-stepping loops in `calculateETADeadline` and
+ * `calculateWorkingDurationMs`. Both walk forward one working day at a
+ * time, so a bogus or unbounded input (e.g. a multi-year estimate, or a
+ * corrupted date range) could otherwise loop indefinitely.
+ */
+const MAX_WORKING_DAY_ITERATIONS = 1000;
+
+/**
  * Working hours configuration interface
  */
 export interface WorkingHoursConfig {
@@ -175,19 +183,27 @@ export function calculateETADeadline(
   current = moveToNextWorkingDay(current, config);
   current = skipWeekends(current, config);
 
-  // Calculate full working days needed
-  const fullDaysNeeded = Math.floor(remainingHours / workingHoursPerDay);
-  if (fullDaysNeeded > 0) {
-    let workingDaysAdded = 0;
-    while (workingDaysAdded < fullDaysNeeded) {
-      current = moveToNextWorkingDay(current, config);
-      workingDaysAdded++;
+  // Leaves remainingHours in (0, workingHoursPerDay] rather than consuming every full day, so
+  // an exact multi-day estimate pins to the end of the last working day instead of the start
+  // of the next - matching how a single exact day is pinned above.
+  let dayIterations = 0;
+  while (remainingHours > workingHoursPerDay) {
+    if (dayIterations >= MAX_WORKING_DAY_ITERATIONS) {
+      throw new Error(
+        'Maximum iterations reached in calculateETADeadline - possible infinite loop'
+      );
     }
-    remainingHours -= fullDaysNeeded * workingHoursPerDay;
+    remainingHours -= workingHoursPerDay;
+    current = moveToNextWorkingDay(current, config);
+    dayIterations++;
   }
 
-  // Handle remaining partial day
-  if (remainingHours > 0) {
+  if (remainingHours === workingHoursPerDay) {
+    // Estimate exactly fills this day - pin to end of working day.
+    const istForCalc = utcToIST(current);
+    istForCalc.setUTCHours(config.end, 0, 0, 0);
+    current = istToUTC(istForCalc);
+  } else if (remainingHours > 0) {
     const istForPartial = utcToIST(current);
     const totalMinutesNeeded = remainingHours * 60;
     istForPartial.setUTCMinutes(istForPartial.getUTCMinutes() + totalMinutesNeeded);
@@ -214,9 +230,8 @@ export function calculateWorkingDurationMs(
   const end = new Date(endUtc);
   let totalMs = 0;
   let iterations = 0;
-  const MAX_ITERATIONS = 1000; // Safety limit for large date ranges
 
-  while (current < end && iterations < MAX_ITERATIONS) {
+  while (current < end && iterations < MAX_WORKING_DAY_ITERATIONS) {
     iterations++;
 
     // 1. Skip weekends
@@ -266,7 +281,7 @@ export function calculateWorkingDurationMs(
     }
   }
 
-  if (iterations >= MAX_ITERATIONS) {
+  if (iterations >= MAX_WORKING_DAY_ITERATIONS) {
     throw new Error(
       `Maximum iterations reached in calculateWorkingDurationMs - possible infinite loop. Range: ${startUtc.toISOString()} to ${endUtc.toISOString()}`
     );

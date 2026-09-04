@@ -1,5 +1,5 @@
 import { BaseSideEffectHandler } from '../base-handler';
-import { ActivityClassification } from '@xyne/shared';
+import { ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -10,6 +10,14 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { websocketService } from '@/services/websocketService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import {
+  dispatchEtaNotifications,
+  drainEtaActivityOutbox,
+  drainedOutboxTimestamp,
+  etaSystemMessageContent,
+  etaSignalsFromMetadataDiff,
+  writeEtaActivitiesPrisma,
+} from '@/services/etaManagement';
 
 import {
   emitTicketUpdated,
@@ -194,12 +202,99 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
         workspaceId: true,
         createdBy: true,
         assignedTo: true,
+        userGroupId: true,
+        boardId: true,
+        eta: true,
+        statusV2: true,
+        metadata: true,
       },
     });
 
     if (!ticket) {
       logger.warn(`[TicketsSideEffectHandler] Ticket ${ticketId} not found`);
       return;
+    }
+
+    try {
+      const etaIntents = drainEtaActivityOutbox({
+        previousMetadata: prev.metadata,
+        currentMetadata: args.metadata,
+      });
+      if (etaIntents.length > 0) {
+        const messageActorIds = [
+          ...new Set(etaIntents.map(i => i.actorId).filter((id): id is string => !!id)),
+        ];
+        const messageActors = messageActorIds.length
+          ? await db.user.findMany({
+              where: { id: { in: messageActorIds } },
+              select: { id: true, name: true, displayName: true },
+            })
+          : [];
+        const actorNames = new Map(
+          messageActors.map(u => [u.id, u.displayName || u.name || 'Someone']),
+        );
+
+        const intentsWithMessages = etaIntents.map(intent => {
+          const actorName = intent.actorId ? actorNames.get(intent.actorId) : undefined;
+          const content = actorName ? etaSystemMessageContent(intent, actorName) : null;
+          return content ? { ...intent, systemMessageContent: content } : intent;
+        });
+
+        await writeEtaActivitiesPrisma(db, intentsWithMessages, {
+          ticketId,
+          workspaceId: ticket.workspaceId,
+          channelId: ticket.channelId,
+          conversationId: ticket.conversationId,
+          timestamp: drainedOutboxTimestamp(args.metadata) ?? Date.now(),
+        });
+      }
+    } catch (error) {
+      logger.error(`[TicketsSideEffectHandler] Failed to write staged ETA activities:`, error);
+    }
+
+    // ETA planning-risk alerts. Driven off the committed before-vs-after state rather
+    // than the in-transaction evaluation result, so one place covers every Zero mutator
+    // that writes a ticket (ticket.update, nonLinear.transition, ticketStageEta.update).
+    // The Prisma write paths own their own post-commit dispatch - they never reach here.
+    //
+    // Diffed against THIS job's own `args.metadata`, never the re-fetched `ticket.metadata`
+    // - same reason as the outbox drain above: one logical mutation can emit several
+    // `tickets.update` jobs (board transfer does), and `ticket.metadata` is the FINAL state
+    // for all of them. Using it as "current" for every job made every job whose own prev
+    // predated the risk-detecting write compute an identical "risk just appeared" diff
+    // against that same final state - not idempotent, a genuine duplicate alert per extra
+    // job. Gating on `args.metadata !== undefined` means only the one job that actually
+    // carried the metadata write evaluates a diff at all; jobs that only touched
+    // stageName/kanbanPosition/boardId etc. skip this block entirely.
+    //
+    // Deliberately drops the `newEta` signal: a due-date change is already notified by
+    // the generic `etaChanged` branch below, to the same awareness recipient set. Only
+    // the risk alert (which goes to the narrower "action recipients" set) is new here.
+    //
+    // Suppressed while paused - risk state stays visible, just labeled paused. Mirrors
+    // the guard in stageEtaDeadlineWorker.ts's reconciliation pass.
+    if (ticket.statusV2 !== TicketStatusV2.PAUSED && args.metadata !== undefined) {
+      try {
+        const { riskAlert } = etaSignalsFromMetadataDiff({
+          previousMetadata: prev.metadata,
+          currentMetadata: args.metadata,
+          previousEta: prev.eta,
+          currentEta: ticket.eta?.getTime() ?? null,
+        });
+        await dispatchEtaNotifications(
+          { riskAlert, newEta: null },
+          {
+            ticketId,
+            createdBy: ticket.createdBy,
+            assignedTo: ticket.assignedTo,
+            ticketUserGroupId: ticket.userGroupId,
+            boardId: ticket.boardId,
+            actorId,
+          },
+        );
+      } catch (error) {
+        logger.error(`[TicketsSideEffectHandler] Failed to dispatch ETA planning-risk notification:`, error);
+      }
     }
 
     // Fetch all role assignments (manager, team lead, dev, qa, pr reviewer, etc.)
@@ -294,7 +389,11 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           logger.info(`[TicketsSideEffectHandler] Sent priority change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
         }
 
-        if (etaChanged && args.eta !== undefined) {
+        // No notifications while paused. This is a plain field diff (fires for ANY eta
+        // write), and moving into a paused stage is itself a stage entry, which can
+        // trigger an automatic forecast extension - without this guard that extension
+        // would notify even though the ticket is being paused, not worked.
+        if (etaChanged && args.eta !== undefined && ticket.statusV2 !== TicketStatusV2.PAUSED) {
           const formattedDate = new Date(args.eta).toLocaleDateString('en-US', {
             month: 'long',
             day: 'numeric',
