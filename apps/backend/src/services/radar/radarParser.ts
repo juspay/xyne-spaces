@@ -7,13 +7,13 @@ const TAG = '[RADAR-PARSER]';
 const AGENT_NAME = 'RadarParser';
 
 /** 429s are transient concurrency limits on the shared endpoint — back off, don't fail. */
-const RATE_LIMIT_MAX_RETRIES = 6;
+const RATE_LIMIT_MAX_RETRIES = config.radar.rateLimitMaxRetries;
 /** Schema-repair round-trips after the first response. */
 const MAX_REPAIR_ATTEMPTS = 2;
-const REQUEST_TIMEOUT_MS = 300_000;
+const REQUEST_TIMEOUT_MS = config.radar.parserTimeoutMs;
 
 /** Per-message text cap so one pasted log dump can't blow the prompt budget. */
-const MAX_MESSAGE_TEXT_CHARS = 2000;
+const MAX_MESSAGE_TEXT_CHARS = config.radar.maxMessageTextChars;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -35,7 +35,7 @@ export interface ParserOpenItem {
 }
 
 export interface ParserOperation {
-  op: 'create' | 'resolve' | 'reassign';
+  op: 'create' | 'resolve' | 'reassign' | 'dismiss';
   sourceMessageId: string;
   title?: string;
   contextSummary?: string;
