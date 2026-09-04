@@ -1,3 +1,10 @@
+## [1.274.0](https://github.com/juspay/xyne-spaces/compare/v1.273.4...v1.274.0) (2026-09-04)
+
+
+### Features
+
+* self service ingestion fixes ([#1404](https://github.com/juspay/xyne-spaces/issues/1404)) ([0b2482f](https://github.com/juspay/xyne-spaces/commit/0b2482fc9c8be547469dc798be996e41583098b9))
+
 ## [1.273.4](https://github.com/juspay/xyne-spaces/compare/v1.273.3...v1.273.4) (2026-09-04)
 
 
