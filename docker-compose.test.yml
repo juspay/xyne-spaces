@@ -140,6 +140,15 @@ services:
       - BACKEND_URL=http://backend:3001
       - DASHBOARD_URL=http://dashboard:5173
       - BROWSER=chromium
+      # Use the pre-baked image deps as-is: make pnpm non-interactive and stop it
+      # re-verifying/reinstalling (a reinstall re-blocks @getgauge/cli's build script).
+      - CI=true
+      - NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false
+      - NPM_CONFIG_CONFIRM_MODULES_PURGE=false
+      # Container-scoped log-noise suppression for the test run.
+      - NPM_CONFIG_LOGLEVEL=error
+      - NODE_NO_WARNINGS=1
+      - COREPACK_ENABLE_DOWNLOAD_PROMPT=0
     depends_on:
       backend:
         condition: service_healthy

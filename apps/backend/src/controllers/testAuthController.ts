@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AccessType, AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
+import { AccessType, AuthProvider, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
 import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -256,6 +256,24 @@ export class TestAuthController {
         }
       }
 
+      // Ensure the per-workspace "DM" project exists (normally created during org
+      // onboarding); without it POST /api/users/me/dms 500s for pre-existing test workspaces.
+      const existingDmProject = await db.project.findFirst({
+        where: { workspaceId: workspace.id, code: 'DM', type: ProjectType.DM },
+      });
+      if (!existingDmProject) {
+        await db.project.create({
+          data: {
+            name: 'Direct Messages',
+            code: 'DM',
+            description: 'DM project (test-auth)',
+            workspaceId: workspace.id,
+            type: ProjectType.DM,
+            createdBy: user.id,
+          },
+        });
+      }
+
       const effectiveIsNewUser = setAsNewUser ?? isNewUser;
       logger.info(`[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id} (dbIsNew: ${isNewUser}, effectiveIsNew: ${effectiveIsNewUser})`);
 
@@ -396,6 +414,13 @@ export class TestAuthController {
 
       if (sessionId) {
         res.cookie('xyne_session', sessionId, {
+          ...cookieOptions,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+
+        // Session cookie the auth middleware and session-scoped routes require
+        // (real login controllers set it too); without it session-gated routes 401.
+        res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });

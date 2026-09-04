@@ -232,9 +232,8 @@ console.log(`\n📁 Run artifacts: ${path.relative(process.cwd(), runArtifactDir
 const gaugeArgs = [
   'run',
   '--sort=alpha',
-  // Retry failures immediately; scenarios that still fail are retried again at the end.
-  '--max-retries-count',
-  String(testConfig.retries),
+  // Retry failed scenarios; gauge rejects `--max-retries-count 0`, so only pass it when retries > 0.
+  ...(testConfig.retries > 0 ? ['--max-retries-count', String(testConfig.retries)] : []),
   // Exclude quarantined (known-flaky) scenarios.
   '--tags',
   scenarioTagFilter,
