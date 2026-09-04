@@ -135,6 +135,8 @@ export const SDLC_MEMBERSHIP_RELATION = "REPOSITORY";
  */
 export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
 
+export const SDLC_ARTIFACT_REPOSITORY_RELATION = "CONTEXT";
+
 /** Structure, not content. Every read of the content graph excludes these. */
 export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
@@ -622,9 +624,119 @@ export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
 
+export const SDLC_AGENT_SLUG = "sdlc-agent" as const;
+
+export const SDLC_AGENT_OPERATIONS = [
+  "interactive",
+  "baseline",
+  "artifact",
+  "work",
+  "wiki",
+] as const;
+export const sdlcAgentOperationSchema = z.enum(SDLC_AGENT_OPERATIONS);
+export type SdlcAgentOperation = z.infer<typeof sdlcAgentOperationSchema>;
+
+export const SDLC_WIKI_AGENT_ROLES = [
+  "BOOTSTRAP_SURVEY",
+  "BOOTSTRAP_PAGE",
+  "BOOTSTRAP_EDITOR",
+  "BOOTSTRAP",
+  "GENERATOR",
+  "ARCHITECTURE_VALIDATOR",
+  "CORRECTOR",
+] as const;
+export const sdlcWikiAgentRoleSchema = z.enum(SDLC_WIKI_AGENT_ROLES);
+export type SdlcWikiAgentRole = z.infer<typeof sdlcWikiAgentRoleSchema>;
+
+const nullableNonEmpty = z.string().min(1).nullable();
+
+export const sdlcAgentContextSchema = z
+  .object({
+    version: z.literal(1),
+    operation: sdlcAgentOperationSchema,
+    workspaceId: z.string().min(1),
+    projectId: z.string().min(1),
+    channelId: z.string().min(1),
+    actorUserId: z.string().min(1),
+    repository: z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      url: z.string().min(1),
+      baseBranch: z.string().min(1),
+    }),
+    permissions: z.object({ repositoryRole: z.enum(["ADMIN", "MEMBER"]) }),
+    gates: z.object({
+      capabilities: z.array(z.unknown()),
+      allBaselinesApproved: z.boolean(),
+    }),
+    execution: z.object({
+      workflowExecutionId: nullableNonEmpty,
+      sessionId: nullableNonEmpty,
+      conversationId: nullableNonEmpty,
+    }),
+    interactiveGrant: nullableNonEmpty.optional(),
+    artifact: z.object({
+      kind: nullableNonEmpty,
+      id: nullableNonEmpty,
+      sourceType: nullableNonEmpty,
+      sourceId: nullableNonEmpty,
+    }),
+    ticketId: nullableNonEmpty.optional(),
+    setupExecutionId: nullableNonEmpty.optional(),
+    baselineKind: sdlcBaselineKindSchema.nullable().optional(),
+    generationCommit: nullableNonEmpty.optional(),
+    wiki: z
+      .object({
+        role: sdlcWikiAgentRoleSchema.nullable(),
+        assignedCommitShas: z.array(z.string()),
+        bootstrapRef: z.string().nullable(),
+        targetHeadSha: z.string().nullable(),
+      })
+      .optional(),
+  })
+  .superRefine((context, ctx) => {
+    const fail = (message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    const hasExecution =
+      Boolean(context.execution.workflowExecutionId) && Boolean(context.execution.sessionId);
+
+    switch (context.operation) {
+      case "baseline":
+        if (!context.setupExecutionId) fail("setupExecutionId is required for baseline runs");
+        if (!context.baselineKind) fail("baselineKind is required for baseline runs");
+        if (!hasExecution) fail("baseline runs require a bound execution");
+        break;
+      case "artifact":
+        if (!hasExecution) fail("artifact runs require a bound execution");
+        break;
+      case "work":
+        if (!context.ticketId) fail("ticketId is required for work runs");
+        if (!hasExecution) fail("work runs require a bound execution");
+        break;
+      case "interactive":
+        if (!context.execution.conversationId) fail("interactive runs require a conversationId");
+        if (!context.interactiveGrant) fail("interactive runs require an interactiveGrant");
+        break;
+      case "wiki":
+        break;
+    }
+  });
+export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;
+
+export const resolveSdlcAgentRepositorySchema = z.object({
+  agentSlug: z.literal(SDLC_AGENT_SLUG),
+  repoId: z.string().min(1),
+  actorUserId: z.string().min(1),
+  conversationId: z.string().min(1),
+  channelId: z.string().min(1).optional(),
+});
+export type ResolveSdlcAgentRepositoryInput = z.infer<
+  typeof resolveSdlcAgentRepositorySchema
+>;
+
 export const bootstrapSdlcRuntimeCredentialSchema = z
   .object({
-    agentSlug: z.literal("sdlc-agent"),
+    agentSlug: z.literal(SDLC_AGENT_SLUG),
     repoId: z.string().min(1),
     operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
     sandboxId: z.string().min(1).max(256),
@@ -635,9 +747,20 @@ export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
 
+export const sdlcRepoIdsSchema = z.array(z.string().min(1)).max(50).optional();
+
+export function sdlcRepoIds(input: {
+  repoId?: string | undefined;
+  repoIds?: string[] | undefined;
+}): string[] {
+  if (input.repoIds) return [...new Set(input.repoIds)];
+  return input.repoId ? [input.repoId] : [];
+}
+
 export const createSdlcClawArtifactSchema = z
   .object({
-    repoId: z.string().min(1),
+    repoId: z.string().min(1).optional(),
+    repoIds: sdlcRepoIdsSchema,
     // The hub to write into. A repository sits in several, so it cannot be inferred.
     channelId: z.string().min(1).optional(),
     kind: sdlcArtifactKindSchema.optional(),
@@ -665,6 +788,12 @@ export const createSdlcClawArtifactSchema = z
           "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
       });
     }
+    if (value.kind === "BASELINE" && sdlcRepoIds(value).length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Baseline artifacts belong to exactly one repository",
+      });
+    }
     const isArtifact = value.kind !== "BASELINE";
     if (isArtifact) {
       if (!value.folderId) {
@@ -686,7 +815,8 @@ export type CreateSdlcClawArtifactInput = z.infer<
 >;
 
 export const updateSdlcClawArtifactSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1).optional(),
   canvasId: z.string().min(1),
   title: z.string().trim().min(1).max(255).optional(),
   markdown: z.string().min(1).max(5_000_000),
@@ -735,23 +865,31 @@ export const createSdlcLinkSchema = z.object({
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
 
-export const createSdlcTrackSchema = z.object({
-  repoId: z.string().min(1),
+export const createSdlcClawLinkSchema = createSdlcLinkSchema.extend({
   channelId: z.string().min(1).optional(),
+  repoId: z.string().min(1).optional(),
+  repoIds: sdlcRepoIdsSchema,
+});
+export type CreateSdlcClawLinkInput = z.infer<typeof createSdlcClawLinkSchema>;
+
+export const createSdlcTrackSchema = z.object({
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).optional(),
 });
 export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
 
 export const createSdlcArtifactTypeSchema = z.object({
-  repoId: z.string().min(1),
-  channelId: z.string().min(1).optional(),
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1),
   name: z.string().trim().min(1).max(80),
 });
 export type CreateSdlcArtifactTypeInput = z.infer<typeof createSdlcArtifactTypeSchema>;
 
 export const renameSdlcArtifactTypeSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1),
   folderId: z.string().min(1),
   name: z.string().trim().min(1).max(80),
 });

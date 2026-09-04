@@ -1,5 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { ACLAuditEventType, ACLAuditTargetType } from '@xyne/shared';
+import { ACLAuditEventType, ACLAuditTargetType,
+  SDLC_AGENT_SLUG,
+} from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { logger } from '@/utils/logger';
@@ -34,7 +36,6 @@ const adapters: Record<VcsProvider, VcsProviderAdapter> = {
 const ACCESS_REFRESH_CHUNK = 5;
 
 const activeExecutionStatuses = ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING', 'EXTERNAL_WAIT'];
-const SDLC_AGENT_SLUG = 'sdlc-agent';
 
 export class SdlcVcsService implements SdlcVcs {
   private readonly credentialStore = new SdlcVcsCredentialStore();

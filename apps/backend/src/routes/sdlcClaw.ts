@@ -1,7 +1,8 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import {
   UserType,
-  createSdlcLinkSchema,
+  createSdlcClawLinkSchema,
+  sdlcRepoIds,
   createSdlcClawArtifactSchema,
   createSdlcTrackSchema,
   createSdlcArtifactTypeSchema,
@@ -60,30 +61,42 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
 router.post(
   '/links',
   route(async (req, res) => {
-    const input = createSdlcLinkSchema.extend({ repoId: createSdlcLinkSchema.shape.sourceId }).parse(
-      req.body,
-    );
-    const { repoId, ...linkInput } = input;
+    const { repoId, repoIds, channelId, ...linkInput } = createSdlcClawLinkSchema.parse(req.body);
+    const namedRepoId = sdlcRepoIds({ repoId, repoIds })[0] ?? null;
+    if (!channelId && !namedRepoId) {
+      throw new AppError('channelId is required', 400);
+    }
     const link = await sdlcHub.linkContext(
       await actorFromRequest(req),
-      repoId,
+      channelId ? null : namedRepoId,
       linkInput,
-      channelIdFromBody(req)
+      channelId
     );
     res.status(201).json({ success: true, link });
   }),
 );
 
 router.post(
-  '/tracks/list',
+  '/repositories/list',
   route(async (req, res) => {
-    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
-    if (!repoId) throw new AppError('repoId is required', 400);
-    const tracks = await sdlcHub.listTracks(
+    const query = typeof req.body?.query === 'string' ? req.body.query : '';
+    const requestedLimit = Number(req.body?.limit);
+    const repositories = await sdlcHub.listRepositoryRunContexts(
       await actorFromRequest(req),
-      repoId,
+      query,
+      Number.isFinite(requestedLimit) ? requestedLimit : 20,
       channelIdFromBody(req)
     );
+    res.status(200).json({ success: true, repositories });
+  }),
+);
+
+router.post(
+  '/tracks/list',
+  route(async (req, res) => {
+    const channelId = channelIdFromBody(req);
+    if (!channelId) throw new AppError('channelId is required', 400);
+    const tracks = await sdlcHub.listTracks(await actorFromRequest(req), channelId);
     res.status(200).json({ success: true, tracks });
   }),
 );
@@ -100,13 +113,9 @@ router.post(
 router.post(
   '/artifact-types/list',
   route(async (req, res) => {
-    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
-    if (!repoId) throw new AppError('repoId is required', 400);
-    const artifactTypes = await sdlcHub.listArtifactTypes(
-      await actorFromRequest(req),
-      repoId,
-      channelIdFromBody(req)
-    );
+    const channelId = channelIdFromBody(req);
+    if (!channelId) throw new AppError('channelId is required', 400);
+    const artifactTypes = await sdlcHub.listArtifactTypes(await actorFromRequest(req), channelId);
     res.status(200).json({ success: true, artifactTypes });
   }),
 );
@@ -117,9 +126,8 @@ router.post(
     const input = createSdlcArtifactTypeSchema.parse(req.body);
     const artifactType = await sdlcHub.createArtifactType(
       await actorFromRequest(req),
-      input.repoId,
-      input.name,
-      input.channelId
+      input.channelId,
+      input.name
     );
     res.status(201).json({ success: true, artifactType });
   }),
@@ -134,7 +142,7 @@ router.patch(
     });
     const artifactType = await sdlcHub.renameArtifactType(
       await actorFromRequest(req),
-      input.repoId,
+      input.channelId,
       input.folderId,
       input.name
     );
