@@ -1239,13 +1239,56 @@ model PullRequests {
   status                  String
   ticketId                String?   // Ticket reference for prs raised by devs
 
+  // Commit authorship tracking (v4: Co-authored-by)
+  botCommitCount          Int?      // Commits with at least one bot in Co-authored-by
+  humanCommitCount        Int?      // Commits with no bots
+  unknownCommitCount      Int?      // Failed attribution
+  commitAnalysisStatus    String?   // 'PENDING' | 'COMPLETED' | 'FAILED'
+  commitAnalysisError     String?   // Error message if analysis failed
+  commitAnalyzedAt        DateTime? // When commit analysis completed
+
   // Relations
   workflowExecution WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id])
+  commits           Commit[]           // Individual commits in this PR
 
   @@index([workflowExecutionId])
   @@index([date])
   @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
+  @@index([commitAnalysisStatus])
   @@map("pull_requests")
+  @@schema("public")
+}
+
+/// Individual commits within a PR, with bot attribution parsed from Co-authored-by trailers
+model Commit {
+  workspaceId     String
+  id              String   @id @default(cuid())
+
+  // Commit identifiers
+  commitSha       String
+  pullRequestId   String
+  repositoryUrl   String
+
+  // Bot attribution (parsed from xyne-bot-author trailer in commit message)
+  agentSlug       String?  // Single bot slug or null
+
+  // Git metadata from VCS API
+  authorName      String
+  authorEmail     String
+  messageHeadline String   // First line of commit message
+  messageBody     String?  @db.Text // Full commit message (for Co-authored-by parsing)
+  committedAt     DateTime
+
+  createdAt       DateTime @default(now())
+
+  // Relations
+  pullRequest PullRequests @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@unique([pullRequestId, commitSha])
+  @@index([pullRequestId])
+  @@index([workspaceId])
+  @@index([workspaceId, repositoryUrl, committedAt(sort: Desc)])
+  @@map("commits")
   @@schema("public")
 }
 
