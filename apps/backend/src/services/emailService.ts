@@ -1208,6 +1208,10 @@ export class EmailService {
       receivedAt ?? new Date(),
     );
 
+    // Outside the transaction on purpose: the allocator reaches a second database over its
+    // own small pool, so allocating inside holds a main-DB connection while queueing there.
+    const xyneId = await TicketIdService.generateTicketId(this.prisma, projectId);
+
     // Create conversation + email + ticket in a single transaction.
     // Email has @@unique on externalMessageId — if a duplicate notification arrives
     // concurrently, the transaction rolls back everything (no orphaned tickets).
@@ -1256,8 +1260,6 @@ export class EmailService {
         await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, createdEmail.id, channel.workspaceId);
       }
 
-      // Generate xyneId and create ticket
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
       const ticketTitle = (emailSubject ?? '').replace(SUBJECT_PREFIX_REGEX, '').trim() || emailSubject;
       const ticketPriority = derivePriorityFromSubject(emailSubject);
       const createdTicket = await tx.ticket.create({
@@ -1292,7 +1294,7 @@ export class EmailService {
       });
 
       return { conversation: conv, ticket: createdTicket, email: createdEmail };
-    });
+    }, { maxWait: 10_000, timeout: 30_000 });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         await this.emailRepository.backfillRfcMessageIdByExternalMessageId(
@@ -1550,7 +1552,7 @@ export class EmailService {
         const created = await this.emailRepository.create(emailData, tx);
         await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, created.id, created.workspaceId);
         return created;
-      }) : await this.emailRepository.create(emailData);
+      }, { maxWait: 10_000, timeout: 30_000 }) : await this.emailRepository.create(emailData);
       void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
@@ -2493,7 +2495,7 @@ export class EmailService {
           wasVespaMerge: !!(vespaMatchConversationId && previousLatestEmailId && ticketId),
           insertedEmailIds: persistedEmails.map(row => row.id),
         };
-      });
+      }, { maxWait: 10_000, timeout: 30_000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         logger.warn('[EmailService] ingestEmailThread hit unique conflict, treating as duplicate', {
