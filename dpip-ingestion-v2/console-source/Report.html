@@ -1,0 +1,2384 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>DPIP Daily Registry Intelligence Report</title>
+        <style>
+            :root {
+                --navy: #1b3a6b;
+                --navy-deep: #12294d;
+                --steel: #2e5fa3;
+                --teal: #17697a;
+                --amber: #b8762e;
+                --green: #1e7b4d;
+                --red: #b03a2e;
+                --ink: #252b36;
+                --muted: #687386;
+                --paper: #f3f4f7;
+                --card: #ffffff;
+                --line: #dfe3ea;
+                --soft-blue: #edf3fb;
+                --soft-amber: #fbf4e8;
+                --shadow: 0 8px 24px rgba(18, 41, 77, 0.07);
+                --font-display: Cambria, Georgia, "Times New Roman", serif;
+                --font-body: Calibri, "Segoe UI", Arial, sans-serif;
+            }
+            * {
+                box-sizing: border-box;
+            }
+            html {
+                scroll-behavior: smooth;
+            }
+            body {
+                margin: 0;
+                background: var(--paper);
+                color: var(--ink);
+                font-family: var(--font-body);
+                font-size: 14px;
+            }
+            button,
+            input,
+            select {
+                font: inherit;
+            }
+            header {
+                background:
+                    radial-gradient(
+                        circle at 90% 20%,
+                        rgba(255, 255, 255, 0.1),
+                        transparent 27%
+                    ),
+                    linear-gradient(135deg, var(--navy), var(--navy-deep));
+                color: #fff;
+                padding: 24px 30px 22px;
+            }
+            .header-inner {
+                max-width: 1500px;
+                margin: 0 auto;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 18px;
+                flex-wrap: wrap;
+            }
+            .brand {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+            .mark {
+                width: 48px;
+                height: 48px;
+                border-radius: 11px;
+                display: grid;
+                place-items: center;
+                background: var(--amber);
+                color: var(--navy-deep);
+                font: 700 18px var(--font-display);
+                box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+            }
+            h1,
+            h2,
+            h3,
+            .metric-value {
+                font-family: var(--font-display);
+            }
+            h1 {
+                margin: 0;
+                font-size: 24px;
+            }
+            .subtitle {
+                margin: 4px 0 0;
+                color: #cbd6ea;
+                font-size: 12px;
+                letter-spacing: 0.55px;
+                text-transform: uppercase;
+            }
+            .header-badge {
+                padding: 8px 13px;
+                border: 1px solid rgba(255, 255, 255, 0.32);
+                border-radius: 20px;
+                background: rgba(255, 255, 255, 0.1);
+                font-size: 12px;
+            }
+            .meta-strip {
+                background: #e9edf3;
+                border-bottom: 1px solid var(--line);
+            }
+            .meta-inner {
+                max-width: 1500px;
+                margin: 0 auto;
+                padding: 9px 30px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px 22px;
+                color: var(--muted);
+                font-size: 11.5px;
+            }
+            .meta-inner b {
+                color: var(--ink);
+            }
+            .filter-bar {
+                position: sticky;
+                top: 0;
+                z-index: 20;
+                background: rgba(255, 255, 255, 0.97);
+                border-bottom: 1px solid var(--line);
+                box-shadow: 0 2px 12px rgba(18, 41, 77, 0.05);
+                backdrop-filter: blur(8px);
+            }
+            .filter-inner {
+                max-width: 1500px;
+                margin: 0 auto;
+                padding: 12px 30px;
+                display: flex;
+                align-items: end;
+                flex-wrap: wrap;
+                gap: 12px 16px;
+            }
+            .filter-field {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .filter-field label {
+                color: var(--muted);
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+            }
+            input,
+            select {
+                min-height: 36px;
+                padding: 7px 10px;
+                border: 1px solid var(--line);
+                border-radius: 7px;
+                background: #fff;
+                color: var(--ink);
+            }
+            button {
+                min-height: 36px;
+                padding: 8px 12px;
+                border: 1px solid var(--line);
+                border-radius: 7px;
+                background: #fff;
+                color: var(--navy-deep);
+                cursor: pointer;
+                font-weight: 600;
+            }
+            button:hover {
+                background: #f5f7fa;
+            }
+            main {
+                max-width: 1500px;
+                margin: 0 auto;
+                padding: 24px 30px 54px;
+            }
+            .alert {
+                display: none;
+                margin-bottom: 16px;
+                padding: 14px 16px;
+                border: 1px solid #efc5bf;
+                border-left: 4px solid var(--red);
+                border-radius: 9px;
+                background: #fff5f3;
+                color: #74291f;
+                white-space: pre-wrap;
+                line-height: 1.5;
+            }
+            .alert.warning {
+                border-color: #ead2a9;
+                border-left-color: var(--amber);
+                background: #fffaf1;
+                color: #744c16;
+            }
+            .kpi-grid {
+                display: grid;
+                grid-template-columns: repeat(6, minmax(170px, 1fr));
+                gap: 14px;
+            }
+            .card,
+            .chart-card,
+            .table-card {
+                background: var(--card);
+                border: 1px solid var(--line);
+                border-radius: 11px;
+                box-shadow: var(--shadow);
+            }
+            .kpi {
+                padding: 16px 17px;
+                min-height: 122px;
+            }
+            .metric-label {
+                color: var(--muted);
+                font-size: 10.5px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+            }
+            .metric-value {
+                margin-top: 9px;
+                color: var(--navy-deep);
+                font-size: 28px;
+                font-weight: 700;
+            }
+            .metric-note {
+                margin-top: 5px;
+                color: var(--muted);
+                font-size: 11px;
+                line-height: 1.35;
+            }
+            .narrative {
+                margin-top: 16px;
+                padding: 15px 17px;
+                border-left: 4px solid var(--steel);
+                line-height: 1.6;
+            }
+            .section {
+                margin-top: 25px;
+            }
+            .section-heading {
+                margin-bottom: 13px;
+            }
+            .section-heading h2 {
+                margin: 0;
+                color: var(--navy-deep);
+                font-size: 18px;
+            }
+            .section-heading p {
+                margin: 4px 0 0;
+                color: var(--muted);
+                font-size: 12px;
+            }
+            .grid-2 {
+                display: grid;
+                grid-template-columns: 1.45fr 1fr;
+                gap: 18px;
+            }
+            .grid-2-even {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 18px;
+            }
+            .grid-3 {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 18px;
+            }
+            .chart-card {
+                padding: 15px 17px 14px;
+                min-width: 0;
+            }
+            .chart-title-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                gap: 12px;
+                margin-bottom: 10px;
+            }
+            .chart-card h3 {
+                margin: 0;
+                font-size: 13.5px;
+                color: var(--ink);
+            }
+            .chart-note {
+                color: var(--muted);
+                font-size: 10.5px;
+                white-space: nowrap;
+            }
+            .chart-host {
+                width: 100%;
+                min-height: 295px;
+                overflow: hidden;
+            }
+            .chart-host.tall {
+                min-height: 345px;
+            }
+            .chart-host svg {
+                display: block;
+                width: 100%;
+                height: auto;
+                overflow: visible;
+            }
+            .expandable-chart {
+                cursor: zoom-in;
+                border-radius: 8px;
+                outline: none;
+            }
+            .expandable-chart:focus-visible {
+                box-shadow: 0 0 0 3px rgba(46, 95, 163, 0.24);
+            }
+            .chart-modal[hidden] {
+                display: none;
+            }
+            .chart-modal {
+                position: fixed;
+                inset: 0;
+                z-index: 100;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+                background: rgba(18, 41, 77, 0.72);
+            }
+            .chart-modal-panel {
+                width: min(1400px, 100%);
+                max-height: calc(100vh - 48px);
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                border-radius: 12px;
+                background: var(--card);
+                box-shadow: 0 24px 70px rgba(18, 41, 77, 0.3);
+            }
+            .chart-modal-header {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 20px;
+                padding: 18px 20px 14px;
+                border-bottom: 1px solid var(--line);
+            }
+            .chart-modal-header h2 {
+                margin: 0;
+                color: var(--navy-deep);
+                font-size: 19px;
+            }
+            .chart-modal-header p {
+                margin: 4px 0 0;
+                color: var(--muted);
+                font-size: 11.5px;
+            }
+            .chart-modal-close {
+                flex: 0 0 auto;
+            }
+            .chart-modal-scroll {
+                overflow: auto;
+                padding: 18px 20px 24px;
+            }
+            .chart-modal-chart {
+                min-width: 850px;
+            }
+            .chart-modal-chart svg {
+                display: block;
+                width: 100%;
+                height: auto;
+                overflow: visible;
+            }
+            body.expanded-chart-open {
+                overflow: hidden;
+            }
+            .empty-chart {
+                min-height: 260px;
+                display: grid;
+                place-items: center;
+                color: var(--muted);
+                border: 1px dashed var(--line);
+                border-radius: 8px;
+                background: #fafbfc;
+                text-align: center;
+                padding: 24px;
+            }
+            .legend {
+                display: flex;
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 8px 14px;
+                margin-top: 9px;
+                color: var(--muted);
+                font-size: 10.5px;
+            }
+            .legend-item {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .legend-swatch {
+                width: 10px;
+                height: 10px;
+                border-radius: 2px;
+            }
+            .table-card {
+                overflow: hidden;
+            }
+            .table-scroll {
+                overflow: auto;
+                max-height: 430px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 12px;
+            }
+            th {
+                position: sticky;
+                top: 0;
+                z-index: 2;
+                padding: 9px 10px;
+                border-bottom: 1px solid var(--line);
+                background: #f7f9fc;
+                color: var(--muted);
+                font-size: 10px;
+                letter-spacing: 0.35px;
+                text-align: left;
+                text-transform: uppercase;
+                white-space: nowrap;
+            }
+            td {
+                padding: 9px 10px;
+                border-bottom: 1px solid #edf0f4;
+                white-space: nowrap;
+            }
+            tbody tr:hover td {
+                background: #fafbfd;
+            }
+            .data-notes {
+                padding: 16px 18px;
+                color: #4f596a;
+                line-height: 1.55;
+            }
+            .data-notes ul {
+                margin: 0;
+                padding-left: 20px;
+            }
+            .data-notes li + li {
+                margin-top: 7px;
+            }
+            .payload-help {
+                margin-top: 18px;
+                padding: 13px 15px;
+                border: 1px dashed #b9c3d2;
+                border-radius: 9px;
+                background: #f8fafc;
+                color: var(--muted);
+                font-size: 11.5px;
+                line-height: 1.55;
+            }
+            .payload-help code {
+                color: var(--navy-deep);
+            }
+            footer {
+                padding: 18px 30px 26px;
+                color: #89909b;
+                text-align: center;
+                font-size: 11px;
+            }
+            @media (max-width: 1250px) {
+                .kpi-grid {
+                    grid-template-columns: repeat(3, 1fr);
+                }
+                .grid-3 {
+                    grid-template-columns: 1fr 1fr;
+                }
+            }
+            @media (max-width: 900px) {
+                .grid-2,
+                .grid-2-even,
+                .grid-3 {
+                    grid-template-columns: 1fr;
+                }
+            }
+            @media (max-width: 700px) {
+                header,
+                .meta-inner,
+                .filter-inner,
+                main {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                }
+                .kpi-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+                .filter-field {
+                    width: 100%;
+                }
+                input,
+                select {
+                    width: 100%;
+                }
+                .chart-note {
+                    white-space: normal;
+                }
+                .chart-modal {
+                    padding: 8px;
+                }
+                .chart-modal-panel {
+                    max-height: calc(100vh - 16px);
+                }
+            }
+            /* Instant hover tooltip for table headers (native title has a fixed delay).
+               Placed below the header so the scroll container does not clip it. */
+            .has-tip {
+                cursor: help;
+                border-bottom: 1px dotted #9aa3af;
+            }
+            .has-tip::after {
+                content: attr(data-tip);
+                position: absolute;
+                top: calc(100% + 8px);
+                left: 0;
+                width: 260px;
+                padding: 9px 11px;
+                border-radius: 7px;
+                background: var(--navy-deep);
+                color: #edf1fa;
+                font-size: 11.5px;
+                font-weight: 400;
+                line-height: 1.45;
+                letter-spacing: 0;
+                text-transform: none;
+                white-space: normal;
+                box-shadow: 0 8px 20px rgba(10, 20, 45, 0.25);
+                opacity: 0;
+                visibility: hidden;
+                transition: opacity 0.12s ease;
+                z-index: 80;
+                pointer-events: none;
+            }
+            .has-tip:hover::after {
+                opacity: 1;
+                visibility: visible;
+            }
+        </style>
+    </head>
+    <body>
+        <!--
+  ============================================================================
+  PAYLOAD REPLACEMENT AREA
+  ============================================================================
+  Replace ONLY the content inside the <template id="dpip-email-body"> element
+  with the COMPLETE email body received by your workflow.
+
+  Accepted inputs match the Lambda parser:
+    1. Plain JSON array containing exactly seven table blocks, or
+    2. HTML email whose visible text is that JSON array.
+
+  Do not paste a JSON-escaped wrapper string. Paste the actual email body.
+  ============================================================================
+-->
+<template id="dpip-email-body">[]</template>
+
+        <header>
+            <div class="header-inner">
+                <div class="brand">
+                    <div class="mark">DP</div>
+                    <div>
+                        <h1>DPIP Daily Registry Intelligence</h1>
+                        <p class="subtitle">
+                            Reporting, screening, identifier coverage and entity
+                            linkage
+                        </p>
+                    </div>
+                </div>
+                <div class="header-badge" id="reportBadge">
+                    Structured seven-table payload
+                </div>
+            </div>
+        </header>
+
+        <div class="meta-strip">
+            <div class="meta-inner">
+                <span>Available dates: <b id="availableDates">—</b></span>
+                <span>Selected dates: <b id="selectedDates">—</b></span>
+                <span
+                    >Selected party: <b id="selectedParty">All parties</b></span
+                >
+                <span>Payload rows: <b id="payloadRows">0</b></span>
+                <span>Latest snapshot: <b id="latestSnapshot">—</b></span>
+            </div>
+        </div>
+
+        <section class="filter-bar">
+            <div class="filter-inner">
+                <div class="filter-field">
+                    <label for="dateFrom">From</label>
+                    <input type="date" id="dateFrom" />
+                </div>
+                <div class="filter-field">
+                    <label for="dateTo">To</label>
+                    <input type="date" id="dateTo" />
+                </div>
+                <div class="filter-field">
+                    <label for="partySelect">Party</label>
+                    <select id="partySelect">
+                        <option value="">All parties</option>
+                    </select>
+                </div>
+                <div class="filter-field">
+                    <label for="identifierTypeSelect">Identifier type</label>
+                    <select id="identifierTypeSelect">
+                        <option value="">ALL</option>
+                    </select>
+                </div>
+                <div class="filter-field">
+                    <label for="screeningStatusSelect">Screening status</label>
+                    <select id="screeningStatusSelect">
+                        <option value="">ALL</option>
+                    </select>
+                </div>
+                <button id="resetButton" type="button">Reset filters</button>
+            </div>
+        </section>
+
+        <main>
+            <div id="errorAlert" class="alert"></div>
+            <div id="warningAlert" class="alert warning"></div>
+
+            <section class="kpi-grid">
+                <article class="card kpi">
+                    <div class="metric-label">Reports</div>
+                    <div class="metric-value" id="kpiReports">—</div>
+                    <div class="metric-note" id="kpiReportsNote">
+                        Aggregate identifier type ALL
+                    </div>
+                </article>
+                <article class="card kpi">
+                    <div class="metric-label">Screenings</div>
+                    <div class="metric-value" id="kpiScreenings">—</div>
+                    <div class="metric-note" id="kpiScreeningsNote">
+                        Sum of screening count
+                    </div>
+                </article>
+                <article class="card kpi">
+                    <div class="metric-label">Identifiers</div>
+                    <div class="metric-value" id="kpiIdentifiers">—</div>
+                    <div class="metric-note">
+                        Reported in selected dates
+                    </div>
+                </article>
+                <article class="card kpi">
+                    <div class="metric-label">External entities</div>
+                    <div class="metric-value" id="kpiExternalEntities">—</div>
+                    <div class="metric-note">
+                        Latest external entity snapshot
+                    </div>
+                </article>
+                <article class="card kpi">
+                    <div class="metric-label">Clusters</div>
+                    <div class="metric-value" id="kpiClusters">—</div>
+                    <div class="metric-note">Latest cluster snapshot</div>
+                </article>
+                <article class="card kpi">
+                    <div class="metric-label">Active parties</div>
+                    <div class="metric-value" id="kpiParties">—</div>
+                    <div class="metric-note">
+                        Distinct parties in selected activity
+                    </div>
+                </article>
+            </section>
+
+            <article class="card narrative" id="narrative">
+                Replace the payload block with an email body to generate the
+                report.
+            </article>
+
+            <section class="section">
+                <div class="section-heading">
+                    <h2>Daily activity</h2>
+                    <p>
+                        Trend lines are calculated directly from report and
+                        screening rows in the selected date range.
+                    </p>
+                </div>
+                <div class="grid-2">
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Daily reports</h3>
+                            <span class="chart-note"
+                                >reports_count · Click to expand</span
+                            >
+                        </div>
+                        <div
+                            id="dailyReportsChart"
+                            class="chart-host tall"
+                        ></div>
+                    </article>
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Daily screenings</h3>
+                            <span class="chart-note"
+                                >screenings.count · Click to expand</span
+                            >
+                        </div>
+                        <div
+                            id="dailyScreeningsChart"
+                            class="chart-host tall"
+                        ></div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-heading">
+                    <h2>Party contribution</h2>
+                    <p>
+                        Contribution and volume comparison across the parties
+                        present in the payload.
+                    </p>
+                </div>
+                <div class="grid-3">
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Reports by party</h3>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
+                        </div>
+                        <div id="reportsByPartyChart" class="chart-host"></div>
+                    </article>
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Screenings by party</h3>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
+                        </div>
+                        <div
+                            id="screeningsByPartyChart"
+                            class="chart-host"
+                        ></div>
+                    </article>
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Identifiers by party</h3>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
+                        </div>
+                        <div
+                            id="identifiersByPartyChart"
+                            class="chart-host"
+                        ></div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-heading">
+                    <h2>Registry composition</h2>
+                    <p>Identifier type and report sub-source composition.</p>
+                </div>
+                <div class="grid-2-even">
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Identifier types</h3>
+                            <span class="chart-note"
+                                >Top 12 · Click to view all</span
+                            >
+                        </div>
+                        <div id="identifierTypeChart" class="chart-host"></div>
+                    </article>
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Report sub-sources</h3>
+                            <span class="chart-note"
+                                >By volume · Click to view all</span
+                            >
+                        </div>
+                        <div id="subSourceChart" class="chart-host"></div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-heading">
+                    <h2>Coverage and entity linkage</h2>
+                    <p>
+                        Latest snapshot within the selected period, using the
+                        four history tables.
+                    </p>
+                </div>
+                <div class="grid-2-even">
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Common identifiers across parties</h3>
+                            <span class="chart-note">Click to view all</span>
+                        </div>
+                        <div
+                            id="partyIdentifiersChart"
+                            class="chart-host"
+                        ></div>
+                    </article>
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Clusters by linked external entities</h3>
+                            <span class="chart-note"
+                                >Log scale · Click to view all</span
+                            >
+                        </div>
+                        <div id="clusterExternalChart" class="chart-host"></div>
+                    </article>
+                </div>
+                <div class="grid-2-even" style="margin-top: 18px">
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>External entities by identifiers linked</h3>
+                            <span class="chart-note">Click to view all</span>
+                        </div>
+                        <div
+                            id="externalIdentifiersChart"
+                            class="chart-host"
+                        ></div>
+                    </article>
+                    <article class="chart-card">
+                        <div class="chart-title-row">
+                            <h3>Clusters by identifier count</h3>
+                            <span class="chart-note"
+                                >Log scale · Click to view all</span
+                            >
+                        </div>
+                        <div
+                            id="clusterIdentifiersChart"
+                            class="chart-host"
+                        ></div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-heading">
+                    <h2>Party leaderboard</h2>
+                    <p>Combined operational summary for the selected period.</p>
+                </div>
+                <article class="table-card">
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Party</th>
+                                    <th>Reports</th>
+                                    <th>Identifiers</th>
+                                    <th class="has-tip" data-tip="External entities matched by this party's reports, counted per day and summed over the selected dates. An entity matched on several days counts each time, so this is report activity, not the registry total shown in the External Entities tile.">External entities</th>
+                                    <th class="has-tip" data-tip="Clusters matched by this party's reports, counted per day and summed over the selected dates. A cluster matched on several days counts each time, so this is report activity, not the registry total shown in the Clusters tile.">Clusters</th>
+                                    <th>Screenings</th>
+                                    <th>Report days</th>
+                                    <th>Screening days</th>
+                                    <th>Peak screening</th>
+                                    <th>Peak date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboardBody"></tbody>
+                        </table>
+                    </div>
+                </article>
+            </section>
+        </main>
+
+        <div
+            id="expandedChartModal"
+            class="chart-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="expandedChartModalTitle"
+            hidden
+        >
+            <div class="chart-modal-panel">
+                <div class="chart-modal-header">
+                    <div>
+                        <h2 id="expandedChartModalTitle">Chart details</h2>
+                        <p id="expandedChartModalNote">
+                            Showing the complete chart.
+                        </p>
+                    </div>
+                    <button
+                        id="expandedChartModalClose"
+                        class="chart-modal-close"
+                        type="button"
+                        aria-label="Close expanded chart"
+                    >
+                        Close
+                    </button>
+                </div>
+                <div class="chart-modal-scroll">
+                    <div id="expandedChart" class="chart-modal-chart"></div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            DPIP Daily Registry Intelligence — generated from the structured
+            email payload.
+        </footer>
+
+        <script>
+            (() => {
+                "use strict";
+
+                const TABLE_NAMES = [
+                    "reports",
+                    "screenings",
+                    "cluster_external_entities",
+                    "external_entity_identifiers",
+                    "cluster_identifiers",
+                    "party_identifiers",
+                    "entities_by_customer",
+                ];
+
+                const TABLE_FIELDS = {
+                    reports: [
+                        "identifier_type",
+                        "reported_date",
+                        "party_id",
+                        "sub_source",
+                        "status",
+                        "customer_type",
+                        "metrics_type",
+                        "metrics_value",
+                    ],
+                    screenings: [
+                        "screening_date",
+                        "party_id",
+                        "event_type",
+                        "screening_status",
+                        "count",
+                    ],
+                    cluster_external_entities: [
+                        "cluster_count",
+                        "num_external_entities",
+                        "last_updated_date",
+                    ],
+                    external_entity_identifiers: [
+                        "party_id",
+                        "external_entity_count",
+                        "num_identifiers",
+                        "last_updated_date",
+                    ],
+                    cluster_identifiers: [
+                        "cluster_count",
+                        "num_identifiers",
+                        "last_updated_date",
+                    ],
+                    party_identifiers: [
+                        "party_ids",
+                        "num_identifiers",
+                        "last_updated_date",
+                    ],
+                    entities_by_customer: [
+                        "party_id",
+                        "customer_type",
+                        "entity_count",
+                        "last_updated_date",
+                    ],
+                };
+
+                const REPORT_METRIC_TYPES = new Set([
+                    "reports_count",
+                    "identifiers_count",
+                    "external_entities_count",
+                    "clusters_count",
+                ]);
+
+                const COLORS = [
+                    "#1b3a6b",
+                    "#17697a",
+                    "#b8762e",
+                    "#2e5fa3",
+                    "#1e7b4d",
+                    "#7a5aa6",
+                    "#8a6670",
+                    "#6b7280",
+                ];
+                const DEEP_DISCOVERY_FOOTER_PATTERN =
+                    /^[ \t]*=+[ \t]*(?:\r?\n[\s\S]*|$)/m;
+                const HTML_EMAIL_FOOTER_PATTERN =
+                    /^(\s*\[[\s\S]*\])(?:\r\n?|\n)?<br\b[^>]*>[ \t]*=+[ \t]*(?:(?:\r\n?|\n)?<br\b[^>]*>[\s\S]*|$)/i;
+                const HTML_LINE_BREAK_PATTERN =
+                    /(?:\r\n?|\n)?<br\b[^>]*>/gi;
+
+                const $ = (id) => document.getElementById(id);
+                const fmt = (value) =>
+                    new Intl.NumberFormat("en-IN", {
+                        maximumFractionDigits: 0,
+                    }).format(value || 0);
+                const fmt1 = (value) =>
+                    new Intl.NumberFormat("en-IN", {
+                        maximumFractionDigits: 1,
+                    }).format(value || 0);
+                const compact = (value) =>
+                    new Intl.NumberFormat("en-IN", {
+                        notation: "compact",
+                        maximumFractionDigits: 1,
+                    }).format(value || 0);
+                const escapeHtml = (value) =>
+                    String(value ?? "")
+                        .replaceAll("&", "&amp;")
+                        .replaceAll("<", "&lt;")
+                        .replaceAll(">", "&gt;")
+                        .replaceAll('"', "&quot;")
+                        .replaceAll("'", "&#039;");
+                const sum = (rows, field) =>
+                    rows.reduce(
+                        (total, row) => total + safeNumber(row[field]),
+                        0,
+                    );
+                const weightedSum = (rows, countField, weightField) =>
+                    rows.reduce(
+                        (total, row) =>
+                            total +
+                            safeNumber(row[countField]) *
+                                safeNumber(row[weightField]),
+                        0,
+                    );
+                const isAllIdentifierType = (row) =>
+                    String(row.identifier_type ?? "")
+                        .trim()
+                        .toLowerCase() === "all";
+                const isAllCustomerType = (row) =>
+                    String(row.customer_type ?? "")
+                        .trim()
+                        .toLowerCase() === "all";
+                const unique = (values) => [
+                    ...new Set(
+                        values.filter(
+                            (value) =>
+                                value !== undefined &&
+                                value !== null &&
+                                String(value).length > 0,
+                        ),
+                    ),
+                ];
+                const normalizeParty = (value) =>
+                    String(value ?? "")
+                        .trim()
+                        .toLowerCase();
+                const displayParty = (value) =>
+                    String(value ?? "").toUpperCase();
+                const safeNumber = (value) => {
+                    if (typeof value === "number")
+                        return Number.isFinite(value) && value >= 0 ? value : 0;
+                    if (typeof value === "bigint") return Number(value);
+                    if (
+                        typeof value === "string" &&
+                        /^(0|[1-9]\d*)$/.test(value.trim())
+                    ) {
+                        const parsed = Number(value);
+                        return Number.isFinite(parsed) ? parsed : 0;
+                    }
+                    return 0;
+                };
+                const dateValue = (value) =>
+                    typeof value === "string" &&
+                    /^\d{4}-\d{2}-\d{2}$/.test(value)
+                        ? value
+                        : "";
+                const fmtDate = (value) => {
+                    if (!dateValue(value)) return "—";
+                    return new Date(value + "T00:00:00Z").toLocaleDateString(
+                        "en-GB",
+                        {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            timeZone: "UTC",
+                        },
+                    );
+                };
+                const inDateRange = (value, from, to) => {
+                    const date = dateValue(value);
+                    return (
+                        date && (!from || date >= from) && (!to || date <= to)
+                    );
+                };
+
+                function decodeHtmlEntities(value) {
+                    const textarea = document.createElement("textarea");
+                    textarea.innerHTML = value;
+                    return textarea.value;
+                }
+
+                function htmlEmailToText(value) {
+                    return decodeHtmlEntities(
+                        value
+                            .replace(/<!--[\s\S]*?-->/g, "")
+                            .replace(
+                                /<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+                                "",
+                            )
+                            .replace(HTML_LINE_BREAK_PATTERN, " ")
+                            .replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, "\n")
+                            .replace(/<[^>]+>/g, ""),
+                    ).replace(/\u00a0/g, " ");
+                }
+
+                function stripKnownEmailFooters(value) {
+                    return value
+                        .replace(HTML_EMAIL_FOOTER_PATTERN, "$1")
+                        .replace(DEEP_DISCOVERY_FOOTER_PATTERN, "")
+                        .trim();
+                }
+
+                function applyReportMetric(row) {
+                    for (const metricType of REPORT_METRIC_TYPES) {
+                        row[metricType] = 0;
+                    }
+
+                    const metricType = String(row.metrics_type ?? "")
+                        .trim()
+                        .toLowerCase();
+                    if (!REPORT_METRIC_TYPES.has(metricType)) return false;
+                    row[metricType] = safeNumber(row.metrics_value);
+
+                    delete row.metrics_type;
+                    delete row.metrics_value;
+                    return true;
+                }
+
+                function normalizeInput(input) {
+                    if (typeof input !== "string") return input;
+                    const trimmed = input.trim();
+                    if (!trimmed) throw new Error("The payload area is empty.");
+
+                    const withoutFooter = stripKnownEmailFooters(trimmed);
+                    const candidates = [
+                        withoutFooter.replace(HTML_LINE_BREAK_PATTERN, " "),
+                    ];
+
+                    if (
+                        /<\/?[a-z][^>]*>|&(?:nbsp|quot|apos|lt|gt|amp|#\d+|#x[0-9a-f]+);/i.test(
+                            trimmed,
+                        )
+                    ) {
+                        candidates.push(
+                            stripKnownEmailFooters(
+                                htmlEmailToText(withoutFooter),
+                            ),
+                        );
+                    }
+
+                    for (const candidate of candidates) {
+                        try {
+                            return JSON.parse(candidate);
+                        } catch (_) {}
+                    }
+                    throw new Error(
+                        "Invalid JSON after applying the Lambda-compatible HTML email normalization.",
+                    );
+                }
+
+                function parsePayload(raw) {
+                    const payload = normalizeInput(raw);
+                    if (!Array.isArray(payload))
+                        throw new Error("Payload must be an array.");
+
+                    const tableMap = Object.fromEntries(
+                        TABLE_NAMES.map((name) => [name, []]),
+                    );
+                    const seen = new Set();
+                    const warnings = [];
+
+                    for (const block of payload) {
+                        if (
+                            !block ||
+                            typeof block !== "object" ||
+                            Array.isArray(block)
+                        ) {
+                            throw new Error(
+                                "Every table block must be an object.",
+                            );
+                        }
+                        const table = block.table;
+                        if (!TABLE_NAMES.includes(table))
+                            throw new Error("Unknown table: " + String(table));
+                        if (seen.has(table))
+                            throw new Error("Repeated table: " + table);
+                        seen.add(table);
+
+                        if (
+                            !Array.isArray(block.data) ||
+                            block.data.length === 0
+                        ) {
+                            throw new Error("Missing data for table: " + table);
+                        }
+
+                        const headers = block.data[0];
+                        const expected = TABLE_FIELDS[table];
+                        if (
+                            !Array.isArray(headers) ||
+                            headers.length !== expected.length ||
+                            new Set(headers).size !== headers.length ||
+                            expected.some((field) => !headers.includes(field))
+                        ) {
+                            throw new Error(
+                                "Invalid headers for table: " + table,
+                            );
+                        }
+
+                        const rows = [];
+                        for (
+                            let index = 1;
+                            index < block.data.length;
+                            index += 1
+                        ) {
+                            const inputRow = block.data[index];
+                            if (
+                                !Array.isArray(inputRow) ||
+                                inputRow.length !== headers.length
+                            ) {
+                                warnings.push(
+                                    table +
+                                        " row " +
+                                        index +
+                                        ": wrong column count; row skipped.",
+                                );
+                                continue;
+                            }
+                            const row = {};
+                            headers.forEach((field, columnIndex) => {
+                                const value = inputRow[columnIndex];
+                                row[field] =
+                                    field === "party_id"
+                                        ? normalizeParty(value)
+                                        : field === "party_ids"
+                                          ? splitParties(value).join(",")
+                                          : value;
+                            });
+                            if (
+                                table === "reports" &&
+                                !applyReportMetric(row)
+                            ) {
+                                warnings.push(
+                                    `${table} row ${index}: unsupported metrics_type; row skipped.`,
+                                );
+                                continue;
+                            }
+                            rows.push(row);
+                        }
+                        tableMap[table] = rows;
+                    }
+
+                    const missing = TABLE_NAMES.filter(
+                        (name) => !seen.has(name),
+                    );
+                    if (missing.length)
+                        throw new Error(
+                            "Missing tables: " + missing.join(", "),
+                        );
+                    if (payload.length !== TABLE_NAMES.length)
+                        throw new Error(
+                            "Payload must contain exactly seven table blocks.",
+                        );
+
+                    return { tables: tableMap, warnings };
+                }
+
+                function aggregate(rows, key, valueField) {
+                    const result = new Map();
+                    for (const row of rows) {
+                        const keyValue = String(row[key] ?? "UNKNOWN");
+                        result.set(
+                            keyValue,
+                            (result.get(keyValue) || 0) +
+                                safeNumber(row[valueField]),
+                        );
+                    }
+                    return result;
+                }
+
+                function sortedEntries(map, limit) {
+                    const entries = [...map.entries()].sort(
+                        (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+                    );
+                    return typeof limit === "number"
+                        ? entries.slice(0, limit)
+                        : entries;
+                }
+
+                function latestSnapshotRows(rows, from, to, partyMatcher, bucket) {
+                    let candidates = rows.filter((row) =>
+                        inDateRange(row.last_updated_date, from, to),
+                    );
+                    if (partyMatcher)
+                        candidates = candidates.filter(partyMatcher);
+                    if (!candidates.length) return [];
+                    const latest = candidates
+                        .map((row) => row.last_updated_date)
+                        .sort()
+                        .at(-1);
+                    let latestRows = candidates.filter(
+                        (row) => row.last_updated_date === latest,
+                    );
+                    /* Same-day job re-runs can leave two rows for one bucket with
+                       slightly different values; keep the larger one — the
+                       registry only grows within a day. */
+                    if (bucket) {
+                        const best = new Map();
+                        for (const row of latestRows) {
+                            const key = bucket.key
+                                .map((field) => row[field])
+                                .join("|");
+                            const prev = best.get(key);
+                            if (
+                                prev === undefined ||
+                                Number(row[bucket.value]) >
+                                    Number(prev[bucket.value])
+                            )
+                                best.set(key, row);
+                        }
+                        latestRows = [...best.values()];
+                    }
+                    return latestRows;
+                }
+
+                function splitParties(value) {
+                    return String(value ?? "")
+                        .split(/[,|]+/)
+                        .map(normalizeParty)
+                        .filter(Boolean);
+                }
+
+                function svgElement(tag, attrs = {}, text = "") {
+                    const attrText = Object.entries(attrs)
+                        .map(([key, value]) => `${key}="${escapeHtml(value)}"`)
+                        .join(" ");
+                    return `<${tag}${attrText ? " " + attrText : ""}>${text}</${tag}>`;
+                }
+
+                function emptyChart(
+                    hostId,
+                    message = "No data available for the selected filters.",
+                ) {
+                    $(hostId).innerHTML =
+                        `<div class="empty-chart">${escapeHtml(message)}</div>`;
+                }
+
+                function lineChart(hostId, entries, options = {}) {
+                    if (
+                        !entries.length ||
+                        entries.every(([, value]) => value === 0)
+                    ) {
+                        emptyChart(hostId);
+                        return;
+                    }
+
+                    const width = options.width || 920,
+                        height = options.height || 340;
+                    const margin = {
+                        top: options.showAllPoints ? 42 : 22,
+                        right: 18,
+                        bottom: options.showAllLabels ? 82 : 48,
+                        left: 72,
+                    };
+                    const plotW = width - margin.left - margin.right;
+                    const plotH = height - margin.top - margin.bottom;
+                    const values = entries.map(([, value]) => value);
+                    const max = Math.max(...values, 1);
+                    const x = (index) =>
+                        margin.left +
+                        (entries.length === 1
+                            ? plotW / 2
+                            : (index * plotW) / (entries.length - 1));
+                    const y = (value) =>
+                        margin.top + plotH - (value / max) * plotH;
+
+                    let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.ariaLabel || "Line chart")}">`;
+                    for (let i = 0; i <= 4; i++) {
+                        const value = (max * (4 - i)) / 4;
+                        const gy = margin.top + (plotH * i) / 4;
+                        svg += svgElement("line", {
+                            x1: margin.left,
+                            x2: width - margin.right,
+                            y1: gy,
+                            y2: gy,
+                            stroke: "#e4e8ee",
+                            "stroke-width": 1,
+                        });
+                        svg += svgElement(
+                            "text",
+                            {
+                                x: margin.left - 10,
+                                y: gy + 4,
+                                "text-anchor": "end",
+                                fill: "#737d8e",
+                                "font-size": 11,
+                            },
+                            options.valueFormatter
+                                ? options.valueFormatter(value)
+                                : compact(value),
+                        );
+                    }
+
+                    const points = entries
+                        .map(([, value], index) => `${x(index)},${y(value)}`)
+                        .join(" ");
+                    const area = `${margin.left},${margin.top + plotH} ${points} ${x(entries.length - 1)},${margin.top + plotH}`;
+                    svg += svgElement("polygon", {
+                        points: area,
+                        fill: options.fill || "rgba(46,95,163,.12)",
+                    });
+                    svg += svgElement("polyline", {
+                        points,
+                        fill: "none",
+                        stroke: options.color || COLORS[0],
+                        "stroke-width": 3,
+                        "stroke-linejoin": "round",
+                        "stroke-linecap": "round",
+                    });
+
+                    const tickIndexes = options.showAllLabels
+                        ? entries.map((_, index) => index)
+                        : unique([
+                              0,
+                              Math.floor((entries.length - 1) * 0.25),
+                              Math.floor((entries.length - 1) * 0.5),
+                              Math.floor((entries.length - 1) * 0.75),
+                              entries.length - 1,
+                          ]);
+                    for (const index of tickIndexes) {
+                        const [label] = entries[index];
+                        const tickY = height - 18;
+                        svg += svgElement(
+                            "text",
+                            {
+                                x: x(index),
+                                y: tickY,
+                                "text-anchor": options.showAllLabels
+                                    ? "end"
+                                    : "middle",
+                                fill: "#737d8e",
+                                "font-size": 10.5,
+                                transform: options.showAllLabels
+                                    ? `rotate(-45 ${x(index)} ${tickY})`
+                                    : "",
+                            },
+                            escapeHtml(
+                                options.labelFormatter
+                                    ? options.labelFormatter(label)
+                                    : label,
+                            ),
+                        );
+                    }
+
+                    if (options.showAllPoints) {
+                        entries.forEach(([label, value], index) => {
+                            const pointValue = options.valueFormatter
+                                ? options.valueFormatter(value)
+                                : compact(value);
+                            svg += `<g><title>${escapeHtml(
+                                `${options.labelFormatter ? options.labelFormatter(label) : label}: ${pointValue}`,
+                            )}</title>`;
+                            svg += svgElement("circle", {
+                                cx: x(index),
+                                cy: y(value),
+                                r: 4,
+                                fill: options.color || COLORS[0],
+                                stroke: "#fff",
+                                "stroke-width": 1.5,
+                            });
+                            svg += svgElement(
+                                "text",
+                                {
+                                    x: x(index),
+                                    y: Math.max(14, y(value) - 9),
+                                    "text-anchor": "middle",
+                                    fill: options.color || COLORS[0],
+                                    "font-size": 9.5,
+                                    "font-weight": 700,
+                                },
+                                pointValue,
+                            );
+                            svg += "</g>";
+                        });
+                    }
+
+                    const peakIndex = values.indexOf(max);
+                    if (!options.showAllPoints) {
+                        svg += svgElement("circle", {
+                            cx: x(peakIndex),
+                            cy: y(max),
+                            r: 4.5,
+                            fill: options.color || COLORS[0],
+                            stroke: "#fff",
+                            "stroke-width": 2,
+                        });
+                        svg += svgElement(
+                            "text",
+                            {
+                                x: x(peakIndex),
+                                y: Math.max(14, y(max) - 9),
+                                "text-anchor": "middle",
+                                fill: options.color || COLORS[0],
+                                "font-size": 11,
+                                "font-weight": 700,
+                            },
+                            compact(max),
+                        );
+                    }
+                    svg += "</svg>";
+                    $(hostId).innerHTML = svg;
+                }
+
+                function horizontalBarChart(hostId, entries, options = {}) {
+                    const filtered = entries.filter(([, value]) =>
+                        options.includeZero ? value >= 0 : value > 0,
+                    );
+                    if (!filtered.length) {
+                        emptyChart(hostId);
+                        return;
+                    }
+
+                    const data =
+                        options.limit === null
+                            ? filtered
+                            : filtered.slice(0, options.limit || 12);
+                    const width = 860;
+                    const rowH = options.rowHeight || 31;
+                    const height = Math.max(285, 50 + data.length * rowH);
+                    const margin = {
+                        top: 16,
+                        right: options.right || 72,
+                        bottom: 24,
+                        left: options.left || 190,
+                    };
+                    const plotW = width - margin.left - margin.right;
+                    const max = Math.max(
+                        ...data.map(([, value]) =>
+                            options.log ? Math.log10(value + 1) : value,
+                        ),
+                        1,
+                    );
+
+                    let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.ariaLabel || "Bar chart")}">`;
+                    data.forEach(([label, rawValue], index) => {
+                        const scaled = options.log
+                            ? Math.log10(rawValue + 1)
+                            : rawValue;
+                        const y = margin.top + index * rowH;
+                        const barW =
+                            rawValue === 0
+                                ? 0
+                                : Math.max(2, (scaled / max) * plotW);
+                        svg += svgElement(
+                            "text",
+                            {
+                                x: margin.left - 10,
+                                y: y + 18,
+                                "text-anchor": "end",
+                                fill: "#4d586a",
+                                "font-size": 11,
+                            },
+                            escapeHtml(
+                                options.labelFormatter
+                                    ? options.labelFormatter(label)
+                                    : label,
+                            ),
+                        );
+                        svg += svgElement("rect", {
+                            x: margin.left,
+                            y: y + 5,
+                            width: barW,
+                            height: 17,
+                            rx: 3,
+                            fill:
+                                options.color || COLORS[index % COLORS.length],
+                        });
+                        svg += svgElement(
+                            "text",
+                            {
+                                x: Math.min(width - 5, margin.left + barW + 7),
+                                y: y + 18,
+                                fill: "#4d586a",
+                                "font-size": 10.5,
+                                "font-weight": 700,
+                            },
+                            options.valueFormatter
+                                ? options.valueFormatter(rawValue)
+                                : compact(rawValue),
+                        );
+                    });
+                    svg += "</svg>";
+                    $(hostId).innerHTML = svg;
+                }
+
+                const expandableChartConfigs = new Map();
+                let expandedChartTrigger = null;
+
+                function closeExpandedChart() {
+                    const modal = $("expandedChartModal");
+                    modal.hidden = true;
+                    document.body.classList.remove("expanded-chart-open");
+                    $("expandedChart").innerHTML = "";
+                    $("expandedChart").style.minWidth = "";
+                    expandedChartTrigger?.focus();
+                    expandedChartTrigger = null;
+                }
+
+                function openExpandedChart(hostId) {
+                    const config = expandableChartConfigs.get(hostId);
+                    if (!config) return;
+
+                    expandedChartTrigger = $(hostId);
+                    $("expandedChartModalTitle").textContent = config.title;
+
+                    if (config.type === "line") {
+                        const expandedWidth = Math.max(
+                            920,
+                            config.entries.length * 78,
+                        );
+                        $("expandedChartModalNote").textContent =
+                            `Showing all ${fmt(config.entries.length)} date and value point(s). Scroll horizontally to inspect the full timeline.`;
+                        $("expandedChart").style.minWidth =
+                            `${expandedWidth}px`;
+                        lineChart("expandedChart", config.entries, {
+                            ...config.options,
+                            width: expandedWidth,
+                            height: 500,
+                            showAllLabels: true,
+                            showAllPoints: true,
+                            valueFormatter: fmt,
+                            ariaLabel: `${config.title}, all values`,
+                        });
+                    } else {
+                        $("expandedChartModalNote").textContent =
+                            `Showing all ${fmt(config.entries.length)} available y-axis value(s). Scroll to inspect the full chart.`;
+                        $("expandedChart").style.minWidth = "850px";
+                        horizontalBarChart("expandedChart", config.entries, {
+                            ...config.options,
+                            limit: null,
+                            rowHeight: 34,
+                            right: 140,
+                            includeZero: true,
+                            valueFormatter: fmt,
+                            ariaLabel: `${config.title}, all values`,
+                        });
+                    }
+
+                    $("expandedChartModal").hidden = false;
+                    document.body.classList.add("expanded-chart-open");
+                    $("expandedChartModalClose").focus();
+                }
+
+                function makeChartExpandable(
+                    hostId,
+                    title,
+                    type,
+                    entries,
+                    options,
+                ) {
+                    expandableChartConfigs.set(hostId, {
+                        title,
+                        type,
+                        entries,
+                        options,
+                    });
+
+                    const host = $(hostId);
+                    host.classList.add("expandable-chart");
+                    host.tabIndex = 0;
+                    host.setAttribute("role", "button");
+                    host.setAttribute(
+                        "aria-label",
+                        `${title}. Open expanded chart showing all values.`,
+                    );
+                    host.onclick = () => openExpandedChart(hostId);
+                    host.onkeydown = (event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openExpandedChart(hostId);
+                        }
+                    };
+                }
+
+                function expandableLineChart(hostId, title, entries, options) {
+                    lineChart(hostId, entries, options);
+                    makeChartExpandable(
+                        hostId,
+                        title,
+                        "line",
+                        entries,
+                        options,
+                    );
+                }
+
+                function expandableBarChart(hostId, title, entries, options) {
+                    horizontalBarChart(hostId, entries, options);
+                    makeChartExpandable(hostId, title, "bar", entries, options);
+                }
+
+                function setSelectOptions(
+                    select,
+                    values,
+                    labelFormatter = (value) => value,
+                ) {
+                    const current = select.value;
+                    select
+                        .querySelectorAll("option:not(:first-child)")
+                        .forEach((option) => option.remove());
+                    const fixedOptionValue = select.options[0]?.value;
+                    const fixedOptionLabel =
+                        select.options[0]?.textContent.toLowerCase();
+                    values
+                        .filter(
+                            (value) =>
+                                value !== fixedOptionValue &&
+                                String(value).toLowerCase() !==
+                                    fixedOptionLabel,
+                        )
+                        .forEach((value) => {
+                            const option = document.createElement("option");
+                            option.value = value;
+                            option.textContent = labelFormatter(value);
+                            select.appendChild(option);
+                        });
+                    if (values.includes(current)) select.value = current;
+                }
+
+                function showError(message) {
+                    $("errorAlert").style.display = "block";
+                    $("errorAlert").textContent = message;
+                }
+
+                function showWarnings(warnings) {
+                    if (!warnings.length) {
+                        $("warningAlert").style.display = "none";
+                        return;
+                    }
+                    $("warningAlert").style.display = "block";
+                    $("warningAlert").textContent =
+                        warnings.slice(0, 12).join("\n") +
+                        (warnings.length > 12
+                            ? `\n… and ${warnings.length - 12} more warning(s).`
+                            : "");
+                }
+
+                function renderEmptyReport() {
+                    [
+                        "dailyReportsChart",
+                        "dailyScreeningsChart",
+                        "reportsByPartyChart",
+                        "screeningsByPartyChart",
+                        "identifiersByPartyChart",
+                        "identifierTypeChart",
+                        "subSourceChart",
+                        "partyIdentifiersChart",
+                        "clusterExternalChart",
+                        "externalIdentifiersChart",
+                        "clusterIdentifiersChart",
+                    ].forEach((id) =>
+                        emptyChart(
+                            id,
+                            "No rows are present in this section of the payload.",
+                        ),
+                    );
+                    $("leaderboardBody").innerHTML =
+                        `<tr><td colspan="11" style="text-align:center;color:#687386;padding:25px">No activity rows available.</td></tr>`;
+                }
+
+                let parsed;
+
+                try {
+                    const rawEmailBody = $("dpip-email-body").innerHTML;
+                    parsed = parsePayload(rawEmailBody);
+                    showWarnings(parsed.warnings);
+                } catch (error) {
+                    showError(
+                        error instanceof Error
+                            ? error.message
+                            : "Unable to parse the payload.",
+                    );
+                    parsed = {
+                        tables: Object.fromEntries(
+                            TABLE_NAMES.map((name) => [name, []]),
+                        ),
+                        warnings: [],
+                    };
+                }
+
+                const tables = parsed.tables;
+                const allRows = TABLE_NAMES.reduce(
+                    (total, name) => total + tables[name].length,
+                    0,
+                );
+                $("payloadRows").textContent = fmt(allRows);
+
+                const allDates = [
+                    ...tables.reports.map((row) =>
+                        dateValue(row.reported_date),
+                    ),
+                    ...tables.screenings.map((row) =>
+                        dateValue(row.screening_date),
+                    ),
+                    ...tables.cluster_external_entities.map((row) =>
+                        dateValue(row.last_updated_date),
+                    ),
+                    ...tables.external_entity_identifiers.map((row) =>
+                        dateValue(row.last_updated_date),
+                    ),
+                    ...tables.cluster_identifiers.map((row) =>
+                        dateValue(row.last_updated_date),
+                    ),
+                    ...tables.party_identifiers.map((row) =>
+                        dateValue(row.last_updated_date),
+                    ),
+                ]
+                    .filter(Boolean)
+                    .sort();
+
+                const minDate = allDates[0] || "";
+                const maxDate = allDates.at(-1) || "";
+                $("availableDates").textContent = minDate
+                    ? `${fmtDate(minDate)} – ${fmtDate(maxDate)}`
+                    : "No dated rows";
+                $("latestSnapshot").textContent = maxDate
+                    ? fmtDate(maxDate)
+                    : "—";
+                $("reportBadge").textContent = allRows
+                    ? `${fmt(allRows)} payload rows loaded`
+                    : "Valid payload structure; no data rows";
+
+                const parties = unique([
+                    ...tables.reports.map((row) => String(row.party_id ?? "")),
+                    ...tables.screenings.map((row) =>
+                        String(row.party_id ?? ""),
+                    ),
+                    ...tables.external_entity_identifiers.map((row) =>
+                        String(row.party_id ?? ""),
+                    ),
+                    ...tables.party_identifiers.flatMap((row) =>
+                        splitParties(row.party_ids),
+                    ),
+                ]).sort((a, b) => a.localeCompare(b));
+
+                const identifierTypeOptions = unique(
+                    tables.reports.map((row) =>
+                        String(row.identifier_type ?? ""),
+                    ),
+                ).sort();
+                const screeningStatuses = unique(
+                    tables.screenings.map((row) =>
+                        String(row.screening_status ?? ""),
+                    ),
+                ).sort();
+
+                setSelectOptions($("partySelect"), parties, displayParty);
+                setSelectOptions(
+                    $("identifierTypeSelect"),
+                    identifierTypeOptions,
+                );
+                setSelectOptions($("screeningStatusSelect"), screeningStatuses);
+
+                if (minDate && maxDate) {
+                    $("dateFrom").min = minDate;
+                    $("dateFrom").max = maxDate;
+                    $("dateFrom").value = minDate;
+                    $("dateTo").min = minDate;
+                    $("dateTo").max = maxDate;
+                    $("dateTo").value = maxDate;
+                } else {
+                    $("dateFrom").disabled = true;
+                    $("dateTo").disabled = true;
+                }
+
+                function render() {
+                    const from = $("dateFrom").value;
+                    const to = $("dateTo").value;
+                    if (from && to && from > to) {
+                        $("dateTo").value = from;
+                    }
+
+                    const selectedFrom = $("dateFrom").value;
+                    const selectedTo = $("dateTo").value;
+                    const party = $("partySelect").value;
+                    const identifierType = $("identifierTypeSelect").value;
+                    const screeningStatus = $("screeningStatusSelect").value;
+
+                    const reports = tables.reports.filter(
+                        (row) =>
+                            inDateRange(
+                                row.reported_date,
+                                selectedFrom,
+                                selectedTo,
+                            ) &&
+                            (!party || String(row.party_id) === party) &&
+                            (!identifierType ||
+                                String(row.identifier_type) === identifierType),
+                    );
+
+                    const screenings = tables.screenings.filter(
+                        (row) =>
+                            inDateRange(
+                                row.screening_date,
+                                selectedFrom,
+                                selectedTo,
+                            ) &&
+                            (!party || String(row.party_id) === party) &&
+                            (!screeningStatus ||
+                                String(row.screening_status) ===
+                                    screeningStatus),
+                    );
+
+                    const metricReports = reports.filter(
+                        (row) =>
+                            String(row.status).toLowerCase() === "all" &&
+                            isAllCustomerType(row),
+                    );
+                    const aggregateReports = identifierType
+                        ? metricReports
+                        : metricReports.filter(isAllIdentifierType);
+
+                    const partyMatcher = party
+                        ? (row) => String(row.party_id ?? "") === party
+                        : null;
+
+                    const partyIdsMatcher = party
+                        ? (row) => splitParties(row.party_ids).includes(party)
+                        : null;
+
+                    const clusterExternal = latestSnapshotRows(
+                        tables.cluster_external_entities,
+                        selectedFrom,
+                        selectedTo,
+                        null,
+                        {
+                            key: ["num_external_entities"],
+                            value: "cluster_count",
+                        },
+                    );
+                    const externalIdentifiers = latestSnapshotRows(
+                        tables.external_entity_identifiers,
+                        selectedFrom,
+                        selectedTo,
+                        partyMatcher,
+                        {
+                            key: ["party_id", "num_identifiers"],
+                            value: "external_entity_count",
+                        },
+                    );
+                    const clusterIdentifiers = latestSnapshotRows(
+                        tables.cluster_identifiers,
+                        selectedFrom,
+                        selectedTo,
+                        null,
+                        {
+                            key: ["num_identifiers"],
+                            value: "cluster_count",
+                        },
+                    );
+                    const partyIdentifiers = latestSnapshotRows(
+                        tables.party_identifiers,
+                        selectedFrom,
+                        selectedTo,
+                        partyIdsMatcher,
+                        {
+                            key: ["party_ids"],
+                            value: "num_identifiers",
+                        },
+                    );
+
+                    const totalReports = sum(aggregateReports, "reports_count");
+                    const totalScreenings = sum(screenings, "count");
+                    const totalIdentifiers = sum(
+                        aggregateReports,
+                        "identifiers_count",
+                    );
+                    const totalExternalEntities = sum(
+                        externalIdentifiers,
+                        "external_entity_count",
+                    );
+                    const totalClusters = sum(clusterExternal, "cluster_count");
+                    const activeParties = unique([
+                        ...aggregateReports.map((row) =>
+                            String(row.party_id ?? ""),
+                        ),
+                        ...screenings.map((row) => String(row.party_id ?? "")),
+                    ]);
+
+                    $("kpiReports").textContent = fmt(totalReports);
+                    $("kpiScreenings").textContent = fmt(totalScreenings);
+                    $("kpiIdentifiers").textContent = fmt(totalIdentifiers);
+                    $("kpiExternalEntities").textContent = fmt(
+                        totalExternalEntities,
+                    );
+                    $("kpiClusters").textContent = fmt(totalClusters);
+                    $("kpiParties").textContent = fmt(activeParties.length);
+                    $("kpiReportsNote").textContent =
+                        `${fmt(unique(aggregateReports.map((row) => row.reported_date)).length)} reported day(s)`;
+                    $("kpiScreeningsNote").textContent =
+                        `${fmt(unique(screenings.map((row) => row.screening_date)).length)} screening day(s)`;
+
+                    $("selectedDates").textContent = selectedFrom
+                        ? `${fmtDate(selectedFrom)} – ${fmtDate(selectedTo)}`
+                        : "No dated rows";
+                    $("selectedParty").textContent = party
+                        ? displayParty(party)
+                        : "All parties";
+
+                    const reportsByParty = sortedEntries(
+                        aggregate(
+                            aggregateReports,
+                            "party_id",
+                            "reports_count",
+                        ),
+                    );
+                    const screeningsByParty = sortedEntries(
+                        aggregate(screenings, "party_id", "count"),
+                    );
+                    const identifiersByParty = sortedEntries(
+                        aggregate(
+                            aggregateReports,
+                            "party_id",
+                            "identifiers_count",
+                        ),
+                    );
+                    const identifierTypes = sortedEntries(
+                        aggregate(
+                            metricReports.filter((row) => {
+                                const identifierType = String(
+                                    row.identifier_type ?? "",
+                                )
+                                    .trim()
+                                    .toLowerCase();
+                                return (
+                                    identifierType.length > 0 &&
+                                    identifierType !== "null" &&
+                                    identifierType !== "all"
+                                );
+                            }),
+                            "identifier_type",
+                            "identifiers_count",
+                        ),
+                    );
+                    const subSources = sortedEntries(
+                        aggregate(
+                            aggregateReports,
+                            "sub_source",
+                            "reports_count",
+                        ),
+                    );
+                    const dailyReports = [
+                        ...aggregate(
+                            aggregateReports,
+                            "reported_date",
+                            "reports_count",
+                        ).entries(),
+                    ].sort((a, b) => a[0].localeCompare(b[0]));
+                    const dailyScreenings = [
+                        ...aggregate(
+                            screenings,
+                            "screening_date",
+                            "count",
+                        ).entries(),
+                    ].sort((a, b) => a[0].localeCompare(b[0]));
+
+                    expandableLineChart(
+                        "dailyReportsChart",
+                        "Daily reports",
+                        dailyReports,
+                        {
+                            color: COLORS[0],
+                            fill: "rgba(46,95,163,.12)",
+                            labelFormatter: fmtDate,
+                            ariaLabel: "Daily reports trend",
+                        },
+                    );
+                    expandableLineChart(
+                        "dailyScreeningsChart",
+                        "Daily screenings",
+                        dailyScreenings,
+                        {
+                            color: COLORS[2],
+                            fill: "rgba(184,118,46,.13)",
+                            labelFormatter: fmtDate,
+                            ariaLabel: "Daily screenings trend",
+                        },
+                    );
+                    expandableBarChart(
+                        "reportsByPartyChart",
+                        "Reports by party",
+                        reportsByParty,
+                        {
+                            color: COLORS[0],
+                            limit: 12,
+                            left: 150,
+                            labelFormatter: displayParty,
+                        },
+                    );
+                    expandableBarChart(
+                        "screeningsByPartyChart",
+                        "Screenings by party",
+                        screeningsByParty,
+                        {
+                            color: COLORS[2],
+                            limit: 12,
+                            left: 150,
+                            labelFormatter: displayParty,
+                        },
+                    );
+                    expandableBarChart(
+                        "identifiersByPartyChart",
+                        "Identifiers by party",
+                        identifiersByParty,
+                        {
+                            color: COLORS[1],
+                            limit: 12,
+                            left: 150,
+                            labelFormatter: displayParty,
+                        },
+                    );
+                    expandableBarChart(
+                        "identifierTypeChart",
+                        "Identifier types",
+                        identifierTypes,
+                        {
+                            color: COLORS[3],
+                            limit: 12,
+                            left: 230,
+                            labelFormatter: (label) =>
+                                label.replaceAll("_", " "),
+                        },
+                    );
+                    expandableBarChart(
+                        "subSourceChart",
+                        "Report sub-sources",
+                        subSources,
+                        {
+                            color: COLORS[2],
+                            limit: 12,
+                            left: 190,
+                        },
+                    );
+
+                    const overlapEntries = partyIdentifiers
+                        .map((row) => [
+                            displayParty(row.party_ids ?? "unknown"),
+                            safeNumber(row.num_identifiers),
+                        ])
+                        .sort((a, b) => b[1] - a[1]);
+                    expandableBarChart(
+                        "partyIdentifiersChart",
+                        "Common identifiers across parties",
+                        overlapEntries,
+                        { color: COLORS[2], limit: 14, left: 250 },
+                    );
+
+                    const clusterExternalEntries = clusterExternal
+                        .map((row) => [
+                            String(row.num_external_entities ?? "0"),
+                            safeNumber(row.cluster_count),
+                        ])
+                        .sort((a, b) => Number(a[0]) - Number(b[0]));
+                    expandableBarChart(
+                        "clusterExternalChart",
+                        "Clusters by linked external entities",
+                        clusterExternalEntries,
+                        {
+                            color: COLORS[1],
+                            limit: 18,
+                            left: 185,
+                            log: true,
+                            labelFormatter: (label) =>
+                                `${label} external entit${label === "1" ? "y" : "ies"}`,
+                        },
+                    );
+
+                    const externalIdentifierEntries = externalIdentifiers
+                        .map((row) => [
+                            party
+                                ? String(row.num_identifiers ?? "0")
+                                : `${displayParty(row.party_id ?? "unknown")} · ${String(row.num_identifiers ?? "0")}`,
+                            safeNumber(row.external_entity_count),
+                        ])
+                        .sort((a, b) => b[1] - a[1]);
+                    expandableBarChart(
+                        "externalIdentifiersChart",
+                        "External entities by identifiers linked",
+                        externalIdentifierEntries,
+                        {
+                            color: COLORS[3],
+                            limit: 18,
+                            left: party ? 190 : 230,
+                            labelFormatter: (label) =>
+                                party ? `${label} identifiers` : label,
+                        },
+                    );
+
+                    const clusterIdentifierEntries = clusterIdentifiers
+                        .map((row) => [
+                            String(row.num_identifiers ?? "0"),
+                            safeNumber(row.cluster_count),
+                        ])
+                        .sort((a, b) => Number(a[0]) - Number(b[0]));
+                    expandableBarChart(
+                        "clusterIdentifiersChart",
+                        "Clusters by identifier count",
+                        clusterIdentifierEntries,
+                        {
+                            color: COLORS[0],
+                            limit: 18,
+                            left: 170,
+                            log: true,
+                            labelFormatter: (label) => `${label} identifiers`,
+                        },
+                    );
+
+                    const reportPartyGroups = new Map();
+                    for (const row of aggregateReports) {
+                        const key = String(row.party_id ?? "UNKNOWN");
+                        const current = reportPartyGroups.get(key) || {
+                            reports: 0,
+                            identifiers: 0,
+                            external: 0,
+                            clusters: 0,
+                            reportDates: new Set(),
+                        };
+                        current.reports += safeNumber(row.reports_count);
+                        current.identifiers += safeNumber(
+                            row.identifiers_count,
+                        );
+                        current.external += safeNumber(
+                            row.external_entities_count,
+                        );
+                        current.clusters += safeNumber(row.clusters_count);
+                        current.reportDates.add(row.reported_date);
+                        reportPartyGroups.set(key, current);
+                    }
+
+                    const screeningPartyGroups = new Map();
+                    for (const row of screenings) {
+                        const key = String(row.party_id ?? "UNKNOWN");
+                        const current = screeningPartyGroups.get(key) || {
+                            screenings: 0,
+                            screeningDates: new Set(),
+                            peak: 0,
+                            peakDate: "",
+                        };
+                        const count = safeNumber(row.count);
+                        current.screenings += count;
+                        current.screeningDates.add(row.screening_date);
+                        if (count > current.peak) {
+                            current.peak = count;
+                            current.peakDate = row.screening_date;
+                        }
+                        screeningPartyGroups.set(key, current);
+                    }
+
+                    const leaderboardParties = unique([
+                        ...reportPartyGroups.keys(),
+                        ...screeningPartyGroups.keys(),
+                    ]);
+                    const leaderboard = leaderboardParties
+                        .map((name) => {
+                            const report = reportPartyGroups.get(name) || {
+                                reports: 0,
+                                identifiers: 0,
+                                external: 0,
+                                clusters: 0,
+                                reportDates: new Set(),
+                            };
+                            const screening = screeningPartyGroups.get(
+                                name,
+                            ) || {
+                                screenings: 0,
+                                screeningDates: new Set(),
+                                peak: 0,
+                                peakDate: "",
+                            };
+                            return {
+                                party: name,
+                                ...report,
+                                ...screening,
+                                score: report.reports + screening.screenings,
+                            };
+                        })
+                        .sort(
+                            (a, b) =>
+                                b.score - a.score ||
+                                a.party.localeCompare(b.party),
+                        );
+
+                    $("leaderboardBody").innerHTML = leaderboard.length
+                        ? leaderboard
+                              .map(
+                                  (row, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><b>${escapeHtml(displayParty(row.party))}</b></td>
+          <td>${fmt(row.reports)}</td>
+          <td>${fmt(row.identifiers)}</td>
+          <td>${fmt(row.external)}</td>
+          <td>${fmt(row.clusters)}</td>
+          <td>${fmt(row.screenings)}</td>
+          <td>${fmt(row.reportDates.size)}</td>
+          <td>${fmt(row.screeningDates.size)}</td>
+          <td>${fmt(row.peak)}</td>
+          <td>${fmtDate(row.peakDate)}</td>
+        </tr>`,
+                              )
+                              .join("")
+                        : `<tr><td colspan="11" style="text-align:center;color:#687386;padding:25px">No activity rows match the selected filters.</td></tr>`;
+
+                    const topReportParty = reportsByParty[0];
+                    const topScreeningParty = screeningsByParty[0];
+                    const dominantIdentifier = identifierTypes[0];
+                    const dateText = selectedFrom
+                        ? `${fmtDate(selectedFrom)} to ${fmtDate(selectedTo)}`
+                        : "the available period";
+
+                    const narrativeParts = [
+                        `For ${dateText}, the selected scope contains ${fmt(totalReports)} reports and ${fmt(totalScreenings)} screenings across ${fmt(activeParties.length)} active parties.`,
+                    ];
+                    if (topReportParty && totalReports > 0) {
+                        narrativeParts.push(
+                            `${displayParty(topReportParty[0])} contributed the largest report volume at ${fmt(topReportParty[1])} (${fmt1((topReportParty[1] / totalReports) * 100)}%).`,
+                        );
+                    }
+                    if (topScreeningParty && totalScreenings > 0) {
+                        narrativeParts.push(
+                            `${displayParty(topScreeningParty[0])} contributed the largest screening volume at ${fmt(topScreeningParty[1])} (${fmt1((topScreeningParty[1] / totalScreenings) * 100)}%).`,
+                        );
+                    }
+                    if (dominantIdentifier && totalIdentifiers > 0) {
+                        narrativeParts.push(
+                            `${dominantIdentifier[0].replaceAll("_", " ")} is the leading identifier type with ${fmt(dominantIdentifier[1])} identifiers.`,
+                        );
+                    }
+                    narrativeParts.push(
+                        "Missing dates are treated as unavailable rather than zero activity.",
+                    );
+                    $("narrative").textContent = narrativeParts.join(" ");
+                }
+
+                if (!allRows) renderEmptyReport();
+                render();
+
+                [
+                    "dateFrom",
+                    "dateTo",
+                    "partySelect",
+                    "identifierTypeSelect",
+                    "screeningStatusSelect",
+                ].forEach((id) => $(id).addEventListener("change", render));
+
+                $("resetButton").addEventListener("click", () => {
+                    if (minDate && maxDate) {
+                        $("dateFrom").value = minDate;
+                        $("dateTo").value = maxDate;
+                    }
+                    $("partySelect").value = "";
+                    $("identifierTypeSelect").value = "";
+                    $("screeningStatusSelect").value = "";
+                    render();
+                });
+
+                $("expandedChartModalClose").addEventListener(
+                    "click",
+                    closeExpandedChart,
+                );
+                $("expandedChartModal").addEventListener("click", (event) => {
+                    if (event.target === $("expandedChartModal"))
+                        closeExpandedChart();
+                });
+                document.addEventListener("keydown", (event) => {
+                    if (
+                        event.key === "Escape" &&
+                        !$("expandedChartModal").hidden
+                    ) {
+                        closeExpandedChart();
+                    }
+                });
+            })();
+        </script>
+    </body>
+</html>
