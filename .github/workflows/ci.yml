@@ -19,6 +19,18 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Temporary: validates the new isolated ci-cluster/github-builds-vpc runner
+  # setup end-to-end. Intentionally does nothing but print — no checkout, no
+  # build. Remove once ci-cluster is confirmed working for real jobs.
+  # ---------------------------------------------------------------------------
+  hello-ci-cluster:
+    name: Hello (ci-cluster)
+    runs-on: ci-cluster-github-runners
+    steps:
+      - name: Hello
+        run: echo "hello"
+
+  # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
