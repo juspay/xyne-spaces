@@ -17,31 +17,61 @@ export const boardEtaManagementSchema = z.object({
 export type BoardEtaManagement = z.infer<typeof boardEtaManagementSchema>;
 
 /**
- * A board with no `etaManagement` key (or an unparseable one) is treated as no
- * Standard Path, automation disabled. This lets existing boards keep their
- * current behavior with zero metadata backfill - only boards that explicitly
- * opt in via the board-settings mutator get a real `etaManagement` object.
+ * The single source of truth for what an unconfigured board should default
+ * to - used both when a board is first created (`boardRepository.createBoard`)
+ * and when an existing board with no saved `etaManagement` is read
+ * (`parseBoardEtaManagement`'s fallback below). One function shared by both
+ * moments in a board's life is what makes it impossible for "a new board of
+ * type X" and "a pre-existing board of type X" to silently end up with
+ * different automation defaults - every board type defaults to on, for both.
+ *
+ * `createTicket` and every stage-transition path only ever write `eta` when
+ * `autoRecomputeEnabled` is true, so this is what restores every
+ * pre-existing board's pre-feature guarantee that a ticket always gets a
+ * computed due date, and what keeps a stage-deadline edit or board transfer
+ * recalculating it the way it always used to (PRD H1/H2).
+ *
+ * The tradeoff, accepted deliberately: existing tickets - on every board
+ * type, not only linear ones - will have their due date auto-extended
+ * (never shortened - see `extendOnly.ts`) the next time a covered mutation
+ * touches them, not only new ones. In practice this only has a live effect
+ * on DEFAULT and RELEASE boards, which `routeResolution.ts` forecasts
+ * identically; NON_LINEAR stays inert until a Standard Path is configured
+ * (`standardPathStageIds: []` makes the route NOT_APPLICABLE regardless of
+ * this flag), and FLOW stays inert unconditionally (same file).
+ *
+ * `boardType` stays a parameter - not dropped now that every type resolves
+ * the same way - so this remains the one place a future per-type split would
+ * be made, rather than reappearing as two independently-maintained checks.
  */
-export const DEFAULT_BOARD_ETA_MANAGEMENT: BoardEtaManagement = {
-  autoRecomputeEnabled: false,
-  standardPathStageIds: [],
-};
+export function defaultAutoRecomputeEnabled(_boardType: string): boolean {
+  return true;
+}
 
 export function validateBoardEtaManagement(data: unknown) {
   return boardEtaManagementSchema.safeParse(data);
 }
 
-/** Tolerant parse: absent or invalid `etaManagement` falls back to the documented defaults. */
-export function parseBoardEtaManagement(metadata: unknown): BoardEtaManagement {
+/**
+ * Tolerant parse: absent or invalid `etaManagement` falls back to no Standard
+ * Path and `defaultAutoRecomputeEnabled(boardType)`. `boardType` is required
+ * (not optional/defaulted) so a call site can't silently fall back to the
+ * wrong automation default for its board by omitting it.
+ */
+export function parseBoardEtaManagement(metadata: unknown, boardType: string): BoardEtaManagement {
+  const fallback: BoardEtaManagement = {
+    autoRecomputeEnabled: defaultAutoRecomputeEnabled(boardType),
+    standardPathStageIds: [],
+  };
   if (metadata === null || typeof metadata !== 'object') {
-    return DEFAULT_BOARD_ETA_MANAGEMENT;
+    return fallback;
   }
   const candidate = (metadata as Record<string, unknown>).etaManagement;
   if (candidate === undefined) {
-    return DEFAULT_BOARD_ETA_MANAGEMENT;
+    return fallback;
   }
   const result = validateBoardEtaManagement(candidate);
-  return result.success ? result.data : DEFAULT_BOARD_ETA_MANAGEMENT;
+  return result.success ? result.data : fallback;
 }
 
 /**
@@ -52,13 +82,14 @@ export function parseBoardEtaManagement(metadata: unknown): BoardEtaManagement {
  */
 export function mergeBoardEtaManagement(
   existingMetadata: unknown,
+  boardType: string,
   patch: Partial<BoardEtaManagement>,
 ): Record<string, unknown> {
   const base =
     existingMetadata !== null && typeof existingMetadata === 'object'
       ? { ...(existingMetadata as Record<string, unknown>) }
       : {};
-  const current = parseBoardEtaManagement(existingMetadata);
+  const current = parseBoardEtaManagement(existingMetadata, boardType);
   base.etaManagement = { ...current, ...patch } satisfies BoardEtaManagement;
   return base;
 }

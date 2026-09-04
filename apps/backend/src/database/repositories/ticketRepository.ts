@@ -189,7 +189,7 @@ export class TicketRepository {
         throw new Error(`Board ${data.boardId} not found`);
       }
       const transitions = await client.stageTransition.findMany({ where: { boardId: data.boardId } });
-      const boardEtaManagement = parseBoardEtaManagement(board.metadata);
+      const boardEtaManagement = parseBoardEtaManagement(board.metadata, board.boardType);
 
       // Create ticket with the conversationId, auto-assigned stageName. `eta` is set here
       // only when the caller explicitly provided one (e.g. migration) An automatic initial due date, when the board has opted in, is set
@@ -629,8 +629,18 @@ export class TicketRepository {
         null,
         { requireExplicitTransition: false },
       );
+      // currentTicket.metadata was read before this transaction opened, so a concurrent
+      // write (e.g. acknowledgeEtaRisk) landing before ours would be silently lost by the
+      // merge below. FOR UPDATE locks the row so that can't happen, and feeding this into
+      // evaluateEta too keeps the risk decision - not just the write - based on current state.
+      const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown }[]>`
+        SELECT "metadata"
+        FROM "tickets"
+        WHERE "id" = ${ticketId}
+        FOR UPDATE
+      `;
       const boardEtaCtx = await loadBoardEtaContext(tx, currentTicket.boardId);
-      const currentTicketEtaManagement = parseTicketEtaManagement(currentTicket.metadata);
+      const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
 
       const etaResult = evaluateEta({
         ticketId,
@@ -655,7 +665,7 @@ export class TicketRepository {
         now,
       });
       const mergedMetadata = mergeTicketEtaManagement(
-        currentTicket.metadata,
+        lockedTicket?.metadata,
         etaResult.ticketEtaManagementPatch,
       );
 

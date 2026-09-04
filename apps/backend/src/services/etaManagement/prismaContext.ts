@@ -43,7 +43,7 @@ export async function loadBoardEtaContext(
 
   return {
     boardType: board.boardType,
-    boardEtaManagement: parseBoardEtaManagement(board.metadata),
+    boardEtaManagement: parseBoardEtaManagement(board.metadata, board.boardType),
     stages,
     transitions,
   };

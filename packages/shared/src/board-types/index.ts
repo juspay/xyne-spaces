@@ -110,9 +110,10 @@ export interface BoardMetadata {
   /**
    * Config + versioning for the ETA risk-detection/auto-recalculation
    * feature (planning risk, Standard Path, automatic due-date extension).
-   * Absent = no Standard Path, automation disabled - see
-   * `parseBoardEtaManagement` in `validation/etaManagementSchema.ts`, which
-   * every reader must go through rather than casting this field directly.
+   * Absent = no Standard Path, automatic due-date recalculation defaulted per
+   * board type (see `defaultAutoRecomputeEnabled`) - go through
+   * `parseBoardEtaManagement` in `validation/etaManagementSchema.ts` rather
+   * than casting this field directly.
    */
   etaManagement?: BoardEtaManagement;
 }

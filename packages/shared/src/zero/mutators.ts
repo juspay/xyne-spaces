@@ -4870,32 +4870,6 @@ export const mutators = defineMutators({
     ),
   },
   board: {
-    updateEtaManagement: defineMutator(
-      z.object({
-        boardId: z.string(),
-        autoRecomputeEnabled: z.boolean(),
-        now: z.number(),
-        // Standard Path - see the backend mutator for the real validation; this optimistic
-        // client-side write skips it (server is authoritative and will reject an invalid path).
-        standardPathStageIds: z.array(z.string()).optional(),
-      }),
-      async ({ tx, ctx, args: { boardId, autoRecomputeEnabled, now, standardPathStageIds } }) => {
-        const board = await tx.run(zql.boards.where('id', boardId).one());
-        if (!board) return;
-
-        const merged = mergeBoardEtaManagement(board.metadata, {
-          autoRecomputeEnabled,
-          ...(standardPathStageIds !== undefined && { standardPathStageIds }),
-        });
-
-        await tx.mutate.boards.update({
-          id: boardId,
-          metadata: merged as ReadonlyJSONValue,
-          updatedBy: ctx.userID,
-          updatedAt: now,
-        });
-      },
-    ),
     updateFlowPlan: defineMutator(
       z.object({
         boardId: z.string(),
@@ -4927,6 +4901,11 @@ export const mutators = defineMutators({
         projectId: z.string().optional(),
         boardType: z.nativeEnum(BoardType).optional(),
         metadata: z.any().optional(),
+        // Automatic ETA management - see the backend mutator for the Standard Path
+        // validation this optimistic client-side write deliberately skips (the server is
+        // authoritative and will reject an invalid path, rolling this write back).
+        autoRecomputeEnabled: z.boolean().optional(),
+        standardPathStageIds: z.array(z.string()).optional(),
         stages: z
           .array(
             z.object({
@@ -4963,6 +4942,8 @@ export const mutators = defineMutators({
           description,
           projectId,
           metadata,
+          autoRecomputeEnabled,
+          standardPathStageIds,
           stages,
           timestamp,
           stageIds = {},
@@ -5010,6 +4991,21 @@ export const mutators = defineMutators({
           }
         }
 
+        // ETA settings merge into the etaManagement subtree instead of replacing the whole
+        // column. Base is the caller's `metadata` when it sent one (so both survive),
+        // otherwise the board's current metadata.
+        const nextMetadata =
+          autoRecomputeEnabled !== undefined || standardPathStageIds !== undefined
+            ? mergeBoardEtaManagement(
+                metadata !== undefined ? metadata : board.metadata,
+                boardType ?? board.boardType,
+                {
+                  ...(autoRecomputeEnabled !== undefined && { autoRecomputeEnabled }),
+                  ...(standardPathStageIds !== undefined && { standardPathStageIds }),
+                },
+              )
+            : metadata;
+
         // Update board
         await tx.mutate.boards.update({
           id: boardId,
@@ -5017,7 +5013,7 @@ export const mutators = defineMutators({
           ...(description !== undefined && { description }),
           ...(projectId !== undefined && { projectId }),
           ...(boardType !== undefined && { boardType }),
-          ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
+          ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });

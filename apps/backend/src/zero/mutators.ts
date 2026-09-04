@@ -5929,8 +5929,10 @@ export function createMutators(
             params.statusV2 !== undefined &&
             ticket.statusV2 === TicketStatusV2.PAUSED &&
             params.statusV2 !== TicketStatusV2.PAUSED;
+          // Excludes isBoardChanging: a combined board+eta call is fully handled by the
+          // transfer branch's own evaluation - see needsEtaEvaluation below.
           const isPureManualEtaChange =
-            isEtaChanging && !isStageChanging && !isResumingFromPause && !isEnteringTerminal && !isLeavingTerminal;
+            isEtaChanging && !isStageChanging && !isBoardChanging && !isResumingFromPause && !isEnteringTerminal && !isLeavingTerminal;
 
           // Board/etaManagement context, fetched once and reused by both the permission gate
           // below and the ETA domain-service evaluation further down - only when one of the
@@ -5947,7 +5949,7 @@ export function createMutators(
           const etaBoard = needsBoardEtaContext
             ? await tx.run(zql.boards.where('id', ticket.boardId).one())
             : null;
-          const boardEtaManagement = parseBoardEtaManagement(etaBoard?.metadata ?? null);
+          const boardEtaManagement = parseBoardEtaManagement(etaBoard?.metadata ?? null, etaBoard?.boardType ?? BoardType.DEFAULT);
 
           // Stage-only moves are gated only once a board has opted into automatic ETA
           // management (stage moves can now trigger auto-recompute) - scoped the same way as
@@ -6072,7 +6074,7 @@ export function createMutators(
             }
             // Forecast from the new board's first stage onward, extend-only against the
             // ticket's pre-transfer due date. Boards without automation keep their date.
-            const targetBoardEtaManagement = parseBoardEtaManagement(targetBoard?.metadata ?? null);
+            const targetBoardEtaManagement = parseBoardEtaManagement(targetBoard?.metadata ?? null, targetBoard?.boardType ?? BoardType.DEFAULT);
             if (targetBoardEtaManagement.autoRecomputeEnabled) {
               const effectiveStatusV2 = firstStage.defaultTicketStatusV2 ?? ticket.statusV2;
               const etaCtx = await loadZeroEtaContext(tx, {
@@ -6464,8 +6466,12 @@ export function createMutators(
           // Every trigger this mutator can produce that needs ETA re-evaluation. NON_LINEAR
           // direct stage changes already threw above.
           let etaActivityIntentsForTicketUpdate: ReturnType<typeof buildEtaActivityIntents> = [];
+          // Skipped when isBoardChanging: this block resolves the stage from the
+          // pre-transfer ticket.boardId, so running it here would clobber the transfer
+          // branch's already-correct evaluation with one against the deleted old visit.
           const needsEtaEvaluation =
-            isStageChanging || isEtaChanging || isEnteringTerminal || isLeavingTerminal || isResumingFromPause;
+            !isBoardChanging &&
+            (isStageChanging || isEtaChanging || isEnteringTerminal || isLeavingTerminal || isResumingFromPause);
 
           // Pure manual due-date edit: optimistic-concurrency check against the persisted
           // fingerprint, so a stale client refetches rather than committing a change decided
@@ -6561,10 +6567,12 @@ export function createMutators(
 
           if (isPureManualEtaChange) {
             // User-attributed, unlike the system-attributed ETA_AUTO_RECOMPUTED/ETA_RISK_*
-            // rows. Stays alongside the generic ActivityType.ETA row the `fields` loop
-            // already writes (unchanged, for existing timeline consumers) - this one carries
-            // the reason, which is a mutator param the side-effect layer cannot observe on
-            // its own and so must travel through the outbox.
+            // rows. REPLACES the generic ActivityType.ETA row the `fields` loop would
+            // otherwise write - suppressed for this case above (`if (field === 'eta' &&
+            // isPureManualEtaChange) continue;`), so a manual edit produces one timeline row
+            // carrying the reason, not two saying the same thing. Travels through the outbox
+            // since the reason is a mutator param the side-effect layer cannot observe on its
+            // own.
             etaActivityIntentsForTicketUpdate = [
               ...etaActivityIntentsForTicketUpdate,
               {
@@ -7131,7 +7139,7 @@ export function createMutators(
           if (!currentStage) return;
 
           const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
-          const boardEtaManagement = parseBoardEtaManagement(board?.metadata ?? null);
+          const boardEtaManagement = parseBoardEtaManagement(board?.metadata ?? null, board?.boardType ?? BoardType.DEFAULT);
 
           if (etaExpectedFingerprint !== undefined) {
             const preCheckEtaManagement = parseTicketEtaManagement(ticket.metadata);
@@ -8290,36 +8298,114 @@ export function createMutators(
           });
         },
       ),
-      /**
-       * Toggle automatic ETA management (extend-only forecast-based due-date recalculation)
-       * for a board. Deliberately a narrow, dedicated mutator rather than folded into the
-       * generic `board.update` below: this keeps the admin-only gate specific and auditable,
-       * and validates through the shared etaManagement schema rather than accepting
-       * `metadata` as arbitrary JSON the way `board.update` still does for its other fields.
-       */
-      updateEtaManagement: defineMutator(
+      update: defineMutator(
         z.object({
           boardId: z.string(),
-          autoRecomputeEnabled: z.boolean(),
-          now: z.number(),
-          // Standard Path (NON_LINEAR only). Omitted = leave the existing path
-          // untouched; [] explicitly clears it (disables Standard Path forecasting without
-          // changing allowed transitions).
+          name: z.string().optional(),
+          description: z.string().optional(),
+          projectId: z.string().optional(),
+          boardType: z.nativeEnum(BoardType).optional(),
+          metadata: z.any().optional(),
+          // Automatic ETA management. Merged into `metadata.etaManagement` below rather
+          // than going through the raw `metadata` arg above, which is a whole-column
+          // overwrite and would drop sibling keys.
+          autoRecomputeEnabled: z.boolean().optional(),
+          // Standard Path (NON_LINEAR only). Omitted = leave the existing path untouched;
+          // [] explicitly clears it (disables Standard Path forecasting without changing
+          // allowed transitions).
           standardPathStageIds: z.array(z.string()).optional(),
+          stages: z
+            .array(
+              z.object({
+                id: z.string().optional(),
+                name: z.string(),
+                eta: z.number().optional(),
+                sequenceNumber: z.number(),
+                defaultTicketStatusV2: z.string().optional(),
+                prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
+                approverIds: z.array(z.string()).optional(),
+                approvers: z
+                  .array(
+                    z.object({
+                      approverId: z.string(),
+                      approverType: z.enum(['USER', 'ROLE']),
+                    })
+                  )
+                  .optional(),
+                formId: z.string().optional(),
+                requestApprovalOnEntry: z.boolean().optional(),
+              })
+            )
+            .optional(),
+          timestamp: z.number(),
+          stageIds: z.record(z.string(), z.string()).optional(),
+          prStatusMappingIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({ tx, args: { boardId, autoRecomputeEnabled, now, standardPathStageIds } }) => {
+        async ({
+          tx,
+          args: {
+            boardId,
+            name,
+            description,
+            projectId,
+            boardType,
+            metadata,
+            autoRecomputeEnabled,
+            standardPathStageIds,
+            stages,
+            timestamp,
+            stageIds = {},
+            prStatusMappingIds = {},
+          },
+        }) => {
+          // Validate board exists
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
           }
 
-          // Board-admin action, mirroring nonLinear.syncTransitions's gate (BoardAcl.canUpdate).
-          if (board.createdBy !== authData.sub && !(await hasProjectAdminAccess({ userID: authData.sub }, tx))) {
-            throw new Error('Not authorized to edit ETA management settings for this board');
+          if (board.boardType === BoardType.RELEASE) {
+            // Gate release-board edits like board.delete and the config-save mutator.
+            await assertReleaseManageAccess();
+            if (projectId !== undefined && projectId !== board.projectId) {
+              throw new Error('Release boards cannot be moved to another project');
+            }
+            if (boardType !== undefined && boardType !== BoardType.RELEASE) {
+              throw new Error('Release boards cannot be converted to a normal board');
+            }
           }
 
+          if (boardType !== undefined && boardType !== board.boardType) {
+            if (board.boardType === BoardType.FLOW) {
+              throw new Error('Flow boards cannot be converted to another board type');
+            }
+            if (boardType === BoardType.FLOW) {
+              throw new Error('Existing boards cannot be converted to a Flow board');
+            }
+          }
+
+          // Validate project exists if projectId is being changed
+          if (projectId && projectId !== board.projectId) {
+            const project = await tx.run(zql.projects.where('id', projectId).one());
+            if (!project) {
+              throw new Error('Project not found');
+            }
+          }
+
+          // Check for duplicate name if name is being changed
+          if (name && name !== board.name) {
+            const existingBoard = await tx.run(zql.boards.where('name', name).one());
+            if (existingBoard && existingBoard.id !== boardId) {
+              throw new Error(`Board with name '${name}' already exists`);
+            }
+          }
+
+          // A same-call boardType change wins, so a board converted to NON_LINEAR can take
+          // a Standard Path in one shot.
+          const effectiveBoardType = boardType ?? board.boardType;
+
           if (standardPathStageIds !== undefined && standardPathStageIds.length > 0) {
-            if (board.boardType !== BoardType.NON_LINEAR) {
+            if (effectiveBoardType !== BoardType.NON_LINEAR) {
               throw new Error('A Standard Path can only be configured on a non-linear board');
             }
 
@@ -8395,110 +8481,20 @@ export function createMutators(
             }
           }
 
-          const mergedMetadata = mergeBoardEtaManagement(board.metadata, {
-            autoRecomputeEnabled,
-            ...(standardPathStageIds !== undefined && { standardPathStageIds }),
-          });
-
-          await tx.mutate.boards.update({
-            id: boardId,
-            metadata: mergedMetadata as ReadonlyJSONValue,
-            updatedBy: authData.sub,
-            updatedAt: now,
-          });
-        },
-      ),
-      update: defineMutator(
-        z.object({
-          boardId: z.string(),
-          name: z.string().optional(),
-          description: z.string().optional(),
-          projectId: z.string().optional(),
-          boardType: z.nativeEnum(BoardType).optional(),
-          metadata: z.any().optional(),
-          stages: z
-            .array(
-              z.object({
-                id: z.string().optional(),
-                name: z.string(),
-                eta: z.number().optional(),
-                sequenceNumber: z.number(),
-                defaultTicketStatusV2: z.string().optional(),
-                prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
-                approverIds: z.array(z.string()).optional(),
-                approvers: z
-                  .array(
-                    z.object({
-                      approverId: z.string(),
-                      approverType: z.enum(['USER', 'ROLE']),
-                    })
-                  )
-                  .optional(),
-                formId: z.string().optional(),
-                requestApprovalOnEntry: z.boolean().optional(),
-              })
-            )
-            .optional(),
-          timestamp: z.number(),
-          stageIds: z.record(z.string(), z.string()).optional(),
-          prStatusMappingIds: z.record(z.string(), z.string()).optional(),
-        }),
-        async ({
-          tx,
-          args: {
-            boardId,
-            name,
-            description,
-            projectId,
-            boardType,
-            metadata,
-            stages,
-            timestamp,
-            stageIds = {},
-            prStatusMappingIds = {},
-          },
-        }) => {
-          // Validate board exists
-          const board = await tx.run(zql.boards.where('id', boardId).one());
-          if (!board) {
-            throw new Error('Board not found');
-          }
-
-          if (board.boardType === BoardType.RELEASE) {
-            // Gate release-board edits like board.delete and the config-save mutator.
-            await assertReleaseManageAccess();
-            if (projectId !== undefined && projectId !== board.projectId) {
-              throw new Error('Release boards cannot be moved to another project');
-            }
-            if (boardType !== undefined && boardType !== BoardType.RELEASE) {
-              throw new Error('Release boards cannot be converted to a normal board');
-            }
-          }
-
-          if (boardType !== undefined && boardType !== board.boardType) {
-            if (board.boardType === BoardType.FLOW) {
-              throw new Error('Flow boards cannot be converted to another board type');
-            }
-            if (boardType === BoardType.FLOW) {
-              throw new Error('Existing boards cannot be converted to a Flow board');
-            }
-          }
-
-          // Validate project exists if projectId is being changed
-          if (projectId && projectId !== board.projectId) {
-            const project = await tx.run(zql.projects.where('id', projectId).one());
-            if (!project) {
-              throw new Error('Project not found');
-            }
-          }
-
-          // Check for duplicate name if name is being changed
-          if (name && name !== board.name) {
-            const existingBoard = await tx.run(zql.boards.where('name', name).one());
-            if (existingBoard && existingBoard.id !== boardId) {
-              throw new Error(`Board with name '${name}' already exists`);
-            }
-          }
+          // ETA settings merge into the etaManagement subtree instead of replacing the whole
+          // column. Base is the caller's `metadata` when it sent one (so both survive),
+          // otherwise the board's current metadata.
+          const nextMetadata =
+            autoRecomputeEnabled !== undefined || standardPathStageIds !== undefined
+              ? mergeBoardEtaManagement(
+                  metadata !== undefined ? metadata : board.metadata,
+                  effectiveBoardType,
+                  {
+                    ...(autoRecomputeEnabled !== undefined && { autoRecomputeEnabled }),
+                    ...(standardPathStageIds !== undefined && { standardPathStageIds }),
+                  },
+                )
+              : metadata;
 
           // Update board
           await tx.mutate.boards.update({
@@ -8507,7 +8503,7 @@ export function createMutators(
             ...(description !== undefined && { description }),
             ...(projectId !== undefined && { projectId }),
             ...(boardType !== undefined && { boardType }),
-            ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
+            ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
             updatedBy: authData.sub,
             updatedAt: timestamp,
           });
@@ -17579,7 +17575,7 @@ export function createMutators(
           if (board?.boardType !== BoardType.NON_LINEAR) {
             throw new Error('nonLinear.transition is only valid for NON_LINEAR boards');
           }
-          const boardEtaManagement = parseBoardEtaManagement(board.metadata);
+          const boardEtaManagement = parseBoardEtaManagement(board.metadata, board.boardType);
 
           // Stage moves can now trigger automatic ETA extension once a board opts into
           // autoRecomputeEnabled - gate them the same way ticket.update gates assignee/eta/

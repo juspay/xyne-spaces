@@ -816,7 +816,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket) return null;
     return deriveEtaManagementView({
       ticketEtaManagement: parseTicketEtaManagement(ticket.metadata),
-      boardEtaManagement: parseBoardEtaManagement(boardData?.metadata ?? null),
+      boardEtaManagement: parseBoardEtaManagement(
+        boardData?.metadata ?? null,
+        boardData?.boardType ?? BoardType.DEFAULT,
+      ),
       ticketEta: ticket.eta ?? null,
       ticketStatus: ticket.statusV2,
       now: Date.now(),

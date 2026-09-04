@@ -455,8 +455,18 @@ const transferTicketToBoard = async (params: {
     // the pattern already used by TicketRepository.updateTicketStage and the Zero
     // ticket.update board-transfer branch.
     const effectiveStatusV2 = (firstStage.defaultTicketStatusV2 ?? currentTicket.statusV2) as TicketStatusV2;
+    // currentTicket.metadata was read before this transaction opened, so a concurrent
+    // write (e.g. acknowledgeEtaRisk) landing before ours would be silently lost by the
+    // merge below. FOR UPDATE locks the row so that can't happen, and feeding this into
+    // evaluateEta too keeps the risk decision - not just the write - based on current state.
+    const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown }[]>`
+      SELECT "metadata"
+      FROM "tickets"
+      WHERE "id" = ${ticketId}
+      FOR UPDATE
+    `;
     const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
-    const currentTicketEtaManagement = parseTicketEtaManagement(currentTicket.metadata);
+    const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
     const stepEstimate = resolveStepEstimate(
       { id: firstStage.id, eta: firstStage.eta },
       null,
@@ -487,7 +497,7 @@ const transferTicketToBoard = async (params: {
     });
 
     const mergedMetadata = mergeTicketEtaManagement(
-      currentTicket.metadata,
+      lockedTicket?.metadata,
       etaResult.ticketEtaManagementPatch,
     );
 

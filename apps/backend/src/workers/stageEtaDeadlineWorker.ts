@@ -36,6 +36,9 @@ const BATCH_SLEEP_MS = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SLEEP_MS ||
 // (metadata + timeline + notifications) rather than a bulk `updateMany`.
 const STAGE_ETA_REMINDER_BATCH_SIZE = 15;
 const STAGE_ETA_REMINDER_BATCH_DELAY_MS = 1000;
+// Page size for both cursor-paginated TicketStageEta scans below - shared so the two
+// stay in sync rather than drifting as two separately-tuned magic numbers.
+const QUERY_BATCH_SIZE = 10000;
 
 const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
   if (chunkSize <= 0) return [items];
@@ -185,58 +188,77 @@ class StageEtaDeadlineWorker {
     const todayMidnight = new Date(now);
     todayMidnight.setHours(0, 0, 0, 0);
 
-    const entries = await db.ticketStageEta.findMany({
-      where: {
-        stageLeftAt: null,
-        stageEta: { gt: now },
-        ticket: {
-          statusV2: { in: OPEN_STATUSES },
-          OR: [
-            { eta: null },
-            { eta: { gte: todayMidnight } },
-          ],
-        },
-      },
-      select: {
-        id: true,
-        ticketId: true,
-        stageId: true,
-        stageEta: true,
-        stageEnteredAt: true,
-        ticket: {
-          select: {
-            id: true,
-            xyneId: true,
-            assignedTo: true,
-            createdBy: true,
-            channelId: true,
-            conversationId: true,
-            stageName: true,
-            eta: true,
-            workspaceId: true,
-            boardId: true,
-            userGroupId: true,
-            statusV2: true,
-            metadata: true,
+    // Cursor-paginated and read-replica, like getOverdueTicketIds - and processed one page
+    // at a time (fetch, evaluate/write, discard, repeat) rather than accumulated into one
+    // array first, since each row here carries a full nested ticket including its metadata
+    // JSON blob. Unlike the ID-only overdue scan, an unbounded version of this query holds
+    // that full payload for every matching visit in a large workspace at once.
+    const readerDb = readReplicaDb ?? db;
+    let cursor: string | undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const entries = await readerDb.ticketStageEta.findMany({
+        where: {
+          stageLeftAt: null,
+          stageEta: { gt: now },
+          ticket: {
+            statusV2: { in: OPEN_STATUSES },
+            OR: [
+              { eta: null },
+              { eta: { gte: todayMidnight } },
+            ],
           },
         },
-      },
-    });
+        select: {
+          id: true,
+          ticketId: true,
+          stageId: true,
+          stageEta: true,
+          stageEnteredAt: true,
+          ticket: {
+            select: {
+              id: true,
+              xyneId: true,
+              assignedTo: true,
+              createdBy: true,
+              channelId: true,
+              conversationId: true,
+              stageName: true,
+              eta: true,
+              workspaceId: true,
+              boardId: true,
+              userGroupId: true,
+              statusV2: true,
+              metadata: true,
+            },
+          },
+        },
+        take: QUERY_BATCH_SIZE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        orderBy: { id: 'asc' },
+      });
 
-    if (entries.length === 0) return;
+      if (entries.length > 0) {
+        const ticketMap = new Map<string, TicketForReconciliation>(
+          entries.map(e => [e.ticketId, e.ticket as TicketForReconciliation]),
+        );
 
-    const ticketMap = new Map<string, TicketForReconciliation>(
-      entries.map(e => [e.ticketId, e.ticket as TicketForReconciliation]),
-    );
+        const stageIds = [...new Set(entries.map(e => e.stageId))];
+        const stages = await readerDb.stage.findMany({
+          where: { id: { in: stageIds } },
+          select: { id: true, name: true, eta: true },
+        });
+        const stageMap = new Map(stages.map(s => [s.id, s]));
 
-    const stageIds = [...new Set(entries.map(e => e.stageId))];
-    const stages = await db.stage.findMany({
-      where: { id: { in: stageIds } },
-      select: { id: true, name: true, eta: true },
-    });
-    const stageMap = new Map(stages.map(s => [s.id, s]));
+        await this.reconcilePlanningRisk(entries, ticketMap, stageMap, now);
+      }
 
-    await this.reconcilePlanningRisk(entries, ticketMap, stageMap, now);
+      hasMore = entries.length === QUERY_BATCH_SIZE;
+      if (hasMore) {
+        cursor = entries[entries.length - 1].id;
+      }
+    }
   }
 
   /**

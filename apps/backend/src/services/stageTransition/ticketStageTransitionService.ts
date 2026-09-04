@@ -461,8 +461,18 @@ export class TicketStageTransitionService {
       const deadlineTracked = activeVisitRow
         ? activeVisitRow.stageEta.getTime() !== activeVisitRow.stageEnteredAt.getTime()
         : false;
+      // ticket.metadata was read before this transaction opened, so a concurrent write
+      // (e.g. acknowledgeEtaRisk) landing before ours would be silently lost by the merge
+      // below. FOR UPDATE locks the row so that can't happen, and feeding this into
+      // evaluateEta too keeps the risk decision - not just the write - based on current state.
+      const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown }[]>`
+        SELECT "metadata"
+        FROM "tickets"
+        WHERE "id" = ${ticketId}
+        FOR UPDATE
+      `;
       const boardEtaCtx = await loadBoardEtaContext(tx, ticket.boardId);
-      const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+      const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
 
       const etaResult = evaluateEta({
         ticketId,
@@ -489,7 +499,7 @@ export class TicketStageTransitionService {
 
       // 8e. Update ticket stage (+ ETA/metadata from the domain-service evaluation, in the
       // same write - never a second `ticket.update` call for the same transaction).
-      const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
+      const mergedMetadata = mergeTicketEtaManagement(lockedTicket?.metadata, etaResult.ticketEtaManagementPatch);
       const updatedTicket = await tx.ticket.update({
         where: { id: ticketId },
         data: {

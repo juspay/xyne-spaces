@@ -286,10 +286,10 @@ const BoardRolesConfigScreen = ({
       setAutoRecomputeEnabled(next);
       try {
         const result = zero.mutate(
-          mutators.board.updateEtaManagement({
+          mutators.board.update({
             boardId,
             autoRecomputeEnabled: next,
-            now: Date.now(),
+            timestamp: Date.now(),
           }),
         );
         const res = await result.server;
@@ -373,11 +373,11 @@ const BoardRolesConfigScreen = ({
     setSavingStandardPath(true);
     try {
       const result = zero.mutate(
-        mutators.board.updateEtaManagement({
+        mutators.board.update({
           boardId,
           autoRecomputeEnabled,
           standardPathStageIds,
-          now: Date.now(),
+          timestamp: Date.now(),
         }),
       );
       const res = await result.server;

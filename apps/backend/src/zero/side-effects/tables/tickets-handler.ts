@@ -255,9 +255,17 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     // ETA planning-risk alerts. Driven off the committed before-vs-after state rather
     // than the in-transaction evaluation result, so one place covers every Zero mutator
     // that writes a ticket (ticket.update, nonLinear.transition, ticketStageEta.update).
-    // Fingerprint-based signal derivation makes this naturally idempotent when one
-    // logical mutation emits several `tickets.update` jobs (e.g. board transfer). The
-    // Prisma write paths own their own post-commit dispatch - they never reach here.
+    // The Prisma write paths own their own post-commit dispatch - they never reach here.
+    //
+    // Diffed against THIS job's own `args.metadata`, never the re-fetched `ticket.metadata`
+    // - same reason as the outbox drain above: one logical mutation can emit several
+    // `tickets.update` jobs (board transfer does), and `ticket.metadata` is the FINAL state
+    // for all of them. Using it as "current" for every job made every job whose own prev
+    // predated the risk-detecting write compute an identical "risk just appeared" diff
+    // against that same final state - not idempotent, a genuine duplicate alert per extra
+    // job. Gating on `args.metadata !== undefined` means only the one job that actually
+    // carried the metadata write evaluates a diff at all; jobs that only touched
+    // stageName/kanbanPosition/boardId etc. skip this block entirely.
     //
     // Deliberately drops the `newEta` signal: a due-date change is already notified by
     // the generic `etaChanged` branch below, to the same awareness recipient set. Only
@@ -265,11 +273,11 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     //
     // Suppressed while paused - risk state stays visible, just labeled paused. Mirrors
     // the guard in stageEtaDeadlineWorker.ts's reconciliation pass.
-    if (ticket.statusV2 !== TicketStatusV2.PAUSED) {
+    if (ticket.statusV2 !== TicketStatusV2.PAUSED && args.metadata !== undefined) {
       try {
         const { riskAlert } = etaSignalsFromMetadataDiff({
           previousMetadata: prev.metadata,
-          currentMetadata: ticket.metadata,
+          currentMetadata: args.metadata,
           previousEta: prev.eta,
           currentEta: ticket.eta?.getTime() ?? null,
         });
