@@ -1198,6 +1198,12 @@ model ArtifactApp {
   headVersionId      String?
   title              String
   description        String?
+  /// Xyne icon id (kebab-case, e.g. "kanban-board") shown in the sidebar and
+  /// library. Seeded from the agent's pick on the first build; the owner can
+  /// change it, and once set it is never overwritten by a later build — the
+  /// icon belongs to the APP, not to any version, so it lives here rather
+  /// than on the manifest.
+  icon               String?
   /// "PRIVATE" | "WORKSPACE". Follows the Spaces `Canvas.visibility` convention
   /// of a plain string column rather than a Postgres enum.
   visibility         String    @default("PRIVATE")
