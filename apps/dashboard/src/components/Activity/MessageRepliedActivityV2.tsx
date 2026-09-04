@@ -2,7 +2,7 @@ import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
-import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -103,13 +103,9 @@ export const MessageRepliedActivityV2 = ({
           contentOnly={true}
         />
       ) : (
-        <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
-          {getFlowJsonPreviewText(latestReplyMessage.content) ?? (
-            <RenderMessageWithHTML
-              message={latestReplyMessage.content}
-              showEdited={latestReplyMessage.edited}
-            />
-          )}
+        <div className='text-foreground text-sm line-clamp-2 whitespace-normal break-words'>
+          {getFlowJsonPreviewText(latestReplyMessage.content) ??
+            htmlToPlainText(latestReplyMessage.content)}
         </div>
       )}
     </ActivityItemCard>

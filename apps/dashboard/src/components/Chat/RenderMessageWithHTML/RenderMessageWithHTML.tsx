@@ -1,4 +1,4 @@
-import React, { JSX, useEffect, useMemo, useRef, useState } from 'react';
+import React, { JSX, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
@@ -545,9 +545,20 @@ function CollapsibleConversationHistory({
   );
 }
 
-const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
-const CODE_BLOCK_PREVIEW_LINES = 20;
-const CODE_BLOCK_PREVIEW_MAX_HEIGHT = CODE_BLOCK_PREVIEW_LINES * 20 + 16;
+const CODE_BLOCK_LINE_HEIGHT_PX = 20;
+const CODE_BLOCK_PREVIEW_PADDING_PX = 16;
+
+export interface CodeBlockRenderOptions {
+  collapseThreshold: number;
+  previewLines: number;
+  showExpandToggle: boolean;
+}
+
+export const CodeBlockRenderContext = React.createContext<CodeBlockRenderOptions>({
+  collapseThreshold: Number.POSITIVE_INFINITY,
+  previewLines: Number.POSITIVE_INFINITY,
+  showExpandToggle: false,
+});
 
 function MessageCodeBlock({
   children,
@@ -556,6 +567,8 @@ function MessageCodeBlock({
   children: React.ReactNode;
   codeText: string;
 }): JSX.Element {
+  const { collapseThreshold, previewLines, showExpandToggle } = useContext(CodeBlockRenderContext);
+  const previewMaxHeight = previewLines * CODE_BLOCK_LINE_HEIGHT_PX + CODE_BLOCK_PREVIEW_PADDING_PX;
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const resetTimerRef = useRef<number | undefined>(undefined);
@@ -583,15 +596,16 @@ function MessageCodeBlock({
   };
 
   const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
-  const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+  const collapsible = showExpandToggle && lines > collapseThreshold;
+  const silentCollapse = !showExpandToggle && lines > previewLines;
 
   return (
     <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
       <div
         className='relative overflow-hidden'
         style={
-          collapsible && !isExpanded
-            ? { maxHeight: `${CODE_BLOCK_PREVIEW_MAX_HEIGHT}px` }
+          (collapsible && !isExpanded) || silentCollapse
+            ? { maxHeight: `${previewMaxHeight}px` }
             : undefined
         }
       >
@@ -614,7 +628,7 @@ function MessageCodeBlock({
             <button
               type='button'
               onClick={() => setIsExpanded(prev => !prev)}
-              className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
+              className='expand-toggle-pill pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-[13px] font-medium leading-none text-foreground shadow-sm transition-all hover:bg-muted hover:shadow active:scale-95 cursor-pointer'
               data-track-category='MESSAGE'
               data-track-name='TOGGLE_CODE_BLOCK'
               data-track-metadata={JSON.stringify({ isExpanded, lineCount: lines })}
