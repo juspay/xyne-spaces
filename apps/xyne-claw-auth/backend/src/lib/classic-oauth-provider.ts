@@ -5,6 +5,7 @@ import { CONFIG } from "../config.js";
 import { type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "./oauth-state.js";
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth-return.js";
+import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { asyncHandler, ok, badRequest, HttpError } from "./http.js";
 import { createLogger } from "../logger.js";
@@ -125,7 +126,7 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
   const router = Router();
   router.use("/:userId", pinUserIdParam);
 
-  router.post(`/:userId/oauth/${type}/authorize`, asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
+  router.post(`/:userId/oauth/${type}/authorize`, oauthLimiter, asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
     const { userId } = req.params;
     const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
 
