@@ -57,8 +57,8 @@ describe("fastModeBetaHeader", () => {
   it("is just the fast-mode beta for API keys", () => {
     expect(fastModeBetaHeader(undefined, "sk-ant-api03-xxx")).toBe(FAST_MODE_BETA);
   });
-  it("re-states pi-ai's OAuth betas for OAuth tokens (Object.assign would otherwise drop them)", () => {
-    expect(fastModeBetaHeader(undefined, "sk-ant-oat01-xxx")).toBe(`claude-code-20250219,oauth-2025-04-20,${FAST_MODE_BETA}`);
+  it("does not fabricate OAuth betas (Claude OAuth removed — keys are API keys)", () => {
+    expect(fastModeBetaHeader(undefined, undefined)).toBe(FAST_MODE_BETA);
   });
   it("extends an existing header without duplicating", () => {
     expect(fastModeBetaHeader("foo-2025, bar-2026", undefined)).toBe(`foo-2025,bar-2026,${FAST_MODE_BETA}`);

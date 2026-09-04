@@ -16,7 +16,6 @@ vi.mock("../repositories/index.js", () => ({
 
 vi.mock("../config.js", () => ({ CONFIG: { encryptionKey: Buffer.alloc(32) } }));
 vi.mock("../crypto.js", () => ({ decrypt: vi.fn((encryptedKey: string) => `plain:${encryptedKey}`) }));
-vi.mock("./claude-creds.js", () => ({ extractClaudeBearer: vi.fn((value: string) => value) }));
 
 const { resolveClaudeModelsCredential } = await import("./claude-models-credential.js");
 

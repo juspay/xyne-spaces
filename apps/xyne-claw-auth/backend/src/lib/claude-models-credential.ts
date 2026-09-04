@@ -1,7 +1,6 @@
 import { agentRepository, agentProviderCredentialsRepository, userProviderCredentialsRepository } from "../repositories/index.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
-import { extractClaudeBearer } from "./claude-creds.js";
 
 export interface ClaudeModelsCredential {
   apiKey: string;
@@ -31,7 +30,7 @@ export async function resolveClaudeModelsCredential(input: {
     const baseUrl = input.baseUrl ?? userCred.baseUrl ?? undefined;
     const authType = input.authType ?? userCred.authType ?? undefined;
     return {
-      apiKey: extractClaudeBearer(decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey)),
+      apiKey: decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey).trim(),
       ...(baseUrl ? { baseUrl } : {}),
       ...(authType ? { authType } : {}),
     };
@@ -41,7 +40,7 @@ export async function resolveClaudeModelsCredential(input: {
   const agentCred = agentRow ? await agentProviderCredentialsRepository.findByAgentAndProvider(agentRow.id, "claude") : null;
   if (agentCred?.encryptedKey && agentCred.iv && agentCred.authTag) {
     return {
-      apiKey: extractClaudeBearer(decrypt(agentCred.encryptedKey, agentCred.iv, agentCred.authTag, CONFIG.encryptionKey)),
+      apiKey: decrypt(agentCred.encryptedKey, agentCred.iv, agentCred.authTag, CONFIG.encryptionKey).trim(),
       ...(agentCred.baseUrl ? { baseUrl: agentCred.baseUrl } : {}),
       ...(agentCred.authType ? { authType: agentCred.authType } : {}),
     };

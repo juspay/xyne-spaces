@@ -14,17 +14,7 @@
       "count": 2
     }
   },
-  "src/lib/claude-oauth-refresh.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
   "src/lib/claw-fetch.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/lib/codex-oauth-refresh.ts": {
     "no-restricted-globals": {
       "count": 1
     }
