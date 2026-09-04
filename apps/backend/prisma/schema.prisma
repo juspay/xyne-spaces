@@ -489,7 +489,7 @@ model WorkflowExecution {
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
   @@map("workflow_executions")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model WorkflowExecutionState {

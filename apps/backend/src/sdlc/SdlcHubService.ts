@@ -592,6 +592,19 @@ export class SdlcHubService implements SdlcHub {
     return { executionId: execution.id, status: execution.status };
   }
 
+  async getRepositorySetupExecution(
+    actor: SdlcActor,
+    repoId: string
+  ): Promise<{ id: string; status: string; context: string | null; updatedAt: number } | null> {
+    const repo = await this.requireRepositoryRole(actor, repoId, false);
+    if (!repo.sdlcSetupExecutionId) return null;
+    const execution = await this.prisma.workflowExecution.findFirst({
+      where: { id: repo.sdlcSetupExecutionId, workspaceId: actor.workspaceId },
+      select: { id: true, status: true, context: true, updatedAt: true },
+    });
+    return execution ? { ...execution, updatedAt: execution.updatedAt.getTime() } : null;
+  }
+
   async getRepositoryRunContext(
     actor: SdlcActor,
     repoId: string,
@@ -1060,7 +1073,7 @@ export class SdlcHubService implements SdlcHub {
     return commitAndSyncCanvasArtifact(
       () =>
         this.prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT "id" FROM "public"."workflow_executions" WHERE "id" = ${input.setupExecutionId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "workflow"."workflow_executions" WHERE "id" = ${input.setupExecutionId} FOR UPDATE`;
           const execution = await tx.workflowExecution.findFirst({
             where: {
               id: input.setupExecutionId,

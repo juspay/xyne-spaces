@@ -36,7 +36,6 @@ import { StageAcl } from '../tables/stage-acl';
 import { BoardAcl } from '../tables/boards-acl';
 import { TicketACl } from '../tables/tickets-acl';
 import { WOrkflowsAcl } from '../tables/workflows-acl';
-import { WorkflowExecutionsAcl } from '../tables/workflow-executions-acl';
 import { SubTicketsACL } from '../tables/sub-tickets-acl';
 import { TicketSubTicketMappingsACL } from '../tables/ticket-sub-ticket-mappings-acl';
 import { TicketActivitiesACL } from '../tables/ticket-activities-acl';
@@ -304,8 +303,6 @@ export class ACLFactory {
         return new UserWorkloadMappingsACL(ctx);
       case 'users':
         return new UsersACL(ctx);
-      case 'workflow_executions':
-        return new WorkflowExecutionsAcl(ctx);
       case 'workflows':
         return new WOrkflowsAcl(ctx);
       case 'channel_user_status': 

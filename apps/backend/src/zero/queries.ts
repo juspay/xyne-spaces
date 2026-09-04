@@ -2227,9 +2227,6 @@ export const queries: AnyQueryRegistry = defineQueries({
     ({ args: { ticketId } }) => {
       return zql.workflows
         .where('ticketId', ticketId)
-        .related('workflowExecutions', (executionQuery) =>
-          executionQuery.orderBy('createdAt', 'asc')
-        )
         .orderBy('createdAt', 'asc');
     }
   ),
@@ -4339,7 +4336,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('sdlcEntityLinks', link =>
         link
           .where('relationType', SDLC_MEMBERSHIP_RELATION)
-          .related('repo', repo => repo.related('project').related('setupExecution')),
+          .related('repo', repo => repo.related('project')),
       )
       .one(),
   ),
@@ -4358,7 +4355,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .where('id', repoId)
       .where('projectId', 'IS NOT', null)
       .related('project')
-      .related('setupExecution')
       .one(),
   ),
   /**

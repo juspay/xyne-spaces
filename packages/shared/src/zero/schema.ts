@@ -499,24 +499,6 @@ export const workflowTable = table('workflows')
   })
   .primaryKey('id');
 
-export const workflowExecutionTable = table('workflow_executions')
-  .columns({
-    workspaceId: string(), // denormalized tenant key (stamped on insert)
-    id: string(),
-    workflowId: string(),
-    workflowType: string().optional(),
-    status: string(),
-    parentWorkflowExecutionId: string().optional(),
-    sourceStepsId: string().optional(),
-    stepInputOverrideData: string().optional(),
-    tag: string(),
-    createdAt: number(),
-    updatedAt: number(),
-    ignoreDuration: number(),
-    createdBy: string().optional(),
-  })
-  .primaryKey('id');
-
 export const userGroupTable = table('user_groups')
   .columns({
     id: string(),
@@ -2959,43 +2941,7 @@ export const workflowTableRelationships = relationships(workflowTable, ({ one, m
     destField: ['id'],
     destSchema: ticketTable,
   }),
-  workflowExecutions: many({
-    sourceField: ['id'],
-    destField: ['workflowId'],
-    destSchema: workflowExecutionTable,
-  }),
 }));
-
-export const workflowExecutionTableRelationships = relationships(
-  workflowExecutionTable,
-  ({ one, many }) => ({
-    workflow: one({
-      sourceField: ['workflowId'],
-      destField: ['id'],
-      destSchema: workflowTable,
-    }),
-    parentWorkflowExecution: one({
-      sourceField: ['parentWorkflowExecutionId'],
-      destField: ['id'],
-      destSchema: workflowExecutionTable,
-    }),
-    childWorkflowExecutions: many({
-      sourceField: ['id'],
-      destField: ['parentWorkflowExecutionId'],
-      destSchema: workflowExecutionTable,
-    }),
-    pullRequests: many({
-      sourceField: ['id'],
-      destField: ['workflowExecutionId'],
-      destSchema: pullRequestsTable,
-    }),
-    createdByUser: one({
-      sourceField: ['createdBy'],
-      destField: ['id'],
-      destSchema: userTable,
-    }),
-  }),
-);
 
 
 export const userGroupTableRelationships = relationships(userGroupTable, ({ one, many }) => ({
@@ -3407,11 +3353,6 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
     sourceField: ['projectId'],
     destField: ['id'],
     destSchema: projectTable,
-  }),
-  setupExecution: one({
-    sourceField: ['sdlcSetupExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
   }),
   // Membership edges pointing here. targetId is polymorphic, so readers filter
   // by relationType.
@@ -4082,11 +4023,6 @@ export const canvasUserStatusTableRelationships = relationships(
 );
 
 export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
-  workflowExecution: one({
-    sourceField: ['workflowExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
   ticket: one({
     sourceField: ['ticketId'],
     destField: ['id'],
@@ -4798,7 +4734,6 @@ export const schema = createSchema({
     userWorkloadMappingTable,
     userExpertiseMappingTable,
     workflowTable,
-    workflowExecutionTable,
     userGroupTable,
     userTable,
     userPresenceTable,
@@ -4937,7 +4872,6 @@ export const schema = createSchema({
     userWorkloadMappingTableRelationships,
     userExpertiseMappingTableRelationships,
     workflowTableRelationships,
-    workflowExecutionTableRelationships,
     userGroupTableRelationships,
     userTableRelationships,
     userPresenceTableRelationships,
@@ -5067,7 +5001,6 @@ export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type Workflow = Row<typeof schema.tables.workflows>;
-export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type User = Row<typeof schema.tables.users>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
