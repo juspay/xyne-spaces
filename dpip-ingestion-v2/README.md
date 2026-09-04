@@ -4,10 +4,11 @@ TypeScript HTTP ingestion function for the DPIP daily registry datasets,
 v2 payload contract.
 
 Deployed as its own Cloud Run service, separate from `dpip-ingestion/`.
-Both services share one Cloud SQL instance, but this one owns its own
-database (`dpip_v2`, set via `DB_NAME`); table names are therefore identical
-to v1's. The two are triggered by different email subjects and must not
-share a `DPIP_BEARER_SECRET`.
+Both services use the same Cloud SQL instance, the same database, and the
+same `dpip` schema; v2's tables carry a `_v2` suffix so they sit alongside
+v1's without colliding. Set `DB_NAME` to the same value the v1 service uses.
+The two are triggered by different email subjects and must not share a
+`DPIP_BEARER_SECRET`.
 
 Differences from v1:
 
