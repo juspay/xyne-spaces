@@ -1,3 +1,10 @@
+## [1.276.1](https://github.com/juspay/xyne-spaces/compare/v1.276.0...v1.276.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* use pause/play icons for user group deactivate & reactivate ([#1545](https://github.com/juspay/xyne-spaces/issues/1545)) ([f4b52d4](https://github.com/juspay/xyne-spaces/commit/f4b52d43a174ddc66a918dcedc70288546aab6b0))
+
 ## [1.276.0](https://github.com/juspay/xyne-spaces/compare/v1.275.0...v1.276.0) (2026-09-04)
 
 
