@@ -1,7 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { Plug, Unplug } from 'lucide-react';
 import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
-import Button from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
 
 interface DeskConnectionCardProps {
