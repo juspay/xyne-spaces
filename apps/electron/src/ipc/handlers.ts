@@ -38,6 +38,17 @@ import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
 import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
+import {
+  abortDiarizationSession,
+  appendDiarizationAudio,
+  beginDiarizationSession,
+  cancelSpeakerDiarizationDownload,
+  downloadSpeakerDiarizationModels,
+  finishDiarizationSession,
+  getSpeakerDiarizationStatus,
+  onSpeakerDiarizationStatusChange,
+  setSpeakerDiarizationEnabled,
+} from '../services/speaker-diarization';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -664,6 +675,74 @@ export function setupIpcHandlers(): void {
   ipcMain.on('recording-pill:recording-stopped', (event) => {
     if (!isMainWindowSender(event)) return;
     syncRecordingState(false);
+  });
+
+  // ── On-device speaker diarization ("speaker disambiguation") ─────────────
+  // Preference + model download are UI-preference IPC (any app window). The
+  // audio session channels carry raw microphone PCM and are restricted to the
+  // trusted top-level frame of the main window, like the error-report recorder.
+  ipcMain.handle('speaker-diarization:get-status', (event) => {
+    if (!isAppWindowSender(event)) return null;
+    return getSpeakerDiarizationStatus();
+  });
+
+  ipcMain.on('speaker-diarization:set-enabled', (event, enabled: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setSpeakerDiarizationEnabled(!!enabled);
+  });
+
+  ipcMain.handle('speaker-diarization:download-models', async (event) => {
+    if (!isAppWindowSender(event)) return { ok: false, error: 'Untrusted sender' };
+    try {
+      await downloadSpeakerDiarizationModels();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.on('speaker-diarization:cancel-download', (event) => {
+    if (!isAppWindowSender(event)) return;
+    cancelSpeakerDiarizationDownload();
+  });
+
+  onSpeakerDiarizationStatusChange((status) => {
+    broadcastToAppWindows('speaker-diarization:status-changed', status);
+  });
+
+  ipcMain.handle('speaker-diarization:begin-session', (event) => {
+    if (!isMainWindowSender(event)) return null;
+    const status = getSpeakerDiarizationStatus();
+    if (!status.enabled || !status.modelsReady) return null;
+    return beginDiarizationSession();
+  });
+
+  ipcMain.on('speaker-diarization:audio-chunk', (event, sessionId: unknown, chunk: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    if (typeof sessionId !== 'string') return;
+    let buffer: Buffer | null = null;
+    if (chunk instanceof ArrayBuffer) buffer = Buffer.from(chunk);
+    else if (ArrayBuffer.isView(chunk)) buffer = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    if (!buffer || buffer.length === 0) return;
+    appendDiarizationAudio(sessionId, buffer);
+  });
+
+  ipcMain.handle('speaker-diarization:finish-session', async (event, sessionId: unknown) => {
+    if (!isMainWindowSender(event)) return { ok: false, error: 'Untrusted sender' };
+    if (typeof sessionId !== 'string') return { ok: false, error: 'Invalid session' };
+    try {
+      const result = await finishDiarizationSession(sessionId);
+      return { ok: true, result };
+    } catch (error) {
+      errorLogger.error('[ipc] speaker diarization failed', error);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.on('speaker-diarization:abort-session', (event, sessionId: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    if (typeof sessionId !== 'string') return;
+    abortDiarizationSession(sessionId);
   });
 
   // Meeting detection toggle (user preference from settings)

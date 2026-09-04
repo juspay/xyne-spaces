@@ -13,7 +13,6 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
-import { useSpeakerIdentificationEnabled } from '../../SpeakerIdentification/useSpeakerIdentificationEnabled';
 
 type AttachmentType = QueryResultType<
   typeof queries.conversationMessagesV2
@@ -201,26 +200,25 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   attachments,
 }) => {
   const metadata = message.metadata;
-  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
 
   // For headless recordings: show only the identified transcript (fall back to plain transcript
   // if identified is absent). For regular calls: hide the identified transcript attachment.
-  // When the speaker identification CAC flag is off, treat everything as a regular call
-  // (hide identified_transcript entirely).
+  // An identified attachment only exists when speakers were actually labelled (server
+  // voiceprints or the desktop app's on-device diarization), so no feature flag is consulted.
   const isHeadless = (metadata as Record<string, unknown> | null)?.['isHeadlessRecording'] === true;
   const visibleAttachments = attachments?.filter(att => {
     const attMeta = att.metadata as Record<string, unknown> | null;
     const attType = attMeta?.['type'] as string | undefined;
     if (attType === 'whiteboard' && context !== 'thread') return false;
 
-    if (speakerIdentificationEnabled && isHeadless) {
+    if (isHeadless) {
       // Prefer identified_transcript; fall back to transcript only when no identified exists
       const hasIdentified = attachments.some(
         a => (a.metadata as Record<string, unknown> | null)?.['type'] === 'identified_transcript',
       );
       return hasIdentified ? attType === 'identified_transcript' : attType === 'transcript';
     }
-    // Regular calls or flag disabled: never show the identified transcript attachment
+    // Regular calls: never show the identified transcript attachment
     return attType !== 'identified_transcript';
   });
 

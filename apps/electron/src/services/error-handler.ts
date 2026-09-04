@@ -27,7 +27,27 @@ export function setupGlobalErrorHandlers(): void {
   });
 
   // Handle uncaught exceptions in main process
+  // If the terminal that launched us goes away (pane closed, wrapper exited),
+  // every console write fails with EIO/EPIPE. Without this guard the failure
+  // surfaces as an uncaughtException, which we log to the console, which fails
+  // again — a loop that filled ~1 MB of log every 30 s in dev. Drop the console
+  // transport and keep going; the file transport is unaffected.
+  const silenceConsoleOnDeadStdio = (error: NodeJS.ErrnoException): boolean => {
+    if (error?.code !== 'EIO' && error?.code !== 'EPIPE') return false;
+    if (log.transports['console'].level !== false) {
+      log.transports['console'].level = false;
+      log.warn('[ErrorHandler] stdout/stderr unavailable (' + error.code + '); console logging disabled');
+    }
+    return true;
+  };
+  for (const stream of [process.stdout, process.stderr]) {
+    stream?.on('error', (error: NodeJS.ErrnoException) => {
+      if (!silenceConsoleOnDeadStdio(error)) throw error;
+    });
+  }
+
   process.on('uncaughtException', (error: Error) => {
+    if (silenceConsoleOnDeadStdio(error as NodeJS.ErrnoException)) return;
     Logger.logError(ElectronEvent.UNCAUGHT_EXCEPTION, error, {
       source: 'main_process',
       origin: 'uncaughtException',

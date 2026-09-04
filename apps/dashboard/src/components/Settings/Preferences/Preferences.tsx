@@ -56,6 +56,7 @@ import { logger } from '../../../utils/logger';
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
+import { SpeakerDiarizationToggle } from '../SpeakerDiarizationToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
@@ -709,6 +710,8 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
       </RadioGroup>
     </div>
+
+    <SpeakerDiarizationToggle />
   </div>
 );
 

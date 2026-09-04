@@ -7,6 +7,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
+import { speakerSegmentService } from '@/services/speakerSegmentService';
 import type { SummaryModelType } from '@/services/callLlmRetry';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
@@ -65,7 +66,11 @@ interface DetailedSummaryCanvasResult {
  * processTranscript — a second run with no new entries is a cheap no-op.
  */
 class NoteTakerTranscriptService {
-  async processTranscript(call: Call, hasTranscript: boolean): Promise<void> {
+  async processTranscript(
+    call: Call,
+    hasTranscript: boolean,
+    options: { force?: boolean } = {},
+  ): Promise<void> {
     const callId = call.externalId;
 
     // Serialize processing per call — the room_finished reconcile fallback can
@@ -105,7 +110,7 @@ class NoteTakerTranscriptService {
       }
 
       const storedEntryCount = this.getStoredEntryCount(call);
-      if (entries.length <= storedEntryCount) {
+      if (!options.force && entries.length <= storedEntryCount) {
         logger.info(`[${callId}] note_taker_process_skipped`, {
           reason: 'already_processed',
           current_entry_count: entries.length,
@@ -617,7 +622,17 @@ class NoteTakerTranscriptService {
   private async getFormattedTranscript(callId: string, plainEntries: TranscriptEntry[]): Promise<string | null> {
     const speakerIdentificationEnabled = await transcriptService.isSpeakerIdentificationEnabled();
 
-    if (speakerIdentificationEnabled) {
+    // Desktop-app speaker diarization: if the client uploaded a speaker timeline,
+    // (re)build the identified transcript from it now that the plain transcript
+    // exists. Independent of the server-side voiceprint feature flag.
+    const localSegmentsApplied = await speakerSegmentService
+      .materializeIdentifiedTranscript(callId)
+      .catch((error) => {
+        logger.error(`[${callId}] speaker_segments_apply_failed`, { error, path: 'note_taker' });
+        return false;
+      });
+
+    if (speakerIdentificationEnabled || localSegmentsApplied) {
       const identifiedContent = await transcriptService.getIdentifiedTranscriptContent(callId);
       if (identifiedContent) return identifiedContent;
       logger.warn(`[${callId}] identified_transcript_unavailable`, { action: 'fallback_to_plain', path: 'note_taker' });

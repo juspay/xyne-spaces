@@ -131,6 +131,9 @@ router.post('/:callId/mute-all', callController.muteAllParticipants);
 // Mute individual participant endpoint (host only)
 router.post('/:callId/mute-participant', callController.muteParticipant);
 
+// On-device speaker diarization result for a note-taker recording (owner only)
+router.post('/:callId/speaker-segments', callController.uploadSpeakerSegments);
+
 // In-call recording start/stop (any participant; starter-only to stop)
 router.post('/:callId/recording/start', callController.startCallRecording);
 router.post('/:callId/recording/stop', callController.stopCallRecording);

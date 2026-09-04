@@ -411,6 +411,27 @@ const electronAPI = {
     },
   },
 
+  // On-device speaker diarization ("speaker disambiguation" in Preferences).
+  // Preference + model download; and the per-recording microphone PCM session.
+  speakerDiarization: {
+    getStatus: () => ipcRenderer.invoke('speaker-diarization:get-status'),
+    setEnabled: (enabled: boolean) => ipcRenderer.send('speaker-diarization:set-enabled', enabled),
+    downloadModels: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('speaker-diarization:download-models'),
+    cancelDownload: () => ipcRenderer.send('speaker-diarization:cancel-download'),
+    onStatusChanged: (callback: (status: unknown) => void) => {
+      const listener = (_event: unknown, status: unknown) => callback(status);
+      ipcRenderer.on('speaker-diarization:status-changed', listener);
+      return () => ipcRenderer.removeListener('speaker-diarization:status-changed', listener);
+    },
+    beginSession: (): Promise<string | null> => ipcRenderer.invoke('speaker-diarization:begin-session'),
+    pushAudio: (sessionId: string, pcm16: ArrayBuffer) =>
+      ipcRenderer.send('speaker-diarization:audio-chunk', sessionId, pcm16),
+    finishSession: (sessionId: string): Promise<{ ok: boolean; error?: string; result?: unknown }> =>
+      ipcRenderer.invoke('speaker-diarization:finish-session', sessionId),
+    abortSession: (sessionId: string) => ipcRenderer.send('speaker-diarization:abort-session', sessionId),
+  },
+
   clawOverlay: {
     setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('claw:set-ignore-mouse', ignore),
     setExpanded: (expanded: boolean) => ipcRenderer.send('claw:set-expanded', expanded),

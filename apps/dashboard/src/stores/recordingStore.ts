@@ -22,12 +22,80 @@ import {
   shouldConfirmTranscriptionAgentLeft,
 } from '../utils/livekitAgent';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
+import {
+  SPEAKER_LABELS_APPLIED_EVENT,
+  abortLocalSpeakerTap,
+  startLocalSpeakerTap,
+  stopLocalSpeakerTap,
+} from '../services/Recording/localSpeakerTap';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
 // `Room.disconnect()` emits Disconnected asynchronously. Mark a normal user
 // stop first so its callback cannot be mistaken for a server-side failure.
 const intentionallyDisconnectedRooms = new WeakSet<Room>();
+
+const SPEAKER_TOAST_ID = 'speaker-disambiguation';
+
+/**
+ * Stop the microphone tap, diarize on-device, and upload the speaker timeline
+ * for `callId`. Fire-and-forget: nothing here can block or fail the stop flow.
+ */
+function finishSpeakerDisambiguation(callId: string | null): void {
+  if (!window.electronAPI?.speakerDiarization) return;
+  void (async () => {
+    let started = false;
+    try {
+      const stopPromise = stopLocalSpeakerTap();
+      // Only surface a toast if there is actually a tap to finish; the promise
+      // settles immediately (null) otherwise.
+      const raced = await Promise.race([
+        stopPromise,
+        new Promise<'pending'>(r => setTimeout(() => r('pending'), 150)),
+      ]);
+      if (raced === 'pending') {
+        started = true;
+        toast.loading('Identifying speakers…', {
+          id: SPEAKER_TOAST_ID,
+          description: 'Running on your device. You can keep working.',
+        });
+      }
+      const result = raced === 'pending' ? await stopPromise : raced;
+      if (!result) {
+        if (started) toast.dismiss(SPEAKER_TOAST_ID);
+        return;
+      }
+      if (!callId) {
+        toast.dismiss(SPEAKER_TOAST_ID);
+        return;
+      }
+      const speakerCount = new Set(result.segments.map(s => s.speaker)).size;
+      await recordingService.uploadSpeakerSegments(callId, result);
+      toast.success(
+        speakerCount > 0 ? `Speakers identified (${speakerCount})` : 'No distinct speakers found',
+        {
+          id: SPEAKER_TOAST_ID,
+          description:
+            speakerCount > 0
+              ? 'The transcript now labels who said what.'
+              : 'The recording may have been too short or too quiet.',
+          duration: 4000,
+        },
+      );
+      // Let an open recording detail page refetch the labelled transcript.
+      window.dispatchEvent(new CustomEvent(SPEAKER_LABELS_APPLIED_EVENT, { detail: { callId } }));
+    } catch (error) {
+      logger.error(Event.RECORDING_ERROR, {
+        error: `speaker disambiguation upload failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      toast.error('Could not save speaker labels', {
+        id: SPEAKER_TOAST_ID,
+        description: 'The recording and transcript were saved normally.',
+        duration: 5000,
+      });
+    }
+  })();
+}
 
 const PAGE_UNLOAD_GRACE_MS = 5000;
 let pageUnloading = false;
@@ -215,6 +283,10 @@ export const recordingStore = createStore({
 
           // Enable microphone
           await room.localParticipant.setMicrophoneEnabled(true);
+
+          // Desktop app with speaker disambiguation on: mirror the mic into the
+          // on-device diarizer for the length of the recording. No-op elsewhere.
+          await startLocalSpeakerTap(room).catch(() => undefined);
 
           // Update store with connected state
           recordingStore.send({
@@ -482,6 +554,10 @@ export const recordingStore = createStore({
         playAudio(AUDIO_PATHS.RECORDING_END);
       }
 
+      // On-device speaker diarization (desktop app only). Runs in the
+      // background after the room is gone; resolves null when not enabled.
+      finishSpeakerDisambiguation(context.externalId);
+
       // A caller about to navigate away (workspace switch, reload) shows this
       // toast itself once the destination page mounts — this one would just be
       // torn down mid-display by the hard navigation before it's legible.
@@ -529,6 +605,7 @@ export const recordingStore = createStore({
     }),
 
     error: (context, event: { error: string }): RecordingState => {
+      abortLocalSpeakerTap();
       // Cleanup room on error
       if (context.room) {
         void context.room.disconnect();

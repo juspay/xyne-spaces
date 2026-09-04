@@ -36,7 +36,7 @@ import {
 } from '../../utils/recordingSummaryRequest';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
+import { SPEAKER_LABELS_APPLIED_EVENT } from '../../services/Recording/localSpeakerTap';
 import {
   Spinner,
   Flag,
@@ -172,7 +172,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const capturedTranscript =
     navState?.hasTranscript === true &&
     (stoppedAtMs === null || Date.now() - stoppedAtMs < NO_TRANSCRIPT_AFTER_MS);
-  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const currentUser = useSelf();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
 
@@ -423,6 +422,18 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   useEffect(() => {
     if (recordingId) void loadRecording(recordingId);
+  }, [recordingId]);
+
+  // The desktop app applies on-device speaker labels a few seconds after a
+  // recording stops; refetch so the labelled transcript shows without a reload.
+  useEffect(() => {
+    if (!recordingId) return;
+    const onLabelsApplied = (event: Event): void => {
+      const detail = (event as CustomEvent<{ callId?: string }>).detail;
+      if (detail?.callId === recordingId) void loadRecording(recordingId);
+    };
+    window.addEventListener(SPEAKER_LABELS_APPLIED_EVENT, onLabelsApplied);
+    return (): void => window.removeEventListener(SPEAKER_LABELS_APPLIED_EVENT, onLabelsApplied);
   }, [recordingId]);
 
   // A summary asked for on a previous visit is still pending, so restore the skeleton.
@@ -875,10 +886,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
     [recordingId],
   );
 
-  const transcriptText =
-    speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
-      ? (recording.identifiedTranscript ?? recording.transcript)
-      : recording?.transcript;
+  // The backend only produces an identified transcript when speakers were
+  // actually labelled (server voiceprints or the desktop app's on-device
+  // diarization), so its presence is the only gate needed here.
+  const transcriptText = recording?.hasIdentifiedTranscript
+    ? (recording.identifiedTranscript ?? recording.transcript)
+    : recording?.transcript;
 
   const markedMomentSeconds = useMemo(
     () =>
@@ -1527,6 +1540,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
         {showTranscriptPanel && transcriptText && (
           <TranscriptSidePanel
             transcript={transcriptText}
+            showSpeakers={!!recording?.hasIdentifiedTranscript}
             target={citationRef}
             openNonce={citationNonce}
             markedTimestampsSeconds={markedMomentSeconds}

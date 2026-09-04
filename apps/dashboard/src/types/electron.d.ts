@@ -17,6 +17,19 @@ export interface ErrorReportRecordingInfo {
   elapsedSeconds?: number;
 }
 
+export interface SpeakerDiarizationStatus {
+  enabled: boolean;
+  modelsReady: boolean;
+  modelVersion: number;
+  download: {
+    state: 'idle' | 'downloading' | 'error';
+    receivedBytes: number;
+    totalBytes: number;
+    error: string | null;
+  };
+  processing: boolean;
+}
+
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
@@ -171,6 +184,28 @@ export interface ElectronAPI {
     getEnabled: () => Promise<boolean>;
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
+  };
+  /** On-device speaker diarization ("speaker disambiguation") — desktop app only. */
+  speakerDiarization?: {
+    getStatus: () => Promise<SpeakerDiarizationStatus | null>;
+    setEnabled: (enabled: boolean) => void;
+    downloadModels: () => Promise<{ ok: boolean; error?: string }>;
+    cancelDownload: () => void;
+    onStatusChanged: (callback: (status: SpeakerDiarizationStatus) => void) => () => void;
+    /** Returns null when the feature is off or models are missing. */
+    beginSession: () => Promise<string | null>;
+    /** 16 kHz mono signed 16-bit little-endian PCM. */
+    pushAudio: (sessionId: string, pcm16: ArrayBuffer) => void;
+    finishSession: (sessionId: string) => Promise<{
+      ok: boolean;
+      error?: string;
+      result?: {
+        segments: Array<{ start: number; end: number; speaker: number }>;
+        durationSeconds: number;
+        sampleRate: number;
+      };
+    }>;
+    abortSession: (sessionId: string) => void;
   };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;

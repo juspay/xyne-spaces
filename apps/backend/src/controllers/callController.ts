@@ -27,6 +27,7 @@ import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { isRecording } from '@/utils/callTypeUtils';
+import { speakerSegmentService, LocalSpeakerSegmentsSchema } from '@/services/speakerSegmentService';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -1561,6 +1562,67 @@ export class CallController {
    * PATCH /api/calls/recordings/:callId
    * Update recording title
    */
+  /**
+   * POST /api/calls/:callId/speaker-segments
+   * Desktop app uploads the speaker timeline it computed on-device (Sherpa-ONNX)
+   * for a note-taker recording. Owner only. The segments are stored, the
+   * identified transcript is rebuilt from them, and — if the recording was
+   * already summarised before the segments arrived — the note-taker pipeline is
+   * re-run so the summary reflects who said what.
+   */
+  uploadSpeakerSegments = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const parsed = LocalSpeakerSegmentsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'Invalid speaker segments payload' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      await speakerSegmentService.storeSegments(callId, userId, parsed.data);
+      const applied = await speakerSegmentService.materializeIdentifiedTranscript(callId);
+
+      // Already processed => the summary was generated without speakers. Re-run
+      // (best-effort, in the background) so it picks up the identified transcript.
+      const metadata =
+        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+          ? (call.metadata as Record<string, unknown>)
+          : {};
+      const alreadyProcessed = typeof metadata.transcriptEntryCount === 'number';
+      if (applied && alreadyProcessed) {
+        noteTakerTranscriptService.processTranscript(call, true, { force: true }).catch((error) => {
+          logger.error(`[${callId}] speaker_segments_reprocess_failed`, { error });
+        });
+      }
+
+      res.json({ success: true, applied, reprocessing: applied && alreadyProcessed });
+    } catch (error) {
+      logger.error(`[CallController] uploadSpeakerSegments failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to store speaker segments' });
+    }
+  };
+
   updateRecordingTitle = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
@@ -1857,13 +1919,21 @@ export class CallController {
       }
 
       const normalizedPath = normalizeStoragePath(transcriptPath);
-      const transcriptBuffer = await transcriptService.downloadFormattedTranscript(callId, normalizedPath);
+
+      // Prefer the speaker-identified transcript (voiceprints or the desktop
+      // app's on-device diarization) so the download matches what the recording
+      // page shows and what citation segments were numbered against.
+      const identifiedContent = await transcriptService.getIdentifiedTranscriptContent(callId);
+      const transcriptBuffer = identifiedContent
+        ? Buffer.from(identifiedContent, 'utf-8')
+        : await transcriptService.downloadFormattedTranscript(callId, normalizedPath);
 
       if (!transcriptBuffer) {
         logger.warn(`[${callId}] download_transcript_not_available | path=${normalizedPath}`);
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
+      logger.info(`[${callId}] download_transcript_source | identified=${Boolean(identifiedContent)}`);
 
       logger.info(`[${callId}] download_transcript_buffer_received | buffer_size=${transcriptBuffer.length} bytes`);
 

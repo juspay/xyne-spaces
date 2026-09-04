@@ -224,11 +224,14 @@ const RecordingsV2Pill = ({
     try {
       const detail =
         menuDetail ?? (await recordingService.getRecordingDetail(recording.externalId));
-      if (!detail.transcript) {
+      // Prefer the speaker-labelled transcript when one exists (voiceprints or
+      // on-device diarization), matching what the recording page displays.
+      const transcriptText = detail.identifiedTranscript ?? detail.transcript;
+      if (!transcriptText) {
         toast.error("Transcript isn't available right now");
         return;
       }
-      const blob = new Blob([detail.transcript], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob([transcriptText], { type: 'text/plain;charset=utf-8' });
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = href;

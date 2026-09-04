@@ -22,7 +22,8 @@
   ],
 
   "asarUnpack": [
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "**/node_modules/sherpa-onnx-*/**"
   ],
 
   "mac": {

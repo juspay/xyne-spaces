@@ -32,7 +32,6 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import Dialog from '../../components/ui/Dialog';
 import { formatRecordingDuration, logRecordingError } from '../../utils/recordingUtils';
-import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import { CanvasEditor } from '../../components/Canvas/CanvasEditor/CanvasEditor';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
@@ -148,7 +147,6 @@ export default function RecordingDetailScreen(): ReactElement {
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -508,14 +506,12 @@ export default function RecordingDetailScreen(): ReactElement {
             <div className='flex items-center gap-2 mb-4'>
               <FileText className='w-4 h-4 text-muted-foreground' />
               <h2 className='text-base font-semibold text-foreground dark:text-gray-100'>
-                {speakerIdentificationEnabled && recording.hasIdentifiedTranscript
-                  ? 'Identified Transcript'
-                  : 'Transcript'}
+                {recording.hasIdentifiedTranscript ? 'Identified Transcript' : 'Transcript'}
               </h2>
             </div>
 
             <pre className='whitespace-pre-wrap font-sans text-sm text-foreground dark:text-gray-100 leading-relaxed'>
-              {speakerIdentificationEnabled && recording.hasIdentifiedTranscript
+              {recording.hasIdentifiedTranscript
                 ? (recording.identifiedTranscript ?? recording.transcript)
                 : recording.transcript}
             </pre>

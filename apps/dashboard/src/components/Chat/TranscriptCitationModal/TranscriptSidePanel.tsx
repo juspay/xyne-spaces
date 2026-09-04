@@ -55,6 +55,13 @@ export interface TranscriptSidePanelProps {
    * spoken at that point and drawn as a divider above it.
    */
   markedTimestampsSeconds?: readonly number[];
+  /**
+   * Print each line's speaker next to its timestamp. Off by default: a plain
+   * note-taker transcript carries the recorder's name on every line, which is
+   * noise. Turned on for identified transcripts (voiceprints or on-device
+   * diarization), where the label is the whole point.
+   */
+  showSpeakers?: boolean;
   onClose: () => void;
   className?: string;
 }
@@ -66,6 +73,7 @@ export function TranscriptSidePanel({
   isLoading = false,
   error = null,
   markedTimestampsSeconds = NO_MARKED_MOMENTS,
+  showSpeakers = false,
   onClose,
   className = '',
 }: TranscriptSidePanelProps): ReactElement {
@@ -282,9 +290,14 @@ export function TranscriptSidePanel({
                     index === targetIndex ? targetHighlight : 'hover:bg-muted/40',
                   )}
                 >
-                  {line.timestamp ? (
-                    <span className='mb-0.5 block font-mono text-xs text-muted-foreground'>
-                      {line.timestamp}
+                  {line.timestamp || (showSpeakers && line.speaker) ? (
+                    <span className='mb-0.5 flex items-baseline gap-2 text-xs'>
+                      {line.timestamp ? (
+                        <span className='font-mono text-muted-foreground'>{line.timestamp}</span>
+                      ) : null}
+                      {showSpeakers && line.speaker ? (
+                        <span className='font-medium text-foreground/80'>{line.speaker}</span>
+                      ) : null}
                     </span>
                   ) : null}
                   <p className='text-sm leading-relaxed text-foreground/90'>

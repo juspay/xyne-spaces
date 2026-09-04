@@ -581,6 +581,28 @@ class RecordingService {
   }
 
   /**
+   * Upload the speaker timeline computed on-device by the desktop app for a
+   * note-taker recording (owner only). The backend relabels the transcript as
+   * Speaker 1 / Speaker 2 / … and, if the summary already exists, regenerates it.
+   */
+  async uploadSpeakerSegments(
+    callId: string,
+    payload: {
+      recordingStartedAt: number;
+      durationSeconds: number;
+      sampleRate: number;
+      segments: Array<{ start: number; end: number; speaker: number }>;
+    },
+  ): Promise<{ success: boolean; applied: boolean; reprocessing: boolean }> {
+    const response: AxiosResponse<{ success: boolean; applied: boolean; reprocessing: boolean }> =
+      await apiInstance.post(`/calls/${callId}/speaker-segments`, {
+        ...payload,
+        source: 'electron-sherpa-onnx',
+      });
+    return response.data;
+  }
+
+  /**
    * Start an in-call recording. Any participant may start; the backend enforces a
    * single ACTIVE recording per call, so a concurrent start returns the existing
    * recording with `alreadyActive: true` instead of starting a second egress.
