@@ -27,8 +27,6 @@ import {
   deleteAgentProviderCredential,
   shareAgentProviderCredential,
   listAgents,
-  startAgentCodexOauth,
-  exchangeAgentCodexOauth,
   listAgentCodexModels,
   listClaudeModels,
   type AgentProviderCredentialStatus,
@@ -349,24 +347,6 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Codex agent-scoped browser-OAuth flow. Mirrors what SettingsTab does for
-  // user-level Codex creds, but targets agentProviderCredentials via the
-  // /agents/:slug/provider-credentials/codex/oauth/{start,exchange} routes.
-  // Only relevant when form.provider="codex" + form.authType="oauth_token".
-  const [codexFlow, setCodexFlow] = useState<{ url: string; state: string } | null>(null);
-  const [codexCode, setCodexCode] = useState("");
-  const [codexBusy, setCodexBusy] = useState(false);
-  const [codexErr, setCodexErr] = useState<string | null>(null);
-
-  // Claude (Anthropic) browser-OAuth flow — mirrors the codex one. Captures the
-  // refreshable {access_token, refresh_token, expires_at} bundle so the token
-  // auto-refreshes instead of dying on expiry (the old paste-a-token path gave
-  // no refresh token). Only relevant when form.provider="claude" + oauth_token.
-  const [claudeFlow, setClaudeFlow] = useState<{ url: string; state: string } | null>(null);
-  const [claudeCode, setClaudeCode] = useState("");
-  const [claudeBusy, setClaudeBusy] = useState(false);
-  const [claudeErr, setClaudeErr] = useState<string | null>(null);
-
   // Share-to-agents dialog. Promotes this agent's credential into an
   // org-level shared credential (one OAuth session) and binds selected
   // agents to it — the fix for per-agent token copies of one ChatGPT
@@ -416,10 +396,8 @@ export function ProviderTabV3({ agent, userId }: Props) {
     }
   };
 
-  // Codex model list — fetched after a codex credential exists on the agent.
-  // The OAuth bundle is required to hit ChatGPT backend's /codex/models, so
-  // this only loads once we have a saved codex cred. Same picker the Codex
-  // CLI shows: gpt-5.5, gpt-5.4, gpt-5.3-codex, etc.
+  // Codex model list — fetched after a codex credential exists on the agent.)
+  // API-key-only now (ChatGPT OAuth removed): standard /v1/models.
   const [codexModels, setCodexModels] = useState<Array<{ id: string; name: string }> | null>(null);
   const [codexModelsErr, setCodexModelsErr] = useState<string | null>(null);
   const hasCodexCred = creds.some((c) => c.provider === "codex" && c.configured);
@@ -1244,7 +1222,14 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     <MenuItem
                       key={key}
                       selected={form.provider === key}
-                      onSelect={() => setForm((p) => ({ ...p, provider: key }))}
+                      onSelect={() =>
+                        setForm((p) => ({
+                          ...p,
+                          provider: key,
+                          // Claude supports Anthropic API keys only (OAuth sign-in removed).
+                          authType: key === "claude" ? "api_key" : p.authType,
+                        }))
+                      }
                       trailing={form.provider === key ? <CheckIcon size={12} weight="bold" /> : undefined}
                     >
                       {PROVIDER_DISPLAY[key]}
@@ -1252,9 +1237,10 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   ))}
                 </Menu>
               </div>
-              {/* LiteLLM is always an API key (Bearer) — no OAuth path — so the
-                  auth-type selector is hidden for it. */}
-              {form.provider !== "litellm" && (
+              {/* Only GitHub Copilot keeps an OAuth auth-type — Claude + Codex
+                  OAuth were removed (subscription tokens must not be stored on
+                  a third-party server), so those are API-key-only. */}
+              {form.provider === "copilot" && (
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-semibold text-xyne-fg-secondary">
                   Auth type
@@ -1272,7 +1258,8 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     </button>
                   )}
                 >
-                  {(["api_key", "oauth_token"] as const).map((key) => (
+                  {(["api_key", "oauth_token"] as const)
+                    .map((key) => (
                     <MenuItem
                       key={key}
                       selected={form.authType === key}
@@ -1285,175 +1272,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                 </Menu>
               </div>
               )}
-              {/* Claude Pro/Max OAuth — point users at `claude setup-token` from
-                  Claude Code, mirroring the user-level Settings UI banner. */}
-              {form.provider === "claude" && form.authType === "oauth_token" && (
-                <div className="sm:col-span-2 space-y-2 rounded border border-xyne-brand/50 bg-xyne-brand-ghost px-3 py-2.5 text-xs text-xyne-brand">
-                  <p>
-                    Sign in with the team's Claude account in the browser. After authorizing, Anthropic shows a code — copy it (or the full redirect URL) and paste it below. This captures a <strong>refreshable</strong> token, so it won't silently expire like a pasted one. The team's Pro/Max quota will be used.
-                  </p>
-                  {!claudeFlow ? (
-                    <button
-                      type="button"
-                      disabled={claudeBusy}
-                      onClick={async () => {
-                        setClaudeBusy(true);
-                        setClaudeErr(null);
-                        try {
-                          const { startAgentClaudeOauth } = await import("../../../../lib/api");
-                          const flow = await startAgentClaudeOauth(agent.slug);
-                          setClaudeFlow({ url: flow.url, state: flow.state });
-                          window.open(flow.url, "_blank", "noopener,noreferrer");
-                        } catch (e) {
-                          setClaudeErr(e instanceof Error ? e.message : "Failed to start sign-in");
-                        } finally {
-                          setClaudeBusy(false);
-                        }
-                      }}
-                      className="rounded-md bg-xyne-brand px-3 py-1.5 text-xs font-medium text-xyne-fg-inverse hover:opacity-90 disabled:opacity-50"
-                    >
-                      {claudeBusy ? "Opening…" : "Sign in with Claude"}
-                    </button>
-                  ) : (
-                    <>
-                      <p>
-                        If the new tab didn't open,{" "}
-                        <a href={claudeFlow.url} target="_blank" rel="noopener noreferrer" className="underline text-xyne-brand hover:text-white">click here</a>.
-                      </p>
-                      <textarea
-                        value={claudeCode}
-                        onChange={(e) => setClaudeCode(e.target.value)}
-                        placeholder="Paste the code (or the full http://localhost:53692/callback?code=…&state=… URL)"
-                        rows={3}
-                        className="w-full rounded-md border border-xyne-brand bg-xyne-surface px-2 py-1.5 text-xs text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-brand focus:ring-1 focus:ring-xyne-brand"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={claudeBusy || !claudeCode.trim()}
-                          onClick={async () => {
-                            setClaudeBusy(true);
-                            setClaudeErr(null);
-                            try {
-                              const { exchangeAgentClaudeOauth } = await import("../../../../lib/api");
-                              await exchangeAgentClaudeOauth(agent.slug, { code: claudeCode.trim(), state: claudeFlow.state });
-                              setClaudeFlow(null);
-                              setClaudeCode("");
-                              await reload(); // cred saved → model dropdown becomes fetchable
-                            } catch (e) {
-                              setClaudeErr(e instanceof Error ? e.message : "Sign-in failed");
-                            } finally {
-                              setClaudeBusy(false);
-                            }
-                          }}
-                          className="rounded-md bg-xyne-brand px-3 py-1.5 text-xs font-medium text-xyne-fg-inverse hover:opacity-90 disabled:opacity-50"
-                        >
-                          {claudeBusy ? "Verifying…" : "Complete sign-in"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setClaudeFlow(null); setClaudeCode(""); setClaudeErr(null); }}
-                          className="rounded-md px-2 py-1.5 text-xs text-xyne-brand hover:text-xyne-brand"
-                        >
-                          Cancel sign-in
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {claudeErr && <p className="text-xyne-error">{claudeErr}</p>}
-                  <p className="text-[10px] text-xyne-brand/70">
-                    Prefer a long-lived token? Run <code className="rounded bg-xyne-surface px-1 font-mono">claude setup-token</code> in Claude Code and paste it in the API key field instead (no auto-refresh).
-                  </p>
-                </div>
-              )}
-              {/* Codex ChatGPT browser-OAuth flow — replaces the raw paste-bundle path
-                  with a "Sign in with ChatGPT" button that mirrors what the user-level
-                  Settings UI uses. Stores the OAuth bundle (access + refresh + expiry)
-                  into agentProviderCredentials via the backend's /codex/oauth/exchange.
-                  Falls back to the manual-paste field if the user isn't on Codex + OAuth. */}
-              {form.provider === "codex" && form.authType === "oauth_token" ? (
-                <div className="sm:col-span-2 space-y-2 rounded border border-xyne-brand/50 bg-xyne-brand-ghost px-3 py-2.5 text-xs text-xyne-brand">
-                  <p>
-                    Sign in with the team's ChatGPT account in the browser. After authorizing, OpenAI's page will show a code — copy it (or the full callback URL) and paste it below to finish. The team's Codex sub will be used for every user who runs this agent without a personal Codex key.
-                  </p>
-                  {!codexFlow ? (
-                    <button
-                      type="button"
-                      disabled={codexBusy}
-                      onClick={async () => {
-                        setCodexBusy(true);
-                        setCodexErr(null);
-                        try {
-                          const { startAgentCodexOauth } = await import("../../../../lib/api");
-                          const flow = await startAgentCodexOauth(agent.slug);
-                          setCodexFlow({ url: flow.url, state: flow.state });
-                          window.open(flow.url, "_blank", "noopener,noreferrer");
-                        } catch (e) {
-                          setCodexErr(e instanceof Error ? e.message : "Failed to start sign-in");
-                        } finally {
-                          setCodexBusy(false);
-                        }
-                      }}
-                      className="rounded-md bg-xyne-brand px-3 py-1.5 text-xs font-medium text-xyne-fg-inverse hover:opacity-90 disabled:opacity-50"
-                    >
-                      {codexBusy ? "Opening…" : "Sign in with ChatGPT"}
-                    </button>
-                  ) : (
-                    <>
-                      <p>
-                        If the new tab didn't open,{" "}
-                        <a href={codexFlow.url} target="_blank" rel="noopener noreferrer" className="underline text-xyne-brand hover:text-white">click here</a>.
-                      </p>
-                      <textarea
-                        value={codexCode}
-                        onChange={(e) => setCodexCode(e.target.value)}
-                        placeholder="Paste the code or the full http://localhost:1455/auth/callback?code=…&state=… URL"
-                        rows={3}
-                        className="w-full rounded-md border border-xyne-brand bg-xyne-surface px-2 py-1.5 text-xs text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-brand focus:ring-1 focus:ring-xyne-brand"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={codexBusy || !codexCode.trim()}
-                          onClick={async () => {
-                            setCodexBusy(true);
-                            setCodexErr(null);
-                            try {
-                              const { exchangeAgentCodexOauth } = await import("../../../../lib/api");
-                              await exchangeAgentCodexOauth(agent.slug, { code: codexCode.trim(), state: codexFlow.state });
-                              setCodexFlow(null);
-                              setCodexCode("");
-                              // Keep the form open so the user can pick a model
-                              // from the dropdown (now fetchable since the
-                              // credential is saved). Reload triggers the
-                              // codex-models effect.
-                              await reload();
-                            } catch (e) {
-                              setCodexErr(e instanceof Error ? e.message : "Sign-in failed");
-                            } finally {
-                              setCodexBusy(false);
-                            }
-                          }}
-                          className="rounded-md bg-xyne-brand px-3 py-1.5 text-xs font-medium text-xyne-fg-inverse hover:opacity-90 disabled:opacity-50"
-                        >
-                          {codexBusy ? "Verifying…" : "Complete sign-in"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setCodexFlow(null); setCodexCode(""); setCodexErr(null); }}
-                          className="rounded-md px-2 py-1.5 text-xs text-xyne-brand hover:text-xyne-brand"
-                        >
-                          Cancel sign-in
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {codexErr && <p className="text-xyne-error">{codexErr}</p>}
-                  <p className="text-[10px] text-xyne-brand/70">
-                    No keys are typed or stored in your browser — only the OAuth code-exchange round-trip ever sees the token.
-                  </p>
-                </div>
-              ) : (
+
                 <div className="sm:col-span-2 flex flex-col gap-1.5">
                   <label className="text-[12px] font-semibold text-xyne-fg-secondary">
                     API key
@@ -1471,7 +1290,6 @@ export function ProviderTabV3({ agent, userId }: Props) {
                       : "Encrypted the moment you save. Never returned by the API after upload."}
                   </p>
                 </div>
-              )}
               {(() => {
                 // Model dropdown sourced from /v1/models — for codex, claude,
                 // and litellm (each scoped to that credential's key). Free-text

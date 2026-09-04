@@ -458,19 +458,9 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Codex agent-scoped browser-OAuth flow. Mirrors what SettingsTab does for
-  // user-level Codex creds, but targets agentProviderCredentials via the
-  // /agents/:slug/provider-credentials/codex/oauth/{start,exchange} routes.
-  // Only relevant when form.provider="codex" + form.authType="oauth_token".
-  const [codexFlow, setCodexFlow] = useState<{ url: string; state: string } | null>(null);
-  const [codexCode, setCodexCode] = useState("");
-  const [codexBusy, setCodexBusy] = useState(false);
-  const [codexErr, setCodexErr] = useState<string | null>(null);
 
   // Codex model list — fetched after a codex credential exists on the agent.
-  // The OAuth bundle is required to hit ChatGPT backend's /codex/models, so
-  // this only loads once we have a saved codex cred. Same picker the Codex
-  // CLI shows: gpt-5.5, gpt-5.4, gpt-5.3-codex, etc.
+  // API-key-only now (ChatGPT OAuth removed): standard /v1/models.
   const [codexModels, setCodexModels] = useState<Array<{ id: string; name: string }> | null>(null);
   const [codexModelsErr, setCodexModelsErr] = useState<string | null>(null);
   const hasCodexCred = creds.some((c) => c.provider === "codex" && c.configured);
@@ -737,7 +727,7 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
                 >
                   <option value="api_key">api_key</option>
-                  <option value="oauth_token">oauth_token</option>
+                  {form.provider === "copilot" && <option value="oauth_token">oauth_token</option>}
                 </select>
               </div>
               <div className="sm:col-span-2">
@@ -757,96 +747,9 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
                   Only applies to reasoning-capable models (e.g. gpt-5.x, codex). Lower = faster per-turn responses.
                 </p>
               </div>
-              {/* Codex ChatGPT browser-OAuth flow — replaces the raw paste-bundle path
-                  with a "Sign in with ChatGPT" button that mirrors what the user-level
-                  Settings UI uses. Stores the OAuth bundle (access + refresh + expiry)
-                  into agentProviderCredentials via the backend's /codex/oauth/exchange.
-                  Falls back to the manual-paste field if the user isn't on Codex + OAuth. */}
-              {form.provider === "codex" && form.authType === "oauth_token" ? (
-                <div className="sm:col-span-2 space-y-2 rounded border border-purple-900/50 bg-purple-950/20 px-3 py-2.5 text-xs text-purple-200">
-                  <p>
-                    Sign in with the team's ChatGPT account in the browser. After authorizing, OpenAI's page will show a code — copy it (or the full callback URL) and paste it below to finish. The team's Codex sub will be used for every user who runs this agent without a personal Codex key.
-                  </p>
-                  {!codexFlow ? (
-                    <button
-                      type="button"
-                      disabled={codexBusy}
-                      onClick={async () => {
-                        setCodexBusy(true);
-                        setCodexErr(null);
-                        try {
-                          const { startAgentCodexOauth } = await import("../lib/api");
-                          const flow = await startAgentCodexOauth(agent.slug);
-                          setCodexFlow({ url: flow.url, state: flow.state });
-                          window.open(flow.url, "_blank", "noopener,noreferrer");
-                        } catch (e) {
-                          setCodexErr(e instanceof Error ? e.message : "Failed to start sign-in");
-                        } finally {
-                          setCodexBusy(false);
-                        }
-                      }}
-                      className="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-                    >
-                      {codexBusy ? "Opening…" : "Sign in with ChatGPT"}
-                    </button>
-                  ) : (
-                    <>
-                      <p>
-                        If the new tab didn't open,{" "}
-                        <a href={codexFlow.url} target="_blank" rel="noopener noreferrer" className="underline text-purple-100 hover:text-white">click here</a>.
-                      </p>
-                      <textarea
-                        value={codexCode}
-                        onChange={(e) => setCodexCode(e.target.value)}
-                        placeholder="Paste the code or the full http://localhost:1455/auth/callback?code=…&state=… URL"
-                        rows={3}
-                        className="w-full rounded-md border border-purple-900 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={codexBusy || !codexCode.trim()}
-                          onClick={async () => {
-                            setCodexBusy(true);
-                            setCodexErr(null);
-                            try {
-                              const { exchangeAgentCodexOauth } = await import("../lib/api");
-                              await exchangeAgentCodexOauth(agent.slug, { code: codexCode.trim(), state: codexFlow.state });
-                              setCodexFlow(null);
-                              setCodexCode("");
-                              // Keep the form open so the user can pick a model
-                              // from the dropdown (now fetchable since the
-                              // credential is saved). Reload triggers the
-                              // codex-models effect.
-                              await reload();
-                            } catch (e) {
-                              setCodexErr(e instanceof Error ? e.message : "Sign-in failed");
-                            } finally {
-                              setCodexBusy(false);
-                            }
-                          }}
-                          className="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-                        >
-                          {codexBusy ? "Verifying…" : "Complete sign-in"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setCodexFlow(null); setCodexCode(""); setCodexErr(null); }}
-                          className="rounded-md px-2 py-1.5 text-xs text-purple-300 hover:text-purple-100"
-                        >
-                          Cancel sign-in
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {codexErr && <p className="text-red-300">{codexErr}</p>}
-                  <p className="text-[10px] text-purple-300/70">
-                    No keys are typed or stored in your browser — only the OAuth code-exchange round-trip ever sees the token.
-                  </p>
-                </div>
-              ) : (
+
                 <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-zinc-400">API key / OAuth bundle (encrypted on save — never shown again)</label>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">API key (encrypted on save — never shown again)</label>
                   <input
                     type="password"
                     value={form.apiKey}
@@ -855,7 +758,6 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
                     className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
                   />
                 </div>
-              )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-zinc-400">Model{form.provider === "codex" && codexModels && codexModels.length > 0 ? "" : " (optional)"}</label>
                 {form.provider === "codex" && codexModels && codexModels.length > 0 ? (

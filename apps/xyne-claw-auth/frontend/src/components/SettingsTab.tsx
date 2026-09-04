@@ -11,8 +11,6 @@ import {
   listCopilotModelsForUser,
   listClaudeModelsForUser,
   listCodexModelsForUser,
-  startCodexOauth,
-  exchangeCodexOauth,
   getAvailableTools,
   type ProviderCredential,
   type SubagentRouting,
@@ -204,12 +202,12 @@ function ProviderCredentialCard({
   provider: string;
   existing?: ProviderCredential;
   saving: boolean;
-  onSave: (payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token"; reasoningEffort?: "low" | "medium" | "high" }) => Promise<void>;
+  onSave: (payload: { apiKey?: string; model?: string; baseUrl?: string; reasoningEffort?: "low" | "medium" | "high" }) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const meta = PROVIDER_META[provider];
   const [apiKey, setApiKey] = useState("");
-  const [authType, setAuthType] = useState<"api_key" | "oauth_token">(existing?.authType === "oauth_token" ? "oauth_token" : "api_key");
+
   const [model, setModel] = useState(existing?.model ?? meta?.defaultModel ?? "");
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? meta?.defaultBaseUrl ?? "");
   const [reasoningEffort, setReasoningEffort] = useState<"low" | "medium" | "high">(
@@ -220,16 +218,10 @@ function ProviderCredentialCard({
   const [editing, setEditing] = useState(false);
   const [models, setModels] = useState<ClaudeModelInfo[] | null>(null);
   const [modelsErr, setModelsErr] = useState<string | null>(null);
-  // Codex browser-OAuth flow state (only used when provider=codex && authType=oauth_token).
-  const [codexFlow, setCodexFlow] = useState<{ url: string; state: string } | null>(null);
-  const [codexCode, setCodexCode] = useState("");
-  const [codexBusy, setCodexBusy] = useState(false);
-  const [codexErr, setCodexErr] = useState<string | null>(null);
 
   useEffect(() => {
     setModel(existing?.model ?? meta?.defaultModel ?? "");
     setBaseUrl(existing?.baseUrl ?? meta?.defaultBaseUrl ?? "");
-    setAuthType(existing?.authType === "oauth_token" ? "oauth_token" : "api_key");
     if (existing?.reasoningEffort === "low" || existing?.reasoningEffort === "medium" || existing?.reasoningEffort === "high") {
       setReasoningEffort(existing.reasoningEffort);
     }
@@ -238,8 +230,8 @@ function ProviderCredentialCard({
   const hasKey = Boolean(existing?.hasApiKey);
   const isClaude = provider === "claude";
   const isCodex = provider === "codex";
-  const supportsOauth = isClaude || isCodex;
-  const isOauth = authType === "oauth_token";
+  // Claude + Codex OAuth were removed (subscription tokens must not be
+  // stored on a third-party server) — both providers are API-key-only.
 
   // Fetch live model catalog when API key is configured. Claude + Codex both expose a /v1/models endpoint.
   useEffect(() => {
@@ -290,116 +282,15 @@ function ProviderCredentialCard({
       </div>
       {editing && (
         <div className="mt-3 space-y-2 border-t border-zinc-800 pt-3">
-          {supportsOauth && (
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-zinc-400">Auth method</label>
-              <div className="grid grid-cols-2 gap-2">
-                <label className={`group flex cursor-pointer flex-col gap-0.5 rounded-md border px-3 py-2 text-xs transition-all ${authType === "api_key" ? "border-zinc-400 bg-zinc-800 ring-1 ring-zinc-400/30" : "border-zinc-700 bg-zinc-950 hover:border-zinc-600 hover:bg-zinc-900"}`}>
-                  <span className="flex items-center gap-2">
-                    <input type="radio" name="authType" value="api_key" checked={authType === "api_key"} onChange={() => setAuthType("api_key")} className="accent-zinc-300" />
-                    <span className="font-medium text-zinc-100">API Key</span>
-                  </span>
-                  <span className="ml-5 text-zinc-500">{isClaude ? "usage-based, Console key" : "usage-based, Platform key"}</span>
-                </label>
-                <label className={`group flex cursor-pointer flex-col gap-0.5 rounded-md border px-3 py-2 text-xs transition-all ${authType === "oauth_token" ? "border-purple-500 bg-purple-950/30 ring-1 ring-purple-500/30" : "border-zinc-700 bg-zinc-950 hover:border-zinc-600 hover:bg-zinc-900"}`}>
-                  <span className="flex items-center gap-2">
-                    <input type="radio" name="authType" value="oauth_token" checked={authType === "oauth_token"} onChange={() => setAuthType("oauth_token")} className="accent-purple-400" />
-                    <span className="font-medium text-zinc-100">{isClaude ? "OAuth Token" : "ChatGPT OAuth Token"}</span>
-                  </span>
-                  <span className="ml-5 text-zinc-500">{isClaude ? "Pro/Max subscription" : "ChatGPT Plus/Pro subscription"}</span>
-                </label>
-              </div>
-              {isOauth && isClaude && (
-                <p className="mt-2 rounded border border-purple-900/50 bg-purple-950/20 px-2 py-1.5 text-xs text-purple-200">
-                  Run <code className="rounded bg-zinc-950 px-1 text-purple-300">claude setup-token</code> on any machine with Claude Code installed. It opens a browser for one-time authorization and prints a token valid for one year — paste that token below. Your Pro/Max quota will be used.
-                </p>
-              )}
-              {isOauth && isCodex && (
-                <div className="mt-2 space-y-2 rounded border border-purple-900/50 bg-purple-950/20 px-3 py-2.5 text-xs text-purple-200">
-                  <p>
-                    Sign in with your ChatGPT account in the browser. After authorizing, OpenAI's page will show a code — copy it (or the full callback URL) and paste it below to finish.
-                  </p>
-                  {!codexFlow ? (
-                    <button
-                      type="button"
-                      disabled={codexBusy}
-                      onClick={async () => {
-                        setCodexBusy(true);
-                        setCodexErr(null);
-                        try {
-                          const flow = await startCodexOauth(userId);
-                          setCodexFlow({ url: flow.url, state: flow.state });
-                          window.open(flow.url, "_blank", "noopener,noreferrer");
-                        } catch (e) {
-                          setCodexErr(e instanceof Error ? e.message : "Failed to start sign-in");
-                        } finally {
-                          setCodexBusy(false);
-                        }
-                      }}
-                      className="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-                    >
-                      {codexBusy ? "Opening…" : "Sign in with ChatGPT"}
-                    </button>
-                  ) : (
-                    <>
-                      <p>
-                        If the new tab didn't open,{" "}
-                        <a href={codexFlow.url} target="_blank" rel="noopener noreferrer" className="underline text-purple-100 hover:text-white">click here</a>.
-                      </p>
-                      <textarea
-                        value={codexCode}
-                        onChange={(e) => setCodexCode(e.target.value)}
-                        placeholder="Paste the code or the full http://localhost:1455/auth/callback?code=…&state=… URL"
-                        rows={3}
-                        className="w-full rounded-md border border-purple-900 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={codexBusy || !codexCode.trim()}
-                          onClick={async () => {
-                            setCodexBusy(true);
-                            setCodexErr(null);
-                            try {
-                              await exchangeCodexOauth(userId, { code: codexCode.trim(), state: codexFlow.state });
-                              setCodexFlow(null);
-                              setCodexCode("");
-                              setEditing(false);
-                              await onSave({}); // triggers parent reload via onSave's usual chain
-                            } catch (e) {
-                              setCodexErr(e instanceof Error ? e.message : "Sign-in failed");
-                            } finally {
-                              setCodexBusy(false);
-                            }
-                          }}
-                          className="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-                        >
-                          {codexBusy ? "Verifying…" : "Complete sign-in"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setCodexFlow(null); setCodexCode(""); setCodexErr(null); }}
-                          className="rounded-md px-2 py-1.5 text-xs text-purple-300 hover:text-purple-100"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {codexErr && <p className="text-red-300">{codexErr}</p>}
-                </div>
-              )}
-            </div>
-          )}
           <div>
             <label className="mb-1.5 block text-xs font-medium text-zinc-400">
-              {supportsOauth && isOauth ? (isClaude ? "OAuth Token" : "ChatGPT OAuth Token") : "API Key"} {hasKey && <span className="text-zinc-600">(leave blank to keep current)</span>}
+              API Key {hasKey && <span className="text-zinc-600">(leave blank to keep current)</span>}
             </label>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={hasKey ? "••••••••" : (isClaude && isOauth ? "sk-ant-oat01-…" : isCodex && isOauth ? "ey…  (access_token from ~/.codex/auth.json)" : "sk-…")}
+              placeholder={hasKey ? "••••••••" : ("sk-…")}
               className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 shadow-sm transition-colors hover:border-zinc-600 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
             />
           </div>
@@ -447,8 +338,7 @@ function ProviderCredentialCard({
           </div>
           <button
             onClick={async () => {
-              const payload: { apiKey?: string; model?: string; baseUrl?: string; authType?: "api_key" | "oauth_token"; reasoningEffort?: "low" | "medium" | "high" } = { model, baseUrl, reasoningEffort };
-              if (supportsOauth) payload.authType = authType;
+              const payload: { apiKey?: string; model?: string; baseUrl?: string; reasoningEffort?: "low" | "medium" | "high" } = { model, baseUrl, reasoningEffort };
               if (apiKey) payload.apiKey = apiKey;
               else if (!hasKey) { return; }
               await onSave(payload);
