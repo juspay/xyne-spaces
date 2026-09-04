@@ -96,7 +96,7 @@ async function writeReports(
     const values = valuesClause(batch, fields);
     const result = await client.query<{ inserted: boolean }>(
       `
-        INSERT INTO dpip.reports (
+        INSERT INTO dpip.reports_v2 (
           identifier_type,
           reported_date,
           party_id,
@@ -146,7 +146,7 @@ async function writeScreenings(
     const values = valuesClause(batch, fields);
     const result = await client.query<{ inserted: boolean }>(
       `
-        INSERT INTO dpip.screenings (
+        INSERT INTO dpip.screenings_v2 (
           screening_date,
           party_id,
           event_type,
@@ -191,7 +191,7 @@ async function writeHistoryTable(
     const values = valuesClause(batch, fields);
     const result: QueryResult = await client.query(
       `
-        INSERT INTO dpip.${table} (${fields.join(', ')})
+        INSERT INTO dpip.${table}_v2 (${fields.join(', ')})
         VALUES ${values.sql}
         ON CONFLICT DO NOTHING
         RETURNING 1
@@ -278,7 +278,7 @@ export async function readAllDpipTables(
         const result = await client.query<DpipRow>(
           `
             SELECT ${textFields.join(', ')}
-            FROM dpip.${table}
+            FROM dpip.${table}_v2
             ORDER BY ${spec.key.join(', ')}
           `,
         );
