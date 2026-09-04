@@ -1,36 +1,61 @@
-import { buildSdlcPath } from '@xyne/shared/sdlc';
+import { buildSdlcPath, sdlcSectionForCanvas, type SdlcNavTarget } from '@xyne/shared/sdlc';
 
-interface SdlcActivityNavigationActivity {
-  canvasId?: string | null;
-  canvas?: { readonly id: string } | null | undefined;
-  ticketId?: string | null;
-  ticket?: { readonly id: string } | null | undefined;
-  conversationId?: string | null;
-  messageId?: string | null;
-  message?:
-    | {
-        readonly messageId: string;
-        readonly conversation?: { readonly conversationId: string } | null | undefined;
-      }
-    | null
-    | undefined;
+interface SdlcCanvas {
+  readonly id: string;
+  readonly folderId?: string | null;
+  readonly sdlcArtifact?: { readonly artifactType?: string | null } | null;
+}
+interface SdlcActivity {
+  readonly channelId?: string | null;
+  readonly canvas?: SdlcCanvas | null;
+  readonly canvasId?: string | null;
+  readonly trackId?: string | null;
+  readonly ticketId?: string | null;
+  readonly conversationId?: string | null;
+  readonly messageId?: string | null;
+  readonly blockId?: string | null;
+  readonly actionSource?: string | null;
+  readonly actionSourceId?: string | null;
 }
 
-/** Maps an activity row onto the entity ids `buildSdlcPath` routes on. */
+/** SDLC's row-to-path rule. The owner is stamped at write time, so nothing is fetched. */
 export function resolveSdlcActivityTarget(input: {
-  activity: SdlcActivityNavigationActivity;
+  activity: SdlcActivity;
   channelType: string | null | undefined;
-  channelId: string | null | undefined;
   fallbackPath: string;
 }): string {
-  if (input.channelType !== 'SDLC' || !input.channelId) return input.fallbackPath;
-  const activity = input.activity;
+  const { activity } = input;
+  const channelId = activity.channelId;
+  if (input.channelType !== 'SDLC' || !channelId) return input.fallbackPath;
+
+  const conversationId = activity.conversationId ?? undefined;
+  const canvas = activity.canvas;
+  // Only a conversation with no owner is left to the ticket's own page.
+  const place: Partial<SdlcNavTarget> = activity.canvasId
+    ? {
+        ...sdlcSectionForCanvas(canvas?.sdlcArtifact?.artifactType, canvas?.folderId),
+        canvasId: activity.canvasId,
+        conversationId,
+      }
+    : activity.trackId
+      ? { section: 'tracks', trackId: activity.trackId, conversationId }
+      : activity.ticketId
+        ? // conversationId is only the scroll anchor here; the page has no panel.
+          { section: 'tickets', ticketId: activity.ticketId, conversationId }
+        : { section: 'overview' };
+
+  // A canvas comment mention files the thread id in actionSourceId.
+  const commentThreadId =
+    activity.actionSource === 'canvas_comment' && activity.actionSourceId !== activity.canvasId
+      ? activity.actionSourceId
+      : undefined;
 
   return buildSdlcPath({
-    channelId: input.channelId,
-    canvasId: activity.canvasId ?? activity.canvas?.id,
-    ticketId: activity.ticketId ?? activity.ticket?.id,
-    conversationId: activity.message?.conversation?.conversationId ?? activity.conversationId,
-    messageId: activity.message?.messageId ?? activity.messageId,
+    ...place,
+    section: place.section ?? 'overview',
+    channelId,
+    ...(activity.messageId ? { messageId: activity.messageId } : {}),
+    ...(activity.blockId ? { blockId: activity.blockId } : {}),
+    ...(commentThreadId ? { commentThreadId } : {}),
   });
 }

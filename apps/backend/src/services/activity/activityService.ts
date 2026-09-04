@@ -4,6 +4,12 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { currentWorkspaceId, withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
+import {
+  isSdlcChannel,
+  sdlcConversationOwner,
+  sdlcConversationTicket,
+  sdlcTicketConversation,
+} from '@/sdlc/sdlcNavTarget';
 
 export interface CreateActivityParams {
   id?: string;
@@ -23,6 +29,7 @@ export interface CreateActivityParams {
   channelId?: string;
   pullRequestId?: string;
   canvasId?: string;
+  trackId?: string;
   blockId?: string;
   conversationSeenCutoffAt?: Date | null;
   isThreadActivity?: boolean;
@@ -236,11 +243,42 @@ export class ActivityService {
     });
   }
 
+  /** The artifact or track owning the conversation, else its ticket. Stamped so the feed needs no join. */
+  private async sdlcOwner(row: {
+    channelId?: string | null;
+    conversationId?: string | null;
+    ticketId?: string | null;
+    canvasId?: string | null;
+  }): Promise<{ canvasId?: string; trackId?: string; ticketId?: string; conversationId?: string }> {
+    const { channelId } = row;
+    if (!channelId || row.canvasId || (!row.conversationId && !row.ticketId)) return {};
+    try {
+      if (!(await isSdlcChannel(channelId))) return {};
+      const conversationId =
+        row.conversationId ?? (row.ticketId ? await sdlcTicketConversation(row.ticketId) : null);
+      if (!conversationId) return {};
+
+      const owner = await sdlcConversationOwner(conversationId);
+      if (owner) {
+        return owner.sourceType === 'CANVAS'
+          ? { canvasId: owner.sourceId, conversationId }
+          : { trackId: owner.sourceId, conversationId };
+      }
+      if (row.ticketId) return {};
+      const ticketId = await sdlcConversationTicket(conversationId);
+      return ticketId ? { ticketId } : {};
+    } catch (error) {
+      logger.error('[ActivityService] SDLC owner lookup failed', { row, error });
+      return {};
+    }
+  }
+
   /**
    * Create a single activity
    */
   async createActivity(params: CreateActivityParams): Promise<void> {
-    const activity = await this.enrichActivityWithConversationCutoff(params);
+    const enriched = await this.enrichActivityWithConversationCutoff(params);
+    const activity = { ...enriched, ...(await this.sdlcOwner(enriched)) };
     logger.info('[ActivityService] Creating activity', {
       activityId: activity.id,
       userId: activity.userId,
@@ -273,6 +311,7 @@ export class ActivityService {
         ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
         ...(activity.pullRequestId ? { pullRequestId: activity.pullRequestId } : {}),
         ...(activity.canvasId ? { canvasId: activity.canvasId } : {}),
+        ...(activity.trackId ? { trackId: activity.trackId } : {}),
         ...(activity.blockId ? { blockId: activity.blockId } : {}),
         ...(activity.conversationSeenCutoffAt
           ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
@@ -307,7 +346,12 @@ export class ActivityService {
    */
   async createActivities(activities: CreateActivityParams[]): Promise<void> {
     if (activities.length === 0) return;
-    const enrichedActivities = await this.enrichActivitiesWithConversationCutoff(activities);
+    const enrichedActivities = await Promise.all(
+      (await this.enrichActivitiesWithConversationCutoff(activities)).map(async a => ({
+        ...a,
+        ...(await this.sdlcOwner(a)),
+      })),
+    );
 
     logger.info('[ActivityService] Creating activities batch', {
       count: enrichedActivities.length,
@@ -344,6 +388,7 @@ export class ActivityService {
         ...(a.conversationId ? { conversationId: a.conversationId } : {}),
         ...(a.pullRequestId ? { pullRequestId: a.pullRequestId } : {}),
         ...(a.canvasId ? { canvasId: a.canvasId } : {}),
+        ...(a.trackId ? { trackId: a.trackId } : {}),
         ...(a.blockId ? { blockId: a.blockId } : {}),
         ...(a.conversationSeenCutoffAt
           ? { conversationSeenCutoffAt: a.conversationSeenCutoffAt }
@@ -468,6 +513,7 @@ export class ActivityService {
       workspaceId: activity.workspaceId,
       channelId: activity.channelId ?? channelId,
     });
+    const owned = await this.sdlcOwner(activity);
     await this.prisma.activity.create({
       data: {
         userId: activity.userId,
@@ -477,6 +523,9 @@ export class ActivityService {
         actionSourceId: activity.actionSourceId,
         messageId: activity.messageId,
         ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
+        ...(owned.canvasId ? { canvasId: owned.canvasId } : {}),
+        ...(owned.trackId ? { trackId: owned.trackId } : {}),
+        ...(owned.ticketId ? { ticketId: owned.ticketId } : {}),
         channelId: activity.channelId,
         actorId: activity.actorId,
         isRead: false,
@@ -592,6 +641,7 @@ export class ActivityService {
       );
 
       const resolvedWorkspaceId = await this.resolveWorkspaceId({ workspaceId, channelId });
+      const owned = await this.sdlcOwner({ channelId, conversationId });
       await this.prisma.activity.create({
         data: {
           userId: recipientUserId,
@@ -601,6 +651,9 @@ export class ActivityService {
           actionSourceId: latestReplyMessageId,
           messageId: latestReplyMessageId,
           conversationId,
+          ...(owned.canvasId ? { canvasId: owned.canvasId } : {}),
+          ...(owned.trackId ? { trackId: owned.trackId } : {}),
+          ...(owned.ticketId ? { ticketId: owned.ticketId } : {}),
           channelId: channelId,
           actorId: actorId,
           isRead: false,

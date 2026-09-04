@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageMentionActivity } from './MessageMentionActivity';
 import { KeywordMatchActivity } from './KeywordMatchActivity';
 import { CanvasMentionActivity } from './CanvasMentionActivity';
+import { isCanvasActivity } from './isCanvasActivity';
 import { MessageRepliedActivity } from './MessageRepliedActivity';
 import { MessageRepliedActivityV2 } from './MessageRepliedActivityV2';
 import { ReactionAddedActivity } from './ReactionAddedActivity';
@@ -42,7 +43,7 @@ export const ActivityItem = memo(function ActivityItem({
       return <SlashCommandArtifactActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'mentioned_user':
-      if (activity.canvasId) {
+      if (isCanvasActivity(activity)) {
         return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;
       }
       return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;

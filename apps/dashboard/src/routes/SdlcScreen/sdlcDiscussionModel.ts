@@ -40,9 +40,7 @@ export function resolveCanvasDiscussionOwner(
 export function resolveSdlcDiscussionContext(input: {
   selectedCanvasId: string | null;
   selectedWikiPage: { canvasId: string; title: string } | null;
-  selectedTicketId: string | null;
   selectedConversationId: string | null;
-  ticketIds: readonly string[];
   canvases: readonly CanvasSummary[];
   links: readonly LinkSummary[];
 }): SdlcDiscussionContext | null {
@@ -59,16 +57,6 @@ export function resolveSdlcDiscussionContext(input: {
   if (input.selectedCanvasId) {
     const owner = resolveCanvasDiscussionOwner(input.selectedCanvasId, input.canvases);
     return owner ? { owner, surface: { type: 'CANVAS', id: input.selectedCanvasId } } : null;
-  }
-  if (input.selectedTicketId) {
-    if (!input.ticketIds.includes(input.selectedTicketId)) return null;
-    const sourceLink = input.links.find(
-      link => link.relationType === 'TICKET' && link.targetId === input.selectedTicketId,
-    );
-    const owner = sourceLink
-      ? resolveCanvasDiscussionOwner(sourceLink.sourceId, input.canvases)
-      : null;
-    return owner ? { owner, surface: { type: 'TICKET', id: input.selectedTicketId } } : null;
   }
   if (!input.selectedConversationId) return null;
   const discussionLink = input.links.find(
