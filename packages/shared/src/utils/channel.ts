@@ -1,4 +1,4 @@
-import { ChannelType, DeskType } from '../zero/schema.js';
+import { ChannelType, DeskType } from '../zero/types.js';
 
 /** Channel types that feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
