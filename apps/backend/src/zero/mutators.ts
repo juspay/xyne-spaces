@@ -38,6 +38,7 @@ import {
   ActivityClassification,
   PRStatusEvent,
   UserResponsibility,
+  AssignmentStrategy,
   AccessType,
   BoardType,
   ReenterMode,
@@ -7577,6 +7578,7 @@ export function createMutators(
           description: z.string().optional(),
           reassignOnUnavailable: z.boolean().optional(),
           maxWorkload: z.number().int().positive().nullable().optional(),
+          assignmentStrategy: z.nativeEnum(AssignmentStrategy).optional(),
           userResponsibilityUpdates: z
             .record(z.string(), z.nativeEnum(UserResponsibility))
             .optional(),
@@ -7592,6 +7594,7 @@ export function createMutators(
             description,
             reassignOnUnavailable,
             maxWorkload,
+            assignmentStrategy,
             userResponsibilityUpdates,
             userRoleUpdates,
             timestamp,
@@ -7633,6 +7636,7 @@ export function createMutators(
             ...(description !== undefined && { description }),
             ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
             ...(maxWorkload !== undefined && { maxWorkload }),
+            ...(assignmentStrategy !== undefined && { assignmentStrategy }),
             updatedAt: timestamp,
           });
 
@@ -10720,6 +10724,9 @@ export function createMutators(
               userGroupId,
               onCall: state.onCall,
               isActiveForAssignment,
+              // Carried forward: this is a full-row upsert, and dropping the
+              // round-robin cursor here would restart the rotation on every save.
+              lastAssignedAt: existingState?.lastAssignedAt ?? null,
               createdBy: existingState?.createdBy ?? authData.sub,
               updatedAt: now,
               createdAt: existingState?.createdAt ?? now,

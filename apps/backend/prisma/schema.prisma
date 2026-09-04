@@ -703,6 +703,7 @@ model UserGroup {
   alias       String?  // xyne-space-dev | frontend | backend (for mentions)
   description String?
   metadata    Json? // Team-specific config: statuses, skills, etc.
+  assignmentStrategy   String            @default("WORKLOAD") // WORKLOAD | ROUND_ROBIN — how the engine ranks eligible members
   autoRotationEnabled  Boolean           @default(false)
   rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
@@ -1016,6 +1017,7 @@ model UserAssignmentState {
   userGroupId           String
   onCall                Boolean  @default(true)
   isActiveForAssignment Boolean  @default(true)
+  lastAssignedAt        DateTime? // Round-robin cursor: when this member was last picked by the assignment engine
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   createdBy             String
@@ -1027,6 +1029,7 @@ model UserAssignmentState {
   @@unique([userId, userGroupId])
   @@index([userGroupId])
   @@index([userId])
+  @@index([userGroupId, lastAssignedAt]) // round-robin: least-recently-assigned lookup
   @@map("user_assignment_states")
   @@schema("public")
 }
