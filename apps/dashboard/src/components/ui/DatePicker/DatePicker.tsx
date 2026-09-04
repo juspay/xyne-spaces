@@ -13,6 +13,7 @@ interface DatePickerProps {
   minDate?: Date;
   maxDate?: Date;
   disabledDates?: Date[];
+  markedDates?: Date[];
   inputClassName?: string;
   showClearButton?: boolean;
   isInitialOpen?: boolean;
@@ -80,7 +81,8 @@ const MonthView: React.FC<{
   minDate?: Date;
   maxDate?: Date;
   disabledDates?: Date[];
-}> = ({ year, month, selectedDate, onSelect, minDate, maxDate, disabledDates }) => {
+  markedDates?: Date[];
+}> = ({ year, month, selectedDate, onSelect, minDate, maxDate, disabledDates, markedDates }) => {
   const { daysInMonth, startingDayOfWeek } = getMonthData(year, month);
 
   const monthNames = [
@@ -119,6 +121,7 @@ const MonthView: React.FC<{
           const isSelected = isSameDay(date, selectedDate);
           const isToday = isSameDay(date, new Date());
           const isDisabled = isDateDisabled(date, minDate, maxDate, disabledDates);
+          const isMarked = markedDates?.some(markedDate => isSameDay(markedDate, date)) ?? false;
 
           return (
             <button
@@ -128,8 +131,8 @@ const MonthView: React.FC<{
               data-date={`${year}-${month}-${day}`}
               disabled={isDisabled}
               className={`
-                aspect-square flex items-center justify-center text-sm rounded-md transition-colors
-                ${isSelected ? 'bg-[var(--ticket-accent)] text-white font-semibold' : ''}
+                relative aspect-square flex items-center justify-center text-sm rounded-md transition-colors
+                ${isSelected ? 'bg-primary text-white font-semibold' : ''}
                 ${!isSelected && isToday ? 'border border-primary text-primary font-semibold' : ''}
                 ${!isSelected && !isToday && !isDisabled ? 'hover:bg-muted text-foreground' : ''}
                 ${isDisabled ? 'text-muted-foreground cursor-not-allowed' : 'cursor-pointer'}
@@ -142,6 +145,15 @@ const MonthView: React.FC<{
               })}
             >
               {day}
+              {isMarked && (
+                <span
+                  className={cn(
+                    'absolute bottom-1 size-1 rounded-full',
+                    isSelected ? 'bg-background' : 'bg-status-failure',
+                  )}
+                  aria-hidden='true'
+                />
+              )}
             </button>
           );
         })}
@@ -159,6 +171,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   minDate,
   maxDate,
   disabledDates,
+  markedDates,
   inputClassName = '',
   showClearButton = true,
   isInitialOpen = false,
@@ -443,6 +456,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                   {...(minDate && { minDate })}
                   {...(maxDate && { maxDate })}
                   {...(disabledDates && { disabledDates })}
+                  {...(markedDates && { markedDates })}
                 />
               </div>
             ))}
@@ -461,7 +475,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             </Button>
             <Button
               onClick={handleApply}
-              className='h-8 px-3 text-sm font-semibold rounded-lg transition-colors bg-[var(--ticket-accent)] hover:bg-[var(--ticket-accent)]/90 text-white'
+              className='h-8 px-3 text-sm font-semibold rounded-lg transition-colors bg-primary hover:bg-primary/90 text-white'
               data-track-category='Tickets'
               data-track-name='ApplyDatePicker'
             >
