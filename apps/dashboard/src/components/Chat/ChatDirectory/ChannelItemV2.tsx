@@ -28,7 +28,7 @@ import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Tooltip from '../../ui/Tooltip';
-import { Button } from '../../ui/Button/Button';
+
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -313,12 +313,11 @@ const ChannelItemV2 = memo(
             </DropdownMenu>
           )}
           {shouldShowCloseButton && (
-            <Button
-              variant='ghost'
+            <button
               type='button'
               className='group-hover:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
-              trackId='close_dm_channel'
+              data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
               data-track-metadata={JSON.stringify({
@@ -327,7 +326,7 @@ const ChannelItemV2 = memo(
               })}
             >
               <MultipleCrossCancelDefault size={14} className='shrink-0' />
-            </Button>
+            </button>
           )}
         </div>
       </Link>

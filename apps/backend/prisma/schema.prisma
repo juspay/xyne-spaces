@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential"]
 }
 
 datasource db {
@@ -436,6 +436,8 @@ model Workflow {
   eventType        String            @default("NO_OP")
   automationSeriesId String?
   scheduledAt      DateTime? // Do the deployment only after 12 AM
+  folderId         String?
+  summary          String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -499,6 +501,8 @@ model WorkflowExecutionState {
   context             String? // For child executions - initial context (JSON)
   output              String? // Execution-specific output (typed result)
   currentStepIndex    Int     @default(0)
+  pausePath           String?
+  pauseType           String?
 
   @@index([workflowExecutionId])
   @@map("workflow_execution_states")
@@ -600,6 +604,37 @@ model WorkflowKnowledge {
   createdAt           DateTime @default(now())
 
   @@map("workflow_knowledge")
+  @@schema("workflow")
+}
+
+model WorkflowFolder {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  name        String
+  metadata    String? // JSON: host metadata
+  parentId    String? // null = top-level folder
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  @@index([workspaceId])
+  @@index([workspaceId, parentId])
+  @@map("workflow_folders")
+  @@schema("workflow")
+}
+
+model WorkflowCredential {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String @id @default(cuid())
+  name        String
+  credType    String // bearer | basic | custom_header | oauth2_client_credentials
+  data        String // ENCRYPTED JSON — auth values
+  status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("workflow_credentials")
   @@schema("workflow")
 }
 
@@ -4227,6 +4262,7 @@ model SavedUserConfiguration {
   updatedAt   DateTime
 
   values      SavedUserConfigurationValue[]
+  viewAccess  ViewAccess[]
 
   @@unique([userId, contextId, name])
   @@index([contextType, contextId])
@@ -4249,6 +4285,23 @@ model SavedUserConfigurationValue {
 
   @@index([configId])
   @@map("saved_user_configuration_values")
+  @@schema("public")
+}
+
+model ViewAccess {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String                @id @default(cuid())
+  viewId      String
+  entityType  String
+  entityId    String
+  sharedBy    String
+  createdAt   DateTime
+
+  view        SavedUserConfiguration @relation(fields: [viewId], references: [id], onDelete: Cascade)
+
+  @@index([viewId])
+  @@index([entityType, entityId])
+  @@map("view_access")
   @@schema("public")
 }
 

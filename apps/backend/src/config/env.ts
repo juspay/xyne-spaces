@@ -272,6 +272,12 @@ const envSchema = Joi.object({
   MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
+
+  // @xyne/workflow-sdk
+  ENABLE_WORKFLOWS_WORKER: Joi.boolean().default(false),
+  WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
+  WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
+  WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -955,6 +961,13 @@ export const config = {
   },
   questionTimeoutMinutes: envVars.QUESTION_TIMEOUT_MINUTES,
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
+
+  workflows: {
+    workerEnabled: envVars.ENABLE_WORKFLOWS_WORKER as boolean,
+    workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
+    lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
+    baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
+  },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
