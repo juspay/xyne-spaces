@@ -14,10 +14,16 @@ import {
   defaultInlineContentSpecs,
   defaultStyleSpecs,
 } from '@blocknote/core';
-import { mentionServerSpec } from 'blocknote-layout-server-utils';
+import { mentionServerSpec, whiteboardServerSpec } from 'blocknote-layout-server-utils';
 import { config } from '@/config/env.js';
 import { logger } from '@/utils/logger.js';
 import { citationServerSpec } from '@/utils/canvasCitationSpec.js';
+import {
+  diagramServerSpec,
+  embedServerSpec,
+  mathBlockServerSpec,
+  mathInlineServerSpec,
+} from '@/utils/canvasCustomBlockServerSpecs.js';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes.js';
 
 const canvasCommentThreadStyleSpec = createStyleSpec(
@@ -45,13 +51,23 @@ const canvasCommentThreadStyleSpec = createStyleSpec(
 
 function createServerSchema() {
   return BlockNoteSchema.create({
-    blockSpecs: defaultBlockSpecs,
+    // The canvas schema's own blocks, for the same reason as the inline specs
+    // below: a type missing here is dropped coming out of Y-Sweet and throws
+    // going in, so one diagram would cost the whole document.
+    blockSpecs: {
+      ...defaultBlockSpecs,
+      whiteboard: whiteboardServerSpec,
+      diagram: diagramServerSpec,
+      mathBlock: mathBlockServerSpec,
+      embed: embedServerSpec,
+    },
     inlineContentSpecs: {
       ...defaultInlineContentSpecs,
       mention: mentionServerSpec,
       // Register "citation" so blocksToYDoc/blocksToYXmlFragment preserve the
       // call-summary citation chips into Y-Sweet instead of silently dropping them.
       citation: citationServerSpec,
+      math: mathInlineServerSpec,
     },
     styleSpecs: {
       ...defaultStyleSpecs,
@@ -315,39 +331,55 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
  * @param canvasId - The document ID (canvas ID)
  * @returns Array of BlockNote blocks, or empty array if unable to read
  */
+/**
+ * The canvas as it stands, with a failed read told apart from an empty canvas.
+ *
+ * readFromYSweet answers `[]` for both, which is harmless when the answer is
+ * only being read and destructive when it is being written back: a write that
+ * restores what markdown cannot carry — a whiteboard's drawing — would take an
+ * unreachable Y-Sweet as "there was nothing here" and commit the document
+ * without it.
+ */
+export async function readFromYSweetStrict(canvasId: string): Promise<BlockNoteBlock[]> {
+  const ysweetUrl = config.ysweet.url;
+  if (!ysweetUrl) {
+    logger.warn('[YSweetUtils] Y-Sweet URL not configured, returning empty content');
+    return [];
+  }
+
+  // Get a client token with read-only authorization
+  const clientToken = await ysweetGetClientToken(canvasId, {
+    authorization: 'read-only',
+  });
+
+  // Override URLs to use direct Y-Sweet URL instead of proxy URL
+  overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
+
+  const existingUpdate = await ysweetGetAsUpdate(clientToken);
+
+  if (!existingUpdate || existingUpdate.length === 0) {
+    logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
+    return [];
+  }
+
+  // Create a new Y.Doc and apply the existing state
+  const ydoc = new Y.Doc();
+  Y.applyUpdate(ydoc, existingUpdate);
+
+  // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
+  const editor = getServerEditor();
+  const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
+
+  logger.info(
+    `[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`
+  );
+  return blocks as BlockNoteBlock[];
+}
+
+/** The same read, with a failure reported as an empty canvas. */
 export async function readFromYSweet(canvasId: string): Promise<BlockNoteBlock[]> {
   try {
-    const ysweetUrl = config.ysweet.url;
-    if (!ysweetUrl) {
-      logger.warn('[YSweetUtils] Y-Sweet URL not configured, returning empty content');
-      return [];
-    }
-
-    // Get a client token with read-only authorization
-    const clientToken = await ysweetGetClientToken(canvasId, {
-      authorization: 'read-only',
-    });
-
-    // Override URLs to use direct Y-Sweet URL instead of proxy URL
-    overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
-
-    const existingUpdate = await ysweetGetAsUpdate(clientToken);
-
-    if (!existingUpdate || existingUpdate.length === 0) {
-      logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
-      return [];
-    }
-
-    // Create a new Y.Doc and apply the existing state
-    const ydoc = new Y.Doc();
-    Y.applyUpdate(ydoc, existingUpdate);
-
-    // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
-    const editor = getServerEditor();
-    const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
-
-    logger.info(`[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`);
-    return blocks as BlockNoteBlock[];
+    return await readFromYSweetStrict(canvasId);
   } catch (error) {
     logger.error('[YSweetUtils] Failed to read from Y-Sweet:', error);
     return [];

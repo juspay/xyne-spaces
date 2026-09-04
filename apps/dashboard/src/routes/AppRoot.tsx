@@ -550,6 +550,9 @@ const AppRoot = (): ReactElement => {
     !isOnAIChatExperiencePage &&
     !isSdlcRoute &&
     !showSdlcDebuggerPanel;
+  // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
+  // branch), so this is what decides whether that in-frame panel is showing.
+  const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -684,66 +687,81 @@ const AppRoot = (): ReactElement => {
                         />
                       )}
                       {isInPanelWebview ? (
-                        isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
-                          // SDLC lane (chrome-free iframe) with Ask AI open: render the
-                          // XyneAI panel INSIDE the frame so Ask AI ships with this lane.
-                          <div className='flex h-screen flex-col'>
-                            <ResizableGroup
-                              orientation='horizontal'
-                              className='flex-1 no-scrollbar overflow-auto'
-                              autoSaveId='sdlc-frame-xyneai'
-                            >
-                              <Panel
-                                id='sdlc-frame-content'
-                                defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                              >
-                                <main className='h-full flex-1 no-scrollbar overflow-auto'>
-                                  <EditWarningModal />
-                                  <Outlet />
-                                </main>
-                              </Panel>
-                              <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
-                                <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
-                              </Separator>
-                              <Panel
-                                id='sdlc-frame-xyneai'
-                                defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                                minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
-                              >
-                                <XyneAISidebarZIndexShell>
-                                  <XyneAISidebar
-                                    channelId={xyneAIChannelId}
-                                    threadInfo={xyneAIThreadInfo}
-                                    startFreshChat={xyneAIStartFreshChat}
-                                    canvasInfo={xyneAICanvasInfo}
-                                    initialContextSelections={xyneAIInitialContextSelections}
-                                    contextOpenNonce={xyneAIContextOpenNonce}
-                                    kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                    kbChannelId={xyneAIKbChannelId ?? ''}
-                                    kbDocId={xyneAIKbDocId ?? ''}
-                                    kbDocName={xyneAIKbDocName ?? ''}
-                                    kbFolderId={xyneAIKbFolderId ?? ''}
-                                    kbFolderName={xyneAIKbFolderName ?? ''}
-                                    kbOpenNonce={xyneAIKbOpenNonce}
-                                    researchContext={xyneAIResearchContext}
-                                    initialQuery={xyneAIInitialQuery ?? undefined}
-                                    autoSendNonce={xyneAIAutoSendNonce}
-                                    onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                                  />
-                                </XyneAISidebarZIndexShell>
-                              </Panel>
-                            </ResizableGroup>
-                          </div>
-                        ) : (
-                          // Inside the browser-panel webview (or SDLC lane with Ask AI
-                          // closed) — render only the route content. No GlobalTopBar /
-                          // AppSidebar / right panels / ChatDirectory.
-                          <main className='flex-1 h-screen'>
-                            <EditWarningModal />
-                            <Outlet />
-                          </main>
-                        )
+                        // Inside the browser-panel webview / SDLC lane: only the route
+                        // content, no GlobalTopBar / AppSidebar / right panels /
+                        // ChatDirectory. The Ask AI panel joins it as a sibling.
+                        //
+                        // The group is rendered whether or not Ask AI is open, and only
+                        // the assistant's own Panel is conditional. Swapping between two
+                        // different layouts moved <Outlet /> to another position in the
+                        // tree, so React unmounted the whole route and built it again —
+                        // opening Ask AI rebuilt the canvas editor and its Y-Sweet
+                        // connection, and the reader lost their place in the document.
+                        <div className='flex h-screen flex-col'>
+                          <ResizableGroup
+                            orientation='horizontal'
+                            className='flex-1 no-scrollbar overflow-auto'
+                            autoSaveId='sdlc-frame-xyneai'
+                            // The assistant's Panel is conditional, so the group
+                            // has to say which panels it is rendering — without
+                            // it the saved two-panel layout is restored over one
+                            // panel, and the split comes back wrong after Ask AI
+                            // has been closed and opened again.
+                            panelIds={
+                              showSdlcFrameXyneAI
+                                ? ['sdlc-frame-content', 'sdlc-frame-xyneai']
+                                : ['sdlc-frame-content']
+                            }
+                          >
+                            {/* defaultSize is read once, on mount: with the
+                                group now always rendered it must describe the
+                                whole width, and the split comes from the saved
+                                layout the ids above select. */}
+                            <Panel id='sdlc-frame-content' defaultSize='100%'>
+                              <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                                <EditWarningModal />
+                                <Outlet />
+                              </main>
+                            </Panel>
+                            {showSdlcFrameXyneAI && (
+                              <>
+                                <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                                  <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+                                </Separator>
+                                <Panel
+                                  id='sdlc-frame-xyneai'
+                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                  minSize={
+                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
+                                  }
+                                >
+                                  <XyneAISidebarZIndexShell>
+                                    <XyneAISidebar
+                                      channelId={xyneAIChannelId}
+                                      threadInfo={xyneAIThreadInfo}
+                                      startFreshChat={xyneAIStartFreshChat}
+                                      canvasInfo={xyneAICanvasInfo}
+                                      initialContextSelections={xyneAIInitialContextSelections}
+                                      contextOpenNonce={xyneAIContextOpenNonce}
+                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                      kbChannelId={xyneAIKbChannelId ?? ''}
+                                      kbDocId={xyneAIKbDocId ?? ''}
+                                      kbDocName={xyneAIKbDocName ?? ''}
+                                      kbFolderId={xyneAIKbFolderId ?? ''}
+                                      kbFolderName={xyneAIKbFolderName ?? ''}
+                                      kbOpenNonce={xyneAIKbOpenNonce}
+                                      researchContext={xyneAIResearchContext}
+                                      initialQuery={xyneAIInitialQuery ?? undefined}
+                                      autoSendNonce={xyneAIAutoSendNonce}
+                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                    />
+                                  </XyneAISidebarZIndexShell>
+                                </Panel>
+                              </>
+                            )}
+                          </ResizableGroup>
+                        </div>
                       ) : isOnboarding ? (
                         // Onboarding screen - full width without sidebar
                         <main

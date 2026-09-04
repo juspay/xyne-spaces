@@ -1,6 +1,5 @@
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
-import { createReactDiagramBlockSpec } from '@blocknote/diagram-block';
-import { createReactInlineMathSpec, createReactMathBlockSpec } from '@blocknote/math-block';
+import { createReactInlineMathSpec } from '@blocknote/math-block';
 import { Extension, type EditorOptions } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
@@ -12,6 +11,8 @@ import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
 import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
+import { canvasDiagramBlockSpec } from './CanvasDiagramSpec';
+import { canvasMathBlockSpec } from './CanvasMathBlockSpec';
 import { CANVAS_EMBED_TYPE, canvasEmbedSpec } from './CanvasEmbedSpec';
 import {
   canvasAudioBlockSpec,
@@ -21,6 +22,7 @@ import {
 } from './CanvasFileBlockSpec';
 import { canvasLinkShortcutsExtension } from './canvasLinkShortcuts';
 import { canvasPastedLinkExtension } from './canvasPastedLink';
+import { canvasSourceBlockShortcutsExtension } from './canvasSourceBlockShortcuts';
 import { canvasTableShortcutsExtension } from './canvasTableShortcuts';
 
 // Default blocks + whiteboard, then extended with mention and citation inline content.
@@ -31,8 +33,8 @@ import { canvasTableShortcutsExtension } from './canvasTableShortcuts';
 function createCanvasSchema() {
   return BlockNoteSchema.create({
     blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs, {
-      diagram: createReactDiagramBlockSpec(),
-      mathBlock: createReactMathBlockSpec(),
+      diagram: canvasDiagramBlockSpec,
+      mathBlock: canvasMathBlockSpec,
       codeBlock: canvasCodeBlockSpec,
       [CANVAS_EMBED_TYPE]: canvasEmbedSpec,
       file: canvasFileBlockSpec,
@@ -288,6 +290,7 @@ export const canvasTiptapOptions = {
     canvasPastedLinkExtension,
     canvasLinkShortcutsExtension,
     canvasTableShortcutsExtension,
+    canvasSourceBlockShortcutsExtension,
   ],
   editorProps: {
     handleKeyDown: handleCanvasTableKeyDown,
