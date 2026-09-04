@@ -33,24 +33,7 @@ import type { AgentLight } from "../../../lib/types";
 import type { AgentRun } from "../../../lib/api";
 import { Skeleton } from "../ui/Skeleton";
 import { formatTimeAgo, getInitials } from "./homeUtils";
-
-const SPACES_APP_URL =
-  import.meta.env.VITE_SPACES_APP_URL ||
-  import.meta.env.VITE_XYNE_BACKEND_URL ||
-  (import.meta.env.DEV ? "http://localhost:5173" : window.location.origin);
-
-function getSpacesWorkspaceId(): string {
-  return document.cookie
-    .split("; ")
-    .find((c) => c.startsWith("xyne_last_workspace="))
-    ?.split("=")[1] ?? "";
-}
-
-function spacesThreadUrl(channelId: string, conversationId: string): string {
-  const workspaceId = getSpacesWorkspaceId();
-  const base = workspaceId ? `${SPACES_APP_URL}/${workspaceId}` : SPACES_APP_URL;
-  return `${base}/chat/dir/${encodeURIComponent(channelId)}/${encodeURIComponent(conversationId)}`;
-}
+import { spacesThreadUrl } from "../../../lib/spacesLink";
 
 const COLLAPSED_COUNT = 4;
 

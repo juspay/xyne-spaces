@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { getMe, getLoginUrl, upsertUser } from "../lib/api";
+import { setSpacesWorkspaceId } from "../lib/spacesLink";
 import { frontendConfig } from "../lib/config";
 import type { User } from "../lib/types";
 
@@ -73,6 +74,9 @@ export function useAuth() {
 
       try {
         const user = await getMe();
+        // Cache the workspaceId so Spaces thread links carry the /:workspaceId
+        // route segment (the xyne_last_workspace cookie is httpOnly → unreadable).
+        setSpacesWorkspaceId(user.workspaceId);
         await upsertUser(user).catch(() => {});
         setState({ status: "authenticated", user });
       } catch {
