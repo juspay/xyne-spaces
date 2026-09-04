@@ -1,3 +1,18 @@
+## [1.277.0](https://github.com/juspay/xyne-spaces/compare/v1.276.1...v1.277.0) (2026-09-04)
+
+
+### Features
+
+* one canvas upload item instead of four ([#1482](https://github.com/juspay/xyne-spaces/issues/1482)) ([db7383d](https://github.com/juspay/xyne-spaces/commit/db7383df2565e748df01c70fb0203e572961c0aa))
+* remove redundant default ([#1550](https://github.com/juspay/xyne-spaces/issues/1550)) ([4c3440c](https://github.com/juspay/xyne-spaces/commit/4c3440c9fa73cd70a04a8458164679d4b89b8dff))
+
+
+### Bug Fixes
+
+* canvas blocks behave as objects, and reach Ask AI and comments ([#1534](https://github.com/juspay/xyne-spaces/issues/1534)) ([27c519d](https://github.com/juspay/xyne-spaces/commit/27c519d43cf32f713aab89376825b9ac823423c6))
+* increase recording summary streaming LLM request timeout to 15m ([#1555](https://github.com/juspay/xyne-spaces/issues/1555)) ([a697d6a](https://github.com/juspay/xyne-spaces/commit/a697d6adc57f9baf0a01a65bf8b3b8432308e176))
+* open the discussion with a newly created artifact ([#1484](https://github.com/juspay/xyne-spaces/issues/1484)) ([05d09b1](https://github.com/juspay/xyne-spaces/commit/05d09b1d969560f17a1639329ec016ccf378943c))
+
 ## [1.276.1](https://github.com/juspay/xyne-spaces/compare/v1.276.0...v1.276.1) (2026-09-04)
 
 
