@@ -1,3 +1,31 @@
+## [1.276.1](https://github.com/juspay/xyne-spaces/compare/v1.276.0...v1.276.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* use pause/play icons for user group deactivate & reactivate ([#1545](https://github.com/juspay/xyne-spaces/issues/1545)) ([f4b52d4](https://github.com/juspay/xyne-spaces/commit/f4b52d43a174ddc66a918dcedc70288546aab6b0))
+
+## [1.276.0](https://github.com/juspay/xyne-spaces/compare/v1.275.0...v1.276.0) (2026-09-04)
+
+
+### Features
+
+* context-aware Electron incoming-call notification text ([#1475](https://github.com/juspay/xyne-spaces/issues/1475)) ([8782ac5](https://github.com/juspay/xyne-spaces/commit/8782ac57f6936c6660d72b7d2594fc683e3e63ac))
+
+
+### Bug Fixes
+
+* align channel info header action buttons ([#1543](https://github.com/juspay/xyne-spaces/issues/1543)) ([e12206d](https://github.com/juspay/xyne-spaces/commit/e12206db5249e69ef289887bd76f3f52cf079401))
+* delete all matching keychain certificates during identity deletion ([#1059](https://github.com/juspay/xyne-spaces/issues/1059)) ([b31710b](https://github.com/juspay/xyne-spaces/commit/b31710ba4597f35a19d410ea095d2653e22909d7))
+* Fix detailed summary generation retry button ([#1544](https://github.com/juspay/xyne-spaces/issues/1544)) ([97f2ffe](https://github.com/juspay/xyne-spaces/commit/97f2ffef5d6b96e90e1b4c69b4dfa21e05357e7e))
+
+## [1.275.0](https://github.com/juspay/xyne-spaces/compare/v1.274.1...v1.275.0) (2026-09-04)
+
+
+### Features
+
+* bulk ticket tag relabel endpoint ([#656](https://github.com/juspay/xyne-spaces/issues/656)) ([f2f6744](https://github.com/juspay/xyne-spaces/commit/f2f6744493b576b76b022f681e3eb11de17c8a96))
+
 ## [1.274.1](https://github.com/juspay/xyne-spaces/compare/v1.274.0...v1.274.1) (2026-09-04)
 
 
