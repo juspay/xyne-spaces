@@ -273,6 +273,13 @@ interface RecordingDetailResponse {
   recording: RecordingDetail;
 }
 
+/**
+ * Recordings and regular calls share these handlers but sit on different routes:
+ * `/calls/recordings/:id/...` and `/calls/:id/...`.
+ */
+export const callScopedPath = (callId: string, isRecording: boolean): string =>
+  isRecording ? `recordings/${callId}` : callId;
+
 class RecordingService {
   /**
    * Start a headless recording session
@@ -377,17 +384,24 @@ class RecordingService {
   }
 
   /** `title` names the new doc; omitted, the backend falls back to the recording title. */
-  async exportGoogleDoc(callId: string, title?: string): Promise<ExportRecordingGoogleDocResult> {
+  async exportGoogleDoc(
+    callId: string,
+    title?: string,
+    isRecording = true,
+  ): Promise<ExportRecordingGoogleDocResult> {
     const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
-      `/calls/recordings/${callId}/export-google-doc`,
+      `/calls/${callScopedPath(callId, isRecording)}/export-google-doc`,
       title ? { title } : {},
     );
     return response.data;
   }
 
-  async getGoogleDocComposeContext(callId: string): Promise<RecordingGoogleDocComposeContext> {
+  async getGoogleDocComposeContext(
+    callId: string,
+    isRecording = true,
+  ): Promise<RecordingGoogleDocComposeContext> {
     const response = await apiInstance.get<{ success: true } & RecordingGoogleDocComposeContext>(
-      `/calls/recordings/${callId}/google-doc-compose-context`,
+      `/calls/${callScopedPath(callId, isRecording)}/google-doc-compose-context`,
     );
     return response.data;
   }

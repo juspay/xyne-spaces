@@ -272,6 +272,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   // Recording anchors use recording-specific actions.
   const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+  // A shared call card. Grouped with recording anchors below: both are generated
+  // cards whose deletion would orphan the entity_access row pointing at them.
+  const isSharedEntityMessage = isRecordingMessage || metadata?.['isCallShareMessage'] === true;
 
   // Both internal and external link previews are stored in link_preview_md.
   // Memoized: ChatBubble re-renders on every hover, and parsing per render
@@ -829,8 +832,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
   // but do not open this message in the generic editor, which would discard that wrapper.
   const canEditMessage =
-    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isRecordingMessage;
-  const canDeleteMessage = canModifyMessage && !hasTicket && !isRecordingMessage;
+    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isSharedEntityMessage;
+  const canDeleteMessage = canModifyMessage && !hasTicket && !isSharedEntityMessage;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -1058,7 +1061,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }),
       ...(!isMessageDeleted &&
         (isCallMessage || !isSystemMessage) &&
-        !isRecordingMessage && { onForwardMessage: handleForwardMessage }),
+        !isSharedEntityMessage && { onForwardMessage: handleForwardMessage }),
       isPinned: conversation?.pinned || false,
       ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
       ...(canEditMessage && { onEditMessage: handleEditMessage }),
@@ -1385,7 +1388,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isMessageDeleted && { onRemindMe: handleOpenReminderOptions })}
               {...(!isMessageDeleted &&
                 (isCallMessage || !isSystemMessage) &&
-                !isRecordingMessage && { onForwardMessage: handleForwardMessage })}
+                !isSharedEntityMessage && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && { onEditMessage: handleEditMessage })}

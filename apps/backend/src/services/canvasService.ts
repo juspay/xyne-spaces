@@ -996,3 +996,19 @@ export async function findExistingDetailedSummaryCanvas(
     return null;
   }
 }
+
+/**
+ * A call's detailed-summary canvas id. Recordings record it on their own row, and
+ * a shared call has it copied there too; otherwise fall back to finding the canvas
+ * by the call it summarizes, which is how a regular call's is normally reached.
+ */
+export async function resolveDetailedSummaryCanvasId(call: {
+  externalId: string;
+  metadata: unknown;
+}): Promise<string | null> {
+  const metadata = call.metadata as Record<string, unknown> | null;
+  const stamped = metadata?.['detailedSummaryCanvasId'];
+  if (typeof stamped === 'string' && stamped.trim()) return stamped;
+  const found = await findExistingDetailedSummaryCanvas(call.externalId);
+  return found?.canvasId ?? null;
+}
