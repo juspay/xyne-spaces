@@ -9748,9 +9748,7 @@ export function createMutators(
           const thread = await tx.run(
             zql.canvas_comment_threads
               .where('id', threadId)
-              .where(({ or, cmp }) =>
-                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
-              )
+              .where('workspaceId', authData.workspaceId)
               .one(),
           );
           if (!thread || thread.canvasId !== canvasId) {
@@ -9761,7 +9759,7 @@ export function createMutators(
 
           await tx.mutate.canvas_comments.insert({
             id: commentId,
-            workspaceId: thread.workspaceId,
+            workspaceId: authData.workspaceId,
             threadId,
             canvasId,
             body,
@@ -9802,9 +9800,7 @@ export function createMutators(
           const comment = await tx.run(
             zql.canvas_comments
               .where('id', commentId)
-              .where(({ or, cmp }) =>
-                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
-              )
+              .where('workspaceId', authData.workspaceId)
               .one(),
           );
           if (!comment) {
@@ -9834,9 +9830,7 @@ export function createMutators(
           const comment = await tx.run(
             zql.canvas_comments
               .where('id', commentId)
-              .where(({ or, cmp }) =>
-                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
-              )
+              .where('workspaceId', authData.workspaceId)
               .one(),
           );
           if (!comment) {
@@ -9859,9 +9853,7 @@ export function createMutators(
           const thread = await tx.run(
             zql.canvas_comment_threads
               .where('id', comment.threadId)
-              .where(({ or, cmp }) =>
-                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
-              )
+              .where('workspaceId', authData.workspaceId)
               .one(),
           );
           if (thread) {
@@ -9883,9 +9875,7 @@ export function createMutators(
           const thread = await tx.run(
             zql.canvas_comment_threads
               .where('id', threadId)
-              .where(({ or, cmp }) =>
-                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
-              )
+              .where('workspaceId', authData.workspaceId)
               .one(),
           );
           if (!thread) {

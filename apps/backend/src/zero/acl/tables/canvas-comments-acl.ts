@@ -38,16 +38,14 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'canvas_comments'>>, tx: Transaction<Schema>): Promise<void> {
-    if (args.workspaceId != null && args.workspaceId !== this.ctx.workspaceId) {
+    if (args.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Canvas comment insert failed: workspace mismatch', 'canvas_comments');
     }
 
     const thread = await tx.run(
       zql.canvas_comment_threads
         .where('id', args.threadId)
-        .where(({ or, cmp }) =>
-          or(cmp('workspaceId', this.ctx.workspaceId), cmp('workspaceId', 'IS', null)),
-        )
+        .where('workspaceId', this.ctx.workspaceId)
         .one(),
     );
     if (!thread || thread.canvasId !== args.canvasId) {
@@ -63,9 +61,7 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
     const comment = await tx.run(
       zql.canvas_comments
         .where('id', args.id)
-        .where(({ or, cmp }) =>
-          or(cmp('workspaceId', this.ctx.workspaceId), cmp('workspaceId', 'IS', null)),
-        )
+        .where('workspaceId', this.ctx.workspaceId)
         .one(),
     );
     if (!comment) {

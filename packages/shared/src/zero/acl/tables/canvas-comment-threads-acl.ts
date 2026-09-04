@@ -11,34 +11,30 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<'canvas_comment_thread
   canSelect<TReturn>(
     query: Query<'canvas_comment_threads', Schema, TReturn>,
   ): Query<'canvas_comment_threads', Schema, TReturn> {
-    return query
-      .where(({ or, cmp }) =>
-        or(cmp('workspaceId', '=', this.ctx.workspaceId), cmp('workspaceId', 'IS', null)),
-      )
-      .whereExists('canvas', canvas =>
-        canvas.where(({ or, cmp, exists }) =>
-          or(
-            cmp('createdBy', this.ctx.userID),
-            cmp('visibility', CanvasVisibility.PUBLIC),
-            exists('participants', participant =>
-              participant.where(({ or, cmp, exists }) =>
-                or(
-                  cmp('userId', this.ctx.userID),
-                  exists('userGroup', userGroup =>
-                    userGroup.whereExists('userGroupMappings', mapping =>
-                      mapping.where('userId', this.ctx.userID),
-                    ),
+    return query.whereExists('canvas', canvas =>
+      canvas.where(({ or, cmp, exists }) =>
+        or(
+          cmp('createdBy', this.ctx.userID),
+          cmp('visibility', CanvasVisibility.PUBLIC),
+          exists('participants', participant =>
+            participant.where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', this.ctx.userID),
+                exists('userGroup', userGroup =>
+                  userGroup.whereExists('userGroupMappings', mapping =>
+                    mapping.where('userId', this.ctx.userID),
                   ),
-                  exists('channel', channel =>
-                    channel.whereExists('participants', channelParticipant =>
-                      channelParticipant.where('userId', this.ctx.userID),
-                    ),
+                ),
+                exists('channel', channel =>
+                  channel.whereExists('participants', channelParticipant =>
+                    channelParticipant.where('userId', this.ctx.userID),
                   ),
                 ),
               ),
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 }

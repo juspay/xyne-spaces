@@ -1,6 +1,15 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 
+/**
+ * Canvas comments carry NO workspaceId column — the tenant boundary is reached
+ * through thread -> canvas. Filtering has to traverse that relation; a bare {}
+ * would read as unrestricted and skip scoping altogether.
+ *
+ * canvasId is denormalised onto the row as well, but the thread relation is the
+ * authoritative path (a comment cannot exist without its thread), so the filter
+ * goes through it and creates validate both.
+ */
 export class CanvasCommentsACL extends BaseQueryACL<
   Prisma.CanvasCommentWhereInput,
   Prisma.CanvasCommentUncheckedCreateInput
@@ -10,33 +19,18 @@ export class CanvasCommentsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasCommentWhereInput> {
-    return {
-      OR: [
-        { workspaceId: this.ctx.workspaceId },
-        { workspaceId: null, thread: { canvas: { workspaceId: this.ctx.workspaceId } } },
-      ],
-    }
+    return { thread: { canvas: { workspaceId: this.ctx.workspaceId } } }
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasCommentWhereInput> {
-    return {
-      OR: [
-        { workspaceId: this.ctx.workspaceId },
-        { workspaceId: null, thread: { canvas: { workspaceId: this.ctx.workspaceId } } },
-      ],
-    }
+    return { thread: { canvas: { workspaceId: this.ctx.workspaceId } } }
   }
 
   async canCreate(data: Prisma.CanvasCommentUncheckedCreateInput): Promise<boolean> {
-    if (data.workspaceId != null && data.workspaceId !== this.ctx.workspaceId) return false
-
     const thread = await this.prisma.canvasCommentThread.findFirst({
       where: {
         id: data.threadId,
-        OR: [
-          { workspaceId: this.ctx.workspaceId },
-          { workspaceId: null, canvas: { workspaceId: this.ctx.workspaceId } },
-        ],
+        canvas: { workspaceId: this.ctx.workspaceId },
       },
       select: { canvasId: true },
     })

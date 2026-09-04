@@ -3071,7 +3071,7 @@ model CanvasCommentThread {
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
-  @@index([workspaceId, canvasId, createdAt])
+  @@index([ canvasId, createdAt])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
@@ -3093,7 +3093,7 @@ model CanvasComment {
   initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
   createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
 
-  @@index([workspaceId, threadId, isInitial, createdAt])
+  @@index([threadId, isInitial, createdAt])
   @@map("canvas_comments")
   @@schema("public")
 }

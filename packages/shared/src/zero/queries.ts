@@ -2609,11 +2609,8 @@ export const queries = defineQueries({
 
   canvasCommentThreads: defineQuery(
     z.object({ canvasId: z.string() }),
-    ({ ctx, args: { canvasId } }) => {
+    ({ args: { canvasId } }) => {
       return zql.canvas_comment_threads
-        .where(({ or, cmp }) =>
-          or(cmp('workspaceId', ctx.workspaceId), cmp('workspaceId', 'IS', null)),
-        )
         .where('canvasId', canvasId)
         .orderBy('createdAt', 'asc')
         .related('initialComment');
@@ -2622,11 +2619,8 @@ export const queries = defineQueries({
 
   canvasThreadComments: defineQuery(
     z.object({ threadId: z.string() }),
-    ({ ctx, args: { threadId } }) => {
+    ({ args: { threadId } }) => {
       return zql.canvas_comments
-        .where(({ or, cmp }) =>
-          or(cmp('workspaceId', ctx.workspaceId), cmp('workspaceId', 'IS', null)),
-        )
         .where('threadId', threadId)
         .orderBy('createdAt', 'asc');
     },
