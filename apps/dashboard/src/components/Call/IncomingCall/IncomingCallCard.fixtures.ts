@@ -53,7 +53,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-1',
-      context: { kind: 'direct', icon: 'user', text: 'Incoming call' },
+      context: { kind: 'direct', icon: 'user', place: null, text: 'Incoming call' },
       identity: { mode: 'solo', userId: null, displayName: 'Ankit Sharma' },
       name: 'Ankit Sharma',
       subtitle: 'ankit.sharma@juspay.in',
@@ -65,7 +65,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-2',
-      context: { kind: 'group', icon: 'users', text: 'Group call' },
+      context: { kind: 'group', icon: 'users', place: null, text: 'Group call' },
       identity: stack(['Ankit Sharma', 'Ojas Deshmukh', 'Shubham Agarwal']),
       name: 'Ankit Sharma',
       subtitle: 'with Ojas and Shubham',
@@ -77,7 +77,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-3',
-      context: { kind: 'group', icon: 'users', text: 'Group call' },
+      context: { kind: 'group', icon: 'users', place: null, text: 'Group call' },
       identity: stack(['Priya Nair', 'Ojas Deshmukh', 'Shubham Agarwal', 'Harsh Iyer'], 2),
       name: 'Priya Nair',
       subtitle: 'with Ojas, Shubham +3',
@@ -89,7 +89,12 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-4',
-      context: { kind: 'thread', icon: 'thread', text: 'Thread call in #engineering' },
+      context: {
+        kind: 'thread',
+        icon: 'thread',
+        place: { kind: 'channel', name: 'engineering' },
+        text: 'Thread call in #engineering',
+      },
       identity: stack(['Rohan Mehta', 'Ojas Deshmukh', 'Shubham Agarwal', 'Meera Pillai'], 1),
       name: 'Rohan Mehta',
       subtitle: 'with Ojas, Shubham +2',
@@ -104,7 +109,12 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-5',
-      context: { kind: 'scheduled', icon: 'calendar', text: 'Scheduled call in #product-sync' },
+      context: {
+        kind: 'scheduled',
+        icon: 'calendar',
+        place: { kind: 'channel', name: 'product-sync' },
+        text: 'Scheduled call in #product-sync',
+      },
       identity: stack(['Kunal Bose', 'Divya Krishnan', 'Rohan Mehta', 'Sana Khan'], 3),
       name: 'Kunal Bose',
       subtitle: 'Weekly product sync',
@@ -119,6 +129,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       context: {
         kind: 'scheduled-thread',
         icon: 'calendar',
+        place: { kind: 'channel', name: 'platform-infra-oncall-escalations' },
         text: 'Scheduled thread call in #platform-infra-oncall-escalations',
       },
       identity: stack(['Meera Pillai', 'Sana Khan', 'Harsh Iyer', 'Ankit Sharma'], 1),
@@ -132,7 +143,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-7',
-      context: { kind: 'unknown', icon: 'hash', text: 'Incoming call' },
+      context: { kind: 'unknown', icon: 'hash', place: null, text: 'Incoming call' },
       identity: stack(['Rohan Mehta', 'Ojas Deshmukh', 'Priya Nair']),
       name: 'Rohan Mehta',
       subtitle: 'with Ojas and Priya',
@@ -145,7 +156,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       ...base,
       callId: 'fx-8',
       isInActiveCall: true,
-      context: { kind: 'direct', icon: 'user', text: 'Incoming call' },
+      context: { kind: 'direct', icon: 'user', place: null, text: 'Incoming call' },
       identity: { mode: 'solo', userId: null, displayName: 'Ankit Sharma' },
       name: 'Ankit Sharma',
       subtitle: 'ankit.sharma@juspay.in',
@@ -157,7 +168,12 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-9',
-      context: { kind: 'thread', icon: 'thread', text: 'Thread call in group DM' },
+      context: {
+        kind: 'thread',
+        icon: 'thread',
+        place: { kind: 'group-dm' },
+        text: 'Thread call in group DM',
+      },
       identity: stack(['Shubham Agarwal', 'Priya Nair', 'Harsh Iyer']),
       name: 'Shubham Agarwal',
       subtitle: 'with Priya and Harsh',
@@ -169,7 +185,12 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-10',
-      context: { kind: 'thread', icon: 'thread', text: 'Thread call in #engineering' },
+      context: {
+        kind: 'thread',
+        icon: 'thread',
+        place: { kind: 'channel', name: 'engineering' },
+        text: 'Thread call in #engineering',
+      },
       identity: stack(['Rohan Mehta', 'Ojas Deshmukh', 'Shubham Agarwal', 'Meera Pillai'], 1),
       name: 'Rohan Mehta',
       // Written by the LLM a beat after the phone starts ringing, so this
@@ -188,7 +209,12 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
     vm: {
       ...base,
       callId: 'fx-11',
-      context: { kind: 'channel', icon: 'hash', text: 'Call in #general' },
+      context: {
+        kind: 'channel',
+        icon: 'hash',
+        place: { kind: 'channel', name: 'general' },
+        text: 'Call in #general',
+      },
       identity: stack(['Divya Krishnan', 'Kunal Bose', 'Meera Pillai', 'Sana Khan'], 196),
       name: 'Divya Krishnan',
       subtitle: 'with Kunal, Meera +197',
@@ -204,6 +230,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       context: {
         kind: 'channel',
         icon: 'hash',
+        place: { kind: 'channel', name: 'Call-Standup-12 Aug 3:04pm' },
         text: 'Call in #Call-Standup-12 Aug 3:04pm',
       },
       identity: stack(['Kunal Bose', 'Divya Krishnan', 'Rohan Mehta', 'Sana Khan'], 8),
@@ -219,7 +246,12 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       ...base,
       callId: 'fx-13',
       invitedBy: 'user-rohan',
-      context: { kind: 'channel', icon: 'hash', text: 'Call in #payments-oncall' },
+      context: {
+        kind: 'channel',
+        icon: 'hash',
+        place: { kind: 'channel', name: 'payments-oncall' },
+        text: 'Call in #payments-oncall',
+      },
       identity: stack(['Rohan Mehta', 'Priya Nair', 'Harsh Iyer'], 4),
       name: 'Rohan Mehta',
       subtitle: 'with Priya, Harsh +5',
