@@ -8,6 +8,7 @@ const chatController = new ChatController();
 
 router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postMessage);
 router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, chatController.updateMessage);
+router.post('/deleteMessage', requirePermission('chat:delete'), validateChannelAccessForPost, chatController.deleteMessage);
 router.post('/agentProgress', requirePermission('chat:write'), validateChannelAccessForPost, chatController.agentProgress);
 router.get('/channelHistory', requirePermission('channels:read'), validateChannelAccessForGet, chatController.channelHistory);
 router.get('/conversationReplies', requirePermission('channels:read'), validateChannelAccessForGet, chatController.conversationReplies);

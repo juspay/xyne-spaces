@@ -6,6 +6,7 @@ import type { TicketCustomFormData } from '@/database/repositories/formsReposito
 export enum ChatEventType {
     MESSAGE_POSTED = 'MESSAGE_POSTED',
     MESSAGE_UPDATED = 'MESSAGE_UPDATED',
+    MESSAGE_DELETED = 'MESSAGE_DELETED',
 }
 
 /**
