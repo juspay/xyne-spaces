@@ -24,6 +24,10 @@ import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
 import { CallLabelPicker } from './CallLabelPicker';
 import { callService } from '../../services/Call/callService';
+import { useCallSummaryRegeneration } from './useCallSummaryRegeneration';
+import { SummaryModelFooter } from '../../components/SummaryModelFooter/SummaryModelFooter';
+import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
+import { SummaryGenerationPanel } from '../RecordingDetailV2Screen/components/SummaryGenerationPill/SummaryGenerationPanel';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -57,6 +61,7 @@ export default function CallDetailScreen(): ReactElement {
   const [canScrollRight, setCanScrollRight] = useState(false);
 
   const { user } = useAuth();
+  const { summaryModelPreference } = useSummaryModelPreference();
 
   const isAIOpen = useSelector(xyneAIActor, state => !state.matches('closed'));
   const allChannels = useAllChannels();
@@ -89,6 +94,13 @@ export default function CallDetailScreen(): ReactElement {
     queries.conversationMessages({ conversationId: callConversationId ?? '' }),
     { enabled: !!callConversationId },
   );
+
+  // `call` above is a frozen navigation-state snapshot. Generation runs in the
+  // background and lands on the call row, so read the fields that move — applied
+  // template, generation status — live.
+  const [callRow] = useCachedQuery(queries.callByExternalId({ callId: call?.externalId ?? '' }), {
+    enabled: !!call?.externalId,
+  });
   const persistedPrdCanvasIds = useMemo<string[]>(() => {
     if (!conversationMessages || !call?.externalId) return [];
     return conversationMessages.flatMap(m => {
@@ -118,7 +130,24 @@ export default function CallDetailScreen(): ReactElement {
     return getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
   }, [callMessage]);
 
-  const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId);
+  const detailedSummaryStatus = useMemo<'pending' | 'ready' | 'failed' | null>(() => {
+    const meta = callRow?.metadata as Record<string, unknown> | null | undefined;
+    const raw = meta?.['detailedSummaryStatus'];
+    return raw === 'pending' || raw === 'ready' || raw === 'failed' ? raw : null;
+  }, [callRow]);
+
+  const summaryModelUsed = useMemo<'fast' | 'thinking' | null>(() => {
+    const meta = callRow?.metadata as Record<string, unknown> | null | undefined;
+    const raw = meta?.['summaryModelUsed'];
+    return raw === 'fast' || raw === 'thinking' ? raw : null;
+  }, [callRow]);
+
+  // A call with a transcript but no canvas still gets the tab; the panel inside
+  // shows shimmer / try again / generate as the status calls for. Live row first: a
+  // call opened straight from the channel has no transcript in its snapshot yet, and
+  // gating on that frozen value would hide the summary until a remount.
+  const hasCallTranscript = Boolean(callRow?.transcript?.trim() || call?.transcript?.trim());
+  const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId) || hasCallTranscript;
 
   const hasRecording = useMemo<boolean>(() => {
     if (!conversationMessages || !call?.externalId) return false;
@@ -129,6 +158,10 @@ export default function CallDetailScreen(): ReactElement {
       }),
     );
   }, [conversationMessages, call?.externalId]);
+
+  // Zero stores epoch ms, the snapshot a date. Live first, so a call that ends
+  // while this screen is open dates itself correctly.
+  const endedAtMs = callRow?.endedAt ?? (call?.endedAt ? new Date(call.endedAt).getTime() : null);
 
   const durationMs =
     call?.startedAt && call?.endedAt
@@ -253,6 +286,16 @@ export default function CallDetailScreen(): ReactElement {
       if (labelsUpdateSeqRef.current === seq) setLabels(previousLabels);
     }
   };
+
+  // Owned here, not in the pill: rewriting swaps the content pane for a panel.
+  const summaryRegeneration = useCallSummaryRegeneration({
+    callId: call?.externalId ?? '',
+    summaryTemplateId: callRow?.summaryTemplateId ?? call?.summaryTemplateId,
+    detailedSummaryStatus,
+    detailedSummaryCanvasId,
+    endedAtMs,
+    summaryModelUsed,
+  });
 
   const title = call?.title ?? 'Untitled Call';
   const heldOn = formatCallHeldOn(call?.startedAt);
@@ -421,7 +464,13 @@ export default function CallDetailScreen(): ReactElement {
               >
                 {hasDetailedSummaryTab && (
                   <CallSummaryTemplatePicker
-                    selectedTemplateId={call.summaryTemplateId}
+                    selectedTemplateId={summaryRegeneration.appliedTemplateId}
+                    isRegenerating={summaryRegeneration.isRegenerating}
+                    regeneratingTemplateId={summaryRegeneration.regeneratingTemplateId}
+                    hasSummary={Boolean(detailedSummaryCanvasId)}
+                    onApplyTemplate={(templateId, templateName) =>
+                      void summaryRegeneration.regenerate(templateId, templateName)
+                    }
                     isActive={activeTab === 'detailed-summary'}
                     onSelect={() => setSelectedTab('detailed-summary')}
                     className={pillClassName(activeTab === 'detailed-summary')}
@@ -466,8 +515,44 @@ export default function CallDetailScreen(): ReactElement {
                   <Loader2 className='size-4 animate-spin' />
                   Loading...
                 </div>
-              ) : activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
-                <DetailedSummaryCanvasTab canvasId={detailedSummaryCanvasId} />
+              ) : activeTab === 'detailed-summary' ? (
+                // An existing summary wins over the panel, as the recording screen
+                // gates on hasDetailedSummary: a rewrite leaves the document readable
+                // for the minutes it runs, and canvasNonce swaps in the new content
+                // once it lands. The pill carries the in-flight state.
+                detailedSummaryCanvasId ? (
+                  <>
+                    <DetailedSummaryCanvasTab
+                      key={`${detailedSummaryCanvasId}:${summaryRegeneration.canvasNonce}`}
+                      canvasId={detailedSummaryCanvasId}
+                    />
+                    {/* Not owner-gated, unlike a recording: rewriting a call summary
+                        is already open to the whole audience, so gating the tier
+                        alone would be arbitrary. */}
+                    <SummaryModelFooter
+                      modelUsed={summaryModelUsed}
+                      preference={summaryModelPreference}
+                      isRegenerating={summaryRegeneration.isRegenerating}
+                      defaultScopeLabel='every call you summarize'
+                      onApply={summaryRegeneration.applyModel}
+                      trackCategory='CallDetail'
+                    />
+                  </>
+                ) : (
+                  <SummaryGenerationPanel
+                    isAwaiting={summaryRegeneration.panelState === 'pending'}
+                    canGenerate={hasCallTranscript}
+                    hasFailed={summaryRegeneration.panelState === 'failed'}
+                    generationRunId={summaryRegeneration.runNonce}
+                    initialProgress={summaryRegeneration.initialProgress}
+                    initialStageIndex={summaryRegeneration.initialStageIndex}
+                    onProgressPause={summaryRegeneration.onProgressPause}
+                    onGenerate={summaryRegeneration.retry}
+                    onRetry={summaryRegeneration.retry}
+                    summarySubject='call'
+                    trackCategory='CallDetail'
+                  />
+                )
               ) : (
                 (() => {
                   const prd = prdEntries.find(e => e.id === activeTab);
