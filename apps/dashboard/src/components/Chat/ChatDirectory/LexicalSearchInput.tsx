@@ -32,10 +32,13 @@ import {
   UserTriggerType,
   ChannelTriggerType,
   PriorityTriggerType,
+  DateTriggerType,
+  BoardTriggerType,
+  MentionsTriggerType,
 } from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
-import { MentionType, type MentionData } from './ChannelCommandMenu.types';
+import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 import { Search } from 'lucide-react';
 import { usePlatform } from '../../../hooks/usePlatform';
 
@@ -44,21 +47,28 @@ interface LexicalSearchInputProps {
   value?: string;
   onChange?: (
     text: string,
-    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+    mentions: Array<{ id: string; type: ChipType; prefix?: string }>,
   ) => void;
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
   onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
   onPrioritySearch?: (query: string | null, trigger?: PriorityTriggerType) => void;
+  onDateSearch?: (query: string | null, trigger?: DateTriggerType) => void;
+  onBoardSearch?: (query: string | null, trigger?: BoardTriggerType) => void;
+  onMentionsSearch?: (query: string | null, trigger?: MentionsTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
   availablePriorities?: Array<{ id: string; name: string }>;
+  availableDates?: Array<{ id: string; name: string }>;
+  availableBoards?: Array<{ id: string; name: string }>;
+  availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
   className?: string;
   open?: boolean;
-  mentionSearchType?: MentionType | null;
+  mentionSearchType?: ChipType | null;
   selectedMentionIndex?: number;
   setSelectedMentionIndex?: (index: number | ((prev: number) => number)) => void;
   onNavigate?: () => void;
   hasNavigated?: boolean;
+  onReplaceTriggerChipsReady?: (replaceChips: (chips: ChipData[]) => void) => void;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -69,7 +79,7 @@ interface LexicalSearchInputProps {
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
   onSetTextReady?: (setText: (text: string) => void) => void;
-  initialMention?: MentionData | null | undefined;
+  initialMention?: ChipData | null | undefined;
   initialQuery?: InitialQueryData | null | undefined;
   disableAutoFocus?: boolean;
   // Current user's id — threaded to chip creation so a current-user chip gets Slack's color.
@@ -80,7 +90,7 @@ interface LexicalSearchInputProps {
 }
 
 export interface InitialQueryData {
-  mentions: MentionData[];
+  mentions: ChipData[];
   text: string;
 }
 
@@ -104,7 +114,7 @@ function InitialMentionPlugin({
   initialMention,
   currentUserID,
 }: {
-  initialMention?: MentionData | null;
+  initialMention?: ChipData | null;
   currentUserID?: string;
 }) {
   const [editor] = useLexicalComposerContext();
@@ -285,9 +295,24 @@ function InsertTextPlugin({
       const insertText = (text: string) => {
         editor.update(() => {
           const selection = $getSelection();
-          if (selection !== null) {
-            selection.insertText(text);
+          if (selection === null) return;
+          // A filter keyword only parses on a word boundary — inserting `with: ` with the
+          // caret right after "issue" would produce "issuewith:", which reads as plain
+          // text and silently filters nothing. Add the separating space when the character
+          // to the left isn't already whitespace (and isn't the start of the input).
+          let prefix = '';
+          if ($isRangeSelection(selection) && selection.isCollapsed()) {
+            const anchor = selection.anchor;
+            const node = anchor.getNode();
+            const before =
+              anchor.type === 'text' ? node.getTextContent().slice(0, anchor.offset) : '';
+            // An empty `before` at a text node's start still needs the check: the previous
+            // sibling may be a chip, after which a space is wanted too.
+            const prevSibling = node.getPreviousSibling();
+            const hasContentBefore = before.length > 0 || prevSibling !== null;
+            if (hasContentBefore && !/\s$/.test(before)) prefix = ' ';
           }
+          selection.insertText(`${prefix}${text}`);
         });
       };
       onInsertTextReady(insertText);
@@ -387,17 +412,17 @@ function OnChangePluginWrapper({
 }: {
   onChange?: (
     text: string,
-    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+    mentions: Array<{ id: string; type: ChipType; prefix?: string }>,
   ) => void;
 }) {
   const extractMentions = (
     node: LexicalNode,
-  ): Array<{ id: string; type: MentionType; prefix?: string; name: string }> => {
-    const mentions: Array<{ id: string; type: MentionType; prefix?: string; name: string }> = [];
+  ): Array<{ id: string; type: ChipType; prefix?: string; name: string }> => {
+    const mentions: Array<{ id: string; type: ChipType; prefix?: string; name: string }> = [];
 
     if ($isFilterChipNode(node)) {
       const mentionData = node.getMentionData();
-      const mention: { id: string; type: MentionType; prefix?: string; name: string } = {
+      const mention: { id: string; type: ChipType; prefix?: string; name: string } = {
         id: mentionData.id,
         type: mentionData.type,
         name: mentionData.name,
@@ -492,9 +517,15 @@ export function LexicalSearchInput({
   onUserSearch,
   onChannelSearch,
   onPrioritySearch,
+  onDateSearch,
+  onBoardSearch,
+  onMentionsSearch,
   availableUsers = [],
   availableChannels = [],
   availablePriorities = [],
+  availableDates = [],
+  availableBoards = [],
+  availableMentionTargets = [],
   enableToTrigger = false,
   className,
   open,
@@ -504,6 +535,7 @@ export function LexicalSearchInput({
   onNavigate,
   hasNavigated,
   onInsertMentionReady,
+  onReplaceTriggerChipsReady,
   onMentionInserted,
   onPasteDetected,
   onManualKeystroke,
@@ -608,15 +640,22 @@ export function LexicalSearchInput({
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}
             {...(onPrioritySearch ? { onPrioritySearch } : {})}
+            {...(onDateSearch ? { onDateSearch } : {})}
+            {...(onBoardSearch ? { onBoardSearch } : {})}
+            {...(onMentionsSearch ? { onMentionsSearch } : {})}
             availableUsers={availableUsers}
             availableChannels={availableChannels}
             availablePriorities={availablePriorities}
+            availableDates={availableDates}
+            availableBoards={availableBoards}
+            availableMentionTargets={availableMentionTargets}
             {...(mentionSearchType !== undefined ? { mentionSearchType } : {})}
             {...(selectedMentionIndex !== undefined ? { selectedMentionIndex } : {})}
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}
             {...(onNavigate ? { onNavigate } : {})}
             {...(hasNavigated !== undefined ? { hasNavigated } : {})}
             {...(onInsertMentionReady ? { onInsertMentionReady } : {})}
+            {...(onReplaceTriggerChipsReady ? { onReplaceTriggerChipsReady } : {})}
             {...(onMentionInserted ? { onMentionInserted } : {})}
             enableToTrigger={enableToTrigger}
             {...(currentUserID ? { currentUserID } : {})}

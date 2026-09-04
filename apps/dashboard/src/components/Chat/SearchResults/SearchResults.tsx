@@ -36,15 +36,26 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import {
   DEFAULT_SEARCH_FILTERS,
+  saveLastSearchState,
   type SearchResultsFilters,
 } from '../../../hooks/useSearchResultsScreen';
+import {
+  ALL_FILTER_PARAM_KEYS,
+  buildChips,
+  buildSearchFilters,
+  buildTokens,
+  readFiltersFromParams,
+  writeFiltersToParams as writeRegistryParams,
+  type FilterResolvers,
+} from '../../../search/filterRegistry';
 import { DisplaySearchResult } from '../../../types/search';
 import { SearchResultMessageCard } from './SearchResultMessageCard';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
 import { SearchFilterBar } from './SearchFilterBar';
-import { SearchQueryInput } from './SearchQueryInput';
+import { SearchQueryInput, type QueryToken } from './SearchQueryInput';
+import { parseSearchFilters } from '../../../utils/searchFilterParser';
 import {
   useAllVisibleChannels,
   useAllChannels,
@@ -52,18 +63,20 @@ import {
 } from '../../../hooks/useChannels';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
   getDMNames,
   isDMChannel,
   isGroupDMChannel,
   groupChannelsByScope,
+  resolveChannelLabel,
 } from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { formatFileSize } from '../MessageAttachment/utils';
 import {
   TabType,
-  MentionType,
   VALID_DOC_TYPES,
   DOC_TYPE_TO_TAB,
 } from '../ChatDirectory/ChannelCommandMenu.types';
@@ -112,24 +125,19 @@ function docTypeToTabType(docType: SearchResultsFilters['docType']): TabType {
   return DOC_TYPE_TO_TAB[docType] ?? TabType.ALL;
 }
 
-type ResultsMention = {
-  id: string;
-  type: MentionType;
-  // Optional: bare @user / #channel mention filters have no prefix.
-  prefix?: 'from:' | 'to:' | 'in:' | 'assignee:' | 'priority:';
-  // Display name — only bare mentions need it (drives the highlight phrase).
-  name?: string;
-};
-
-// Returns true when any sender/channel/assignee filter is active.
+// Returns true when any sender/channel/assignee/participant filter is active.
 // Centralised here so adding a new filter type only requires one update.
 function hasActiveFilters(
-  filters: Pick<SearchResultsFilters, 'fromUserIds' | 'inChannelIds' | 'assigneeIds'>,
+  filters: Pick<
+    SearchResultsFilters,
+    'fromUserIds' | 'inChannelIds' | 'assigneeIds' | 'withUserIds'
+  >,
 ): boolean {
   return (
     filters.fromUserIds.length > 0 ||
     filters.inChannelIds.length > 0 ||
-    filters.assigneeIds.length > 0
+    filters.assigneeIds.length > 0 ||
+    filters.withUserIds.length > 0
   );
 }
 
@@ -139,41 +147,60 @@ function toMessageType(value?: string): MessageType {
     : MessageType.USER;
 }
 
-// Build the hook's selectedMentions from resolved filter ids. Priority is appended from
-// the URL — it has no results-screen UI, so it's pinned rather than read from `filters`.
-function buildSelectedMentions(
-  fromUserIds: string[],
-  channelIds: string[],
-  assigneeIds: string[],
-  priority: string,
-  fromEmails: string[] = [],
-  toEmails: string[] = [],
-  mentionUserIds: string[] = [],
-  mentionChannelIds: string[] = [],
-  mentionUserName: (id: string) => string | undefined = () => undefined,
-  mentionChannelName: (id: string) => string | undefined = () => undefined,
-): ResultsMention[] {
-  return [
-    ...fromUserIds.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
-    ...fromEmails.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
-    ...toEmails.map(id => ({ id, type: MentionType.USER, prefix: 'to:' as const })),
-    ...channelIds.map(id => ({ id, type: MentionType.CHANNEL, prefix: 'in:' as const })),
-    ...assigneeIds.map(id => ({ id, type: MentionType.USER, prefix: 'assignee:' as const })),
-    // Bare @user / #channel — no prefix (routed to mentions/channelMentions); the resolved name
-    // drives the highlight phrase, since the URL carries only ids. Omit name when unresolved —
-    // exactOptionalPropertyTypes forbids an explicit `name: undefined`.
-    ...mentionUserIds.map(id => {
-      const name = mentionUserName(id);
-      return name ? { id, type: MentionType.USER, name } : { id, type: MentionType.USER };
-    }),
-    ...mentionChannelIds.map(id => {
-      const name = mentionChannelName(id);
-      return name ? { id, type: MentionType.CHANNEL, name } : { id, type: MentionType.CHANNEL };
-    }),
-    ...(priority
-      ? [{ id: priority, type: MentionType.PRIORITY, prefix: 'priority:' as const }]
-      : []),
-  ];
+/**
+ * URL ⇄ filter-bar state. The palette hands the page its whole search through these params,
+ * and every bar/popover change is written back, so a results URL is a complete, shareable
+ * description of the search (UX-5). `query` and `display` are owned by the header input and
+ * handled separately.
+ */
+const SORT_VALUES: ReadonlyArray<SearchResultsFilters['sortBy']> = [
+  'relevance',
+  'newest',
+  'oldest',
+];
+
+function parseFiltersFromParams(
+  params: URLSearchParams,
+  previous: SearchResultsFilters = DEFAULT_SEARCH_FILTERS,
+): SearchResultsFilters {
+  const tabParam = parseDocTypeParam(params.get('tab'));
+  const sortParam = params.get('sort') as SearchResultsFilters['sortBy'] | null;
+  // Filter syntax can also arrive typed into the query (`status:todo` from the palette,
+  // which has no control for it); each registry entry decides how its params and that
+  // text merge.
+  const typed = parseSearchFilters(params.get('query') ?? '');
+  return {
+    ...previous,
+    // Only the palette and the "See N more" links pass a tab; absent it, keep the user's
+    // current tab so unrelated URL changes don't reset it.
+    ...(tabParam ? { docType: tabParam } : {}),
+    ...readFiltersFromParams(params, typed),
+    sortBy:
+      sortParam && SORT_VALUES.includes(sortParam) ? sortParam : DEFAULT_SEARCH_FILTERS.sortBy,
+    rankProfile: params.get('rank') ?? '',
+  };
+}
+
+/** Order-independent fingerprint of the filter params, for comparing URL against state. */
+function serializeFilterParams(params: URLSearchParams): string {
+  const filtered = new URLSearchParams();
+  for (const key of ALL_FILTER_PARAM_KEYS) {
+    const value = params.get(key);
+    if (value) filtered.set(key, value);
+  }
+  filtered.sort();
+  return filtered.toString();
+}
+
+/** filters → URL: the registry's params, plus the page-level ones it doesn't own. */
+function writeFiltersToParams(filters: SearchResultsFilters, params: URLSearchParams): void {
+  writeRegistryParams(filters, params);
+  if (filters.docType === 'all') params.delete('tab');
+  else params.set('tab', filters.docType);
+  if (filters.sortBy === DEFAULT_SEARCH_FILTERS.sortBy) params.delete('sort');
+  else params.set('sort', filters.sortBy);
+  if (filters.rankProfile) params.set('rank', filters.rankProfile);
+  else params.delete('rank');
 }
 
 const SearchResults = (): ReactElement => {
@@ -185,45 +212,9 @@ const SearchResults = (): ReactElement => {
 
   const query = searchParams.get('query')?.trim() ?? '';
 
-  // Priority has no results-screen UI, so it isn't in `filters` — it's pinned from the
-  // URL into selectedMentions wherever they're rebuilt. Validated against the enum so a
-  // hand-crafted `?priority=garbage` can't inject a bogus filter.
-  const priorityParam = searchParams.get('priority')?.toUpperCase() ?? '';
-  const priorityFilter = (Object.values(TicketPriority) as string[]).includes(priorityParam)
-    ? priorityParam
-    : '';
-
-  const [filters, setFilters] = useState<SearchResultsFilters>(() => {
-    const fromParam = searchParams.get('from') ?? '';
-    const fromEmailParam = searchParams.get('fromEmail') ?? '';
-    const toEmailParam = searchParams.get('toEmail') ?? '';
-    const inParam = searchParams.get('in') ?? '';
-    const assigneeParam = searchParams.get('assignee') ?? '';
-    const mentionsParam = searchParams.get('mentions') ?? '';
-    const channelMentionsParam = searchParams.get('channelMentions') ?? '';
-    const tabParam = parseDocTypeParam(searchParams.get('tab'));
-    // Toggles come from cmd+K (see buildSearchParams). Absent for deep links / other entry
-    // points → fall back to DEFAULT_SEARCH_FILTERS.
-    const onlyMyChannelsParam = searchParams.get('onlyMyChannels');
-    const includeBotMessagesParam = searchParams.get('includeBotMessages');
-    return {
-      ...DEFAULT_SEARCH_FILTERS,
-      ...(tabParam ? { docType: tabParam } : {}),
-      ...(onlyMyChannelsParam !== null ? { onlyMyChannels: onlyMyChannelsParam === 'true' } : {}),
-      ...(includeBotMessagesParam !== null
-        ? { includeBotMessages: includeBotMessagesParam === 'true' }
-        : {}),
-      fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
-      fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
-      toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
-      inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
-      assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
-      mentionUserIds: mentionsParam ? mentionsParam.split(',').filter(Boolean) : [],
-      mentionChannelIds: channelMentionsParam
-        ? channelMentionsParam.split(',').filter(Boolean)
-        : [],
-    };
-  });
+  const [filters, setFilters] = useState<SearchResultsFilters>(() =>
+    parseFiltersFromParams(searchParams),
+  );
 
   // —— Compare mode (ranking comparison) ——
   const [compareMode, setCompareMode] = useState(false);
@@ -319,7 +310,9 @@ const SearchResults = (): ReactElement => {
     setSelectedMentions,
     setIncludeBotMessages,
     setOnlyMyChannels,
+    setExactMatch,
     setRankProfile,
+    setStructuredFilters,
     setIncludeDebugInfo,
     loadMoreRef,
     paginationState,
@@ -347,43 +340,20 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // Sync from/in/assignee/tab URL params → filter state on navigation (popup → search screen while already mounted)
-  const fromParam = searchParams.get('from') ?? '';
-  const fromEmailParam = searchParams.get('fromEmail') ?? '';
-  const toEmailParam = searchParams.get('toEmail') ?? '';
-  const inParam = searchParams.get('in') ?? '';
-  const assigneeParam = searchParams.get('assignee') ?? '';
-  const mentionsParam = searchParams.get('mentions') ?? '';
-  const channelMentionsParam = searchParams.get('channelMentions') ?? '';
-  const tabParam = searchParams.get('tab') ?? '';
+  // URL filter params → filter state. Covers the palette handoff into an already-mounted
+  // page, the "See N more" links, back/forward, and a pasted results URL.
+  const urlFilterKey = useMemo(() => serializeFilterParams(searchParams), [searchParams]);
   useEffect(() => {
-    const parsedTab = parseDocTypeParam(tabParam);
-    setFilters(prev => ({
-      ...prev,
-      // Only the "See N more" links pass a tab; absent it, keep the user's
-      // current tab so unrelated URL changes don't reset it.
-      ...(parsedTab ? { docType: parsedTab } : {}),
-      fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
-      fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
-      toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
-      inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
-      assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
-      mentionUserIds: mentionsParam ? mentionsParam.split(',').filter(Boolean) : [],
-      mentionChannelIds: channelMentionsParam
-        ? channelMentionsParam.split(',').filter(Boolean)
-        : [],
-    }));
+    setFilters(prev => parseFiltersFromParams(new URLSearchParams(urlFilterKey), prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    fromParam,
-    fromEmailParam,
-    toEmailParam,
-    inParam,
-    assigneeParam,
-    mentionsParam,
-    channelMentionsParam,
-    tabParam,
-  ]);
+  }, [urlFilterKey]);
+
+  // Park the live search where the palette can find it. Its own history entry froze the
+  // moment we navigated here, so without this a back-navigation restores the search as it
+  // was before any filter set on this page.
+  useEffect(() => {
+    saveLastSearchState(searchParams.toString());
+  }, [searchParams]);
 
   // Sync docType filter → hook active tab.
   // When from: is active with "all" tab, the Vespa from: filter is message-schema-only,
@@ -411,6 +381,12 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
 
+  // Sync exact-match → hook; the hook quotes the query when the request is built.
+  useEffect(() => {
+    setExactMatch(filters.exactMatch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.exactMatch]);
+
   // Sync rankProfile filter → hook; clear selection so the matrix never mixes
   // ranking data captured under different profiles
   useEffect(() => {
@@ -431,6 +407,15 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compareMode]);
 
+  // Sync the popover's ticket/date filters → hook. They ride the same backend fields as the
+  // typed `status:`/`board:`/`tags:`/`before:` syntax, which keeps working alongside them.
+  const structuredFilters = useMemo(() => buildSearchFilters(filters), [filters]);
+  const structuredFiltersKey = JSON.stringify(structuredFilters);
+  useEffect(() => {
+    setStructuredFilters(structuredFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structuredFiltersKey]);
+
   // Only explicit in: chips are passed as channel mentions; "only my channels" is
   // applied server-side via the onlyMyChannels flag synced above.
   const channelIdsForSearch = filters.inChannelIds;
@@ -443,26 +428,41 @@ const SearchResults = (): ReactElement => {
     },
     [allUsers],
   );
+  // Falls back to every known channel: a carried-over `in:` may point at a DM or a channel
+  // the user has left, neither of which is in the *visible* set.
   const mentionChannelName = useCallback(
-    (id: string): string | undefined => allChannels.find(c => c.id === id)?.name,
-    [allChannels],
+    (id: string): string | undefined => {
+      const channel =
+        allChannels.find(c => c.id === id) ?? allChannelsForNav.find(c => c.id === id);
+      // A DM's `name` is its participant ids comma-joined, so it can't be shown raw.
+      return channel ? resolveChannelLabel(channel, currentUserId ?? '', allUsers) : undefined;
+    },
+    [allChannels, allChannelsForNav, currentUserId, allUsers],
+  );
+  // Id → name for every registry entry that renders one.
+  // Board tokens carry the board id (that's what the backend matches on), so they need a
+  // resolver too or they render as a raw cuid.
+  const [allBoardsList] = useCachedQuery(queries.getAllBoardsList());
+  const boardName = useCallback(
+    (id: string): string | undefined =>
+      (allBoardsList as ReadonlyArray<{ id: string; name: string }> | undefined)?.find(
+        b => b.id === id,
+      )?.name,
+    [allBoardsList],
+  );
+  const filterResolvers = useMemo(
+    (): FilterResolvers => ({
+      userName: mentionUserName,
+      channelName: mentionChannelName,
+      boardName,
+    }),
+    [mentionUserName, mentionChannelName, boardName],
   );
 
-  // Sync from/in/assignee/priority filters → hook selected mentions
+  // Sync every chip filter (from/to/with/in/assignee/priority + bare @/#) → hook mentions
   useEffect(() => {
     setSelectedMentions(
-      buildSelectedMentions(
-        filters.fromUserIds,
-        channelIdsForSearch,
-        filters.assigneeIds,
-        priorityFilter,
-        filters.fromEmails,
-        filters.toEmails,
-        filters.mentionUserIds,
-        filters.mentionChannelIds,
-        mentionUserName,
-        mentionChannelName,
-      ),
+      buildChips({ ...filters, inChannelIds: channelIdsForSearch }, filterResolvers),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -471,12 +471,76 @@ const SearchResults = (): ReactElement => {
     filters.toEmails,
     channelIdsForSearch,
     filters.assigneeIds,
+    filters.withUserIds,
     filters.mentionUserIds,
     filters.mentionChannelIds,
+    filters.priority,
     mentionUserName,
     mentionChannelName,
-    priorityFilter,
   ]);
+
+  // Declared above the memo that uses it, so the callback is reached through a ref.
+  const handleFiltersChangeRef = useRef<(next: SearchResultsFilters) => void>(() => undefined);
+
+  /**
+   * Applied filters as search-box tokens, labelled with the syntax that expresses them, so
+   * the box reads as the whole search — `from:@nasim in:#access-requests issue` — instead
+   * of only its free-text half. Removing one re-runs the search without it.
+   */
+  /**
+   * Applied filters as search-box tokens. Labels and removal both come from the registry,
+   * so a new filter shows up here without touching this component.
+   */
+  const queryTokens = useMemo(
+    (): QueryToken[] =>
+      buildTokens(filters, filterResolvers).map(token => ({
+        key: token.key,
+        ...(token.prefix ? { prefix: token.prefix } : {}),
+        ...(token.chip ? { chip: token.chip } : {}),
+        label: token.label,
+        onRemove: () => handleFiltersChangeRef.current({ ...filters, ...token.patch }),
+        ...(token.icon ? { icon: token.icon } : {}),
+      })),
+    [filters, filterResolvers],
+  );
+
+  // Keep `display` — the label the global top bar shows — in step with the filters. It's
+  // written once by the palette at hand-off, so without this the bar keeps showing the
+  // search as it was launched and never reflects anything filtered here.
+  const displayLabel = useMemo(
+    // Prefix + value, so the top bar still reads `in:general`, not a bare `general`.
+    () => [...queryTokens.map(t => `${t.prefix ?? ''}${t.label}`), query].filter(Boolean).join(' '),
+    [queryTokens, query],
+  );
+  /**
+   * The complete URL this page's state implies: filter params, the query with any filter
+   * syntax lifted out of it, and the `display` label.
+   *
+   * Built and written as ONE update on purpose. Splitting it across several effects loses
+   * writes — each `setSearchParams(prev => …)` in the same commit sees the pre-update
+   * params, so the last one silently drops what the others just wrote.
+   */
+  const desiredSearch = useMemo(() => {
+    const params = new URLSearchParams(searchParams);
+    writeFiltersToParams(filters, params);
+    // Filter syntax in the query has been lifted into `filters` by parseFiltersFromParams;
+    // strip it so it isn't shown twice — once as its token, once as raw words.
+    const cleanedQuery = parseSearchFilters(params.get('query') ?? '').searchText;
+    if (cleanedQuery) params.set('query', cleanedQuery);
+    else params.delete('query');
+    if (displayLabel) params.set('display', displayLabel);
+    else params.delete('display');
+    return params.toString();
+  }, [searchParams, filters, displayLabel]);
+
+  useEffect(() => {
+    if (desiredSearch === searchParams.toString()) return;
+    setSearchParams(new URLSearchParams(desiredSearch), {
+      replace: true,
+      preventScrollReset: true,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desiredSearch]);
 
   const handleFiltersChange = useCallback(
     (newFilters: SearchResultsFilters) => {
@@ -490,36 +554,26 @@ const SearchResults = (): ReactElement => {
         setActiveTab(effectiveTab);
       }
       setOnlyMyChannels(newFilters.onlyMyChannels);
-      // priorityFilter re-pinned from the URL (not in newFilters) so toggling another
-      // filter keeps it.
-      setSelectedMentions(
-        buildSelectedMentions(
-          newFilters.fromUserIds,
-          newFilters.inChannelIds,
-          newFilters.assigneeIds,
-          priorityFilter,
-          newFilters.fromEmails,
-          newFilters.toEmails,
-          newFilters.mentionUserIds,
-          newFilters.mentionChannelIds,
-          mentionUserName,
-          mentionChannelName,
-        ),
-      );
+      setExactMatch(newFilters.exactMatch);
+      setSelectedMentions(buildChips(newFilters, filterResolvers));
+      setStructuredFilters(buildSearchFilters(newFilters));
     },
     [
       setActiveTab,
       setOnlyMyChannels,
+      setExactMatch,
       setSelectedMentions,
-      priorityFilter,
+      setStructuredFilters,
       mentionUserName,
       mentionChannelName,
     ],
   );
+  handleFiltersChangeRef.current = handleFiltersChange;
 
   // Editing the query in the header re-runs the search through the URL, the same path a
   // cmd+K search takes, so back/forward and the overlay's query restore keep working.
-  // Filters live in their own params and are deliberately left untouched.
+  // Filters live in their own params and are deliberately left untouched. Safe to write
+  // separately: this runs from a user event, not alongside the combined effect above.
   const handleQuerySubmit = useCallback(
     (next: string) => {
       if (next === query) return;
@@ -528,9 +582,8 @@ const SearchResults = (): ReactElement => {
           const params = new URLSearchParams(prev);
           if (next) params.set('query', next);
           else params.delete('query');
-          // `display` is the pre-rendered label the top bar shows, built from mention
-          // names when the search was launched. It can't be patched from here, so drop
-          // it and let the bar fall back to the query it now shows.
+          // Drop the stale `display` label; the combined URL effect rebuilds it from the
+          // new query plus the filters that are still applied.
           params.delete('display');
           return params;
         },
@@ -561,7 +614,7 @@ const SearchResults = (): ReactElement => {
 
   // Single "narrowing filter active" flag (from:/in:/assignee: + priority:, not the
   // onlyMyChannels scope toggle) — shared by result stripping and local-section suppression.
-  const filtersActive = hasActiveFilters(filters) || !!priorityFilter;
+  const filtersActive = hasActiveFilters(filters) || !!filters.priority;
 
   const baseResults = useMemo(() => {
     if (isChannelsMode) return localChannelResults;
@@ -618,10 +671,14 @@ const SearchResults = (): ReactElement => {
     filters.toEmails,
     filters.inChannelIds,
     filters.assigneeIds,
-    priorityFilter,
+    filters.withUserIds,
+    filters.mentionUserIds,
+    filters.mentionChannelIds,
+    filters.priority,
     filters.includeBotMessages,
     filters.onlyMyChannels,
     filters.rankProfile,
+    structuredFiltersKey,
   ]);
   const searchRequestKey = JSON.stringify([query, filterKey]);
   const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
@@ -818,6 +875,9 @@ const SearchResults = (): ReactElement => {
           <div className='flex-1 min-w-0'>
             <SearchQueryInput
               query={query}
+              tokens={queryTokens}
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
               onSubmit={handleQuerySubmit}
               onLiveChange={setText}
               isSearching={isLoading}

@@ -201,6 +201,7 @@ import { valuesToFilters } from '../../utils/savedViewSerialization';
 import { readViewDraft, writeViewDraft, clearViewDraft } from './viewDraft';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../utils/apiError';
+import { matchesTicketSearch } from '../../utils/exactSearch';
 
 type SavedConfigValue = {
   id: string;
@@ -748,7 +749,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [expandedGroupsStorageKey, groupByKey, groupBy]);
 
-  const searchTerm = searchParams.get('search') ?? '';
+  // The text and the mode travel side by side and never merge here: the quotes that mark a
+  // phrase query are added at the request boundary (`toSearchQuery`, in
+  // useKanbanTicketsPage), so both of these stay exactly what the user chose.
+  const searchInputValue = searchParams.get('search') ?? '';
+  const isExactSearch = searchParams.get('exact') === '1';
+  const searchTerm = searchInputValue.trim();
   const [isBoardDropdownOpen, setIsBoardDropdownOpen] = useState(false);
   const [isSourceChannelsOpen, setIsSourceChannelsOpen] = useState(false);
   const [isFiltersDropdownOpen, setIsFiltersDropdownOpen] = useState(false);
@@ -807,6 +813,21 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           next.set('search', value);
         } else {
           next.delete('search');
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  const setIsExactSearch = (value: boolean) => {
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev);
+        if (value) {
+          next.set('exact', '1');
+        } else {
+          next.delete('exact');
         }
         return next;
       },
@@ -2071,9 +2092,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       user?.id,
     );
 
-    // Apply search filter
+    // Apply search filter. A quoted query ("payment failed") is an exact-phrase search:
+    // the string must appear verbatim, same words, same order. Unquoted stays loose —
+    // every word must appear, in any order. Mirrors what Vespa does on the kanban path.
     if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase().trim();
       tickets = tickets.filter(ticket => {
         const searchableText = [
           ticket.title || '',
@@ -2082,11 +2104,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ticket.merchantId || '',
           ticket.statusV2 || '',
           ticket.priority || '',
-        ]
-          .join(' ')
-          .toLowerCase();
+        ].join(' ');
 
-        return searchableText.includes(searchLower);
+        return matchesTicketSearch(searchableText, searchTerm, isExactSearch);
       });
     }
 
@@ -2104,6 +2124,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     formValuesByTicketId,
     formFieldsById,
     searchTerm,
+    // The mode is its own input now. It used to ride along inside `searchTerm` (which
+    // carried the quotes), so toggling it re-ran this memo for free; with the flag split
+    // out, leaving it off the list would freeze the local filter in whichever mode it
+    // last ran in.
+    isExactSearch,
     user?.id,
     showOverdueOnly,
   ]);
@@ -3036,6 +3061,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     () => ({
       ...ticketsQueryParams,
       searchTerm,
+      exactSearch: isExactSearch,
       filters: deferredFilters,
       formEntityValueFieldIds: fevFieldIds,
       dynamicFieldVespaTokens,
@@ -3047,6 +3073,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [
       ticketsQueryParams,
       searchTerm,
+      isExactSearch,
       deferredFilters,
       fevFieldIds,
       dynamicFieldVespaTokens,
@@ -3070,6 +3097,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       JSON.stringify({
         ticketsQueryParams,
         searchTerm: searchTerm.trim(),
+        exactSearch: isExactSearch,
         columnType: shouldUseStatusColumns ? 'status' : 'stage',
         filters: deferredFilters,
         groupBy,
@@ -3089,6 +3117,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       shouldUseStatusColumns,
       showOverdueOnly,
       searchTerm,
+      isExactSearch,
       ticketsQueryParams,
     ],
   );
@@ -3709,8 +3738,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : []
               }
               selectedBoardName={selectedBoardDetail?.name ?? undefined}
-              searchValue={searchTerm}
+              searchValue={searchInputValue}
               onSearchChange={setSearchTerm}
+              isExactSearch={isExactSearch}
+              onExactSearchChange={setIsExactSearch}
               {...(channelId ? { channelId } : {})}
               groupBy={typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy}
               hasActiveView={!!selectedViewId}
@@ -5186,6 +5217,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       baseArgs: {
                         ...ticketsQueryParams,
                         searchTerm,
+                        exactSearch: isExactSearch,
                         filters: deferredFilters,
                         formEntityValueFieldIds: fevFieldIds,
                         dynamicFieldVespaTokens,

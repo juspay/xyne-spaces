@@ -18,9 +18,10 @@ import {
 import { invokeShortcut } from '../../shortcuts';
 import { useSearchMode } from '../../hooks/useSearchMode';
 import { toast } from 'sonner';
+import { hasAnySearchState } from '../../hooks/useSearchResultsScreen';
 import { Tooltip } from '../ui/Tooltip';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
-import type { MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
+import type { ChipData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { formatElapsedTime } from '../../utils/recordingUtils';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -48,7 +49,7 @@ const NavigationAndSearch = (): ReactElement => {
   const [restoreQuery, setRestoreQuery] = useState(false);
   // Cmd+F (screen mode) opens this bar pre-scoped with an in:<channel> chip; the
   // event carries the mention so the input renders cursor-ready with the chip.
-  const [pendingMention, setPendingMention] = useState<MentionData | null>(null);
+  const [pendingMention, setPendingMention] = useState<ChipData | null>(null);
   // Cmd+/ (screen mode) opens this bar seeded with `/` so it lands in slash-command discovery.
   const [pendingCommand, setPendingCommand] = useState(false);
   const openedAtHrefRef = useRef('');
@@ -73,7 +74,7 @@ const NavigationAndSearch = (): ReactElement => {
   // opens seeded with `/`. Either way it opens with no query restore.
   useEffect(() => {
     const handler = (event: Event): void => {
-      const detail = (event as CustomEvent<{ mention?: MentionData; command?: boolean }>).detail;
+      const detail = (event as CustomEvent<{ mention?: ChipData; command?: boolean }>).detail;
       setPendingMention(detail?.mention ?? null);
       setPendingCommand(detail?.command ?? false);
       setRestoreQuery(false);
@@ -101,7 +102,9 @@ const NavigationAndSearch = (): ReactElement => {
     if (searchMode === 'screen') {
       // Clicking the header bar on the results screen restores the active query;
       // elsewhere the overlay opens empty.
-      setRestoreQuery(isOnSearchScreen && Boolean(searchScreenQuery));
+      // Restore whenever the results URL holds any search — a filters-only search
+      // (`in:#eng status:todo`, no words) has no query text but is still worth restoring.
+      setRestoreQuery(isOnSearchScreen && hasAnySearchState(searchScreenParams));
       setSearchOpen(true);
       return;
     }

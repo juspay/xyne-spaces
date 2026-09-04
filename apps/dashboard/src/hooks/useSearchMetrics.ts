@@ -6,7 +6,7 @@ import { searchService, clearVespaSearchCache } from '../services/searchService'
 import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
 import {
   TabType,
-  MentionType,
+  ChipType,
   VespaApps,
   VespaDocTypes,
   SearchableTypes,
@@ -31,12 +31,14 @@ import {
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
 import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
+import type { StructuredSearchFilters } from './useSearchResultsScreen';
+import { resolveDateKeyword } from '../search/filterModel';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
 type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
 
-type SelectedMention = { id: string; type: MentionType; prefix?: string; name?: string };
+type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
 type MentionBuckets = {
   from: SelectedMention[];
@@ -88,11 +90,14 @@ interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
   onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
-  mentionSearchType?: MentionType | null;
+  mentionSearchType?: ChipType | null;
   isCallSearchPage?: boolean;
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
+  // Initial value for the "Include automations" toggle. Set when reopening the palette
+  // from a search whose scope had it on, so the restored search matches what was run.
+  defaultIncludeBotMessages?: boolean;
   // When true, the ALL-tab Vespa query uses groupBy:'docType' so the backend
   // returns results bucketed by document type (≤10 per category) instead of a
   // flat ranked list — lets the ALL tab show a few of each type at once.
@@ -112,6 +117,53 @@ const MAX_BACKEND_OFFSET = 1000;
  * the user typed it.
  */
 export const CMDK_USER_LIMIT = 25;
+
+/**
+ * Text filters for a query, with UI-picked values layered on top. Typed syntax
+ * (`status:todo`, `board:…`) keeps working; an explicit pick from the results page's
+ * Filters popover wins for that field.
+ */
+function resolveTextFilters(
+  query: string,
+  overrides: StructuredSearchFilters,
+): ReturnType<typeof parseSearchFilters> {
+  const parsed = parseSearchFilters(query);
+  return {
+    ...parsed,
+    board: overrides.board || parsed.board,
+    tags: overrides.tags || parsed.tags,
+    status: overrides.status || parsed.status,
+    before: overrides.before || parsed.before,
+    after: overrides.after || parsed.after,
+    on: overrides.on || parsed.on,
+    range: overrides.range || parsed.range,
+  };
+}
+
+/**
+ * Date bounds carried by chips rather than text. Dates are chips in the palette now, so
+ * they no longer appear in the query for `parseSearchFilters` to find — without this the
+ * date filter would render as a chip and quietly not be applied.
+ */
+function boardFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const boards = mentions.filter(m => m.type === ChipType.BOARD).map(m => m.id);
+  return boards.length > 0 ? { board: boards.join(',') } : {};
+}
+
+function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const dates = mentions.filter(m => m.type === ChipType.DATE);
+  if (dates.length === 0) return {};
+  // A preset chip carries its keyword (`last 7 days`) rather than a date — one chip
+  // standing for a window, so the user reads back what they picked. The window is resolved
+  // here, at the request boundary, so the backend still gets the two bounds it wants.
+  const preset = dates.map(m => resolveDateKeyword(m.id)).find(Boolean);
+  if (preset) return { after: preset.after, before: preset.before };
+  const on = dates.find(m => m.prefix === 'on:');
+  if (on) return { on: on.id };
+  const after = dates.find(m => m.prefix === 'after:')?.id;
+  const before = dates.find(m => m.prefix === 'before:')?.id;
+  return { ...(after ? { after } : {}), ...(before ? { before } : {}) };
+}
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
@@ -149,15 +201,25 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Per-tab CAC default; an explicit user pick (rankProfile) wins.
   const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
-    Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
+    Array<{ id: string; type: ChipType; prefix?: string; name?: string }>
   >([]);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
-  const [includeBotMessages, setIncludeBotMessages] = useState(false);
+  const [includeBotMessages, setIncludeBotMessages] = useState(
+    options.defaultIncludeBotMessages ?? false,
+  );
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
   // other consumers (full-page search) default OFF so their behavior is unchanged.
   const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
+  // Exact-match mode. Not derived from the query text: the quotes are added when the
+  // request is built, so the box stays clean.
+  const [exactMatch, setExactMatch] = useState(false);
   // Vespa rank profile, passed through to the search payload. '' => backend default.
   const [rankProfile, setRankProfile] = useState('');
+  // Structured filters picked from UI (the results page's Filters popover) rather than typed
+  // into the query. Merged over whatever `parseSearchFilters` finds in the text, so typed
+  // syntax keeps working and an explicit pick wins.
+  const [structuredFilters, setStructuredFilters] = useState<StructuredSearchFilters>({});
+  const structuredFiltersKey = JSON.stringify(structuredFilters);
   // Compare mode: request per-result matchfeatures/rankfeatures for ranking debug.
   const [includeDebugInfo, setIncludeDebugInfo] = useState(false);
   // Load More Ref
@@ -453,7 +515,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       const parsedFiltersForImpression = parseSearchFilters(params.queryText);
 
       // Priority is chip-only — track it from the chip, not parsed text.
-      if (selectedMentions.some(m => m.type === MentionType.PRIORITY)) {
+      if (selectedMentions.some(m => m.type === ChipType.PRIORITY)) {
         sessionFiltersRef.current.add('priority');
       }
       if (parsedFiltersForImpression.board) sessionFiltersRef.current.add('board');
@@ -714,7 +776,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       abortController: AbortController,
       query: string,
       activeTab: TabType,
-      selectedMentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
+      selectedMentions: Array<{ id: string; type: ChipType; prefix?: string; name?: string }>,
       filteredLocalUsers: User[],
       filteredLocalChannels: Array<{
         channel: Channel;
@@ -738,11 +800,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         stage: stageFilter,
         status: statusFilter,
         type: typeFilter,
-      } = parseSearchFilters(query);
+      } = resolveTextFilters(query, {
+        ...structuredFilters,
+        ...dateFiltersFromChips(selectedMentions),
+        ...boardFilterFromChips(selectedMentions),
+      });
 
       // Priority is chip-only: value comes solely from the chip; raw `priority:` text
       // isn't a filter (falls through to full-text search).
-      const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
+      const priorityFilter = selectedMentions.find(m => m.type === ChipType.PRIORITY)?.id;
 
       // Adjust local results count logic for context
       let localCount = 0;
@@ -862,6 +928,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
+              exactMatch,
               ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
               ...(priorityFilter && { priority: priorityFilter }),
@@ -1172,9 +1239,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       options.isCallSearchPage,
       includeBotMessages,
       onlyMyChannels,
+      exactMatch,
       rankProfile,
       allDefaultRankProfile,
       includeDebugInfo,
+      structuredFilters,
     ],
   );
 
@@ -1185,18 +1254,22 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: string;
     includeBotMessages: boolean;
     onlyMyChannels: boolean;
+    exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
     includeDebugInfo: boolean;
+    structuredFiltersKey: string;
   }>({
     text: '',
     activeTab: TabType.ALL,
     mentionsKey: '',
     includeBotMessages: false,
     onlyMyChannels: options.defaultOnlyMyChannels ?? false,
+    exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
     includeDebugInfo: false,
+    structuredFiltersKey: '{}',
   });
 
   // Debounced backend search with pagination reset
@@ -1226,6 +1299,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
+      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
       normalizedText !== ''
     ) {
       // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
@@ -1243,9 +1317,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         activeTab,
         includeBotMessages,
         onlyMyChannels,
+        exactMatch,
         rankProfile,
         allDefaultRankProfile,
         includeDebugInfo,
+        structuredFiltersKey,
         mentionsKey: currentMentionsKey,
       };
       // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
@@ -1285,9 +1361,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     performSearch,
     includeBotMessages,
     onlyMyChannels,
+    exactMatch,
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
+    structuredFiltersKey,
   ]);
 
   /**
@@ -1305,10 +1383,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       stage: stageFilter,
       status: statusFilter,
       type: typeFilter,
-    } = parseSearchFilters(text);
+    } = resolveTextFilters(text, {
+      ...structuredFilters,
+      ...dateFiltersFromChips(selectedMentions),
+      ...boardFilterFromChips(selectedMentions),
+    });
 
     // Mirror performSearch: priority is chip-only (value from the chip, not text).
-    const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
+    const priorityFilter = selectedMentions.find(m => m.type === ChipType.PRIORITY)?.id;
 
     const hasFilters =
       priorityFilter ||
@@ -1357,6 +1439,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
+          exactMatch,
           ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
           ...(priorityFilter && { priority: priorityFilter }),
@@ -1512,9 +1595,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     includeBotMessages,
     onlyMyChannels,
+    exactMatch,
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
+    structuredFilters,
     options.isCallSearchPage,
   ]);
 
@@ -1605,8 +1690,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setIncludeBotMessages,
     onlyMyChannels,
     setOnlyMyChannels,
+    exactMatch,
+    setExactMatch,
     rankProfile,
     setRankProfile,
+    structuredFilters,
+    setStructuredFilters,
     includeDebugInfo,
     setIncludeDebugInfo,
     loadMore,

@@ -14,6 +14,10 @@ interface CheckboxProps extends Omit<ComponentPropsWithoutRef<'input'>, 'onChang
       shrink below its content width. For tight flex rows (e.g. composer footers)
       where a long label would otherwise push siblings out of the container. */
   truncateLabel?: boolean;
+  /** Replaces the size preset's label typography. For surfaces where the label has to
+      match surrounding text rather than the checkbox's own scale (e.g. the search
+      Filters dialog, where labels sit at the same 14px as the field values). */
+  labelClassName?: string;
 }
 
 export function Checkbox({
@@ -25,6 +29,7 @@ export function Checkbox({
   disabled = false,
   size = 'md',
   truncateLabel = false,
+  labelClassName,
   ...rest
 }: CheckboxProps): ReactElement {
   const sm = size === 'sm';
@@ -110,7 +115,8 @@ export function Checkbox({
       {label && (
         <span
           className={`${
-            sm ? 'text-xs text-muted-foreground' : 'text-[13px] font-medium text-foreground'
+            labelClassName ??
+            (sm ? 'text-xs text-muted-foreground' : 'text-[13px] font-medium text-foreground')
           } ${truncateLabel ? 'truncate' : ''}`}
           {...(truncateLabel && { title: label })}
         >

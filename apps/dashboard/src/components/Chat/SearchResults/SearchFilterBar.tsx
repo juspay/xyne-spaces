@@ -1,21 +1,32 @@
-import { ReactElement, useState, useMemo, useRef, useCallback, KeyboardEvent } from 'react';
+import {
+  Fragment,
+  ReactElement,
+  useState,
+  useMemo,
+  useRef,
+  useCallback,
+  KeyboardEvent,
+} from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { ChevronDown, Check, X, User, Hash, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
+import { ArrowUpDown, Check, ChevronDown, Hash, SlidersHorizontal, User, X } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { cn } from '../../../utils/classNames';
-import { useUserSearch } from '../../../hooks/useUsers';
-import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useUserSearch, useUsers } from '../../../hooks/useUsers';
+import { useAllChannels, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
-import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
+import { isDMChannel, resolveChannelLabel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
+import { type SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
-import type { Channel } from '@xyne/shared';
+import { type Channel } from '@xyne/shared';
+import { clearInapplicable, entriesFor } from '../../../search/filterRegistry';
 import {
   useCmdkDefaultRankProfiles,
   cmdkTabKeyForDocType,
 } from '../../../hooks/useCmdkSearchConfig';
+import { FiltersModal } from './filters/FiltersModal';
+import { CHIP_ACTIVE, CHIP_BASE, MENU_ITEM, POPOVER_CONTENT } from './filters/styles';
 
 interface SearchFilterBarProps {
   filters: SearchResultsFilters;
@@ -41,16 +52,6 @@ const TYPE_LABELS: Record<SearchResultsFilters['docType'], string> = {
   desk: 'Desk',
   people: 'People',
 };
-
-const CHIP_BASE =
-  'rounded-lg h-6 px-2 text-xs font-medium gap-1.5 border-border hover:bg-muted whitespace-nowrap data-[state=open]:ring-0 data-[state=open]:outline-none';
-const CHIP_ACTIVE =
-  'border-primary bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground';
-
-const POPOVER_CONTENT = 'z-[60] bg-popover border border-border rounded-lg shadow-md';
-
-const MENU_ITEM =
-  'flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded text-left focus:outline-none';
 
 function ChannelFilterItem({
   channel,
@@ -139,6 +140,20 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
     { value: 'default_ai', label: 'default_ai' },
   ],
 };
+
+/**
+ * Switching type drops the filters that type can't express, so the bar never shows an
+ * active filter the query won't apply. Rank profiles are schema-scoped, so they reset too.
+ */
+function applyDocTypeChange(
+  filters: SearchResultsFilters,
+  docType: SearchResultsFilters['docType'],
+): SearchResultsFilters {
+  const next = { ...filters, docType, rankProfile: '' };
+  // Each registry entry declares which types can express it; the ones this type can't are
+  // cleared, so the bar never shows an active filter the query won't apply.
+  return { ...next, ...clearInapplicable(next) };
+}
 
 function getRankProfileOptions(
   docType: SearchResultsFilters['docType'],
@@ -237,18 +252,25 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const [typeOpen, setTypeOpen] = useState(false);
   const [fromOpen, setFromOpen] = useState(false);
   const [inOpen, setInOpen] = useState(false);
-  const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [rankOpen, setRankOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [fromQuery, setFromQuery] = useState('');
   const [inQuery, setInQuery] = useState('');
-  const [assigneeQuery, setAssigneeQuery] = useState('');
 
   const fromUsers = useUserSearch(fromQuery, 20) ?? [];
-  const assigneeUsers = useUserSearch(assigneeQuery, 20) ?? [];
   const allChannels = useAllVisibleChannels();
+  const allUsers = useUsers();
   const { userID: currentUserId } = useAuthContextValues();
+
+  const knownChannelsForLabels = useAllChannels();
+
+  // The mode pills the row ends with, in registry order.
+  const toggleEntries = useMemo(
+    () => entriesFor(filters.docType).filter(entry => entry.control?.kind === 'toggle'),
+    [filters.docType],
+  );
 
   const filteredChannels = useMemo(() => {
     const q = inQuery.toLowerCase().trim();
@@ -256,11 +278,58 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
     return allChannels.filter(c => c.name.toLowerCase().includes(q)).slice(0, 20);
   }, [allChannels, inQuery]);
 
+  /**
+   * Applied options first, then the rest, so the popover can rule a line under what's
+   * already on. An applied option is always present even when the query or the 20-row cap
+   * wouldn't return it — otherwise a filter you can see on the chip vanishes from the list
+   * that's supposed to let you turn it off.
+   */
+  const fromOptions = useMemo(() => {
+    const selected = filters.fromUserIds
+      .map(id => fromUsers.find(u => u.id === id) ?? allUsers.find(u => u.id === id))
+      .filter((u): u is (typeof fromUsers)[number] => Boolean(u));
+    const selectedIds = new Set(selected.map(u => u.id));
+    return {
+      selectedCount: selected.length,
+      list: [...selected, ...fromUsers.filter(u => !selectedIds.has(u.id))],
+    };
+  }, [filters.fromUserIds, fromUsers, allUsers]);
+
+  const inOptions = useMemo(() => {
+    const selected = filters.inChannelIds
+      .map(id => filteredChannels.find(c => c.id === id) ?? allChannels.find(c => c.id === id))
+      .filter((c): c is (typeof filteredChannels)[number] => Boolean(c));
+    const selectedIds = new Set(selected.map(c => c.id));
+    return {
+      selectedCount: selected.length,
+      list: [...selected, ...filteredChannels.filter(c => !selectedIds.has(c.id))],
+    };
+  }, [filters.inChannelIds, filteredChannels, allChannels]);
+
   const isTypeActive = filters.docType !== 'all';
   const isFromActive = filters.fromUserIds.length > 0;
   const isInActive = filters.inChannelIds.length > 0;
-  const isAssigneeActive = filters.assigneeIds.length > 0;
   const isSortActive = filters.sortBy !== 'relevance';
+
+  // Applied chips name their value the way Slack's do — "From nasim", not "From (1)".
+  const namedChipLabel = (field: string, ids: string[], nameOf: (id: string) => string): string => {
+    if (ids.length === 0) return field;
+    const only = ids[0];
+    if (ids.length === 1 && only !== undefined) return `${field} ${nameOf(only)}`;
+    return `${field} (${ids.length})`;
+  };
+  const fromChipLabel = namedChipLabel('From', filters.fromUserIds, id => {
+    const user = allUsers.find(u => u.id === id);
+    return user ? getUserDisplayName(user) : id;
+  });
+  // No `#` in the name — the chip already leads with a Hash glyph.
+  const inChipLabel = namedChipLabel('In', filters.inChannelIds, id => {
+    // Falls back to every known channel: a selected DM or a channel the user has left
+    // isn't in the *visible* set, and the chip must never read as a raw id.
+    const channel =
+      allChannels.find(c => c.id === id) ?? knownChannelsForLabels.find(c => c.id === id);
+    return channel ? resolveChannelLabel(channel, currentUserId ?? '', allUsers) : id;
+  });
 
   const resolvedDefaultRankProfile = defaultRankProfileFor(cmdkTabKeyForDocType(filters.docType));
   const rankProfileOptions = getRankProfileOptions(filters.docType, resolvedDefaultRankProfile);
@@ -271,8 +340,6 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
     rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ?? filters.rankProfile;
 
   const showFromIn = filters.docType !== 'channels' && filters.docType !== 'people';
-  const showAssignee = filters.docType === 'tickets' || filters.docType === 'all';
-  const showIncludeAutomations = filters.docType === 'messages' || filters.docType === 'all';
 
   function toggleUser(userId: string): void {
     const next = filters.fromUserIds.includes(userId)
@@ -288,44 +355,23 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
     onFiltersChange({ ...filters, inChannelIds: next });
   }
 
-  function toggleAssignee(userId: string): void {
-    const next = filters.assigneeIds.includes(userId)
-      ? filters.assigneeIds.filter(id => id !== userId)
-      : [...filters.assigneeIds, userId];
-    onFiltersChange({ ...filters, assigneeIds: next });
-  }
-
   // Keyboard nav for each popover
   const typeNav = useListKeyNav(
     TYPE_OPTIONS.length,
     i => {
       const opt = TYPE_OPTIONS[i];
       if (!opt) return;
-      onFiltersChange({
-        ...filters,
-        docType: opt.value,
-        // Rank profiles are schema-scoped; reset to backend default on type change.
-        rankProfile: '',
-        ...(['channels', 'people'].includes(opt.value) && {
-          fromUserIds: [],
-          inChannelIds: [],
-          assigneeIds: [],
-          withUserIds: [],
-          onlyMyChannels: false,
-        }),
-        ...(opt.value !== 'tickets' && opt.value !== 'all' && { assigneeIds: [] }),
-        ...(opt.value !== 'messages' && opt.value !== 'all' && { withUserIds: [] }),
-        ...(opt.value !== 'messages' && opt.value !== 'all' && { includeBotMessages: false }),
-      });
+      onFiltersChange(applyDocTypeChange(filters, opt.value));
       setTypeOpen(false);
     },
     () => setTypeOpen(false),
   );
 
   const fromNav = useListKeyNav(
-    fromUsers.length,
+    fromOptions.list.length,
     i => {
-      if (fromUsers[i]) toggleUser(fromUsers[i].id);
+      const user = fromOptions.list[i];
+      if (user) toggleUser(user.id);
     },
     () => {
       setFromOpen(false);
@@ -334,24 +380,14 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   );
 
   const inNav = useListKeyNav(
-    filteredChannels.length,
+    inOptions.list.length,
     i => {
-      if (filteredChannels[i]) toggleChannel(filteredChannels[i].id);
+      const channel = inOptions.list[i];
+      if (channel) toggleChannel(channel.id);
     },
     () => {
       setInOpen(false);
       setInQuery('');
-    },
-  );
-
-  const assigneeNav = useListKeyNav(
-    assigneeUsers.length,
-    i => {
-      if (assigneeUsers[i]) toggleAssignee(assigneeUsers[i].id);
-    },
-    () => {
-      setAssigneeOpen(false);
-      setAssigneeQuery('');
     },
   );
 
@@ -415,23 +451,7 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                   key={opt.value}
                   data-list-item
                   onClick={() => {
-                    onFiltersChange({
-                      ...filters,
-                      docType: opt.value,
-                      // Rank profiles are schema-scoped; reset to backend default on type change.
-                      rankProfile: '',
-                      ...(['channels', 'people'].includes(opt.value) && {
-                        fromUserIds: [],
-                        inChannelIds: [],
-                        assigneeIds: [],
-                        withUserIds: [],
-                        onlyMyChannels: false,
-                      }),
-                      ...(opt.value !== 'tickets' && opt.value !== 'all' && { assigneeIds: [] }),
-                      ...(opt.value !== 'messages' && opt.value !== 'all' && { withUserIds: [] }),
-                      ...(opt.value !== 'messages' &&
-                        opt.value !== 'all' && { includeBotMessages: false }),
-                    });
+                    onFiltersChange(applyDocTypeChange(filters, opt.value));
                     setTypeOpen(false);
                   }}
                   onMouseEnter={() => typeNav.setActiveIndex(i)}
@@ -469,8 +489,14 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                 className={cn(CHIP_BASE, isFromActive && CHIP_ACTIVE)}
                 onKeyDown={openOnArrowDown(fromOpen, setFromOpen)}
               >
-                <User className='size-3' />
-                {isFromActive ? `From (${filters.fromUserIds.length})` : 'From'}
+                {/* One person → their avatar; several → the generic glyph, since no single
+                    face represents the set. */}
+                {filters.fromUserIds.length === 1 && filters.fromUserIds[0] ? (
+                  <Avatar userId={filters.fromUserIds[0]} size='xs' showActiveStatus={false} />
+                ) : (
+                  <User className='size-3' />
+                )}
+                {fromChipLabel}
                 <ChevronDown
                   className={cn('size-3 transition-transform', fromOpen && 'rotate-180')}
                 />
@@ -499,30 +525,34 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                 />
               </div>
               <div className='max-h-52 overflow-y-auto py-1' ref={fromNav.listRef}>
-                {fromUsers.length === 0 ? (
+                {fromOptions.list.length === 0 ? (
                   <p className='px-3 py-2 text-xs text-muted-foreground'>No users found</p>
                 ) : (
-                  fromUsers.map((user, i) => {
+                  fromOptions.list.map((user, i) => {
                     const selected = filters.fromUserIds.includes(user.id);
                     return (
-                      <button
-                        key={user.id}
-                        data-list-item
-                        onClick={() => toggleUser(user.id)}
-                        onMouseEnter={() => fromNav.setActiveIndex(i)}
-                        className={cn(MENU_ITEM, fromNav.activeIndex === i && 'bg-muted')}
-                        data-track-category='SEARCH_FILTERS'
-                        data-track-name='TOGGLE_FROM_USER'
-                      >
-                        <Check
-                          className={cn(
-                            'size-3.5 shrink-0',
-                            selected ? 'opacity-100' : 'opacity-0',
-                          )}
-                        />
-                        <Avatar userId={user.id} size='xs' showActiveStatus={false} />
-                        <span className='truncate'>{getUserDisplayName(user)}</span>
-                      </button>
+                      <Fragment key={user.id}>
+                        {i === fromOptions.selectedCount && fromOptions.selectedCount > 0 && (
+                          <div className='my-1 border-t border-border' />
+                        )}
+                        <button
+                          data-list-item
+                          onClick={() => toggleUser(user.id)}
+                          onMouseEnter={() => fromNav.setActiveIndex(i)}
+                          className={cn(MENU_ITEM, fromNav.activeIndex === i && 'bg-muted')}
+                          data-track-category='SEARCH_FILTERS'
+                          data-track-name='TOGGLE_FROM_USER'
+                        >
+                          <Check
+                            className={cn(
+                              'size-3.5 shrink-0',
+                              selected ? 'opacity-100' : 'opacity-0',
+                            )}
+                          />
+                          <Avatar userId={user.id} size='xs' showActiveStatus={false} />
+                          <span className='truncate'>{getUserDisplayName(user)}</span>
+                        </button>
+                      </Fragment>
                     );
                   })
                 )}
@@ -561,7 +591,7 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                 onKeyDown={openOnArrowDown(inOpen, setInOpen)}
               >
                 <Hash className='size-3' />
-                {isInActive ? `In (${filters.inChannelIds.length})` : 'In'}
+                {inChipLabel}
                 <ChevronDown
                   className={cn('size-3 transition-transform', inOpen && 'rotate-180')}
                 />
@@ -590,19 +620,23 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                 />
               </div>
               <div className='max-h-52 overflow-y-auto py-1' ref={inNav.listRef}>
-                {filteredChannels.length === 0 ? (
+                {inOptions.list.length === 0 ? (
                   <p className='px-3 py-2 text-xs text-muted-foreground'>No channels found</p>
                 ) : (
-                  filteredChannels.map((channel, i) => (
-                    <ChannelFilterItem
-                      key={channel.id}
-                      channel={channel as unknown as Channel}
-                      currentUserId={currentUserId}
-                      selected={filters.inChannelIds.includes(channel.id)}
-                      highlighted={inNav.activeIndex === i}
-                      onClick={() => toggleChannel(channel.id)}
-                      onMouseEnter={() => inNav.setActiveIndex(i)}
-                    />
+                  inOptions.list.map((channel, i) => (
+                    <Fragment key={channel.id}>
+                      {i === inOptions.selectedCount && inOptions.selectedCount > 0 && (
+                        <div className='my-1 border-t border-border' />
+                      )}
+                      <ChannelFilterItem
+                        channel={channel as unknown as Channel}
+                        currentUserId={currentUserId}
+                        selected={filters.inChannelIds.includes(channel.id)}
+                        highlighted={inNav.activeIndex === i}
+                        onClick={() => toggleChannel(channel.id)}
+                        onMouseEnter={() => inNav.setActiveIndex(i)}
+                      />
+                    </Fragment>
                   ))
                 )}
               </div>
@@ -622,126 +656,39 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
           </Popover.Root>
         )}
 
-        {/* Only my channels — same visibility as In chip */}
-        {showFromIn && (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => onFiltersChange({ ...filters, onlyMyChannels: !filters.onlyMyChannels })}
-            className={cn(CHIP_BASE, filters.onlyMyChannels && CHIP_ACTIVE)}
-            data-track-category='SEARCH_FILTERS'
-            data-track-name='TOGGLE_ONLY_MY_CHANNELS'
-          >
-            Only my channels
-          </Button>
-        )}
-
-        {/* Assignee chip — tickets only */}
-        {showAssignee && (
-          <Popover.Root
-            open={assigneeOpen}
-            onOpenChange={open => {
-              setAssigneeOpen(open);
-              if (!open) setAssigneeQuery('');
-              if (open) assigneeNav.setActiveIndex(-1);
-            }}
-          >
-            <Popover.Trigger asChild>
-              <Button
-                variant='outline'
-                size='sm'
-                className={cn(CHIP_BASE, isAssigneeActive && CHIP_ACTIVE)}
-                onKeyDown={openOnArrowDown(assigneeOpen, setAssigneeOpen)}
-              >
-                <User className='size-3' />
-                {isAssigneeActive ? `Assignee (${filters.assigneeIds.length})` : 'Assignee'}
-                <ChevronDown
-                  className={cn('size-3 transition-transform', assigneeOpen && 'rotate-180')}
-                />
-              </Button>
-            </Popover.Trigger>
-            <Popover.Content
-              side='bottom'
-              align='start'
-              sideOffset={6}
-              className={cn(POPOVER_CONTENT, 'w-64')}
-              onKeyDown={assigneeNav.handleKeyDown}
+        {/* The mode pills, mirroring the palette's row so the same three controls read the
+            same on both surfaces. They belong here rather than in the dialog: each is a
+            mode you flip while reading results, not a value you configure. Driven from the
+            registry, so `appliesTo` decides which are offered — `Bot` is message-only and
+            drops off the Tickets tab on its own. */}
+        {toggleEntries.map(entry => {
+          const isOn = entry.getValue?.(filters) === true;
+          return (
+            <Button
+              key={entry.id}
+              variant='outline'
+              size='sm'
+              onClick={() => onFiltersChange({ ...filters, ...(entry.setValue?.(!isOn) ?? {}) })}
+              aria-pressed={isOn}
+              title={entry.label}
+              className={cn(CHIP_BASE, isOn && CHIP_ACTIVE)}
+              data-track-category='SEARCH_FILTERS'
+              data-track-name={`TOGGLE_${entry.id.toUpperCase()}`}
             >
-              <div className='p-2 border-b border-border'>
-                <input
-                  autoFocus
-                  value={assigneeQuery}
-                  onChange={e => {
-                    setAssigneeQuery(e.target.value);
-                    assigneeNav.setActiveIndex(-1);
-                  }}
-                  onKeyDown={assigneeNav.handleInputKeyDown}
-                  placeholder='Search people…'
-                  className='w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground'
-                  data-track-category='SEARCH_FILTERS'
-                  data-track-name='ASSIGNEE_SEARCH_INPUT'
-                />
-              </div>
-              <div className='max-h-52 overflow-y-auto py-1' ref={assigneeNav.listRef}>
-                {assigneeUsers.length === 0 ? (
-                  <p className='px-3 py-2 text-xs text-muted-foreground'>No users found</p>
-                ) : (
-                  assigneeUsers.map((user, i) => {
-                    const selected = filters.assigneeIds.includes(user.id);
-                    return (
-                      <button
-                        key={user.id}
-                        data-list-item
-                        onClick={() => toggleAssignee(user.id)}
-                        onMouseEnter={() => assigneeNav.setActiveIndex(i)}
-                        className={cn(MENU_ITEM, assigneeNav.activeIndex === i && 'bg-muted')}
-                        data-track-category='SEARCH_FILTERS'
-                        data-track-name='TOGGLE_ASSIGNEE'
-                      >
-                        <Check
-                          className={cn(
-                            'size-3.5 shrink-0',
-                            selected ? 'opacity-100' : 'opacity-0',
-                          )}
-                        />
-                        <Avatar userId={user.id} size='xs' showActiveStatus={false} />
-                        <span className='truncate'>{getUserDisplayName(user)}</span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-              {isAssigneeActive && (
-                <div className='border-t border-border p-1'>
-                  <button
-                    onClick={() => onFiltersChange({ ...filters, assigneeIds: [] })}
-                    className='flex w-full items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded'
-                    data-track-category='SEARCH_FILTERS'
-                    data-track-name='CLEAR_ASSIGNEE'
-                  >
-                    <X className='size-3' /> Clear
-                  </button>
-                </div>
-              )}
-            </Popover.Content>
-          </Popover.Root>
-        )}
+              {entry.control?.kind === 'toggle' ? entry.control.barLabel : entry.label}
+            </Button>
+          );
+        })}
 
-        {/* Include automations — only relevant for messages */}
-        {showIncludeAutomations && (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() =>
-              onFiltersChange({ ...filters, includeBotMessages: !filters.includeBotMessages })
-            }
-            className={cn(CHIP_BASE, filters.includeBotMessages && CHIP_ACTIVE)}
-            data-track-category='SEARCH_FILTERS'
-            data-track-name='TOGGLE_BOT_MESSAGES'
-          >
-            Include automations
-          </Button>
-        )}
+        {/* From, In and the mode pills are the standalone controls; every other filter is
+            set and shown inside the Filters dialog, which carries a count so they aren't
+            invisible. */}
+        <FiltersModal
+          filters={filters}
+          onFiltersChange={onFiltersChange}
+          open={filtersOpen}
+          onOpenChange={setFiltersOpen}
+        />
       </div>
       {/* end left group */}
 
