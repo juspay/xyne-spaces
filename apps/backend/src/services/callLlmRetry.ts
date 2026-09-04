@@ -10,11 +10,12 @@ const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 120_000; // 2 minutes
 const MAX_DELAY_MS = 960_000; // 16 minutes
 const DEFAULT_MODEL = 'glm-latest';
-// The non-streaming agent path for the same workload uses a 300s request
-// timeout. Long transcripts producing multi-phase markdown responses can
-// exceed the 120s LLM_REQUEST_TIMEOUT_MS default, so the streaming client
-// matches the agent path rather than the global default.
-const STREAMING_REQUEST_TIMEOUT_MS = 300_000; // 5 minutes
+// Long transcripts producing multi-phase markdown responses can exceed the
+// 120s LLM_REQUEST_TIMEOUT_MS default (and even the previous 300s ceiling for
+// very long recordings), so the streaming client uses a generous per-request
+// timeout rather than the global default. Retries are bounded separately by
+// MAX_ATTEMPTS / backoff above.
+const STREAMING_REQUEST_TIMEOUT_MS = 900_000; // 15 minutes
 
 type ExtractedContent = ReturnType<typeof extractAgentContent>;
 
