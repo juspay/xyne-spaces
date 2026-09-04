@@ -1,14 +1,10 @@
 import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
 import { useSelector } from '@xstate/react';
 import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { addDays, format, isSameDay, isToday, startOfDay } from 'date-fns';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
-import {
-  closeXyneCalendarSidebar,
-  getXyneCalendarChannelPresentation,
-  xyneCalendarSidebarMotionVariants,
-} from './xyneCalendarSidebar.utils';
+import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
+import { getXyneCalendarChannelPresentation } from './xyneCalendarSidebar.utils';
 import { Button } from '../../ui/Button/Button';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { useAuth } from '../../../hooks/useAuth';
@@ -44,60 +40,53 @@ const COMPACT_METADATA_MIN_WIDTH_PERCENTAGE = 75;
 const CREATE_SLOT_DURATION_MINUTES = 30;
 const CREATE_SLOT_SNAP_MINUTES = 15;
 
-interface XyneCalendarSidebarProps {
-  open: boolean;
-}
+// Bare 'yyyy-MM-dd' is parsed as UTC per spec; appending a local time-of-day
+// avoids a day shift in negative-UTC-offset timezones.
+const dateToIso = (date: Date): string => format(date, 'yyyy-MM-dd');
+const isoToDate = (iso: string): Date => new Date(`${iso}T00:00:00`);
 
-const XyneCalendarSidebarComponent = ({ open }: XyneCalendarSidebarProps): ReactElement => {
-  const shouldReduceMotion = useReducedMotion();
-  const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
-  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+const XyneCalendarSidebarComponent = (): ReactElement => {
+  const selectedDateIso = useSelector(xyneCalendarActor, state => state.context.selectedDate);
+  const selectedCallId = useSelector(xyneCalendarActor, state => state.context.selectedCallId);
+  const selectedDate = useMemo(() => isoToDate(selectedDateIso), [selectedDateIso]);
+
+  const handleDateChange = useCallback((date: Date): void => {
+    xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(date) });
+  }, []);
 
   const handlePreviousDay = useCallback((): void => {
-    setSelectedDate(currentDate => addDays(currentDate, -1));
-  }, []);
+    xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(addDays(selectedDate, -1)) });
+  }, [selectedDate]);
 
   const handleNextDay = useCallback((): void => {
-    setSelectedDate(currentDate => addDays(currentDate, 1));
-  }, []);
+    xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(addDays(selectedDate, 1)) });
+  }, [selectedDate]);
 
   const handleToday = useCallback((): void => {
-    setSelectedDate(startOfDay(new Date()));
+    xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(startOfDay(new Date())) });
   }, []);
 
-  const handleClearSelectedCall = useCallback((): void => setSelectedCallId(null), []);
+  const handleSelectCall = useCallback((callId: string): void => {
+    xyneCalendarActor.send({ type: 'SELECT_CALL', callId });
+  }, []);
 
-  // Re-opening the sidebar should land on the timeline, not the last opened call.
-  useEffect(() => {
-    if (!open) setSelectedCallId(null);
-  }, [open]);
+  const handleClearSelectedCall = useCallback((): void => {
+    xyneCalendarActor.send({ type: 'SELECT_CALL', callId: null });
+  }, []);
 
   return (
-    <motion.aside
-      aria-label='Calendar'
-      className='flex h-full w-full flex-col bg-transparent'
-      initial={shouldReduceMotion ? false : 'hidden'}
-      animate={open ? 'visible' : 'hidden'}
-      variants={xyneCalendarSidebarMotionVariants}
-    >
-      {selectedCallId === null && (
-        <XyneCalendarSidebarHeader
-          selectedDate={selectedDate}
-          onDateChange={setSelectedDate}
-          onPreviousDay={handlePreviousDay}
-          onNextDay={handleNextDay}
-          onToday={handleToday}
-        />
-      )}
-      {open && (
-        <XyneCalendarSidebarTimeline
-          selectedDate={selectedDate}
-          selectedCallId={selectedCallId}
-          onSelectCall={setSelectedCallId}
-          onClearSelectedCall={handleClearSelectedCall}
-        />
-      )}
-    </motion.aside>
+    <aside aria-label='Calendar' className='flex h-full w-full flex-col bg-transparent'>
+      <XyneCalendarSidebarTimeline
+        selectedDate={selectedDate}
+        selectedCallId={selectedCallId}
+        onSelectCall={handleSelectCall}
+        onClearSelectedCall={handleClearSelectedCall}
+        onDateChange={handleDateChange}
+        onPreviousDay={handlePreviousDay}
+        onNextDay={handleNextDay}
+        onToday={handleToday}
+      />
+    </aside>
   );
 };
 
@@ -111,6 +100,7 @@ interface XyneCalendarSidebarHeaderProps {
   onPreviousDay: () => void;
   onNextDay: () => void;
   onToday: () => void;
+  markedDates: Date[];
 }
 
 const XyneCalendarSidebarHeader = memo(
@@ -120,6 +110,7 @@ const XyneCalendarSidebarHeader = memo(
     onPreviousDay,
     onNextDay,
     onToday,
+    markedDates,
   }: XyneCalendarSidebarHeaderProps): ReactElement => {
     const handleDateSelect = (date: Date | null): void => {
       if (!date) return;
@@ -137,7 +128,7 @@ const XyneCalendarSidebarHeader = memo(
             size='iconSm'
             title='Close'
             aria-label='Close Calendar sidebar'
-            onClick={closeXyneCalendarSidebar}
+            onClick={() => xyneCalendarActor.send({ type: 'CLOSE' })}
             data-track-category='Calendar'
             data-track-name='CLOSE_CALENDAR_SIDEBAR'
             className='size-7 rounded-lg text-muted-foreground'
@@ -178,6 +169,7 @@ const XyneCalendarSidebarHeader = memo(
             showClearButton={false}
             inputClassName='min-w-0 flex-1 border-0 bg-transparent px-2 shadow-none rounded-lg'
             contentClassName='z-50'
+            markedDates={markedDates}
           />
 
           <Button
@@ -204,6 +196,10 @@ interface XyneCalendarSidebarTimelineProps {
   selectedCallId: string | null;
   onSelectCall: (callId: string) => void;
   onClearSelectedCall: () => void;
+  onDateChange: (date: Date) => void;
+  onPreviousDay: () => void;
+  onNextDay: () => void;
+  onToday: () => void;
 }
 
 const formatTimelineHour = (hour: number): string => {
@@ -312,6 +308,10 @@ const XyneCalendarSidebarTimeline = memo(
     selectedCallId,
     onSelectCall,
     onClearSelectedCall,
+    onDateChange,
+    onPreviousDay,
+    onNextDay,
+    onToday,
   }: XyneCalendarSidebarTimelineProps): ReactElement => {
     const { user } = useAuth();
     const {
@@ -357,6 +357,19 @@ const XyneCalendarSidebarTimeline = memo(
 
     const isCallDetailOpen = selectedCallId !== null;
     const defaultCallTitle = getDefaultScheduledCallTitle(user);
+
+    const upcomingCallDates = useMemo(() => {
+      const dates = new Set<number>();
+      const nowTime = now.getTime();
+
+      for (const call of calendarScheduledCalls ?? []) {
+        if (!call.startsAt) continue;
+        const startsAt = new Date(call.startsAt).getTime();
+        if (startsAt > nowTime) dates.add(startOfDay(new Date(startsAt)).getTime());
+      }
+
+      return Array.from(dates, date => new Date(date));
+    }, [calendarScheduledCalls, now]);
 
     const handleCreateCallAtSlot = useCallback((startsAt: Date, endsAt: Date): void => {
       setHoverCreateSlot(null);
@@ -556,7 +569,7 @@ const XyneCalendarSidebarTimeline = memo(
             dayLabel={isToday(selectedDate) ? 'Today' : format(selectedDate, 'EEE, MMM d')}
             channel={selectedChannel}
             onBack={onClearSelectedCall}
-            onClose={closeXyneCalendarSidebar}
+            onClose={() => xyneCalendarActor.send({ type: 'CLOSE' })}
             onJoinCall={() => handleCallRowClick(selectedCall)}
             onOpenCallThread={hasThreadAccess ? getGotoTranscriptHandler(selectedCall) : undefined}
             onDownloadTranscript={() => handleDownloadTranscript(selectedCall)}
@@ -599,6 +612,14 @@ const XyneCalendarSidebarTimeline = memo(
 
     return (
       <>
+        <XyneCalendarSidebarHeader
+          selectedDate={selectedDate}
+          onDateChange={onDateChange}
+          onPreviousDay={onPreviousDay}
+          onNextDay={onNextDay}
+          onToday={onToday}
+          markedDates={upcomingCallDates}
+        />
         <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 pb-7 pt-1'>
           <div
             className='relative min-w-0'
