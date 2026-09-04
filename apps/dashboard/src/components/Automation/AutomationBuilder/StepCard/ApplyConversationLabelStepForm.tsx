@@ -5,6 +5,7 @@ import { VariableRefField } from '../SchemaForm/VariableRefField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
+import { useAuth } from '../../../../hooks/useAuth';
 import { cn } from '../../../../utils/classNames';
 
 interface ApplyConversationLabelConfigShape {
@@ -47,6 +48,7 @@ export function ApplyConversationLabelStepForm({
   pathPrefix,
   variableSources,
 }: ApplyConversationLabelStepFormProps): React.ReactElement {
+  const { user } = useAuth();
   const cfg = value as ApplyConversationLabelConfigShape;
   const channelId =
     typeof cfg.channelId === 'string' && !cfg.channelId.includes('{{') ? cfg.channelId : '';
@@ -105,7 +107,7 @@ export function ApplyConversationLabelStepForm({
 
       <FieldRow
         label='Label'
-        description='Label from your private catalog (created if missing).'
+        description='Label from this channel’s catalog (created if missing).'
         error={issuesAt.get('labelName')}
         required
       >
@@ -114,9 +116,10 @@ export function ApplyConversationLabelStepForm({
           value={cfg.labelName ?? ''}
           onChange={e => {
             const name = e.target.value;
-            const existing = (catalog ?? []).find(
+            const matches = (catalog ?? []).filter(
               l => l.name.toLowerCase() === name.trim().toLowerCase(),
             );
+            const existing = matches.find(l => l.createdBy === user?.id) ?? matches[0];
             onChange({
               ...cfg,
               labelName: name,

@@ -1,9 +1,12 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileText, Loader2, Mail, Power, RefreshCw, Tag, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { FileText, History, Loader2, Mail, Power, RefreshCw, Tag, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   archiveAutomation,
+  fetchDeskLabelRuleBackfill,
   setDeskLabelRuleStatus,
+  startDeskLabelRuleBackfill,
   type Automation,
 } from '../../../api/automationsApi';
 import { AutomationStatusValues } from '../../Automation/Automation.types';
@@ -26,6 +29,55 @@ interface MyAutoLabelRulesProps {
 
 export const deskLabelRulesQueryKey = (channelId: string) =>
   ['automations', 'desk-label-rules', channelId] as const;
+
+const backfillQueryKey = (automationId: string) =>
+  ['automations', 'desk-label-rules', 'backfill', automationId] as const;
+
+/**
+ * Live backfill line for one rule. Only polls while a run is actually in flight —
+ * a finished run keeps showing its counts until it ages out of the queue, and a
+ * rule that never ran renders nothing.
+ */
+function BackfillStatus({ automationId }: { automationId: string }): React.ReactElement | null {
+  const { data } = useQuery({
+    queryKey: backfillQueryKey(automationId),
+    queryFn: () => fetchDeskLabelRuleBackfill(automationId),
+    refetchInterval: query => {
+      const state = query.state.data?.backfill?.state;
+      return state === 'queued' || state === 'running' ? 3000 : false;
+    },
+  });
+
+  const run = data?.backfill;
+  if (!run) return null;
+
+  if (run.state === 'failed') {
+    return <span className='text-[11px] text-destructive'>Applying to older emails failed</span>;
+  }
+
+  const progress = run.progress;
+  const labeled = (progress?.labeled ?? 0) + (progress?.alreadyLabeled ?? 0);
+
+  if (run.state === 'completed') {
+    const threads = `${labeled} older ${labeled === 1 ? 'thread' : 'threads'}`;
+    return (
+      <span className='text-[11px] text-muted-foreground'>
+        {progress?.stoppedEarly
+          ? `Stopped after ${threads} — rule is no longer active`
+          : `Applied to ${threads}`}
+      </span>
+    );
+  }
+
+  return (
+    <span className='inline-flex items-center gap-1 text-[11px] text-muted-foreground'>
+      <Loader2 className='size-3 animate-spin' />
+      {run.state === 'queued'
+        ? 'Queued for older emails…'
+        : `Scanning older emails — ${labeled} labeled`}
+    </span>
+  );
+}
 
 export function MyAutoLabelRules({
   channelId,
@@ -54,6 +106,24 @@ export function MyAutoLabelRules({
       invalidate();
     },
     onError: err => toast.error(err instanceof Error ? err.message : 'Status update failed'),
+  });
+
+  // Rules that have been asked to backfill this session — their status line stays
+  // mounted so the poll can report progress without refetching the whole list.
+  const [backfilling, setBackfilling] = useState<Set<string>>(new Set());
+
+  const backfillMutation = useMutation({
+    mutationFn: (item: Automation) => startDeskLabelRuleBackfill(item.id),
+    onSuccess: (data, item) => {
+      setBackfilling(prev => new Set(prev).add(item.id));
+      void queryClient.invalidateQueries({ queryKey: backfillQueryKey(item.id) });
+      toast.success(
+        data.backfill === 'already-running'
+          ? 'Already applying this rule to older emails'
+          : 'Applying to older emails — this runs in the background.',
+      );
+    },
+    onError: err => toast.error(err instanceof Error ? err.message : 'Could not start backfill'),
   });
 
   const archiveMutation = useMutation({
@@ -151,8 +221,38 @@ export function MyAutoLabelRules({
                     {isActive ? 'Active' : 'Disabled'}
                   </span>
                 </div>
+                {backfilling.has(item.id) && (
+                  <div className='mt-0.5'>
+                    <BackfillStatus automationId={item.id} />
+                  </div>
+                )}
               </div>
               <div className='flex items-center gap-1'>
+                <Tooltip
+                  content={
+                    isActive
+                      ? 'Apply to existing emails'
+                      : 'Activate the rule to apply it to existing emails'
+                  }
+                  side='top'
+                >
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='iconSm'
+                    disabled={!isActive || backfillMutation.isPending}
+                    onClick={() => backfillMutation.mutate(item)}
+                    data-track-category='xyne-desk'
+                    data-track-name='auto-label-backfill-rule'
+                    aria-label='Apply to existing emails'
+                  >
+                    {backfillMutation.isPending && backfillMutation.variables?.id === item.id ? (
+                      <Loader2 className='size-4 animate-spin' />
+                    ) : (
+                      <History className='size-4' />
+                    )}
+                  </Button>
+                </Tooltip>
                 <Tooltip content={isActive ? 'Disable rule' : 'Activate rule'} side='top'>
                   <Button
                     type='button'

@@ -74,7 +74,7 @@ export const DeskLabelsSidebar = ({
     const trimmed = newName.trim();
     if (!trimmed) return;
     if (list.some(l => l.name.toLowerCase() === trimmed.toLowerCase())) {
-      toast.error('A label with this name already exists');
+      toast.error('A label with this name already exists in this channel.');
       return;
     }
     // Close optimistically; the mutation applies locally first and we surface
