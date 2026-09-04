@@ -61,6 +61,7 @@ import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
+import { RunOriginChip } from './RunOriginChip';
 import HuddleIcon from '../../icons/HuddleIcon';
 import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
@@ -1136,6 +1137,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {metadata?.['clawRunOrigin'] ? (
+                <RunOriginChip origin={metadata['clawRunOrigin']} />
+              ) : null}
               {headerContent}
             </div>
           )}

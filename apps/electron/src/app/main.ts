@@ -1,7 +1,7 @@
 import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
-import { config } from './config';
+import { config, ENABLE_LOCAL_HARNESS } from './config';
 import { setupDeepLinks } from '../services/deep-links';
 import { setupIpcHandlers } from '../ipc/handlers';
 import { createMainWindow, getMainWindow, setWindowReferences } from '../window/manager';
@@ -13,6 +13,8 @@ import {
 import { setupMTLS } from '../services/mtls';
 import { agentAuthService } from '../services/agent-auth';
 import { installElectronLogStackHook, Logger } from '../services/logger/Logger';
+import { localHarnessBridge } from '../services/local-harness';
+import { BrowserWindow } from 'electron';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
@@ -85,6 +87,8 @@ app.on('before-quit', async () => {
 
   // Stop meeting detector
   meetingDetectorService.stop();
+
+  localHarnessBridge.stop();
 
   // Gracefully stop agent auth server
   try {
@@ -177,6 +181,7 @@ async function initializeApp(): Promise<void> {
 
   // Auto-start agent authorization server
   startAgentAuthServerInBackground();
+  startLocalHarnessBridgeInBackground();
 
   // Initialize UI updater (checks for updates in background)
   if (config.useBundledUI) {
@@ -218,6 +223,15 @@ function startAgentAuthServerInBackground(): void {
     .catch((error) => {
       log.error('[App] Failed to start agent auth server:', error);
     });
+}
+
+function startLocalHarnessBridgeInBackground(): void {
+  if (!ENABLE_LOCAL_HARNESS) return;
+  try {
+    localHarnessBridge.start();
+  } catch (error) {
+    log.error('[App] Failed to start local harness bridge:', error);
+  }
 }
 
 function startMeetingDetectorInBackground(): void {

@@ -55,6 +55,7 @@ import type {
   ProviderModelOption,
   ReasoningEffort,
 } from '@/services/claw/clawSettingsTypes';
+import LocalHarnessSection from './LocalHarnessSection';
 
 const PROVIDER_META: Record<ProviderId, { name: string; description: string; icon: typeof Plane }> =
   {
@@ -1195,7 +1196,7 @@ const ClawSettingsScreen = (): ReactElement => {
       <div className='mb-6 flex flex-col gap-1'>
         <h1 className='text-lg font-semibold text-foreground'>Settings</h1>
         <p className='text-sm text-muted-foreground'>
-          Configure AI providers and agent model assignments.
+          Connect this machine, configure AI providers, and assign agent models.
         </p>
       </div>
 
@@ -1206,6 +1207,7 @@ const ClawSettingsScreen = (): ReactElement => {
       )}
 
       <div className='space-y-8'>
+        <LocalHarnessSection />
         <AIProvidersSection
           credentials={credentials}
           defaultProvider={defaultProvider}

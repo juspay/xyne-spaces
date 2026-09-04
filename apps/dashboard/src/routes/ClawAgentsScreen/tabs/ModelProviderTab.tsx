@@ -19,14 +19,19 @@ import {
   ALL_PROVIDERS,
   applyModelProvider,
   EMPTY_MODEL_PROVIDER_DRAFT,
+  isLocalHarnessProvider,
+  LOCAL_HARNESS_MODEL_OPTIONS,
   modelProviderDirty,
   PROVIDER_DISPLAY,
   readModelProviderDraft,
   THINKING_OPTIONS,
   validateModelProvider,
+  type LocalHarnessProviderKey,
   type ModelProviderDraft,
 } from '@/services/claw/modelProviderConfig';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import { isLocalHarnessAvailable } from '@/config';
+import PersonalHarnessSection from './PersonalHarnessSection';
 
 interface ModelProviderTabProps {
   agent: Agent;
@@ -37,6 +42,10 @@ interface ModelProviderTabProps {
 // "cleared"). THINKING_OPTIONS uses '' to mean "platform default", so we swap
 // it for this sentinel at the UI boundary and map back to '' on change.
 const THINKING_DEFAULT = '__default__';
+
+const MODEL_DEFAULT = '__cli_default__';
+
+const MODEL_CUSTOM = '__custom__';
 
 const Section = ({
   title,
@@ -108,10 +117,11 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
 
   const [draft, setDraft] = useState<ModelProviderDraft>(EMPTY_MODEL_PROVIDER_DRAFT);
   const [saving, setSaving] = useState(false);
+  const [customModels, setCustomModels] = useState<Set<string>>(new Set());
 
-  // Seed on mount / when the agent identity changes.
   useEffect(() => {
     setDraft(readModelProviderDraft(agent.config));
+    setCustomModels(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.id]);
 
@@ -119,9 +129,15 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
   const set = (patch: Partial<ModelProviderDraft>): void =>
     setDraft(prev => ({ ...prev, ...patch }));
 
+  const localHarnessAvailable = isLocalHarnessAvailable();
+
   const remaining = useMemo(
-    () => ALL_PROVIDERS.filter(p => !draft.providerOrder.includes(p)),
-    [draft.providerOrder],
+    () =>
+      ALL_PROVIDERS.filter(
+        p =>
+          !draft.providerOrder.includes(p) && (localHarnessAvailable || !isLocalHarnessProvider(p)),
+      ),
+    [draft.providerOrder, localHarnessAvailable],
   );
 
   const moveProvider = (idx: number, dir: -1 | 1): void => {
@@ -137,6 +153,14 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
 
   const temperatureConflict =
     draft.temperature.trim() !== '' && draft.thinkingLevel !== '' && draft.thinkingLevel !== 'off';
+
+  const localHarnesses = useMemo(
+    () =>
+      localHarnessAvailable
+        ? draft.providerOrder.filter((p): p is LocalHarnessProviderKey => isLocalHarnessProvider(p))
+        : [],
+    [draft.providerOrder, localHarnessAvailable],
+  );
 
   const handleSave = async (): Promise<void> => {
     if (!dirty || saving) return;
@@ -163,9 +187,12 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
 
   if (!isOwner) {
     return (
-      <div className='max-w-2xl rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground'>
-        This agent runs on the workspace default model. Only the owner can change the model or
-        provider.
+      <div className='flex max-w-2xl flex-col gap-8'>
+        <div className='rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground'>
+          This agent runs on the workspace default model. Only the owner can change the model or
+          provider.
+        </div>
+        <PersonalHarnessSection agentSlug={agent.slug} />
       </div>
     );
   }
@@ -219,6 +246,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
                   onClick={() => removeProvider(i)}
                   data-track-category='Claw Agents'
                   data-track-name='Remove provider'
+                  disabled={!localHarnessAvailable && isLocalHarnessProvider(p)}
                   aria-label={`Remove ${PROVIDER_DISPLAY[p] ?? p}`}
                   className={cn(iconBtn, 'hover:text-destructive')}
                 >
@@ -247,6 +275,69 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
           </div>
         )}
       </Section>
+
+      {localHarnesses.length > 0 && (
+        <Section
+          title='Local harness models'
+          description='Runs on your own machine using your own CLI login. Tools still execute on Xyne’s servers with the agent’s normal permissions — the local harness only runs the model.'
+        >
+          <div className='flex flex-col gap-4'>
+            {localHarnesses.map(harness => {
+              const current = draft.localHarnessModels[harness] ?? '';
+              const known = LOCAL_HARNESS_MODEL_OPTIONS[harness].some(o => o.value === current);
+              const isCustom = customModels.has(harness) || (current !== '' && !known);
+              const setModel = (value: string): void =>
+                set({ localHarnessModels: { ...draft.localHarnessModels, [harness]: value } });
+
+              return (
+                <div key={harness} className='flex max-w-sm flex-col gap-1.5'>
+                  <span className='text-xs font-medium text-foreground'>
+                    {PROVIDER_DISPLAY[harness] ?? harness}
+                  </span>
+                  <Select
+                    value={isCustom ? MODEL_CUSTOM : current || MODEL_DEFAULT}
+                    onValueChange={v => {
+                      setCustomModels(prev => {
+                        const next = new Set(prev);
+                        if (v === MODEL_CUSTOM) next.add(harness);
+                        else next.delete(harness);
+                        return next;
+                      });
+                      if (v !== MODEL_CUSTOM) setModel(v === MODEL_DEFAULT ? '' : v);
+                    }}
+                  >
+                    <SelectTrigger size='sm' className='w-full'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LOCAL_HARNESS_MODEL_OPTIONS[harness].map(o => (
+                        <SelectItem key={o.value || MODEL_DEFAULT} value={o.value || MODEL_DEFAULT}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={MODEL_CUSTOM}>Custom…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {isCustom && (
+                    <Input
+                      value={current}
+                      onChange={e => setModel(e.target.value)}
+                      placeholder={
+                        harness === 'claude-code' ? 'e.g. claude-opus-4-5' : 'e.g. gpt-5.5'
+                      }
+                      aria-label={`Custom model for ${PROVIDER_DISPLAY[harness] ?? harness}`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+            <span className='text-xs text-muted-foreground'>
+              Requires the Xyne desktop app with that harness connected. If no device is online,
+              runs fall back to the next provider in the order.
+            </span>
+          </div>
+        </Section>
+      )}
 
       <Section title='Subagent provider'>
         <div className='grid gap-2 sm:grid-cols-2'>
@@ -322,6 +413,8 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
           </div>
         </div>
       </Section>
+
+      <PersonalHarnessSection agentSlug={agent.slug} />
 
       <div className='flex items-center gap-3 border-t border-border pt-4'>
         <Button

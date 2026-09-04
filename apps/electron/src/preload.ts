@@ -424,6 +424,15 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('claw:enabled-changed', listener);
     },
   },
+
+  localHarness: {
+    getStatus: () => ipcRenderer.invoke('local-harness:status'),
+    detect: () => ipcRenderer.invoke('local-harness:detect'),
+    connect: () => ipcRenderer.invoke('local-harness:connect'),
+    disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+    setProviderEnabled: (provider: string, enabled: boolean) =>
+      ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
+  },
 };
 
 if (isTrustedOrigin()) {
