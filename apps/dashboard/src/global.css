@@ -4785,11 +4785,3 @@ img.inline-emoji,
 [data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
   z-index: 10;
 }
-
-/* Midnight theme: apply the intended input fill via [data-theme]. The shared
-   Input/Textarea use `dark:bg-input/30`, but this app never sets a `.dark`
-   class, so that variant is inert. Light themes are unaffected. */
-[data-theme='midnight'] input[data-slot='input'],
-[data-theme='midnight'] textarea[data-slot='textarea'] {
-  background-color: hsl(var(--input) / 0.3);
-}
