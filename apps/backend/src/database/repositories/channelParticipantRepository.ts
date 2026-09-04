@@ -150,6 +150,72 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
   }
 
   // Channel Participant specific methods
+  /**
+   * Join a channel inside a caller-supplied transaction: participant row, status
+   * row and the participantCount increment. Callers already holding a transaction
+   * (e.g. one guarded by an advisory lock) must use this rather than
+   * `addParticipant`, which opens its own and would not be covered by that lock.
+   *
+   * `conversationSeenCutoffAt` is a parameter because resolving it is a per-channel
+   * `ORDER BY createdAt` scan that can take many seconds under load; running it here
+   * would put it back inside the interactive transaction and reintroduce P2028.
+   * Callers must resolve it via `resolveSeenCutoff` before opening their transaction.
+   */
+  async addParticipantInTransaction(
+    tx: Parameters<Parameters<typeof this.db.$transaction>[0]>[0],
+    channelId: string,
+    userId: string,
+    conversationSeenCutoffAt: Date | null,
+    role: ChannelRole = ChannelRole.MEMBER,
+    isClosed: boolean = false
+  ): Promise<{ participant: ChannelParticipant; added: boolean }> {
+    const now = new Date();
+    const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: channelId });
+    const inserted = await tx.channelParticipant.createMany({
+      data: [{ channelId, workspaceId, userId, role: role || ChannelRole.MEMBER }],
+      skipDuplicates: true,
+    });
+    const participant = await tx.channelParticipant.findUniqueOrThrow({
+      where: { channelId_userId: { channelId, userId } },
+    });
+    if (inserted.count === 0) {
+      return { participant, added: false };
+    }
+
+    // Automatically create status record. Use upsert so a pre-existing status
+    // row (e.g. orphaned from a prior partial migration run) is left as-is
+    // instead of throwing a unique-constraint error on (channelId, userId).
+    // desktopNotificationLevel / mobileNotificationLevel intentionally omitted —
+    // null (inherit global) is the DB column default.
+    await tx.channelUserStatus.upsert({
+      where: { channelId_userId: { channelId, userId } },
+      update: {},
+      create: {
+        channelId,
+        workspaceId,
+        userId,
+        isClosed,
+        isStarred: false,
+        lastViewedAt: now,
+        conversationSeenCutoffAt,
+      }
+    });
+
+    // Increment participantCount in channel_stats
+    await tx.channelStats.upsert({
+      where: { channelId },
+      update: { participantCount: { increment: 1 } },
+      create: { channelId, workspaceId, participantCount: 1, lastActivityAt: now },
+    });
+
+    return { participant, added: true };
+  }
+
+  /** Resolve the seen cutoff outside any transaction — see addParticipantInTransaction. */
+  async resolveSeenCutoff(channelId: string, at: Date = new Date()): Promise<Date | null> {
+    return this.getConversationSeenCutoffAt(this.db, channelId, at);
+  }
+
   async addParticipant(channelId: string, userId: string, role: ChannelRole = ChannelRole.MEMBER, isClosed: boolean = false): Promise<ChannelParticipant> {
     // Existence check + the seen-cutoff scan run OUTSIDE the write transaction. getConversationSeenCutoffAt is a
     // per-channel `ORDER BY createdAt` scan that, under heavy parallel migration load, can take many seconds; leaving it
@@ -162,50 +228,12 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       return existing;
     }
 
-    const now = new Date();
-    const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(this.db, channelId, now);
+    const conversationSeenCutoffAt = await this.resolveSeenCutoff(channelId);
 
-    return await this.db.$transaction(async (tx) => {
-      const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: channelId });
-
-      // Create participant
-      const participant = await tx.channelParticipant.create({
-        data: {
-          channelId,
-          workspaceId,
-          userId,
-          role: role || 'MEMBER',
-        }
-      });
-
-      // Automatically create status record. Use upsert so a pre-existing status
-      // row (e.g. orphaned from a prior partial migration run) is left as-is
-      // instead of throwing a unique-constraint error on (channelId, userId).
-      // desktopNotificationLevel / mobileNotificationLevel intentionally omitted —
-      // null (inherit global) is the DB column default.
-      await tx.channelUserStatus.upsert({
-        where: { channelId_userId: { channelId, userId } },
-        update: {},
-        create: {
-          channelId,
-          workspaceId,
-          userId,
-          isClosed,
-          isStarred: false,
-          lastViewedAt: now,
-          conversationSeenCutoffAt,
-        }
-      });
-
-      // Increment participantCount in channel_stats
-      await tx.channelStats.upsert({
-        where: { channelId },
-        update: { participantCount: { increment: 1 } },
-        create: { channelId, workspaceId, participantCount: 1, lastActivityAt: new Date() },
-      });
-
-      return participant;
-    });
+    const { participant } = await this.db.$transaction(async (tx) =>
+      this.addParticipantInTransaction(tx, channelId, userId, conversationSeenCutoffAt, role, isClosed)
+    );
+    return participant;
   }
 
   async removeParticipant(channelId: string, userId: string): Promise<void> {
