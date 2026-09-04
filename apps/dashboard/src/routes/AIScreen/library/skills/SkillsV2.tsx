@@ -1,5 +1,6 @@
 import { ReactElement, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useAuth } from '@/hooks/useAuth';
 import { useClawSkills } from '@/hooks/useClawSkills';
 import type { Skill } from '@/services/claw/clawSkillsTypes';
@@ -23,12 +24,14 @@ const SkillsV2 = ({ query }: { query: string }): ReactElement => {
   const { user } = useAuth();
   const userId = user?.id;
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const searched = useMemo(
     () =>
-      q
-        ? skills.filter(s => `${s.name} ${s.slug} ${s.description ?? ''}`.toLowerCase().includes(q))
-        : skills,
+      searchByNameThenDescription(skills, q, skill => ({
+        name: skill.name || skill.slug,
+        description: skill.description,
+        ...(skill.slug && skill.slug !== skill.name ? { aliases: [skill.slug] as const } : {}),
+      })),
     [skills, q],
   );
 

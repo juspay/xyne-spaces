@@ -25,6 +25,7 @@ import {
   agentRequestRepository,
 } from "../repositories/index.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
+import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
 import {
   identityFromAgentRow,
   identityFromDraftSpec,
@@ -129,8 +130,8 @@ import type { TwinDelivery, UiWidget } from "xyne-claw-shared";
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
-import { connectorTypesFromText, connectorTypesUserAskedToConnect } from "../lib/connector-hints.js";
-import { availableServerIds } from "../lib/connector-availability.js";
+import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
+import { availabilityForServerIds } from "../lib/connector-availability.js";
 
 const clog = createLogger("webhook");
 const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
@@ -4775,6 +4776,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // Connector cards to post alongside the reply, so the user can connect
     // without leaving the conversation.
     pendingConnectorSuggestions?: PendingConnectorSuggestions;
+    blockedConnectors?: string[];
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -6121,10 +6123,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   let inferredTypes: string[] = [];
   if (!payload.pendingConnectorSuggestions) {
     try {
-      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "").slice(
-        0,
-        MCP_SUGGEST_INFERRED_MAX,
-      );
+      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "", {
+        includeKeywords: true,
+      }).slice(0, MCP_SUGGEST_INFERRED_MAX);
     } catch (err) {
       log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -6132,9 +6133,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
+  const rosterAsked =
+    !payload.pendingConnectorSuggestions && wantsConnectorRoster(ctx.rootTask ?? ctx.task ?? "");
+
   const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
     payload.pendingConnectorSuggestions ??
-    (inferredTypes.length > 0 ? { serverTypes: inferredTypes, inferred: true } : undefined);
+    (rosterAsked
+      ? { serverTypes: [], listAll: true, inferred: true }
+      : inferredTypes.length > 0
+        ? { serverTypes: inferredTypes, inferred: true }
+        : undefined);
   if (pendingConnectorSuggestions && agentCardDeliverable) {
     try {
       // Roster mode: the user asked what exists, so the SERVER picks the sample
@@ -6147,23 +6155,27 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Resolve every requested type against the catalog. The model supplies
       // names only — descriptions and display names come from the row, and an
       // unknown type is dropped rather than rendered as an empty card.
-      const rows = listAll
+      const candidates = listAll
         ? await prisma.mcpServer.findMany({
             where: { enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
             orderBy: { name: "asc" },
-            take: MCP_SUGGEST_ROSTER_SAMPLE,
           })
         : await prisma.mcpServer.findMany({
             where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
           });
+      const visibleRows = candidates.filter((row) =>
+        isVisibleToUser(parseConnectorMeta(row.connectorMeta), ctx.senderId),
+      );
+      const rows = listAll ? visibleRows.slice(0, MCP_SUGGEST_ROSTER_SAMPLE) : visibleRows;
       const byType = new Map(rows.map((row) => [row.type, row]));
 
-      const connectedIds = await availableServerIds(
+      const availability = await availabilityForServerIds(
         ctx.senderId,
         rows.map((r) => r.id),
       );
+      const blockedTypes = new Set(payload.blockedConnectors ?? []);
 
       // Roster mode is already ordered by the query; otherwise preserve the
       // model's ordering, since it ranked them by relevance.
@@ -6180,7 +6192,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // request, which is exactly how an already-usable connector slipped
       // through. The server owns this fact like every other on the card.
       const askedToConnect = new Set(
-        connectorTypesUserAskedToConnect(ctx.rootTask ?? ctx.task ?? ""),
+        connectorTypesUserAskedFor(ctx.rootTask ?? ctx.task ?? ""),
       );
 
       const connectors = ordered
@@ -6189,12 +6201,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // exceptions, both genuine user intent: roster mode ("what exists?"),
         // and the user naming a connector they want to connect, where a personal
         // connection is a legitimate want even under an org credential.
-        .filter((row) => listAll || askedToConnect.has(row.type) || !connectedIds.has(row.id))
+        .filter((row) => {
+          if (listAll || askedToConnect.has(row.type)) return true;
+          if (availability.personal.has(row.id)) return false;
+          if (availability.org.has(row.id)) return blockedTypes.has(row.type);
+          return true;
+        })
         .map((row) => ({
           serverType: row.type,
           name: row.name,
           ...(row.description ? { description: row.description } : {}),
-          connected: connectedIds.has(row.id),
+          connected: availability.personal.has(row.id) || availability.org.has(row.id),
         }));
 
       if (connectors.length === 0) {

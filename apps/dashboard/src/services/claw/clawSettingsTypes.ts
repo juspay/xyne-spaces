@@ -1,4 +1,4 @@
-export type ProviderId = 'copilot' | 'claude' | 'codex';
+export type ProviderId = 'copilot' | 'claude' | 'codex' | 'openrouter' | 'litellm';
 
 export type AuthType = 'api_key' | 'oauth_token';
 

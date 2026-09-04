@@ -1,6 +1,7 @@
-import { useMemo, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import type { ToolboxSelection } from '@/services/claw/clawToolsTypes';
 import { BrowseBuiltinToolsDialog } from '../../../shared/pickers/builtin/BrowseBuiltinToolsDialog';
 import {
   disableEntry as disableBuiltinEntry,
@@ -28,7 +29,14 @@ import {
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import { DetailListCard, type DetailListItem } from '../../../shared/primitives/DetailListCard';
-import { useAgentToolSelection, type ManageSectionId } from './useAgentToolSelection';
+import {
+  useAgentToolSelection,
+  type ManageSectionId,
+  type ToolSelection,
+} from './useAgentToolSelection';
+import { useCallableAgents } from '../../../shared/pickers/callableAgent/useCallableAgents';
+import { BrowseCallableAgentsDialog } from '../../../shared/pickers/callableAgent/BrowseCallableAgentsDialog';
+import { DelegationStatusBadge } from './DelegationStatusBadge';
 
 const LOCK_NOTE = 'Only the owner, a contributor, or an admin can change this agent’s tools.';
 
@@ -64,6 +72,24 @@ export function AgentToolsTabV2({
   const builtin = useBuiltinCatalog();
 
   const { saved } = tools;
+  // Deliberately NOT routed through tools.openManage/closeManage: that flow
+  // captures a draft on open and re-persists it on close, which would undo an
+  // add made while the dialog was open (the grant call writes config itself).
+  const [agentsPickerOpen, setAgentsPickerOpen] = useState(false);
+  const callable = useCallableAgents({
+    agentSlug: agent.slug,
+    agentOwnerUserId: agent.ownerUserId,
+    selected: saved.callableAgents,
+    onSelectedChange: callableAgents =>
+      tools.commit({ ...saved, callableAgents }, 'Agents updated'),
+  });
+
+  // The shared pickers only know the four toolbox lists. Re-attach the callable
+  // agents so a subagent/MCP/built-in edit never writes them out of the config.
+  const withCallableAgents = (next: Required<ToolboxSelection>): ToolSelection => ({
+    ...next,
+    callableAgents: tools.draft.callableAgents,
+  });
 
   const subagentItems = useMemo<DetailListItem[]>(
     () =>
@@ -113,6 +139,22 @@ export function AgentToolsTabV2({
     [builtin.entries, saved],
   );
 
+  const callableItems = useMemo<DetailListItem[]>(
+    () =>
+      callable.catalog
+        .filter(entry => entry.status !== null)
+        .map(entry => ({
+          key: entry.slug,
+          iconType: '',
+          name: entry.name,
+          description: entry.description || `@${entry.slug}`,
+          badge: (
+            <DelegationStatusBadge status={entry.status ?? 'missing'} ownerName={entry.ownerName} />
+          ),
+        })),
+    [callable.catalog],
+  );
+
   const note = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;
 
   /** Manage opens the same browse dialog the create flow uses; read-only says why. */
@@ -141,8 +183,31 @@ export function AgentToolsTabV2({
           onRemove={item => {
             const entry = subagents.entries.find(candidate => candidate.name === item.key);
             if (!entry) return;
-            tools.commit(disableSubagent(saved, entry), `${item.name} removed`);
+            tools.commit(withCallableAgents(disableSubagent(saved, entry)), `${item.name} removed`);
           }}
+        />
+      </DetailSection>
+
+      <DetailSection
+        label='Agents'
+        info='Other agents this agent can hand a task to, once their owner approves'
+        trailing={
+          canEdit ? (
+            <ManageButton label='Manage agents' onClick={() => setAgentsPickerOpen(true)} />
+          ) : (
+            <ReadOnlyBadge />
+          )
+        }
+        trailingAlign='end'
+      >
+        <DetailListCard
+          items={callableItems}
+          loading={callable.loading}
+          emptyLabel='No agents added yet.'
+          canEdit={canEdit}
+          note={note}
+          removeLabel={item => `Remove ${item.name}`}
+          onRemove={item => callable.remove(item.key)}
         />
       </DetailSection>
 
@@ -162,7 +227,10 @@ export function AgentToolsTabV2({
           onRemove={item => {
             const entry = mcp.entries.find(candidate => candidate.slug === item.key);
             if (!entry) return;
-            tools.commit(disableMcpEntry(mcp.entries, saved, entry), `${item.name} removed`);
+            tools.commit(
+              withCallableAgents(disableMcpEntry(mcp.entries, saved, entry)),
+              `${item.name} removed`,
+            );
           }}
         />
       </DetailSection>
@@ -183,7 +251,10 @@ export function AgentToolsTabV2({
           onRemove={item => {
             const entry = builtin.entries.find(candidate => candidate.source === item.key);
             if (!entry) return;
-            tools.commit(disableBuiltinEntry(saved, entry), `${item.name} removed`);
+            tools.commit(
+              withCallableAgents(disableBuiltinEntry(saved, entry)),
+              `${item.name} removed`,
+            );
           }}
         />
       </DetailSection>
@@ -205,8 +276,20 @@ export function AgentToolsTabV2({
         isError={subagents.isError}
         onRetry={subagents.refetch}
         selection={tools.draft}
-        onSelectionChange={tools.setDraft}
+        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
         suggested={[]}
+      />
+
+      <BrowseCallableAgentsDialog
+        open={agentsPickerOpen}
+        onOpenChange={setAgentsPickerOpen}
+        catalog={callable.catalog}
+        loading={callable.loading}
+        isError={callable.isError}
+        onRetry={callable.refetch}
+        busySlug={callable.busySlug}
+        onAdd={callable.add}
+        onRemove={callable.remove}
       />
 
       <BrowseMcpsDialog
@@ -220,7 +303,7 @@ export function AgentToolsTabV2({
         isError={mcp.isError}
         onRetry={mcp.refetch}
         selection={tools.draft}
-        onSelectionChange={tools.setDraft}
+        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
         suggested={[]}
       />
 
@@ -234,7 +317,7 @@ export function AgentToolsTabV2({
         isError={builtin.isError}
         onRetry={builtin.refetch}
         selection={tools.draft}
-        onSelectionChange={tools.setDraft}
+        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
         suggested={[]}
       />
     </div>

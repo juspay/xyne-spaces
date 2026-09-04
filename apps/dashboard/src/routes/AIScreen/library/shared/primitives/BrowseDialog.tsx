@@ -116,6 +116,16 @@ interface BrowseDialogProps {
   children: ReactNode;
 }
 
+/** Reset local search/filter/detail state whenever a browse dialog closes. */
+export function handleBrowseDialogOpenChange(
+  next: boolean,
+  onOpenChange: (open: boolean) => void,
+  reset: () => void,
+): void {
+  if (!next) reset();
+  onOpenChange(next);
+}
+
 export function BrowseDialog({
   open,
   onOpenChange,

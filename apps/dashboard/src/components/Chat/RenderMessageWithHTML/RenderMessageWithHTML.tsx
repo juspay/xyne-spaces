@@ -1063,15 +1063,16 @@ const parseNode = (
           context: [flowJSON.screenId],
         });
         return (
-          <FlowScreenManager
-            key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`}
-            flow={flowJSON}
-            messageId={messageId ?? ''}
-            conversationId={conversationId ?? ''}
-            {...(slashCommandArtifactContext && {
-              messageContext: slashCommandArtifactContext,
-            })}
-          />
+          <div key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`} className='mt-1.5'>
+            <FlowScreenManager
+              flow={flowJSON}
+              messageId={messageId ?? ''}
+              conversationId={conversationId ?? ''}
+              {...(slashCommandArtifactContext && {
+                messageContext: slashCommandArtifactContext,
+              })}
+            />
+          </div>
         );
       } catch (e) {
         logger.error(Event.FRONTEND_ERROR, {

@@ -3926,6 +3926,129 @@ router.post(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Agent-level GitHub Copilot device-code login. Mirrors the user-level flow in
+// settings.ts, but stores the token as an AGENT credential so every run of this
+// agent uses it, rather than binding it to the person who signed in.
+//
+// Note this spends the signing-in user's Copilot seat on behalf of everyone who
+// runs the agent — unlike Claude/ChatGPT team accounts, Copilot is licensed per
+// user. Owner-or-admin only, and the acting user is recorded on the credential.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AGENT_COPILOT_DEVICE_PREFIX = "gh-device-agent:";
+
+router.post(
+  "/:slug/provider-credentials/copilot/github-login",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const ghRes = await fetch(GITHUB_DEVICE_CODE_URL, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: new URLSearchParams({ client_id: GITHUB_CLIENT_ID, scope: "read:user" }),
+      });
+      if (!ghRes.ok) {
+        const text = await ghRes.text().catch(() => "");
+        res.status(502).json({ success: false, error: `GitHub error: ${text.slice(0, 200)}` });
+        return;
+      }
+      const data = (await ghRes.json()) as {
+        device_code: string;
+        user_code: string;
+        verification_uri: string;
+        expires_in: number;
+        interval: number;
+      };
+      const redis = redisService.getConnection();
+      await redis.set(
+        `${AGENT_COPILOT_DEVICE_PREFIX}${agent.id}`,
+        JSON.stringify({ device_code: data.device_code, interval: data.interval }),
+        "EX",
+        DEVICE_CODE_TTL,
+      );
+      res.json({
+        success: true,
+        data: {
+          userCode: data.user_code,
+          verificationUri: data.verification_uri,
+          expiresIn: data.expires_in,
+          interval: data.interval,
+        },
+      });
+    } catch (err) {
+      log.error("[agents] copilot/github-login error:", err);
+      res.status(500).json({ success: false, error: "Failed to initiate GitHub login" });
+    }
+  },
+);
+
+router.post(
+  "/:slug/provider-credentials/copilot/github-poll",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const requesterId = getRequesterId(req);
+      const key = `${AGENT_COPILOT_DEVICE_PREFIX}${agent.id}`;
+      const redis = redisService.getConnection();
+      const raw = await redis.get(key);
+      if (!raw) {
+        res.status(400).json({ success: false, error: "No pending login — start again" });
+        return;
+      }
+      const { device_code } = JSON.parse(raw) as { device_code: string };
+
+      const ghRes = await fetch(GITHUB_ACCESS_TOKEN_URL, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: new URLSearchParams({
+          client_id: GITHUB_CLIENT_ID,
+          device_code,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+      });
+      const data = (await ghRes.json()) as {
+        access_token?: string;
+        error?: string;
+        error_description?: string;
+      };
+
+      if (data.access_token) {
+        const encrypted = encrypt(data.access_token, CONFIG.encryptionKey);
+        await agentProviderCredentialsRepository.upsert(agent.id, "copilot", {
+          encryptedKey: encrypted.ciphertext,
+          iv: encrypted.iv,
+          authTag: encrypted.authTag,
+          authType: "oauth_token",
+          baseUrl: "https://api.githubcopilot.com",
+          ...(requesterId ? { createdByUserId: requesterId } : {}),
+        });
+        await redis.del(key);
+        res.json({ success: true, data: { status: "approved" } });
+        return;
+      }
+      if (data.error === "authorization_pending") {
+        res.json({ success: true, data: { status: "pending" } });
+        return;
+      }
+      if (data.error === "slow_down") {
+        res.json({ success: true, data: { status: "slow_down" } });
+        return;
+      }
+      await redis.del(key);
+      res.status(400).json({
+        success: false,
+        error: data.error_description ?? data.error ?? "Authorization failed",
+      });
+    } catch (err) {
+      log.error("[agents] copilot/github-poll error:", err);
+      res.status(500).json({ success: false, error: "GitHub login failed" });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Agent-level Codex model list — mirror of `/settings/codex/models` but reads
 // the agent-scoped credential. ChatGPT OAuth tokens cannot hit OpenAI's
 // `/v1/models` (missing `api.model.read` scope, returns 403); Codex CLI works
