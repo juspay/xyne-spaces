@@ -3342,7 +3342,12 @@ export const queries: AnyQueryRegistry = defineQueries({
     ({ args: { threadId } }) => {
       return zql.canvas_comments
         .where('threadId', threadId)
-        .orderBy('createdAt', 'asc');
+        .orderBy('createdAt', 'asc')
+        .related('attachments', attachment =>
+          attachment
+            .where('entityType', AttachmentEntityType.CANVAS_COMMENT)
+            .where('isDeleted', false),
+        );
     },
   ),
 

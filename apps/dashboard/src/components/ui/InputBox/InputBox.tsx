@@ -254,6 +254,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       disableEnterToSend = false,
       hideSendButton = false,
       hideComposerTools = false,
+      showAttachButtonWhenToolsHidden = false,
+      attachmentMenuMode = 'full',
       hideVoiceInput = false,
       compact = false,
       sendDisabled = false,
@@ -1856,64 +1858,69 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     controls out of the row. The icon buttons keep their size via
                     min-width:auto (fixed-size svg children). */}
                 <div className='flex min-w-0 items-center gap-1'>
-                  {!hideComposerTools && features.fileAttachments && (
-                    <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
-                      <Tooltip
-                        content={
-                          <span className='flex items-center gap-2'>
-                            Attach files
-                            <ShortcutHint keys='mod+o' />
-                          </span>
-                        }
-                        side='top'
-                        delayDuration={300}
-                      >
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type='button'
-                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                            aria-label='Add content'
-                            disabled={disabled || isSending}
+                  {features.fileAttachments &&
+                    (!hideComposerTools || showAttachButtonWhenToolsHidden) && (
+                      <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
+                        <Tooltip
+                          content={
+                            <span className='flex items-center gap-2'>
+                              Attach files
+                              <ShortcutHint keys='mod+o' />
+                            </span>
+                          }
+                          side='top'
+                          delayDuration={300}
+                        >
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type='button'
+                              className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                              aria-label='Add content'
+                              disabled={disabled || isSending}
+                            >
+                              <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
+                            </button>
+                          </DropdownMenuTrigger>
+                        </Tooltip>
+                        <DropdownMenuContent side='top' align='start' className={overlayZIndex}>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              handleAttachClick();
+                              setIsPlusMenuOpen(false);
+                            }}
+                            data-track-category='CHAT_INPUT'
+                            data-track-name='ATTACH_FILE'
                           >
-                            <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
-                          </button>
-                        </DropdownMenuTrigger>
-                      </Tooltip>
-                      <DropdownMenuContent side='top' align='start' className={overlayZIndex}>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            handleAttachClick();
-                            setIsPlusMenuOpen(false);
-                          }}
-                          data-track-category='CHAT_INPUT'
-                          data-track-name='ATTACH_FILE'
-                        >
-                          <Plus className='h-4 w-4' /> Upload Files
-                          <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setIsTranscriptSelectorOpen(true);
-                            setIsPlusMenuOpen(false);
-                          }}
-                          data-track-category='CHAT_INPUT'
-                          data-track-name='ATTACH_TRANSCRIPT'
-                        >
-                          <FileText className='h-4 w-4' /> Add Call Summary
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setIsCanvasAttachmentModalOpen(true);
-                            setIsPlusMenuOpen(false);
-                          }}
-                          data-track-category='CHAT_INPUT'
-                          data-track-name='ATTACH_CANVAS'
-                        >
-                          <FileText className='h-4 w-4' /> Canvas
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
+                            <Plus className='h-4 w-4' /> Upload Files
+                            <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
+                          </DropdownMenuItem>
+                          {attachmentMenuMode === 'full' && (
+                            <>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setIsTranscriptSelectorOpen(true);
+                                  setIsPlusMenuOpen(false);
+                                }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='ATTACH_TRANSCRIPT'
+                              >
+                                <FileText className='h-4 w-4' /> Add Call Summary
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setIsCanvasAttachmentModalOpen(true);
+                                  setIsPlusMenuOpen(false);
+                                }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='ATTACH_CANVAS'
+                              >
+                                <FileText className='h-4 w-4' /> Canvas
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
 
                   <Dialog
                     open={isTranscriptSelectorOpen}
