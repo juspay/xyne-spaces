@@ -52,9 +52,8 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'canvas_comments'>>, tx: Transaction<Schema>): Promise<void> {
-    const comment = await tx.run(
-      zql.canvas_comments.where('id', args.id).one(),
-    );
+    const comment = await tx.run(zql.canvas_comments.where('id', args.id).one());
+    
     if (!comment) {
       throw new MutationACLError('Canvas comment update failed: comment not found', 'canvas_comments');
     }

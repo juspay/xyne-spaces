@@ -15,7 +15,6 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
 
     const participant = await tx.run(
       zql.canvas_participants
-        .where('workspaceId', this.ctx.workspaceId)
         .where('canvasId', canvasId)
         .where('role', 'IN', [CanvasRole.EDITOR, CanvasRole.OWNER])
         .where(({ or, cmp, exists: ex }: any) =>
@@ -49,9 +48,7 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'canvas_comment_threads'>>, tx: Transaction<Schema>): Promise<void> {
-    const thread = await tx.run(
-      zql.canvas_comment_threads.where('id', args.id).one(),
-    );
+    const thread = await tx.run(zql.canvas_comment_threads.where('id', args.id).one());
     if (!thread) {
       throw new MutationACLError('Canvas comment thread update failed: thread not found', 'canvas_comment_threads');
     }
