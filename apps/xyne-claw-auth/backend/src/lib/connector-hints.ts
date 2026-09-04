@@ -32,6 +32,7 @@ export interface ConnectorHint {
   domains?: readonly string[];
   /** Whole-word prose signals, lowercase. */
   keywords?: readonly string[];
+  connectKeywords?: readonly string[];
 }
 
 export const CONNECTOR_HINTS: readonly ConnectorHint[] = [
@@ -41,11 +42,13 @@ export const CONNECTOR_HINTS: readonly ConnectorHint[] = [
     serverType: "google",
     domains: ["docs.google.com", "drive.google.com", "sheets.google.com", "mail.google.com"],
     keywords: ["gmail", "google doc", "google docs", "google drive", "google sheet", "google sheets", "google calendar", "google meet"],
+    connectKeywords: ["google", "google workspace"],
   },
   {
     serverType: "microsoft",
     domains: ["outlook.com", "outlook.office.com", "sharepoint.com"],
     keywords: ["onedrive", "outlook", "teams", "sharepoint"],
+    connectKeywords: ["microsoft", "microsoft 365", "office 365"],
   },
   { serverType: "slack", domains: ["slack.com"], keywords: ["slack"] },
   { serverType: "notion", domains: ["notion.so"], keywords: ["notion"] },
@@ -121,6 +124,7 @@ function keywordIndex(text: string, keyword: string): number {
 /** Connector types the text implies, in the order they first appear. */
 export interface ConnectorMatchOptions {
   includeKeywords?: boolean;
+  includeConnectKeywords?: boolean;
 }
 
 export function connectorTypesFromText(
@@ -144,11 +148,13 @@ export function connectorTypesFromText(
       }
     }
 
-    if (options.includeKeywords) {
-      for (const keyword of hint.keywords ?? []) {
-        const at = keywordIndex(prose, keyword);
-        if (at >= 0 && (earliest === -1 || at < earliest)) earliest = at;
-      }
+    const prosePatterns = [
+      ...(options.includeKeywords ? (hint.keywords ?? []) : []),
+      ...(options.includeConnectKeywords ? (hint.connectKeywords ?? []) : []),
+    ];
+    for (const keyword of prosePatterns) {
+      const at = keywordIndex(prose, keyword);
+      if (at >= 0 && (earliest === -1 || at < earliest)) earliest = at;
     }
 
     if (earliest >= 0) hits.push({ serverType: hint.serverType, at: earliest });
@@ -167,13 +173,17 @@ export function connectorTypesFromText(
 const CONNECT_INTENT =
   /\b(re)?connect(ed|ing|ion|ions)?\b|\bauthori[sz]e\b|\bintegrate\b|\bset ?up\b|\bsign in\b|\blog in\b|\bhook up\b/i;
 
+const SHOW_CONNECTOR_INTENT =
+  /\b(show|see|view|open|display|list|find|bring up|pull up)\b[^.?!\n]{0,60}\b(connector|connectors|mcp|mcps|integration|integrations)\b/i;
+
 /**
- * Connector types the HUMAN explicitly asked to connect, read from their own
- * message. The model cannot be trusted to report this: it has an incentive to
- * claim explicit intent so its card is shown, and has been observed doing so
- * for plain task requests.
+ * Connector types the HUMAN explicitly asked for, read from their own message —
+ * either to connect one or to be shown one. The model cannot be trusted to
+ * report this: it has an incentive to claim explicit intent so its card is
+ * shown, and has been observed doing so for plain task requests.
  */
-export function connectorTypesUserAskedToConnect(text: string): string[] {
-  if (!text.trim() || !CONNECT_INTENT.test(text)) return [];
-  return connectorTypesFromText(text, { includeKeywords: true });
+export function connectorTypesUserAskedFor(text: string): string[] {
+  if (!text.trim()) return [];
+  if (!CONNECT_INTENT.test(text) && !SHOW_CONNECTOR_INTENT.test(text)) return [];
+  return connectorTypesFromText(text, { includeKeywords: true, includeConnectKeywords: true });
 }

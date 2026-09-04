@@ -2879,7 +2879,7 @@ export async function processTask(
       allTools.push(buildDescribeAgentTool(describeAgentRef));
       // Same gate as describe-agent: a connector card is only worth posting
       // where a human is watching and can press Connect.
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef));
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
     }
 
 

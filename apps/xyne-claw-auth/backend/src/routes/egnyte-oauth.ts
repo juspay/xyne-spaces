@@ -25,6 +25,7 @@ import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
+import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "../lib/oauth-return.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
@@ -150,7 +151,7 @@ export const egnyteOAuthProvider: OAuthTokenProvider = {
  */
 router.post("/:userId/oauth/egnyte/authorize", asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
   const { userId } = req.params;
-  const { redirectUri } = req.body as { redirectUri?: string };
+  const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
 
   const envDomain = process.env["EGNYTE_DOMAIN"];
   if (!envDomain || envDomain.trim().length === 0) {
@@ -167,7 +168,7 @@ router.post("/:userId/oauth/egnyte/authorize", asyncHandler(async (req: Request<
   const callbackUri = redirectUri ?? defaultCallbackUri();
 
   // Encode the domain into the signed state so the callback can use it.
-  const state = signOAuthState(userId, { domain: normalizedDomain, redirectUri: callbackUri });
+  const state = signOAuthState(userId, { domain: normalizedDomain, redirectUri: callbackUri, returnTo: resolveOAuthReturn(returnTo) });
 
   const authUrl = new URL(egnyteAuthUrl(normalizedDomain));
   authUrl.searchParams.set("client_id", clientId);
@@ -228,7 +229,9 @@ router.post("/:userId/oauth/egnyte/callback", asyncHandler(async (req: Request<{
 export const egnyteCallbackRouter = Router();
 
 egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response) => {
-  const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
+  // Default until the state verifies below — an unverified state must never
+  // steer the redirect.
+  let frontendUrl = defaultOAuthReturn();
 
   try {
     const { code, state, error: oauthError } = req.query as {
@@ -239,12 +242,12 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
 
     if (oauthError) {
       log.error(`[egnyte-oauth] OAuth error: ${oauthError}`);
-      res.redirect(`${frontendUrl}?egnyte_error=${encodeURIComponent(oauthError)}`);
+      res.redirect(withOAuthResult(frontendUrl, "egnyte_error", oauthError));
       return;
     }
 
     if (!code || !state) {
-      res.redirect(`${frontendUrl}?egnyte_error=missing_code_or_state`);
+      res.redirect(withOAuthResult(frontendUrl, "egnyte_error", "missing_code_or_state"));
       return;
     }
 
@@ -254,37 +257,38 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
     } catch (err) {
       const reason = err instanceof OAuthStateError ? err.reason : "malformed";
       log.error(`[egnyte-oauth] state ${reason}`);
-      res.redirect(`${frontendUrl}?egnyte_error=invalid_state`);
+      res.redirect(withOAuthResult(frontendUrl, "egnyte_error", "invalid_state"));
       return;
     }
 
     const userId = verified.userId;
+    frontendUrl = resolveOAuthReturn(verified.extra?.["returnTo"]);
     const domain = verified.extra?.["domain"] as string | undefined;
     const redirectUri = (verified.extra?.["redirectUri"] as string | undefined) ?? defaultCallbackUri();
 
     if (!domain) {
-      res.redirect(`${frontendUrl}?egnyte_error=missing_domain_in_state`);
+      res.redirect(withOAuthResult(frontendUrl, "egnyte_error", "missing_domain_in_state"));
       return;
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       log.error(`[egnyte-oauth] User not found: ${userId}`);
-      res.redirect(`${frontendUrl}?egnyte_error=user_not_found`);
+      res.redirect(withOAuthResult(frontendUrl, "egnyte_error", "user_not_found"));
       return;
     }
 
     const result = await exchangeAndStore(userId, code, domain, redirectUri);
     if (!result.ok) {
-      res.redirect(`${frontendUrl}?egnyte_error=${encodeURIComponent(result.code)}`);
+      res.redirect(withOAuthResult(frontendUrl, "egnyte_error", result.code));
       return;
     }
 
     log.info(`[egnyte-oauth] Stored Egnyte credentials for user ${userId} (domain: ${domain}.egnyte.com)`);
-    res.redirect(`${frontendUrl}?egnyte_connected=true`);
+    res.redirect(withOAuthResult(frontendUrl, "egnyte_connected", "true"));
   } catch (err) {
     log.error("[egnyte-oauth] browser callback error:", err);
-    res.redirect(`${frontendUrl}?egnyte_error=internal_error`);
+    res.redirect(withOAuthResult(frontendUrl, "egnyte_error", "internal_error"));
   }
 });
 

@@ -149,7 +149,7 @@ import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
-import { connectorTypesFromText, connectorTypesUserAskedToConnect } from "../lib/connector-hints.js";
+import { connectorTypesFromText, connectorTypesUserAskedFor } from "../lib/connector-hints.js";
 import { availableServerIds } from "../lib/connector-availability.js";
 
 const clog = createLogger("webhook");
@@ -4904,10 +4904,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   let inferredTypes: string[] = [];
   if (!payload.pendingConnectorSuggestions) {
     try {
-      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "").slice(
-        0,
-        MCP_SUGGEST_INFERRED_MAX,
-      );
+      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "", {
+        includeKeywords: true,
+      }).slice(0, MCP_SUGGEST_INFERRED_MAX);
     } catch (err) {
       log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -4963,7 +4962,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // request, which is exactly how an already-usable connector slipped
       // through. The server owns this fact like every other on the card.
       const askedToConnect = new Set(
-        connectorTypesUserAskedToConnect(ctx.rootTask ?? ctx.task ?? ""),
+        connectorTypesUserAskedFor(ctx.rootTask ?? ctx.task ?? ""),
       );
 
       const connectors = ordered
