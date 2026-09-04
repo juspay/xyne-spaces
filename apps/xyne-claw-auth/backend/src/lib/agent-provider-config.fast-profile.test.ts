@@ -5,8 +5,6 @@ vi.mock("../config.js", () => ({ CONFIG: { litellmUrl: "", litellmApiKey: "" } }
 vi.mock("../crypto.js", () => ({ decrypt: () => "" }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info() {}, warn() {}, error() {}, debug() {} }) }));
 vi.mock("../repositories/index.js", () => ({ agentProviderCredentialsRepository: { listByAgent: async () => [] }, userProviderCredentialsRepository: {}, sharedProviderCredentialRepository: {} }));
-vi.mock("./claude-oauth-refresh.js", () => ({ getValidClaudeBearer: async () => "" }));
-vi.mock("./codex-oauth-refresh.js", () => ({ getValidCodexBearer: async () => "" }));
 
 import { agentDefaultSpeed, applyFastModeModels, parseFastModeProfile, providerConfigForSpeed } from "./agent-provider-config.js";
 

@@ -19,8 +19,6 @@ vi.mock("../repositories/index.js", () => ({
   userSubagentConfigRepository: { listByUser: async () => state.subagentConfigs },
   sharedProviderCredentialRepository: { persistBundle: async () => {} },
 }));
-vi.mock("./claude-oauth-refresh.js", () => ({ getValidClaudeBearer: async () => "fresh-claude" }));
-vi.mock("./codex-oauth-refresh.js", () => ({ getValidCodexBearer: async () => "fresh-codex" }));
 
 import { resolveProvidersForDispatch } from "./provider-resolution.js";
 
@@ -138,12 +136,13 @@ describe("resolveProvidersForDispatch", () => {
     expect(r.runtimeProviderOrder).toEqual(["codex"]);
   });
 
-  it("refreshes oauth bearers for both providers through the shared helper", async () => {
-    state.userCreds = [cred("claude", { authType: "oauth_token" })];
-    state.agentCreds = [cred("codex", { authType: "oauth_token", sharedCredentialId: "s1" })];
+  it("passes API keys through untransformed (both claude and codex OAuth removed)", async () => {
+    state.userCreds = [cred("claude")];
+    state.agentCreds = [cred("codex")];
     const r = await run({ config: { providerOrder: ["claude", "codex"] } });
-    expect(r.providerConfigs["claude"]?.apiKey).toBe("fresh-claude");
-    expect(r.providerConfigs["codex"]?.apiKey).toBe("fresh-codex");
+    // No OAuth-bearer refresh remains — both providers pass the decrypted payload through.
+    expect(r.providerConfigs["claude"]?.apiKey).toBe("dec:claude-key");
+    expect(r.providerConfigs["codex"]?.apiKey).toBe("dec:codex-key");
   });
 
   it("passes through subagent overrides and mode", async () => {

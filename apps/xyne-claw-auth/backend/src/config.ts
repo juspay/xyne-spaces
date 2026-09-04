@@ -394,19 +394,3 @@ export const ERROR_PIPELINE = {
   agentTimeoutMs: 30 * 60 * 1000,
 } as const;
 
-export const CLAUDE_OAUTH = {
-  clientId: process.env["CLAUDE_OAUTH_CLIENT_ID"] ?? "",
-  authorizeUrl: process.env["CLAUDE_OAUTH_AUTHORIZE_URL"] ?? "",
-  tokenUrl: process.env["CLAUDE_OAUTH_TOKEN_URL"] ?? "",
-  redirectUri: process.env["CLAUDE_OAUTH_REDIRECT_URI"] ?? "",
-  scopes: process.env["CLAUDE_OAUTH_SCOPES"] ?? "",
-  pkcePrefix: process.env["CLAUDE_OAUTH_PKCE_PREFIX"] ?? "claude-pkce-user:",
-} as const;
-
-export const claudeOAuthConfigured = (): boolean =>
-  Boolean(
-    CLAUDE_OAUTH.clientId &&
-      CLAUDE_OAUTH.authorizeUrl &&
-      CLAUDE_OAUTH.tokenUrl &&
-      CLAUDE_OAUTH.redirectUri,
-  );
