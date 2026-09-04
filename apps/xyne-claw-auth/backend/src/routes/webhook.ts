@@ -22,6 +22,7 @@ import {
   agentRequestRepository,
 } from "../repositories/index.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
+import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
 import {
   identityFromAgentRow,
   identityFromDraftSpec,
@@ -4929,17 +4930,20 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Resolve every requested type against the catalog. The model supplies
       // names only — descriptions and display names come from the row, and an
       // unknown type is dropped rather than rendered as an empty card.
-      const rows = listAll
+      const candidates = listAll
         ? await prisma.mcpServer.findMany({
             where: { enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
             orderBy: { name: "asc" },
-            take: MCP_SUGGEST_ROSTER_SAMPLE,
           })
         : await prisma.mcpServer.findMany({
             where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
           });
+      const visibleRows = candidates.filter((row) =>
+        isVisibleToUser(parseConnectorMeta(row.connectorMeta), ctx.senderId),
+      );
+      const rows = listAll ? visibleRows.slice(0, MCP_SUGGEST_ROSTER_SAMPLE) : visibleRows;
       const byType = new Map(rows.map((row) => [row.type, row]));
 
       const connectedIds = await availableServerIds(

@@ -56,11 +56,11 @@ type ConnectorMeta = {
   mode?: string;
 };
 
-function parseConnectorMeta(value: unknown): ConnectorMeta {
+export function parseConnectorMeta(value: unknown): ConnectorMeta {
   return isRecord(value) ? (value as ConnectorMeta) : {};
 }
 
-function isVisibleToUser(meta: ConnectorMeta, requesterId?: string): boolean {
+export function isVisibleToUser(meta: ConnectorMeta, requesterId?: string): boolean {
   const scope = meta.scope ?? "global";
   if (scope === "global") return true;
   return Boolean(requesterId && meta.ownerUserId === requesterId);
