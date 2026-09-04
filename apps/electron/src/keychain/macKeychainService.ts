@@ -22,6 +22,12 @@ const unlinkAsync = promisify(fs.unlink);
 const SECURITY = '/usr/bin/security';
 const OPENSSL = '/usr/bin/openssl';
 
+// `security` reports a missing keychain item with a "not be found" message on stderr.
+// Single source of truth so the delete-identity paths classify it identically.
+function isNotFoundError(e: any): boolean {
+    return Boolean(e?.stderr?.includes("not be found"));
+}
+
 class MacKeychainService implements IKeychain {
     // Store private key PEM in memory for the duration of the session
     // In a real app, you might want to persist these securely until enrollment is complete
@@ -254,27 +260,87 @@ class MacKeychainService implements IKeychain {
     }
     async deleteIdentity(commonName: string): Promise<void> {
         log.info(`Deleting identity for "${commonName}"...`);
-        // Security command to delete identity (cert + key) matching the preference
-        // -c: Match on common name
-        const cmd = `${SECURITY} delete-identity -c "${commonName}"`;
-
+        const logIdentityNotFound = () => {
+            log.info("Identity not found, nothing to delete.");
+            Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
+        };
         try {
-            await execAsync(cmd);
-            log.info("Identity deleted successfully.");
-            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { common_name: commonName });
-        } catch (e: any) {
-            // It might fail if not found, which is fine
-            if (e.stderr && e.stderr.includes("not be found")) {
-                log.info("Identity not found, nothing to delete.");
-                Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
-            } else {
-                log.warn("Delete identity warning:", e.stderr || e.message);
-                Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
-            }
-        }
+            const { stdout } = await execFileAsync(SECURITY, ['find-certificate', '-a', '-c', commonName, '-Z']);
 
-        // Also clear memory just in case
-        this.privateKeyPem = null;
+            // Single-pass parse: dedupe SHA-256 hashes and count blocks dropped by the
+            // exact-label filter, so externally-renamed/legacy items that `-c` matched but
+            // we skip don't disappear without a trace.
+            const hashes = new Set<string>();
+            let skippedBlocks = 0;
+            for (const block of stdout.split(/(?=SHA-256 hash:)/)) {
+                const hash = block.match(/SHA-256 hash:\s*([0-9A-F]+)/i)?.[1];
+                if (!hash) continue;
+                if (block.match(/"labl"<blob>="([^"]*)"/)?.[1] === commonName) {
+                    hashes.add(hash);
+                } else {
+                    skippedBlocks++;
+                }
+            }
+
+            if (skippedBlocks > 0) {
+                log.warn(`Skipped ${skippedBlocks} certificate block(s) matched by common name "${commonName}" whose label did not match exactly.`);
+            }
+
+            if (hashes.size === 0) {
+                logIdentityNotFound();
+                return;
+            }
+
+            let deletedCount = 0;
+            for (const hash of hashes) {
+                // The same hash can exist in more than one keychain in the search list, and
+                // `delete-identity -Z` removes only the first match, so loop until the keychain
+                // reports the hash can no longer be found.
+                while (true) {
+                    try {
+                        // Hash uniquely identifies one identity even when common names are duplicated.
+                        await execFileAsync(SECURITY, ['delete-identity', '-Z', hash]);
+                        deletedCount++;
+                        continue;
+                    } catch (identityError: any) {
+                        if (!isNotFoundError(identityError)) {
+                            throw identityError;
+                        }
+                    }
+
+                    // No identity left for this hash; a partial enrollment may still have left a
+                    // bare certificate without its private key. Swallow a not-found here so a
+                    // concurrent removal (or an item outside the search list) does not abort
+                    // deletion of the remaining hashes.
+                    try {
+                        await execFileAsync(SECURITY, ['delete-certificate', '-Z', hash]);
+                        deletedCount++;
+                    } catch (certError: any) {
+                        if (!isNotFoundError(certError)) {
+                            throw certError;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            log.info(`Deleted ${deletedCount} identity certificate(s) successfully.`);
+            Logger.info(EnrollmentEvent.IDENTITY_DELETED, {
+                common_name: commonName,
+                deleted_count: deletedCount,
+            });
+        } catch (e: any) {
+            if (isNotFoundError(e)) {
+                logIdentityNotFound();
+            } else {
+                log.error("Delete identity failed:", e.stderr || e.message);
+                Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
+                throw e;
+            }
+        } finally {
+            // Also clear memory just in case
+            this.privateKeyPem = null;
+        }
     }
 
     async checkIdentity(commonName: string): Promise<boolean> {
