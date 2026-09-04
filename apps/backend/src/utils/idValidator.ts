@@ -224,3 +224,25 @@ export function validateDocTypes(docTypes: string[]): IdValidationResult {
 
   return { valid, invalid };
 }
+
+/**
+ * Characters that let a docId escape its URL path segment and rewrite the Vespa
+ * Document V1 request path: / \ ? # % and any ASCII control char (0x00-0x1f).
+ */
+// eslint-disable-next-line no-control-regex -- control chars are exactly what we must reject in a path segment
+const DOC_ID_PATH_METACHARACTERS = /[/\\?#%\x00-\x1f]/;
+
+/**
+ * Guard untrusted docId input at request boundaries before it reaches Vespa. The sink already
+ * URL-encodes each path segment; this rejects traversal attempts up front (400 + audit log) instead
+ * of letting them 404 deep in the call chain. Denylist rather than a strict allow-list because memory
+ * docIds are client-supplied and free-form — we block only the injection metacharacters, which never
+ * legitimately appear in a docId.
+ */
+export function isSafeDocId(docId: unknown): docId is string {
+  if (typeof docId !== 'string' || docId.length === 0) {
+    return false;
+  }
+
+  return !docId.includes('..') && !DOC_ID_PATH_METACHARACTERS.test(docId);
+}
