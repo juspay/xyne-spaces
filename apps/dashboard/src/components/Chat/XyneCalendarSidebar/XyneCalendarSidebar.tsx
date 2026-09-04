@@ -19,6 +19,7 @@ import {
   computeEventPositions,
   createSlotClickHandler,
   getCalendarCreateSlot,
+  getCallsOverlappingDay,
   getCurrentUserMeetingStatus,
   minutesFromTopPx,
 } from '../../../routes/CallHistoryScreen/CalenderViewUtils';
@@ -119,21 +120,23 @@ const XyneCalendarSidebarHeader = memo(
 
     return (
       <header className='shrink-0'>
-        <div className='flex h-12 items-center gap-1.5 px-2.5'>
-          <h2 className='min-w-0 flex-1 truncate text-sm font-bold text-foreground pl-1 select-none'>
-            Calendar
-          </h2>
+        <div className='flex items-center gap-6 py-3 pl-2 pr-3'>
+          <div className='flex-1 min-w-0 px-1.5'>
+            <span className='whitespace-nowrap text-foreground font-semibold font-sans tracking-[-0.32px] leading-7 text-base'>
+              Calendar
+            </span>
+          </div>
           <Button
             variant='ghost'
-            size='iconSm'
+            size='sm'
             title='Close'
             aria-label='Close Calendar sidebar'
             onClick={() => xyneCalendarActor.send({ type: 'CLOSE' })}
             data-track-category='Calendar'
             data-track-name='CLOSE_CALENDAR_SIDEBAR'
-            className='size-7 rounded-lg text-muted-foreground'
+            className='h-7 w-7 rounded-lg shrink-0 text-muted-foreground hover:text-foreground'
           >
-            <MultipleCrossCancelDefault className='size-4' strokeWidth={2} aria-hidden='true' />
+            <MultipleCrossCancelDefault size={16} aria-hidden='true' />
           </Button>
         </div>
 
@@ -458,8 +461,10 @@ const XyneCalendarSidebarTimeline = memo(
     const dailyCalls = useMemo(() => {
       const callsById = new Map<string, Call>();
 
-      for (const call of [...(calls ?? []), ...(calendarScheduledCalls ?? [])]) {
-        if (!call.startsAt || !isSameDay(new Date(call.startsAt), selectedDate)) continue;
+      for (const call of getCallsOverlappingDay(
+        [...(calls ?? []), ...(calendarScheduledCalls ?? [])],
+        selectedDate,
+      )) {
         callsById.set(call.id, call);
       }
 
@@ -470,7 +475,10 @@ const XyneCalendarSidebarTimeline = memo(
       );
     }, [calendarScheduledCalls, calls, selectedDate]);
 
-    const callPositions = useMemo(() => computeEventPositions(dailyCalls), [dailyCalls]);
+    const callPositions = useMemo(
+      () => computeEventPositions(dailyCalls, selectedDate),
+      [dailyCalls, selectedDate],
+    );
     const channelPresentationsById = useMemo(
       () =>
         new Map(
@@ -632,7 +640,7 @@ const XyneCalendarSidebarTimeline = memo(
             {TIMELINE_HOURS.map(hour => (
               <div
                 key={hour}
-                className='absolute left-0 right-0 flex items-center gap-4'
+                className='absolute left-0 right-0 flex -translate-y-1/2 items-center gap-4'
                 style={{ top: hour * TIMELINE_HOUR_HEIGHT }}
               >
                 <span className='w-10 shrink-0 text-right text-xs font-mono leading-none text-muted-foreground/80'>
@@ -723,12 +731,15 @@ const XyneCalendarSidebarTimeline = memo(
                   !callHasEnded &&
                   (variant === 'joinable' ||
                     (variant === 'highlighted' && isScheduledCallJoinable(call, now.getTime())));
-
-                const top = getTimelineOffset(position.startMins) + CALL_PILL_VERTICAL_INSET;
+                const continuesFromPreviousDay = !isSameDay(new Date(call.startsAt), selectedDate);
+                const continuesToNextDay =
+                  !!call.endsAt && !isSameDay(new Date(call.endsAt), selectedDate);
+                const topInset = continuesFromPreviousDay ? 0 : CALL_PILL_VERTICAL_INSET;
+                const bottomInset = continuesToNextDay ? 0 : CALL_PILL_VERTICAL_INSET;
+                const top = getTimelineOffset(position.startMins) + topInset;
                 const height = Math.max(
                   MINIMUM_CALL_PILL_HEIGHT,
-                  getTimelineOffset(position.endMins - position.startMins) -
-                    CALL_PILL_VERTICAL_INSET * 2,
+                  getTimelineOffset(position.endMins - position.startMins) - topInset - bottomInset,
                 );
                 const channel = call.channelId
                   ? channelPresentationsById.get(call.channelId)
@@ -761,6 +772,8 @@ const XyneCalendarSidebarTimeline = memo(
                       showCompactMetadata={
                         position.widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE
                       }
+                      continuesFromPreviousDay={continuesFromPreviousDay}
+                      continuesToNextDay={continuesToNextDay}
                       className='h-full'
                     />
                   </div>

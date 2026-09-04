@@ -588,7 +588,7 @@ const CalendarDayView = ({
                     otherUsersCalls,
                     slot => !!slot.startsAt && isSameDay(new Date(slot.startsAt), currentDay),
                   );
-                  const positions = computeEventPositions(allEvents);
+                  const positions = computeEventPositions(allEvents, currentDay);
 
                   return allEvents.map(event => {
                     const pos = positions.get(event.id);
@@ -677,7 +677,7 @@ const CalendarDayView = ({
                   )}
                   {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
                   {(() => {
-                    const positions = computeEventPositions(dayCalls);
+                    const positions = computeEventPositions(dayCalls, currentDay);
                     return dayCalls.map(call => {
                       if (!call.startsAt) return null;
                       const pos = positions.get(call.id);
@@ -724,7 +724,7 @@ const CalendarDayView = ({
                     endsAt: slot.endsAt,
                     slot,
                   }));
-                  const positions = computeEventPositions(slotEvents);
+                  const positions = computeEventPositions(slotEvents, currentDay);
                   return (
                     <div
                       key={user.id}
