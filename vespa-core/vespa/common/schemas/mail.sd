@@ -203,6 +203,7 @@ schema mail {
 
   import field channelRef.docId as channelId {}
   import field channelRef.permissions as permissions {}
+  import field channelRef.channelName as channelName {}
 
   # Subject-line embedding. mail previously embedded ONLY `chunks`, so a query whose
   # meaning lives in the subject had nothing to match semantically -- the same gap
@@ -322,6 +323,8 @@ schema mail {
     summary chunks {
       bolding: on
     }
+    summary channelName {}
+    summary channelId {}
   }
 
   document-summary lean {
@@ -337,6 +340,8 @@ schema mail {
     summary entity {}
     summary permissions {}
     summary mailId {}
+    summary channelName {}
+    summary channelId {}
   }
 
 

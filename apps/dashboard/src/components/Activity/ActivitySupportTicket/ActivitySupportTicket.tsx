@@ -15,6 +15,7 @@ const EMPTY_TICKET_FILTER = {
   aiCategory: undefined,
   conversationIdWhitelist: undefined,
   hasAiDraft: undefined,
+  hasSubTickets: undefined,
   userGroups: undefined,
   lastEmailAtStart: undefined,
   lastEmailAtEnd: undefined,

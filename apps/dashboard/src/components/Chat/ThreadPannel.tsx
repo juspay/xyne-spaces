@@ -130,6 +130,8 @@ interface ThreadMessagesProps {
   onAskAI?: (threadInfo?: ThreadInfo) => void;
   /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
   onUserClick?: ((userId: string) => void) | undefined;
+  /** Forces the initial active tab, overriding the ?selectedTab URL param. Used by modal hosts to avoid inheriting the outer page's tab state. */
+  defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
 }
 
@@ -153,6 +155,7 @@ export const ThreadMessages = ({
   skipInputAutoFocus: propSkipInputAutoFocus = false,
   onAskAI,
   onUserClick,
+  defaultTab,
   headerActionsContainer,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
@@ -195,9 +198,9 @@ export const ThreadMessages = ({
   const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
   const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
-  const selectedTab: TabType = validTabs.includes(selectedTabParam as TabType)
-    ? (selectedTabParam as TabType)
-    : 'thread';
+  const selectedTab: TabType =
+    defaultTab ??
+    (validTabs.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
 
   const isFocusedThread = searchParams.get('focusThread') === '1';
   const skipInputAutoFocus = propSkipInputAutoFocus || searchParams.get('nofocus') === '1';

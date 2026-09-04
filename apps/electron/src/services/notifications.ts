@@ -15,6 +15,8 @@ export interface CallNotificationData {
   callerEmail: string;
   callType: 'AUDIO' | 'VIDEO';
   callerPicture?: string;
+  /** Precomputed body from the renderer; falls back to the legacy line. */
+  body?: string;
 }
 
 // Keep references to prevent garbage collection
@@ -90,7 +92,7 @@ export function showCallNotification(
     // stays on the payload — LiveKit room setup and CallKit still key off it.
     const notification = new Notification({
       title: 'Incoming call',
-      body: `${data.callerName} is calling you`,
+      body: data.body ?? `${data.callerName} is calling you`,
       silent: false,
       urgency: 'critical',
       hasReply: false,

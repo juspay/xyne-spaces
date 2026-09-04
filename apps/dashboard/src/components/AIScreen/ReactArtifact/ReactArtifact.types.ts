@@ -74,6 +74,13 @@ export interface ReactArtifactViewProps {
    * an app keeps its v1 title while a later build may rename itself.
    */
   titleSlot?: ReactNode;
+  /**
+   * Contents of the Settings tab. Supplied by the caller rather than built
+   * here: settings are properties of the APP (its icon, later its name and
+   * visibility), which this view knows nothing about — it renders a payload.
+   * The tab appears only when a caller passes one.
+   */
+  settingsSlot?: ReactNode;
   /** Shows a save affordance. Omitted when already saved or behind the flag. */
   onSave?: (artifact: ReactArtifactRef) => void;
   /** Drives the save button's appearance without the view owning the request. */

@@ -31,6 +31,7 @@
     "@sinclair/typebox": "^0.34.49",
     "@slack/web-api": "8.0.0",
     "@types/pdfkit": "^0.17.6",
+    "@xyne/icons": "workspace:*",
     "@xyne/shared": "workspace:*",
     "@xyne/storage": "workspace:*",
     "bullmq": "^5.72.0",
@@ -65,7 +66,7 @@
     "prisma": "^6.0.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.62.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.2.6"
   },
   "overrides": {
     "@opentelemetry/otlp-transformer": {
