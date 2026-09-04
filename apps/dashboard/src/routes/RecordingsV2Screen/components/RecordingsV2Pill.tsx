@@ -9,6 +9,7 @@ import {
   MicOn,
   MusicQuaverNote,
   Share01,
+  Spinner,
   ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
@@ -44,7 +45,12 @@ import {
 import { cn } from '../../../utils/classNames';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
-import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
+import {
+  formatRecordingTimestamp,
+  isRecordingSummaryGenerating,
+  toRecordingSummaryPreview,
+  toRecordingTitleInput,
+} from '../utils/RecordingsV2.utils';
 import {
   LabelChip,
   SuggestedLabelChip,
@@ -176,6 +182,8 @@ const RecordingsV2Pill = ({
   const durationMs = recording.endedAt
     ? Math.max(0, recording.endedAt - recording.startedAt)
     : null;
+  const summaryPreview = toRecordingSummaryPreview(recording.aiSummary);
+  const isSummaryGenerating = isRecordingSummaryGenerating(recording);
   const isOwner = currentUserId !== undefined && currentUserId === recording.createdByUserId;
   const visibleTags = normalizeRecordingTags(tags);
   const visibleSuggestedTags = isOwner ? normalizeRecordingTags(suggestedTags) : [];
@@ -432,6 +440,23 @@ const RecordingsV2Pill = ({
             </DropdownMenu>
           </span>
         </span>
+
+        {isSummaryGenerating ? (
+          <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+            <Spinner size={12} className='shrink-0 animate-spin' />
+            <TextShimmer
+              as='span'
+              glassEffect={false}
+              className='shimmer-text-themed text-xs'
+            >
+              Generating summary…
+            </TextShimmer>
+          </span>
+        ) : summaryPreview ? (
+          <span className='line-clamp-2 text-xs leading-5 text-muted-foreground'>
+            {summaryPreview}
+          </span>
+        ) : null}
 
         {visibleTags.length > 0 || visibleSuggestedTags.length > 0 ? (
           <span className='flex flex-wrap items-center gap-1.5'>
