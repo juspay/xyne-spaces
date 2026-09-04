@@ -1208,6 +1208,23 @@ export class EmailService {
       receivedAt ?? new Date(),
     );
 
+    // Redundant with the P2002 catch below, but that fires after the number is allocated —
+    // and the allocation is not rolled back with the transaction, so every redelivered
+    // notification would burn a ticket number. The catch stays as the guard for real races.
+    const duplicateEmail = await this.emailRepository.findByExternalMessageIdAndChannel(
+      externalMessageId,
+      channelId,
+    );
+    if (duplicateEmail) {
+      await this.emailRepository.backfillRfcMessageIdByExternalMessageId(
+        channelId,
+        externalMessageId,
+        normalizedRfcMessageId,
+      );
+      logger.warn(`[EmailService] Duplicate externalMessageId skipped: ${externalMessageId}`);
+      return { isDuplicate: true };
+    }
+
     // Outside the transaction on purpose: the allocator reaches a second database over its
     // own small pool, so allocating inside holds a main-DB connection while queueing there.
     const xyneId = await TicketIdService.generateTicketId(this.prisma, projectId);
