@@ -40,6 +40,7 @@ import { Platform,
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { extractFileReferenceIds, resolveReferencedAttachments, mergeAttachments } from '@/apps/utils/fileReferenceUtils';
 import { syncMessageArtifact } from '@/database/repositories/messageArtifactRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
@@ -652,6 +653,29 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         ? await messageAttachmentRepository.findByMessageId(messageId)
         : [];
 
+      const uploadedAppAttachments = attachments.map(att => ({
+        attachmentId: att.id,
+        fileName: att.originalFilename,
+        fileSize: att.size,
+        mimeType: att.mimetype,
+        fileUrl: att.url,
+      }));
+
+      // Resolve files the sender TAGGED from this thread. Ids come from the
+      // message body and are re-authorized here against workspace + thread.
+      const referencedAppAttachments = await resolveReferencedAttachments(
+        extractFileReferenceIds(content),
+        { workspaceId, conversationId, repo: messageAttachmentRepository },
+      ).catch(err => {
+        logger.error('[MessagesSideEffect] Failed to resolve referenced attachments', { error: err, messageId });
+        return [];
+      });
+
+      // Deliver tagged files through the existing attachment pipeline (so Claw
+      // and other apps need no change), while keeping provenance in
+      // referencedAttachments.
+      const mergedAppAttachments = mergeAttachments(uploadedAppAttachments, referencedAppAttachments);
+
       void this.handlleMessageAppEvents(AppEventType.APP_MENTION, {
         conversationId,
         messageId,
@@ -662,15 +686,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
-        ...(attachments.length > 0 && {
-          attachments: attachments.map(att => ({
-            attachmentId: att.id,
-            fileName: att.originalFilename,
-            fileSize: att.size,
-            mimeType: att.mimetype,
-            fileUrl: att.url,
-          })),
-        }),
+        ...(mergedAppAttachments.length > 0 && { attachments: mergedAppAttachments }),
+        ...(referencedAppAttachments.length > 0 && { referencedAttachments: referencedAppAttachments }),
       }, mentionedAppUsersIds);
     }
 

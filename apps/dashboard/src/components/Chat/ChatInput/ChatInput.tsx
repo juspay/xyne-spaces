@@ -9,6 +9,9 @@ import React, {
   useImperativeHandle,
 } from 'react';
 import { withProfilerRef } from '../../../utils/withProfiler';
+import { queries } from '../../../zero/queries';
+import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
+import type { FileReferenceItem } from '../../ui/Selectors/FileReferenceSelector';
 import { useZeroWithFallback as useZero } from '../../../hooks/useZeroWithFallback';
 import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
@@ -207,6 +210,35 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
     const channelResults = useChannelSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
+
+    // Files already posted in this thread — the source list for the `~` file
+    // reference picker. We reuse the same named query the thread view uses, so
+    // the picker only ever offers files the user can already see, and the Zero
+    // permission layer gates access. Attachments are re-authorized server-side
+    // on send, so this list is a convenience, not a trust boundary.
+    const [threadMessagesForFiles] = useZeroQuery(
+      queries.conversationMessages({ conversationId: conversationId ?? '' }),
+      { enabled: !!conversationId },
+    );
+    const fileReferenceItems = useMemo<FileReferenceItem[]>(() => {
+      if (!conversationId || !threadMessagesForFiles) return [];
+      const seen = new Set<string>();
+      const items: FileReferenceItem[] = [];
+      for (const message of threadMessagesForFiles) {
+        const attachments = message.attachments;
+        if (!attachments) continue;
+        for (const att of attachments) {
+          if (!att.id || !att.originalFilename || att.isDeleted || seen.has(att.id)) continue;
+          seen.add(att.id);
+          items.push({
+            id: att.id,
+            name: att.originalFilename,
+            ...(att.mimetype != null && { mimeType: att.mimetype }),
+          });
+        }
+      }
+      return items;
+    }, [conversationId, threadMessagesForFiles]);
 
     // A thread is one incident's workspace, so it holds at most one open artifact
     // of a given command. The channel root is unrestricted — it has no
@@ -1144,6 +1176,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               onMentionSearch={handleMentionSearch}
               channelItems={channelItems}
               onChannelSearch={handleChannelSearch}
+              fileReferenceItems={fileReferenceItems}
               onSendMessage={handleSendMessage}
               onContentChange={handleContentChange}
               onTyping={handleTyping}
