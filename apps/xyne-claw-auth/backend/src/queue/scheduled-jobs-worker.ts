@@ -79,7 +79,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
 
   // Resolve the agent's configured provider so a scheduled run uses the same
   // (premium) model a human chat would — not the platform default. Headless:
-  // agent-level creds only, honoring the agent's providerAlwaysOn policy.
+  // agent-level creds only, honoring the agent's provider order.
   // Best-effort — if the row is gone we fire without it (platform default).
   const { providerConfigs, providerOrder, parent: providerParent } = agentRow
     ? await resolveAgentProviderConfigs(agentRow, { headlessBulk: true })

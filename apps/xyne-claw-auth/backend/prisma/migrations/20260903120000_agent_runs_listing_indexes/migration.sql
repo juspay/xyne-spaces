@@ -1,0 +1,33 @@
+-- agent_runs (userId, startedAt) and (orgId, startedAt) listing indexes.
+--
+-- GET /runs/paged orders every branch by startedAt DESC over a bounded date
+-- window, with either userId (scope=own) or orgId (scope=all, cross-agent) as
+-- the leading equality. Neither shape has a usable index today:
+--   * @@index([userId, status, startedAt]) puts status BETWEEN the equality
+--     and the sort column, so a query with no status equality comes back
+--     ordered by (status, startedAt) and must sort the user's whole history.
+--   * @@index([orgId]) is single-column, so a cross-agent org listing top-N
+--     sorts every run the org has ever made.
+-- With these two, LIMIT/OFFSET paging is an index-ordered scan, and the
+-- sibling COUNT(*) rides the same index range.
+--
+-- ⚠ PROD APPLY NOTE: migrations are applied MANUALLY in SQL studio (no
+-- _prisma_migrations baseline). Plain CREATE INDEX takes a write lock on
+-- agent_runs for the build duration — on the live table, run the CONCURRENTLY
+-- variant instead (it cannot run inside a transaction; execute each as a
+-- single standalone statement):
+--
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS
+--     "agent_runs_userId_startedAt_idx" ON "agent_runs" ("userId", "startedAt");
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS
+--     "agent_runs_orgId_startedAt_idx"  ON "agent_runs" ("orgId",  "startedAt");
+--
+-- The non-concurrent statements below are for fresh/dev databases where
+-- `prisma migrate` runs this file inside a transaction (CONCURRENTLY is
+-- illegal there). Both are guarded — IF NOT EXISTS makes a re-run a no-op
+-- either way, and the index names match what Prisma derives from
+-- @@index([userId, startedAt]) / @@index([orgId, startedAt]) so drift checks
+-- stay clean.
+
+CREATE INDEX IF NOT EXISTS "agent_runs_userId_startedAt_idx" ON "agent_runs" ("userId", "startedAt");
+CREATE INDEX IF NOT EXISTS "agent_runs_orgId_startedAt_idx"  ON "agent_runs" ("orgId",  "startedAt");

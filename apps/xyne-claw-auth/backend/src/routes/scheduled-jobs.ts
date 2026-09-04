@@ -28,7 +28,7 @@ import {
   cancelCronJob,
   type ScheduledJobData,
 } from "../queue/scheduled-jobs-queue.js";
-import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
+import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
 import { designShareUrl } from "./design-shares.js";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
@@ -983,22 +983,6 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   log.info(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
   res.json({ success: true });
   let resultChatMessageId: string | null = null;
-
-  if (payload.status === "handoff") {
-    log.info(`[scheduled-jobs/result] Job ${id}: handoff callback session=${payload.sessionId ?? ""} lastTurn=${payload.lastTurn ?? "unknown"}`);
-    if (payload.sessionId) {
-      const handoff = await handleRunHandoff(payload.sessionId).catch((err) => {
-        log.warn(`[scheduled-jobs/result] handoff re-dispatch failed for ${payload.sessionId}:`, errMsg(err));
-        return null;
-      });
-      if (handoff) {
-        log.info(`[scheduled-jobs/result] Job ${id}: handoff re-dispatched root=${handoff.rootSessionId} newSession=${handoff.newSessionId}`);
-      } else {
-        log.warn(`[scheduled-jobs/result] Job ${id}: handoff callback had no recovery state session=${payload.sessionId}`);
-      }
-    }
-    return;
-  }
 
   // Finalize AgentRun + save assistant ChatMessage (fire-and-forget)
   if (payload.sessionId) {

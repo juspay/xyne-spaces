@@ -4,7 +4,7 @@ process.env.SERVICE_NAME ||= "xyne-claw";
 import express from "express";
 import { SERVER } from "./config.js";
 import { initStore } from "./store.js";
-import { runRouter, getActiveRunCount, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
+import { runRouter, getActiveRunCount, getActiveSessionIds, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
 import { curatorRouter } from "./routes/curator.js";
 import { userMemoryRouter } from "./routes/user-memory.js";
 import { failureCuratorRouter } from "./routes/failure-curator.js";
@@ -17,21 +17,13 @@ import { attachmentsRouter } from "./routes/attachments.js";
 import { litellmModelsRouter } from "./routes/litellm-models.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
 import { beginDraining, isDraining } from "./drain.js";
+import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker.js";
+import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("main");
 
 const DRAIN_TIMEOUT_MS = Number(process.env["DRAIN_TIMEOUT"] ?? 900) * 1_000;
 const FATAL_FLUSH_TIMEOUT_MS = Number(process.env["FATAL_FLUSH_TIMEOUT_MS"] ?? 30_000);
-// Default ON (owner decision 2026-07-15, enabled during a low-traffic window):
-// on drain, checkpoint active runs at a turn boundary and hand off to the new
-// pod via the recovery machinery instead of waiting them out for 15 min.
-// Set XYNE_DRAIN_HANDOFF=0 to fall back to legacy drain-in-place (the
-// kill-switch if handoff misbehaves — see drain-handoff-plan.md Slice C for
-// what to watch: handoff_ok≈handoff_resume_ok, no double answers, no runs
-// stuck in "running"). Handoff only applies to callback-backed runs; others
-// still drain in place, and DRAIN_TIMEOUT stays 900s as the safety net until
-// handoff is proven, so a failed handoff degrades to the old behavior.
-const DRAIN_HANDOFF_ENABLED = process.env["XYNE_DRAIN_HANDOFF"] !== "0";
 const HANDOFF_TURN_CAP_MS = Number(process.env["XYNE_HANDOFF_TURN_CAP_MS"] ?? 120_000);
 
 // Fail closed at boot. Every route is gated by the S2S key; serving without it
@@ -43,8 +35,10 @@ if (!SERVER.s2sKey) {
 }
 
 
+startLoopWatchdog();
 initStore();
 startSessionCleanup();
+const runQueueWorker = startRunQueueWorker();
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -55,10 +49,10 @@ app.get("/health", (_req, res) => {
 
 app.get("/healthz/ready", (_req, res) => {
   if (isDraining()) {
-    res.status(503).json({ status: "draining", service: "xyne-claw", activeRuns: getActiveRunCount() });
+    res.status(503).json({ status: "draining", service: "xyne-claw", activeRuns: getActiveRunCount(), activeSessionIds: getActiveSessionIds() });
     return;
   }
-  res.json({ status: "ready", service: "xyne-claw", activeRuns: getActiveRunCount() });
+  res.json({ status: "ready", service: "xyne-claw", activeRuns: getActiveRunCount(), activeSessionIds: getActiveSessionIds() });
 });
 
 app.use(runRouter);
@@ -97,10 +91,15 @@ async function shutdown(signal: string): Promise<void> {
   for (const r of describeActiveRuns()) {
     log.warn(`[drain] inflight at ${signal}: session=${r.sessionId} agent=${r.agentSlug} user=${r.userId} ageS=${r.ageS}`);
   }
-  if (DRAIN_HANDOFF_ENABLED) {
-    const requested = requestActiveRunHandoffs(HANDOFF_TURN_CAP_MS);
-    log.warn(`[xyne-claw] drain handoff enabled; requested handoff for ${requested} active run(s) (turnCapMs=${HANDOFF_TURN_CAP_MS}).`);
+  if (runQueueWorker) {
+    markRunQueueDrainPaused();
+    await runQueueWorker.pause(true).catch((err) => {
+      log.error("[xyne-claw] run queue worker pause failed:", err);
+    });
+    log.info("[xyne-claw] run queue worker paused; no longer claiming queued runs.");
   }
+  const requested = requestActiveRunHandoffs(HANDOFF_TURN_CAP_MS);
+  log.warn(`[xyne-claw] requested drain checkpoint for ${requested} active run(s) (turnCapMs=${HANDOFF_TURN_CAP_MS}).`);
 
   const hardExitMs = DRAIN_TIMEOUT_MS + FATAL_FLUSH_TIMEOUT_MS + 60_000;
   setTimeout(() => process.exit(1), hardExitMs).unref();
@@ -115,6 +114,12 @@ async function shutdown(signal: string): Promise<void> {
   await flushAllActiveSessions(FATAL_FLUSH_TIMEOUT_MS).catch((err) => {
     log.error("[xyne-claw] flushAllActiveSessions during drain failed:", err);
   });
+  if (runQueueWorker) {
+    await runQueueWorker.close().catch((err) => {
+      log.error("[xyne-claw] run queue worker close failed:", err);
+    });
+  }
+  stopLoopWatchdog();
   server.close(() => process.exit(0));
 }
 

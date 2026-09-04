@@ -42,7 +42,6 @@ import {
 } from "../lib/agent-widget-binding.js";
 import {
   QUEUE_CAP,
-  QUEUE_ENABLED,
   enqueueMessage,
   tryAcquireSlot,
   isSlotBusy,
@@ -1464,8 +1463,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // object name). No colons. Clamped to claw's 128-char limit.
       const eventId = `agent-call_${messageId}_${targetAgent.slug}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128);
       let slotToken: string | null = null;
-      if (QUEUE_ENABLED) {
-        slotToken = await tryAcquireSlot(proposalConversationId, targetAgent.slug);
+      slotToken = await tryAcquireSlot(proposalConversationId, targetAgent.slug);
         if (!slotToken) {
           const queuedMsg: QueuedMessage = {
             eventId,
@@ -1506,7 +1504,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           );
           return;
         }
-      }
 
       const traceId = eventId;
       const fastModeEnabled = await resolveFastMode(proposalConversationId, targetAgent.slug, targetAgent.config);
@@ -1536,7 +1533,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const runBody = (await runRes.json().catch(() => null)) as { success?: boolean; sessionId?: string; error?: string } | null;
       if (!runRes.ok || !runBody?.success || !runBody.sessionId) {
         const { drainNextQueued } = await import("./webhook.js");
-        if (QUEUE_ENABLED) await drainNextQueued(proposalConversationId, targetAgent.slug, slotToken).catch(() => {});
+        await drainNextQueued(proposalConversationId, targetAgent.slug, slotToken).catch(() => {});
         const msg = runBody?.error ?? `dispatch failed with HTTP ${runRes.status}`;
         res.status(422).json({ type: "error", message: msg } satisfies AppActionResponse);
         void replaceFlowCardWithText(
@@ -2219,7 +2216,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // here keeps the card intact (plain error → Approve button stays) so the
       // user can approve once the agent is idle. Fail-open on Redis outage
       // (isSlotBusy → false) since the runtime lock is still the backstop.
-      if (QUEUE_ENABLED && (await isSlotBusy(planConversationId, planAgentSlug))) {
+      if ((await isSlotBusy(planConversationId, planAgentSlug))) {
         log.info(`[flow-action] plan-approval: blocked — run active for conv=${planConversationId} agent=${planAgentSlug}`);
         res.status(409).json({
           type: "error",
@@ -2395,158 +2392,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           }
         } catch (err) {
           log.error("[flow-action] plan-approval: dispatch errored:", errMsg(err));
-        }
-      })();
-      return;
-    }
-
-    // ── 5. Promote provider (escalate to agent's premium model) ───────────────
-    // Triggered when the user taps "Yes, retry with <provider>" / "No" on the
-    // promote-provider card posted by webhook.ts after a default-model failure.
-    // Accept → write `escalatedProvider` on the conversation's SessionContext
-    // so future turns use the premium provider, AND re-dispatch the original
-    // task with the agent's credentials. Decline → just close the card.
-    if (actionType === "promote-provider") {
-      const provider = data["provider"] as string | undefined;
-      const promoteAgentSlug = data["agentSlug"] as string | undefined;
-      const promoteSpacesAppId = data["spacesAppId"] as string | undefined;
-      const promoteChannelId = data["channelId"] as string | undefined;
-      const promoteConversationId = data["conversationId"] as string | undefined;
-      const promoteUserId = data["userId"] as string | undefined;
-      const originalTask = data["originalTask"] as string | undefined;
-
-      if (!provider || !promoteAgentSlug || !promoteChannelId || !promoteConversationId || !promoteUserId) {
-        res.status(400).json({ type: "error", message: "Missing promote-provider fields in flowJSON.data" } satisfies AppActionResponse);
-        return;
-      }
-
-      // Only the intended recipient can answer — prevents thread bystanders
-      // from charging the agent's premium creds against someone else's task.
-      if (!callerUserId || callerUserId !== promoteUserId) {
-        log.error(`[flow-action] promote-provider: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${promoteUserId}`);
-        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
-        return;
-      }
-
-      if (actionId === "promote-provider-decline") {
-        resp = { type: "close_screen", finalMessage: "Stayed on default." };
-        res.json(resp);
-        void replaceFlowCardWithText(
-          messageId,
-          promoteAgentSlug,
-          "✋ **Stayed on default.** Send `/upgrade` any time to switch, or mention me again to retry.",
-          promoteConversationId,
-          promoteChannelId,
-        );
-        return;
-      }
-
-      // actionId === "promote-provider-accept"
-      resp = { type: "close_screen", finalMessage: `▶ Retrying with ${provider}…` };
-      res.json(resp);
-      void replaceFlowCardWithText(
-        messageId,
-        promoteAgentSlug,
-        `▶ **Retrying with ${provider}.** Will use it for the rest of this conversation.`,
-        promoteConversationId,
-        promoteChannelId,
-      );
-
-      // Fire-and-forget: flip the escalation flag + dispatch the original task.
-      (async () => {
-        try {
-          const { buildProviderConfig } = await import("../lib/agent-provider-config.js");
-          const { agentProviderCredentialsRepository } = await import("../repositories/index.js");
-          const { setSession, getSessionByConv } = await import("./webhook.js");
-
-          const agent = await findAgentForFlow(promoteAgentSlug, promoteSpacesAppId);
-          if (!agent) {
-            log.error(`[flow-action] promote-provider: agent ${promoteAgentSlug} not found`);
-            return;
-          }
-          const appToken = agent.spacesAppToken
-            ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
-            : "";
-
-          // Build the promoted provider's config via the shared resolver builder
-          // (one source of truth for default models + codex/claude OAuth-bundle
-          // extraction — the inline copy here previously handled only codex).
-          const credRow = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, provider);
-          const promotedConfig = credRow ? buildProviderConfig(provider, credRow) : null;
-          if (!promotedConfig) {
-            log.error(`[flow-action] promote-provider: no usable ${provider} creds on agent ${promoteAgentSlug}`);
-            return;
-          }
-          const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string; reasoningEffort?: string }> = {
-            [provider]: promotedConfig,
-          };
-
-          // Update the conversation's SessionContext with the escalation
-          // flag. Preserve any existing fields (workflowId, traceId, etc.)
-          // so chain hops and goal loops continue to work.
-          const priorCtx = await getSessionByConv(promoteConversationId, promoteAgentSlug);
-          const baseCtx = priorCtx ?? {
-            mentionedUserId: agent.spacesAppUserId ?? "",
-            senderId: promoteUserId,
-            senderName: "",
-            channelId: promoteChannelId,
-            channelName: promoteChannelId,
-            conversationId: promoteConversationId,
-            task: originalTask ?? "",
-            agentId: agent.id,
-            agentOrgId: agent.orgId,
-            agentSlug: promoteAgentSlug,
-            responseMode: "conversation" as const,
-            appToken,
-            spacesAppId: agent.spacesAppId ?? "",
-            spacesAppUserId: agent.spacesAppUserId ?? "",
-          };
-
-          // Re-dispatch the original task with the escalated provider.
-          const fastModeEnabled = await resolveFastMode(promoteConversationId, promoteAgentSlug, agent.config);
-          const dispatchPayload: Record<string, unknown> = {
-            userId: promoteUserId,
-            task: originalTask ?? "",
-            conversationId: promoteConversationId,
-            channelId: promoteChannelId,
-            agentSlug: promoteAgentSlug,
-            orgId: agent.orgId,
-            callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-            progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-            provider,
-            providerOrder: [provider],
-            providerConfigs,
-            fastMode: fastModeEnabled,
-          };
-          const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-            },
-            body: JSON.stringify(dispatchPayload),
-          });
-          const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
-
-          if (runBody.success && runBody.sessionId) {
-            await setSession(runBody.sessionId, {
-              ...baseCtx,
-              task: originalTask ?? baseCtx.task,
-              provider,
-              escalatedProvider: provider,
-            });
-            log.info(`[flow-action] promote-provider: dispatched session=${runBody.sessionId} provider=${provider} conv=${promoteConversationId}`);
-          } else {
-            log.error("[flow-action] promote-provider: /run dispatch failed", { runBody });
-            // Still flip the flag so the user's NEXT message uses the
-            // escalated provider even if the auto-retry didn't fire.
-            await setSession(`promote-flag-${Date.now()}`, {
-              ...baseCtx,
-              escalatedProvider: provider,
-            });
-          }
-        } catch (err) {
-          log.error("[flow-action] promote-provider: dispatch errored:", errMsg(err));
         }
       })();
       return;
