@@ -80,6 +80,14 @@ type StubAuthor = { id?: string | number; displayName?: string; emailAddress?: s
 const PR_LOOKUP_MAX_RETRIES = 3;
 const PR_LOOKUP_RETRY_DELAY_MS = 2000;
 
+// Count distinct migration files (one row per file×commit is stored, so a file
+// touched across commits — e.g. schema.prisma — must collapse to one).
+export function countDistinctMigrationFiles(
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined | null
+): number {
+  return new Set((migrationLinks ?? []).map(link => link.filePath)).size;
+}
+
 export class CommitAnalysisService {
   // Structurally typed so a BitbucketService or GitHubService can be passed —
   // the controller picks based on board.vcsProvider.
@@ -1234,7 +1242,7 @@ export class CommitAnalysisService {
 
     return {
       envChangeCount: envChanges.length,
-      migrationChangeCount: migrationLinks.length,
+      migrationChangeCount: countDistinctMigrationFiles(migrationLinks),
       migrationLinks,
       envChanges,
     };
