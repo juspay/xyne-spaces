@@ -89,7 +89,6 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import { syncEngine } from '@/zero/sync/syncEngine';
 import { fanout } from '@/zero/sync/fanout';
-import { attachSyncClientGateway } from '@/zero/sync/clientGateway';
 import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
@@ -930,7 +929,8 @@ export class App {
       logger.info('Starting shared-base sync engine...');
       syncEngine.start();
       fanout.start();
-      attachSyncClientGateway(this.httpServer);
+      // Client fan-out is delivered over the app's socket.io connection; handlers are
+      // registered per-socket in websocketService (attachSyncHandlers).
     }
 
     // Ensure default model and tools exist before synchronizing config

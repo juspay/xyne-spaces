@@ -36,6 +36,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { verifySyncServiceToken } from './sync/serviceIdentity';
 import { resolveSharedBase } from './sync/baseQueries';
 import { isGrantQuery, buildGrantBase } from './sync/grantQueries';
+import { obsEmit } from './sync/obs';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
@@ -398,7 +399,9 @@ export async function handleQueries(request: Request): Promise<any> {
     return handleQueryRequest(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (queryName, args): any => {
-        const base = isGrantQuery(queryName)
+        const grant = isGrantQuery(queryName);
+        obsEmit('zero-query', { principal: 'sync', queryName, mode: grant ? 'grant' : 'base' });
+        const base = grant
           ? buildGrantBase(queryName, args)
           : resolveSharedBase(queryName, syncCtx, args);
         if (!base) {
@@ -428,6 +431,7 @@ export async function handleQueries(request: Request): Promise<any> {
       (queryName, args): any =>
         (async () => {
           capturedQueryName = queryName;
+          obsEmit('zero-query', { principal: 'user', queryName, user: authData.sub });
           if (await isQueryDisabled(queryName)) {
             getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
             logger.warn('zero_query_disabled', { query: queryName });

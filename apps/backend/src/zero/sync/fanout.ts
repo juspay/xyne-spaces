@@ -1,17 +1,32 @@
-import type WebSocket from 'ws';
 import Redis, { type RedisOptions } from 'ioredis';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { RedisStreamStore } from './redisStore';
+import { RedisStreamStore, compareStreamId } from './redisStore';
 import type { AclGate } from './aclGate';
+import { obsEmit } from './obs';
+
+/** Extract a small summary of a fan-out payload for observability. */
+function summarize(payload: unknown): Record<string, unknown> {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const rows = Array.isArray(p.rows) ? p.rows.length : undefined;
+  const upserts = Array.isArray(p.upserts) ? p.upserts.length : undefined;
+  const deletes = Array.isArray(p.deletes) ? p.deletes.length : undefined;
+  return { instanceKey: p.instanceKey, rows, upserts, deletes };
+}
 
 const streamKey = (instanceKey: string): string => `sync:stream:${instanceKey}`;
 const instanceOfStream = (key: string): string => key.slice('sync:stream:'.length);
 const BLOCK_MS = 1_000;
 
+/** The minimal socket surface the fan-out needs — satisfied by a socket.io Socket. */
+export interface SyncSocket {
+  emit(event: string, payload: unknown): void;
+  readonly connected: boolean;
+}
+
 interface ClientSub {
   id: string;
-  socket: WebSocket;
+  socket: SyncSocket;
   userId: string;
   workspaceId: string;
   /** Root-scope binding for the gate, e.g. `{ channelId: C }`. */
@@ -20,6 +35,8 @@ interface ClientSub {
   dataInstanceKey: string;
   /** grant table → its materialized instanceKey (for gate snapshots + re-gate). */
   grantByTable: Map<string, string>;
+  /** Client's last applied op-stream offset — resume from here instead of a full snapshot. */
+  sinceOffset?: string;
   admitted: boolean;
 }
 
@@ -93,18 +110,53 @@ export class Fanout {
       (table) => grantRows.get(table) ?? [],
     );
     if (admitted && !client.admitted) {
-      client.admitted = true;
-      const rows = await this.#store.snapshot(client.dataInstanceKey);
-      this.#send(client, { type: 'snapshot', instanceKey: client.dataInstanceKey, rows });
+      await this.#hydrate(client);
     } else if (!admitted && client.admitted) {
       client.admitted = false;
-      this.#send(client, { type: 'revoke', instanceKey: client.dataInstanceKey });
+      this.#emit(client, 'sync:revoke', { instanceKey: client.dataInstanceKey });
     }
   }
 
-  #send(client: ClientSub, msg: unknown): void {
-    if (client.socket.readyState === client.socket.OPEN) {
-      client.socket.send(JSON.stringify(msg));
+  /**
+   * Bring a just-admitted client current. If it carries an offset still retained in the
+   * op-stream, replay only the deltas it missed (resume); otherwise send a full snapshot.
+   * The replay is emitted SYNCHRONOUSLY after the async read so live deltas (delivered once
+   * `admitted`) can't interleave ahead of older replayed ops; any overlap with the live
+   * tail is an idempotent re-apply, never a gap.
+   */
+  async #hydrate(client: ClientSub): Promise<void> {
+    const instanceKey = client.dataInstanceKey;
+    if (client.sinceOffset) {
+      const firstId = await this.#store.firstId(instanceKey);
+      const retained = firstId !== null && compareStreamId(firstId, client.sinceOffset) <= 0;
+      if (retained) {
+        const diffs = await this.#store.readSince(instanceKey, client.sinceOffset);
+        // A `cleared` op in the range = a reset — can't resume across it, fall back to snapshot.
+        if (!diffs.some((d) => d.diff.cleared)) {
+          client.admitted = true;
+          for (const { id, diff } of diffs) {
+            this.#emit(client, 'sync:delta', {
+              instanceKey,
+              upserts: diff.upserts,
+              deletes: diff.deletes,
+              offset: id,
+            });
+          }
+          obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: diffs.length });
+          return;
+        }
+      }
+    }
+    const head = await this.#store.head(instanceKey);
+    const rows = await this.#store.snapshot(instanceKey);
+    client.admitted = true;
+    this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head });
+  }
+
+  #emit(client: ClientSub, event: string, payload: unknown): void {
+    if (client.socket.connected) {
+      client.socket.emit(event, payload);
+      obsEmit('fanout', { event, socketId: client.id, userId: client.userId, ...summarize(payload) });
     }
   }
 
@@ -133,22 +185,34 @@ export class Fanout {
       for (const [key, entries] of res) {
         for (const [id, fields] of entries) {
           this.#cursors.set(key, id);
-          void this.#dispatch(key, fields);
+          void this.#dispatch(key, id, fields);
         }
       }
     }
   }
 
-  async #dispatch(key: string, fields: string[]): Promise<void> {
+  async #dispatch(key: string, id: string, fields: string[]): Promise<void> {
     const diffIdx = fields.indexOf('diff');
     const diff = diffIdx >= 0 ? JSON.parse(fields[diffIdx + 1]) : undefined;
     const instanceKey = instanceOfStream(key);
 
     const dataSubs = this.#dataSubs.get(instanceKey);
     if (dataSubs) {
+      const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id };
+      let admittedCount = 0;
       for (const client of dataSubs) {
-        if (client.admitted) this.#send(client, { type: 'delta', instanceKey, diff });
+        if (client.admitted) {
+          admittedCount += 1;
+          this.#emit(client, 'sync:delta', delta);
+        }
       }
+      obsEmit('stream-diff', {
+        instanceKey,
+        upserts: delta.upserts.length,
+        deletes: delta.deletes.length,
+        clients: admittedCount,
+        subscribers: dataSubs.size,
+      });
     }
 
     const affected = this.#grantToData.get(instanceKey);

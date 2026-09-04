@@ -10,6 +10,7 @@ import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useEncryptionBootstrap } from '@xyne/shared/hooks';
+import { startSyncEngineClient } from '../services/syncEngineClient';
 
 interface ZeroProviderProps {
   children: ReactNode;
@@ -24,6 +25,11 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
 
   const [zero, setZero] = useState<Zero | null>(null);
+
+  // Initialize the shared-base sync engine client once (no-op unless enabled).
+  useEffect(() => {
+    startSyncEngineClient();
+  }, []);
 
   useEffect(() => {
     if (!user || !encryptionReady) {
@@ -77,7 +83,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         pingTimeoutMs: 10000,
         schema,
         mutators: mutators,
-        hiddenTabDisconnectDelay: 60000,
+        hiddenTabDisconnectDelay: 600000,
         context: {
           userID: user.id,
           workspaceId: currentWorkspaceId,

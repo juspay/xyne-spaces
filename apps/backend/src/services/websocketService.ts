@@ -14,6 +14,8 @@ import { type NotificationData } from './notificationService';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
+import { config } from '@/config/env';
+import { attachSyncHandlers } from '@/zero/sync/clientGateway';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -212,6 +214,12 @@ class WebSocketService {
 
     logger.info(`🔌 [CONNECT] User ${userEmail} connected via WebSocket (Socket ID: ${socket.id})`);
 
+    // Shared-base sync engine: register the fan-out handlers SYNCHRONOUSLY, before ANY
+    // await below, so a subscribe the client sends immediately on connect is received
+    // (queued until workspaceId resolves) instead of dropped for want of a handler.
+    // `signalSyncReady` is called once workspaceId is set to go live + flush the queue.
+    const signalSyncReady = config.enableSyncEngine ? attachSyncHandlers(socket) : undefined;
+
     // Cancel any pending offline job (user reconnected within grace period)
     const wasPendingOffline = await presenceCleanupQueue.cancelOfflineJob(userId);
     if (wasPendingOffline) {
@@ -285,6 +293,11 @@ class WebSocketService {
     } catch (error) {
       logger.error(`🔌 [CONNECT] Failed to register orgMember mapping for user ${userId}:`, error);
     }
+
+    // workspaceId is resolved (or the lookup failed) — take the sync engine live and flush
+    // subscribes queued during setup. Outside the try so it also runs on the error path
+    // (with no workspaceId the trigger just clears the queue).
+    signalSyncReady?.();
 
       // Set user status to ONLINE automatically on connect (unless status is AWAY)
       try {

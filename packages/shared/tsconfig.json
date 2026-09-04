@@ -13,6 +13,10 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "#zql/*": ["./node_modules/@rocicorp/zero/out/zql/src/*"]
+    },
     "sourceMap": true,
     "types": ["node", "react", "uuid"]
   },

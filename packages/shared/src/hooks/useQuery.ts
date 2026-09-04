@@ -13,7 +13,10 @@ import type {
 } from '@rocicorp/zero';
 import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { Event } from '../logger/events.js';
-import { useInstrumentation } from './useZero.js';
+import { useInstrumentation, useZero } from './useZero.js';
+import { isSharedQuery } from '../sync/registry.js';
+import { useSharedQuery, useSyncEngineReady } from '../sync/useSharedQuery.js';
+import { obsEmit } from '../sync/obs.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
 import { useFallbackQuery } from './useFallbackQuery.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
@@ -318,6 +321,33 @@ export function useQuery<
   const queryName = query.query.queryName || 'unknown';
   const args = query.args;
 
+  // Shared-base sync engine: for allowlisted queries, serve from the local hosted IVM
+  // (fan-out) and disable Zero. Direct callers get the result here; useCachedQuery
+  // caches whatever this returns, unchanged.
+  const zero = useZero();
+  const syncReady = useSyncEngineReady();
+  const isShared = useMemo(
+    () => syncReady && isSharedQuery(query.query.queryName),
+    [syncReady, query.query.queryName],
+  );
+  const sharedHash = useMemo(() => {
+    if (!isShared) return undefined;
+    try {
+      // @ts-expect-error internal query structure (mirrors useCachedQuery hashing)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      return (query.query.fn({ ctx: zero.context, args }).hash() as string) || undefined;
+    } catch {
+      return undefined;
+    }
+  }, [isShared, query, zero.context, args]);
+  const sharedResult = useSharedQuery<TReturn>(
+    isShared,
+    sharedHash,
+    query.query.queryName,
+    args,
+    zero.context,
+  );
+
   const argsKey = useMemo(() => JSON.stringify(args), [args]);
   const startTime = useMemo(() => performance.now(), [queryName, argsKey]);
   const hasLoggedCompleteRef = useRef(false);
@@ -326,11 +356,20 @@ export function useQuery<
   useEffect(() => {
     if (!isEnabled) return;
     hasLoggedCompleteRef.current = false;
+    // Observability: which route this query mount took (Zero vs shared sync engine).
+    obsEmit('client-route', { queryName, route: isShared ? 'sync' : 'zero' });
     logger.info(Event.ZERO_QUERY_CALLED, { query: queryName });
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
-  }, [queryName, argsKey, isEnabled]);
+  }, [queryName, argsKey, isEnabled, isShared]);
 
-  const result = useQueryWithFallback(query, options);
+  // Disable Zero for shared queries — the sync engine serves them.
+  const effectiveOptions = useMemo(() => {
+    if (!isShared) return options;
+    return typeof options === 'object' && options !== null
+      ? { ...options, enabled: false }
+      : { enabled: false };
+  }, [isShared, options]);
+  const result = useQueryWithFallback(query, effectiveOptions);
   const [data, details] = result;
 
   useEffect(() => {
@@ -387,6 +426,10 @@ export function useQuery<
     }
     return undefined;
   }, [hasPending, triggerRerender, data, shouldDecrypt]);
+
+  // Shared queries return the hosted-IVM result directly (Zero disabled above).
+  // Decryption of shared rows is a follow-up.
+  if (isShared) return sharedResult ?? result;
 
   if (!shouldDecrypt) {
     return result;

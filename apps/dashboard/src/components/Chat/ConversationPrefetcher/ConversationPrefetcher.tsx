@@ -82,7 +82,7 @@ const ConversationPrefetcher = (): null => {
       try {
         // Fetch older conversations (forward from anchor - going back in time)
         await zero.preload(
-          queries.channelConversationsPaginatedV3({
+          queries.channelConversationsPaginatedV4({
             channelId,
             start: { createdAt: anchor },
             direction: 'forward',
@@ -93,7 +93,7 @@ const ConversationPrefetcher = (): null => {
 
         // Fetch newer conversations (backward from anchor - going forward in time)
         await zero.preload(
-          queries.channelConversationsPaginatedV3({
+          queries.channelConversationsPaginatedV4({
             channelId,
             start: { createdAt: anchor },
             direction: 'backward',

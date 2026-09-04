@@ -15,7 +15,7 @@ import type { Context } from '../zero/schema.js';
 
 /* -------------------------- TYPES -------------------------- */
 
-export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
+export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV4>[number];
 
 export type ThreadConversation = NonNullable<
   QueryResultType<typeof queries.threadConversationV2>
@@ -520,12 +520,12 @@ const runWhenIdle = (fn: () => void): void => {
 };
 
 /**
- * Get the AST-based hash for the channelConversationsPaginatedV3 query.
+ * Get the AST-based hash for the channelConversationsPaginatedV4 query.
  * This hash changes automatically when the query structure changes.
  */
 export const getChannelConversationsQueryHash = (context: { userID: string }): string => {
   try {
-    const query = queries.channelConversationsPaginatedV3.fn({
+    const query = queries.channelConversationsPaginatedV4.fn({
       args: {
         channelId: '__dummy__',
         limit: 1,

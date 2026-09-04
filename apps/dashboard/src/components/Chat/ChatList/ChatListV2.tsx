@@ -64,7 +64,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
   const { editingMessageId, requestEdit } = useEditContext();
   const particpantionStatus = useGetChannelUserStatus(channelId);
   const [oldConversations, oldConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       limit: PAGE_SIZE,
       start: oldestConversation ? { createdAt: oldestConversation.createdAt } : null,
@@ -88,7 +88,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
 
   const [inViewAnchor, setInviewAnchor] = useState<Anchor | null>(initialItem);
   const [updatedConveresations, updatedConveresationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       limit: PAGE_SIZE,
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
@@ -97,7 +97,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
     }),
   );
   const [newConversations, newConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       limit: 0,
       start: newestConversation ? { createdAt: newestConversation.createdAt } : null,

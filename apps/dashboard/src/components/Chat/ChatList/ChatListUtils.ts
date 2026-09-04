@@ -7,7 +7,7 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 // Type definitions for utility functions
 export type ThreadMessage = QueryResultType<typeof queries.channelAndThreadMessagesV2>[number];
 
-type ChatListConversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
+type ChatListConversation = QueryResultType<typeof queries.channelConversationsPaginatedV4>[number];
 
 export type CombinedMessageItem =
   | {

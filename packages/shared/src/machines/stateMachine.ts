@@ -63,7 +63,7 @@ export type UserPermission = {
 };
 export type UserChannelStatus = QueryResultType<typeof queries.getAllChannelsUserStatus>[number];
 
-export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
+export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV4>[number];
 
 export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
 export type TwinDraftDB = DraftMessageDB;

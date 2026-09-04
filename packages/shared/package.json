@@ -6,6 +6,9 @@
   "description": "Shared code between dashboard and backend",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "imports": {
+    "#zql/*": "./node_modules/@rocicorp/zero/out/zql/src/*"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -46,6 +49,11 @@
       "types": "./dist/hooks/index.d.ts",
       "import": "./dist/hooks/index.js",
       "default": "./dist/hooks/index.js"
+    },
+    "./sync": {
+      "types": "./dist/sync/index.d.ts",
+      "import": "./dist/sync/index.js",
+      "default": "./dist/sync/index.js"
     },
     "./machines": {
       "types": "./dist/machines/index.d.ts",

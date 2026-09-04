@@ -542,7 +542,7 @@ const applyArchiveFilter = <T extends { where: Function }>(
 };
 
 
-export const queries = defineQueries({
+const queryDefs = {
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)
@@ -4663,4 +4663,9 @@ export const queries = defineQueries({
       .related('userMappings')
       .one();
   }),
-});
+};
+
+export const queries = defineQueries(queryDefs);
+// Raw definitions retain the non-enumerable `.base` (ACL-free) resolver that
+// `defineQueries` strips; the sync engine reads bases from here. See sync/registry.ts.
+export { queryDefs };

@@ -8,6 +8,7 @@ import type { RedisStreamStore } from './redisStore';
 import type { ClientSchema } from './clientSchema';
 import type { QueryMeta } from './queryMeta';
 import { mintSecProtocolToken, buildCookieHeader, SYNC_SERVICE_SUB } from './serviceIdentity';
+import { obsEmit } from './obs';
 
 export interface PackConnectionOptions {
   zeroCacheUrl: string;
@@ -272,6 +273,15 @@ export class PackConnection {
     try {
       for (const [instanceKey, diff] of diffs) {
         await this.#opts.store.applyDiff(instanceKey, cookie, diff);
+        if (diff.upserts.length || diff.deletes.length) {
+          obsEmit('tap-poke', {
+            instanceKey,
+            clientGroupID: this.#opts.clientGroupID,
+            queryName: this.#opts.queryName,
+            upserts: diff.upserts.length,
+            deletes: diff.deletes.length,
+          });
+        }
       }
       await this.#opts.store.saveCookie(this.#opts.clientGroupID, cookie);
     } catch (error) {

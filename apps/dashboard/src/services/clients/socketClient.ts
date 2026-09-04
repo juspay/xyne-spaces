@@ -44,6 +44,14 @@ class WebSocketService {
   private connectionAttemptStartTime: number | null = null;
   private sessionStartTime: number | null = null;
   private firstConnectionAttemptTime: number | null = null;
+  /**
+   * Re-attach thunks for handlers that must survive socket recreation. `connect()`
+   * discards the old socket (removeAllListeners + new io()), so plain `on()` handlers
+   * are lost on every reconnect/recreate; each thunk re-binds its (typed) handler to
+   * the current socket and is re-run on every new socket. Used by the sync engine,
+   * whose protocol listeners (sync:ready/snapshot/delta/revoke) must persist.
+   */
+  private reattachHooks = new Set<() => void>();
 
   connect(): Promise<void> {
     // If already connected, return immediately
@@ -83,6 +91,10 @@ class WebSocketService {
         reconnectionDelayMax: 30000,
         randomizationFactor: 0.5,
       });
+
+      // Re-bind persistent handlers to the freshly created socket (the old one, if any,
+      // was just discarded with removeAllListeners above).
+      for (const attach of this.reattachHooks) attach();
 
       this.socket.io.on('reconnect_attempt', (attempt: number) => {
         this.reconnectAttempts = attempt;
@@ -290,6 +302,24 @@ class WebSocketService {
     if (!this.socket) return;
 
     this.socket.on(event, callback);
+  }
+
+  /**
+   * Register a handler that survives socket recreation: it's bound to the current socket
+   * (if any) and re-bound to every new socket `connect()` creates. Returns a disposer
+   * that stops re-binding and detaches from the current socket. Use for long-lived
+   * protocol listeners that must outlive reconnects.
+   */
+  onPersistent<T = unknown>(event: string, callback: (data: T) => void): () => void {
+    const attach = (): void => {
+      this.socket?.on(event, callback);
+    };
+    this.reattachHooks.add(attach);
+    attach();
+    return () => {
+      this.reattachHooks.delete(attach);
+      this.socket?.off(event, callback);
+    };
   }
 
   // Remove event listeners

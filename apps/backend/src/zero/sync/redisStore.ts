@@ -16,6 +16,23 @@ const cookieKey = (clientGroupID: string): string => `${PREFIX}:cookie:${clientG
 const STREAM_MAXLEN = 10_000;
 const CLEAR_DIFF = JSON.stringify({ upserts: [], deletes: [], cleared: true });
 
+/** XRANGE returns fields as a flat [f, v, f, v, …] array — collapse to an object. */
+function fieldsToObject(fields: string[]): Record<string, string> {
+  const obj: Record<string, string> = {};
+  for (let i = 0; i + 1 < fields.length; i += 2) obj[fields[i]] = fields[i + 1];
+  return obj;
+}
+
+/**
+ * Compare two Redis stream ids (`ms-seq`). Returns <0, 0, >0. Lexicographic comparison
+ * is wrong once the millisecond part differs in length, so compare the two numeric parts.
+ */
+export function compareStreamId(a: string, b: string): number {
+  const [ams, aseq] = a.split('-').map(Number);
+  const [bms, bseq] = b.split('-').map(Number);
+  return ams !== bms ? ams - bms : (aseq || 0) - (bseq || 0);
+}
+
 export class RedisStreamStore {
   /** Mirror one poke's compaction diff to an instance's snapshot hash + op-stream. */
   async applyDiff(instanceKey: string, version: string, diff: StreamDiff): Promise<void> {
@@ -40,6 +57,31 @@ export class RedisStreamStore {
   async head(instanceKey: string): Promise<string> {
     const last = await redisService.getClient().xrevrange(streamKey(instanceKey), '+', '-', 'COUNT', 1);
     return last.length > 0 ? last[0][0] : '0';
+  }
+
+  /** The oldest surviving op-stream id, or null if empty. Used for the resume trim check. */
+  async firstId(instanceKey: string): Promise<string | null> {
+    const first = await redisService.getClient().xrange(streamKey(instanceKey), '-', '+', 'COUNT', 1);
+    return first.length > 0 ? first[0][0] : null;
+  }
+
+  /**
+   * Op-stream diffs strictly after `sinceOffset` (a resume replay), each with its stream
+   * id and version. Exclusive start (`(id`), so a client that already applied `sinceOffset`
+   * receives only what it missed. Caller must first verify `sinceOffset` is still retained
+   * (see `firstId`) — Redis silently returns a partial range past a trimmed id.
+   */
+  async readSince(
+    instanceKey: string,
+    sinceOffset: string,
+  ): Promise<Array<{ id: string; version: string; diff: StreamDiff }>> {
+    const entries = await redisService
+      .getClient()
+      .xrange(streamKey(instanceKey), `(${sinceOffset}`, '+');
+    return entries.map(([id, fields]) => {
+      const map = fieldsToObject(fields);
+      return { id, version: map.v ?? '', diff: JSON.parse(map.diff ?? CLEAR_DIFF) as StreamDiff };
+    });
   }
 
   /** Persisted resume cursor for a client group ('' = fresh connect). */

@@ -7,6 +7,7 @@ import { buildClientSchema, allPkFields } from './clientSchema';
 import { queryMetaFor } from './queryMeta';
 import { SHARED_BASE_QUERIES } from './baseQueries';
 import { isGrantQuery } from './grantQueries';
+import { obsEmit } from './obs';
 
 const QUERY_TTL_MS = 60_000;
 const IDLE_GRACE_MS = 30_000;
@@ -73,6 +74,7 @@ export class InstanceManager {
       group = { connection };
       this.#groups.set(clientGroupID, group);
       logger.info('sync_group_open', { clientGroupID, queryName });
+      obsEmit('tap', { action: 'group-open', clientGroupID, queryName, tables: meta.tables });
     }
 
     let instance = this.#instances.get(instanceKey);
@@ -80,6 +82,14 @@ export class InstanceManager {
       group.connection.addInstance(instanceKey, queryArgs, instanceKey, partitionValue);
       instance = { groupKey: clientGroupID, partitionValue, subscribers: new Set(), idleTimer: null };
       this.#instances.set(instanceKey, instance);
+      obsEmit('tap', {
+        action: 'instance-open',
+        instanceKey,
+        queryName,
+        partition: partitionValue,
+        clientGroupID,
+        grant: isGrantQuery(queryName),
+      });
     }
     if (instance.idleTimer) {
       clearTimeout(instance.idleTimer);
@@ -104,6 +114,7 @@ export class InstanceManager {
     const group = this.#groups.get(instance.groupKey);
     group?.connection.removeInstance(instanceKey, instance.partitionValue);
     this.#instances.delete(instanceKey);
+    obsEmit('tap', { action: 'instance-close', instanceKey, clientGroupID: instance.groupKey });
     try {
       await this.#store.teardownInstance(instanceKey);
       if (group && group.connection.size() === 0) {
@@ -111,6 +122,7 @@ export class InstanceManager {
         this.#groups.delete(instance.groupKey);
         await this.#store.teardownGroup(instance.groupKey);
         logger.info('sync_group_closed', { clientGroupID: instance.groupKey });
+        obsEmit('tap', { action: 'group-close', clientGroupID: instance.groupKey });
       }
     } catch (error) {
       logger.error('sync_instance_teardown_failed', { instanceKey, error });

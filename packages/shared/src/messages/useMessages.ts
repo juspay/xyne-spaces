@@ -201,7 +201,7 @@ function useChannelMessagesImpl(
   );
 
   const [updatedConversations, updatedConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       isMember,
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
@@ -214,7 +214,7 @@ function useChannelMessagesImpl(
   );
 
   const [cutoffConversations, cutoffConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       isMember,
       start: cutoffAnchor,
@@ -227,7 +227,7 @@ function useChannelMessagesImpl(
   );
 
   const [latestConversations, latestConversationsDetails] = useQuery(
-    queries.channelLatestMultipleConversationsV3({
+    queries.channelLatestMultipleConversationsV4({
       channelId,
       isMember,
       limit: latestLimit,
@@ -241,7 +241,7 @@ function useChannelMessagesImpl(
 
     Promise.all([
       zero.run(
-        queries.channelConversationsPaginatedV3({
+        queries.channelConversationsPaginatedV4({
           channelId,
           isMember,
           start: oldConversationsAnchorRef.current,
@@ -252,7 +252,7 @@ function useChannelMessagesImpl(
       ),
       newConversationsAnchor
         ? zero.run(
-            queries.channelConversationsPaginatedV3({
+            queries.channelConversationsPaginatedV4({
               channelId,
               isMember,
               start: newConversationsAnchor,
@@ -360,7 +360,7 @@ function useChannelMessagesImpl(
     isFetchingOlderRef.current = true;
     zero
       .run(
-        queries.channelConversationsPaginatedV3({
+        queries.channelConversationsPaginatedV4({
           channelId,
           isMember,
           start: oldConversationsAnchorRef.current,
@@ -410,7 +410,7 @@ function useChannelMessagesImpl(
     isFetchingRef.current = true;
     zero
       .run(
-        queries.channelConversationsPaginatedV3({
+        queries.channelConversationsPaginatedV4({
           channelId,
           isMember,
           start: newConversationsAnchor,

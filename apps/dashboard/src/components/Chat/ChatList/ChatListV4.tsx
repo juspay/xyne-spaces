@@ -412,7 +412,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Queries ───────────────────────────────────────────────────────────────────
   const [updatedConversations, updatedConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       isMember,
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
@@ -434,7 +434,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   );
 
   const [cutoffConversations, cutoffConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       isMember,
       start: cutoffAnchor,
@@ -447,7 +447,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   );
 
   const [latestConversations, latestConversationsDetails] = useQuery(
-    queries.channelLatestMultipleConversationsV3({
+    queries.channelLatestMultipleConversationsV4({
       channelId,
       isMember,
       limit: PAGE_SIZE / 2,
@@ -462,7 +462,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
     Promise.all([
       zero.run(
-        queries.channelConversationsPaginatedV3({
+        queries.channelConversationsPaginatedV4({
           channelId,
           isMember,
           start: oldConversationsAnchorRef.current,
@@ -473,7 +473,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ),
       newConversationsAnchor &&
         zero.run(
-          queries.channelConversationsPaginatedV3({
+          queries.channelConversationsPaginatedV4({
             channelId,
             isMember,
             start: newConversationsAnchor,
@@ -593,7 +593,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     isFetchingOlderRef.current = true;
     zero
       .run(
-        queries.channelConversationsPaginatedV3({
+        queries.channelConversationsPaginatedV4({
           channelId,
           isMember,
           start: oldConversationsAnchorRef.current,
@@ -643,7 +643,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     isFetchingRef.current = true;
     zero
       .run(
-        queries.channelConversationsPaginatedV3({
+        queries.channelConversationsPaginatedV4({
           channelId,
           isMember,
           start: newConversationsAnchor,

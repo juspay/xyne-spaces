@@ -393,7 +393,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const shouldUseCutoffQuery = initialCutoffCreatedAt !== null && isMember;
 
   const [updatedConversations, updatedConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       isMember,
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
@@ -410,7 +410,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 
   const [cutoffConversations, cutoffConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV3({
+    queries.channelConversationsPaginatedV4({
       channelId,
       isMember,
       start: cutoffAnchor,
@@ -423,7 +423,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 
   const [latestConversations, latestConversationsDetails] = useQuery(
-    queries.channelLatestMultipleConversationsV3({
+    queries.channelLatestMultipleConversationsV4({
       channelId,
       isMember,
       limit: PAGE_SIZE / 2,
@@ -437,7 +437,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
 
     Promise.all([
       zero.run(
-        queries.channelConversationsPaginatedV3({
+        queries.channelConversationsPaginatedV4({
           channelId,
           isMember,
           start: oldConversationsAnchor,
@@ -448,7 +448,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       ),
       newConversationsAnchor &&
         zero.run(
-          queries.channelConversationsPaginatedV3({
+          queries.channelConversationsPaginatedV4({
             channelId,
             isMember,
             start: newConversationsAnchor,
@@ -587,7 +587,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       if (!isInitialLoadComplete) return;
       zero
         .run(
-          queries.channelConversationsPaginatedV3({
+          queries.channelConversationsPaginatedV4({
             channelId,
             isMember,
             start: anchor,
@@ -646,7 +646,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       isFetchingRef.current = true;
       zero
         .run(
-          queries.channelConversationsPaginatedV3({
+          queries.channelConversationsPaginatedV4({
             channelId,
             isMember,
             start: anchor,

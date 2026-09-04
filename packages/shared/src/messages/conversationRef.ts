@@ -7,7 +7,7 @@
  * the conversation + its inline messages, sending appends a message via
  * `mutators.messages.send`.
  *
- * The optional `isMember` flag matches the arg that both `channelConversationsPaginatedV3`
+ * The optional `isMember` flag matches the arg that both `channelConversationsPaginatedV4`
  * and `threadConversation` accept for ACL-scoped reads.
  */
 export type ChannelRef = {

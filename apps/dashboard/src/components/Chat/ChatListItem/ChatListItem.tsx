@@ -47,7 +47,7 @@ const ChatListItemComponent = ({
   // All non-date-separator items are conversations - get conversation data first
   const conversation =
     item.type !== 'date-separator'
-      ? (item.data as QueryResultType<typeof queries.channelConversationsPaginatedV3>[number])
+      ? (item.data as QueryResultType<typeof queries.channelConversationsPaginatedV4>[number])
       : null;
 
   // Hooks must be called unconditionally
