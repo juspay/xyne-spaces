@@ -78,13 +78,15 @@ const inDisplayOrder = (entries: ThreadTypeEntry[]): ThreadTypeEntry[] =>
 const toEntry = (row: {
   name: string;
   label: string;
-  summary: string;
+  // Nullable in the column: DEFAULT '' covers a writer that omits it, but one that passes NULL
+  // explicitly stores NULL. Normalised here so every caller keeps a plain string.
+  summary: string | null;
   color: string;
   description: string;
 }): ThreadTypeEntry => ({
   name: row.name,
   label: row.label,
-  summary: row.summary,
+  summary: row.summary ?? '',
   color: row.color,
   description: row.description,
 });
@@ -171,6 +173,7 @@ export const seedWorkspaceVocabulary = async (
       data: {
         ...key,
         workspaceId,
+        updatedAt: new Date(),
         name: entry.name,
         label: entry.label,
         summary: entry.summary,
@@ -247,7 +250,14 @@ export async function setThreadTypeVocabulary(
       if (keep.has(name)) continue;
       await tx.threadTypeVocabulary.upsert({
         where: { scope_scopeId_name: { ...key, name } },
-        create: { ...key, workspaceId, ...suppression(name), createdBy: userId, updatedBy: userId },
+        create: {
+          ...key,
+          workspaceId,
+          ...suppression(name),
+          createdBy: userId,
+          updatedBy: userId,
+          updatedAt: now,
+        },
         update: { isDeleted: true, updatedBy: userId, updatedAt: now },
       });
     }
@@ -264,6 +274,7 @@ export async function setThreadTypeVocabulary(
           status: entry.status ?? 'APPROVED',
           createdBy: userId,
           updatedBy: userId,
+          updatedAt: now,
         },
         update: {
           ...entry,
@@ -343,7 +354,14 @@ export async function patchThreadTypeVocabulary(
     for (const name of removed) {
       await tx.threadTypeVocabulary.upsert({
         where: { scope_scopeId_name: { ...key, name } },
-        create: { ...key, workspaceId, ...suppression(name), createdBy: userId, updatedBy: userId },
+        create: {
+          ...key,
+          workspaceId,
+          ...suppression(name),
+          createdBy: userId,
+          updatedBy: userId,
+          updatedAt: now,
+        },
         update: { isDeleted: true, updatedBy: userId, updatedAt: now },
       });
     }
@@ -359,6 +377,7 @@ export async function patchThreadTypeVocabulary(
           status: entry.status ?? 'APPROVED',
           createdBy: userId,
           updatedBy: userId,
+          updatedAt: now,
         },
         update: {
           ...entry,
@@ -645,10 +664,11 @@ export async function recordVocabularyCandidate(
         status: 'UNDER_REVIEW',
         createdBy: userId,
         updatedBy: userId,
+        updatedAt: new Date(),
       },
       // Re-using their own tag changes nothing, except that a note fills in a description
       // they did not give the first time.
-      update: description ? { description, updatedBy: userId } : {},
+      update: description ? { description, updatedBy: userId, updatedAt: new Date() } : {},
     });
     logger.info(`${TAG} Recorded free-form tag as a candidate`, { workspaceId, name, userId });
   } catch (error) {

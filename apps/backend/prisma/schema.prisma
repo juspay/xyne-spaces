@@ -4598,7 +4598,7 @@ model ThreadTypeVocabulary {
   workspaceId String
   name        String
   label       String
-  summary     String   @default("")
+  summary     String?  @default("")
   color       String
   description String
   status      String   @default("APPROVED")
@@ -4606,7 +4606,7 @@ model ThreadTypeVocabulary {
   createdBy   String?
   updatedBy   String?
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime
 
   @@unique([scope, scopeId, name])
   @@index([workspaceId, scope, status])
