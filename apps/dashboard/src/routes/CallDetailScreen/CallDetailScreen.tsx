@@ -1,7 +1,8 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Loader2, FileText } from 'lucide-react';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
+import { Hashtag } from '@xyne/icons';
 import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
@@ -24,6 +25,19 @@ import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
 import { CallLabelPicker } from './CallLabelPicker';
 import { callService } from '../../services/Call/callService';
+import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { CallShareModal } from './CallShareModal';
+import { Button } from '../../components/ui/Button/Button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../components/ui/dropdown-menu';
+
+/** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
+const POST_BUTTON_CLASS =
+  'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -37,13 +51,25 @@ const EMPTY_LABEL_SUGGESTIONS: string[] = [];
 export default function CallDetailScreen(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
+  const { callId: callIdParam } = useParams<{ callId: string }>();
   const navState = location.state as { call: Call; labelSuggestions?: string[] } | null;
-  const call = navState?.call;
   // The labels the history screen had loaded when this call was opened. Only the
   // picker's suggestion list — a deep link arrives without them and just offers
   // whatever is already on the call.
   const labelSuggestions = navState?.labelSuggestions ?? EMPTY_LABEL_SUGGESTIONS;
   const { isMobile } = usePlatform();
+
+  // Calls Home hands the row over in navigation state. A call reached by link —
+  // from a share posted to a channel, or a pasted URL — has none, so fall back to
+  // resolving it by the id in the route.
+  const navigationCall = navState?.call;
+  const [fetchedCall, fetchedCallDetails] = useCachedQuery(
+    queries.callById({ callId: callIdParam ?? '' }),
+    { enabled: !navigationCall && Boolean(callIdParam) },
+  );
+  const call: Call | undefined = navigationCall ?? fetchedCall ?? undefined;
+  const isResolvingCall =
+    !navigationCall && Boolean(callIdParam) && fetchedCallDetails.type !== 'complete';
 
   // Hoist derived values so they're available to all hooks below
   const callConversationId =
@@ -115,8 +141,15 @@ export default function CallDetailScreen(): ReactElement {
 
   const detailedSummaryCanvasId = useMemo<string | null>(() => {
     const meta = callMessage?.metadata as Record<string, unknown> | null | undefined;
-    return getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
-  }, [callMessage]);
+    const fromMessage = getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
+    if (fromMessage) return fromMessage;
+    // A call shared out of its own channel: the recipient cannot read the call
+    // message, so the share copied the pointer onto the call row instead
+    // (recordingSharingService.stampCallSummaryCanvasPointer).
+    const callMeta = call?.metadata as Record<string, unknown> | null | undefined;
+    const stamped = callMeta?.['detailedSummaryCanvasId'];
+    return typeof stamped === 'string' && stamped.length > 0 ? stamped : null;
+  }, [callMessage, call?.metadata]);
 
   const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId);
 
@@ -217,16 +250,20 @@ export default function CallDetailScreen(): ReactElement {
     };
   }, [call, isMobile, openAI]);
 
-  const canEditLabels = Boolean(
+  // The call's host, anyone who took part, or a member of the channel it happened
+  // in. Mirrors isCallAudience on the backend, which gates the same two actions.
+  const isCallAudience = Boolean(
     user?.id &&
     call &&
     (call.createdByUserId === user.id ||
       call.participants?.some(p => p.userId === user.id) ||
       (call.channelId && visibleChannels.some(c => c.id === call.channelId))),
   );
+  // Labels are editable by that same audience.
+  const canEditLabels = isCallAudience;
 
-  // `call` comes off navigation state and never re-resolves from Zero, so labels
-  // are held here and reseeded when a different call is opened.
+  // `call` usually comes off navigation state, which never re-resolves from Zero,
+  // so labels are held here and reseeded when a different call is opened.
   const [labels, setLabels] = useState<string[]>(call?.labels ?? []);
   const labelsUpdateSeqRef = useRef(0);
   useEffect(() => {
@@ -254,6 +291,8 @@ export default function CallDetailScreen(): ReactElement {
     }
   };
 
+  const [showShareModal, setShowShareModal] = useState(false);
+
   const title = call?.title ?? 'Untitled Call';
   const heldOn = formatCallHeldOn(call?.startedAt);
   const callLength = formatCallLength(durationMs);
@@ -261,9 +300,13 @@ export default function CallDetailScreen(): ReactElement {
   if (!call) {
     return (
       <div className='flex items-center justify-center h-full'>
-        <p className='text-sm text-muted-foreground'>
-          Call not found. Please go back and try again.
-        </p>
+        {isResolvingCall ? (
+          <Loader2 className='size-5 animate-spin text-muted-foreground' />
+        ) : (
+          <p className='text-sm text-muted-foreground'>
+            Call not found, or you do not have access to it.
+          </p>
+        )}
       </div>
     );
   }
@@ -457,6 +500,59 @@ export default function CallDetailScreen(): ReactElement {
                   <ChevronRight className='size-3.5' />
                 </button>
               )}
+              {isCallAudience && hasDetailedSummaryTab && (
+                <DropdownMenu>
+                  <div className='inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setShowShareModal(true)}
+                      className={cn(POST_BUTTON_CLASS, 'text-xs font-semibold !rounded-2xl')}
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_channel_modal'
+                    >
+                      <Hashtag className='size-3.5' />
+                      Post to channel
+                    </Button>
+                    <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='iconSm'
+                        aria-label='More actions'
+                        className={POST_BUTTON_CLASS}
+                        data-track-category='CallDetail'
+                        data-track-name='open_call_share_menu'
+                      >
+                        <ChevronDown className='size-3.5' />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </div>
+                  <DropdownMenuContent
+                    align='end'
+                    sideOffset={6}
+                    className='w-60 rounded-xl p-1.5 shadow-xl'
+                  >
+                    <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                      Send this summary to
+                    </p>
+                    <DropdownMenuItem
+                      onSelect={() => setShowShareModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_channel_from_menu'
+                    >
+                      <Hashtag className='size-4 text-muted-foreground' />
+                      Post to channel
+                      <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                        Default
+                      </span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
 
             {/* Tab content */}
@@ -495,6 +591,23 @@ export default function CallDetailScreen(): ReactElement {
           </div>
         </div>
       </div>
+
+      {showShareModal && (
+        <Dialog
+          open={showShareModal}
+          onOpenChange={open => !open && setShowShareModal(false)}
+          title='Post to channel'
+          data-testid='post-call-to-channel-modal'
+          onOpenAutoFocus={event => event.preventDefault()}
+        >
+          <CallShareModal
+            callId={call.id}
+            externalId={call.externalId}
+            createdByUserId={call.createdByUserId}
+            onClose={() => setShowShareModal(false)}
+          />
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -117,6 +117,10 @@ router.get('/:callId/chat-history', callController.getCallChatHistory);
 // Update a call's labels (the call's audience; recordings use /recordings/:callId)
 router.patch('/:callId/labels', callController.updateCallLabels);
 
+// Share a call with people, groups or channels. Same handler as the recordings
+// route above — the service picks the entity type off the call's own type.
+router.post('/:callId/sharing', recordingSharingController.manage);
+
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
 

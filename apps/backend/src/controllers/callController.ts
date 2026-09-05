@@ -3034,7 +3034,10 @@ export class CallController {
       },
     });
 
+    // A call carries shares under whichever entity type it was shared as; clear both
+    // so a deleted call can never leave a live access row behind.
     await repositories.entityAccess.deleteForResource(ShareableEntityType.NOTE_TAKER, call.id);
+    await repositories.entityAccess.deleteForResource(ShareableEntityType.CALL, call.id);
 
     // Delete the call record
     await repositories.calls.delete(call.id);
