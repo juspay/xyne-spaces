@@ -1,5 +1,5 @@
-import { ReactElement } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { ReactElement, useEffect, useState } from 'react';
+import { Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
 import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
 import {
   PROJECTS_SIDEBAR_DEFAULT_WIDTH,
@@ -16,6 +16,7 @@ import { useUserGroups } from '../../hooks/useUserGroup';
 
 const ProjectsScreen = (): ReactElement => {
   const location = useLocation();
+  const { workspaceId, ticketId } = useParams<{ workspaceId?: string; ticketId?: string }>();
   const { isMobile } = usePlatform();
   const { isWideScreen, containerRef } = useResizablePanel({ isMobile });
 
@@ -23,6 +24,25 @@ const ProjectsScreen = (): ReactElement => {
   const [projects] = useCachedQuery(queries.getAllProjects());
   const users = useUsers();
   const userGroups = useUserGroups();
+
+  const ticketsRootPath = `/${workspaceId}/projects`;
+  const lastTicketsPathKey = `lastTicketsPath_${workspaceId}`;
+  const isAtTicketsRoot = location.pathname === ticketsRootPath && !location.search;
+  const [entryRedirect, setEntryRedirect] = useState(() =>
+    isAtTicketsRoot ? localStorage.getItem(lastTicketsPathKey) : null,
+  );
+  const redirectTo =
+    isAtTicketsRoot && entryRedirect && entryRedirect !== ticketsRootPath ? entryRedirect : null;
+
+  useEffect(() => {
+    if (redirectTo) return;
+    setEntryRedirect(null);
+    if (!ticketId) {
+      localStorage.setItem(lastTicketsPathKey, `${location.pathname}${location.search}`);
+    }
+  }, [redirectTo, ticketId, lastTicketsPathKey, location.pathname, location.search]);
+
+  if (redirectTo) return <Navigate to={redirectTo} replace />;
 
   return (
     <div
