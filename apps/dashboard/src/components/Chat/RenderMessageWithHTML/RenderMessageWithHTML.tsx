@@ -31,6 +31,7 @@ import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
+import { LinkHoverCard } from '../LinkHoverCard/LinkHoverCard';
 import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer } from '../../Charts';
 import type { ToolOutput as GeniusToolOutput } from '../../../types/toolOutput';
@@ -1310,6 +1311,16 @@ const parseNode = (
       props['data-track-category'] = 'MESSAGE';
       props['data-track-name'] = isExternal ? 'ClickExternalLink' : 'ClickInternalLink';
       props['data-track-metadata'] = JSON.stringify({ url: href, isExternal });
+
+      const label = (el.textContent ?? '').trim().replace(/\/+$/, '');
+      if (isExternal && label !== href.replace(/\/+$/, '')) {
+        const { key, ...anchorProps } = props;
+        return (
+          <LinkHoverCard key={key as string} href={href}>
+            {React.createElement(tag, anchorProps, ...children)}
+          </LinkHoverCard>
+        );
+      }
     }
   }
 

@@ -42,6 +42,7 @@ import {
 import { toast } from 'sonner';
 import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
+import { LinkPopover } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
@@ -1554,6 +1555,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {features.emojiPicker && (
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
         )}
+
+        {features.richText && <LinkPopover editor={editor} />}
 
         {/* Activity bar — absolutely positioned above the input box so showing/hiding
             never shifts the chat layout. The typing indicator and the agent pill share
