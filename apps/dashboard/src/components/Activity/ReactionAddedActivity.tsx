@@ -8,6 +8,8 @@ import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { renderEmoji } from '../../utils/customEmojiUtils';
+import { useCustomEmojis } from '../../hooks/useCustomEmojis';
+import { useEmojiDataReady } from '../../hooks/useEmojiData';
 import { getReactionMessagePreview } from './reactionMessagePreview';
 
 export const ReactionAddedActivity = ({
@@ -21,6 +23,10 @@ export const ReactionAddedActivity = ({
   const message = activity.message;
   const actorUser = useUser(reaction?.userId ?? '');
   const { baseRoute } = useRouteContext();
+  const { data: customEmojis } = useCustomEmojis();
+  // Re-render once the emoji-datasource cache is warm so unicode shortcodes
+  // resolve instead of showing the neutral fallback icon.
+  useEmojiDataReady();
 
   if (!reaction || !message || !reaction.userId || !message.conversation) return null;
 
@@ -35,7 +41,7 @@ export const ReactionAddedActivity = ({
       actorId={reaction.userId}
       actorName={getUserDisplayName(actorUser)}
       channelId={message.conversation?.channelId}
-      badgeIcon={renderEmoji(reaction.emojiName)}
+      badgeIcon={renderEmoji(reaction.emojiName, 'w-5 h-5', 'text-base', { customEmojis })}
       badgeColorClass='bg-muted'
       description={
         <>

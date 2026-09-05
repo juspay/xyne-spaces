@@ -267,7 +267,7 @@ export const ActivityItemCard = ({
             {badgeIcon ? (
               <div
                 className={cn(
-                  'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
+                  'absolute -bottom-1 -right-1 flex size-5 overflow-hidden [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
                   badgeColorClass,
                 )}
               >
