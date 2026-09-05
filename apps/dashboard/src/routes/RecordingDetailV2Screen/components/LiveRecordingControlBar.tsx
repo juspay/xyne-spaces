@@ -32,6 +32,13 @@ import { parseMarkedItems, type MarkedItem, type MarkedItemType } from './marked
 
 const TIMELINE_WINDOW_MS = 40 * 60 * 1000; // 40 min fixed window for the live timeline
 
+const PLAYBACK_SPEEDS = [
+  { value: 1, label: '1x' },
+  { value: 1.2, label: '1.2x' },
+  { value: 1.5, label: '1.5x' },
+  { value: 2, label: '2x' },
+] as const;
+
 interface LiveRecordingControlBarProps {
   recording: RecordingDetail;
   isLive: boolean;
@@ -554,15 +561,27 @@ const RecordedTimelineBar = ({
         />
       </div>
 
-      {/* Only worth explaining the markers once there are some to explain. */}
-      {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
+      {/* Legend only when there's something to explain; speed only once audio can load. */}
+      {(markedTypes.size > 0 || onLoadAudio) && (
+        <div className='mt-3 flex items-center gap-4 pl-1'>
+          {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
+          {onLoadAudio && (
+            <div className='ml-auto'>
+              <PlaybackSpeedControl
+                rate={playback.playbackRate}
+                onChange={playback.setPlaybackRate}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
 
 /** Reads the marker vocabulary of the track above it — only the kinds actually on it. */
 const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactElement => (
-  <div className='mt-3 flex items-center gap-5 pl-1 text-xs text-muted-foreground'>
+  <div className='flex items-center gap-5 text-xs text-muted-foreground'>
     {types.has('decision') && (
       <span className='flex items-center gap-1.5'>
         <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.decision)} aria-hidden='true' />
@@ -581,6 +600,37 @@ const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactE
         Marked moments
       </span>
     )}
+  </div>
+);
+
+interface PlaybackSpeedControlProps {
+  rate: number;
+  onChange: (rate: number) => void;
+}
+
+/** Playback speed control after the audio has loaded. */
+const PlaybackSpeedControl = ({ rate, onChange }: PlaybackSpeedControlProps): ReactElement => (
+  <div className='flex shrink-0 items-center gap-2 text-xs text-muted-foreground'>
+    <span>Speed</span>
+    <div className='flex items-center gap-0.5 rounded-full bg-muted/60 p-0.5'>
+      {PLAYBACK_SPEEDS.map(speed => (
+        <button
+          key={speed.value}
+          type='button'
+          onClick={() => onChange(speed.value)}
+          className={cn(
+            'rounded-full px-2.5 py-1 font-mono text-xs transition-colors',
+            rate === speed.value
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          data-track-category='RecordingDetailV2'
+          data-track-name='set_playback_speed'
+        >
+          {speed.label}
+        </button>
+      ))}
+    </div>
   </div>
 );
 
