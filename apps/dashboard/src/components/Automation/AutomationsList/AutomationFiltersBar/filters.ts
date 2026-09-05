@@ -1,11 +1,14 @@
 import type { DateRangeValue } from '../../../ui/DateRangeFilter/DateRangeFilter';
+import { PRESETS, matchPreset } from '../../../ui/DateRangeFilter/DateRangeFilter';
 import type { Automation, AutomationStatus, WorkflowEventType } from '../../Automation.types';
 import {
+  AutomationRunStatusValues,
   AutomationStatusValues,
   WorkflowEventType as EventType,
   isLiveStatus,
   isProposalStatus,
 } from '../../Automation.types';
+import { DEFAULT_AUTOMATION_SORT, type AutomationSort } from '../AutomationsList.utils';
 
 export type AutomationDateField = 'createdAt' | 'updatedAt';
 
@@ -193,4 +196,116 @@ export function hasActiveFilters(query: string, filters: AutomationFilters): boo
     filters.createdByUserIds.length > 0 ||
     filters.dateRange !== null
   );
+}
+
+/** One key for the automations screen and the desk settings tab — the desk only adds a channel filter. */
+export const automationViewKey = (workspaceId: string): string =>
+  `automation-filters-${workspaceId}`;
+
+const runsKey = (automationId: string): string => `automation-run-filters-${automationId}`;
+
+const read = (key: string): Record<string, unknown> => {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? '');
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+};
+
+const write = (key: string, value: unknown): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage blocked or full — filtering still works, it just won't be remembered.
+  }
+};
+
+/**
+ * A range identical to a preset is stored by its label so "Last 7 days" still means that
+ * tomorrow. The times must match too — `matchPreset` compares days only, and the picker
+ * lets a preset's range carry a custom start/end time.
+ */
+const packRange = (r: DateRangeValue | null): string | { from: string; to: string } | null => {
+  if (!r) return null;
+  const label = matchPreset(r);
+  const preset = PRESETS.find(p => p.label === label)?.getValue();
+  const isPreset =
+    preset?.startDate.getTime() === r.startDate.getTime() &&
+    preset?.endDate.getTime() === r.endDate.getTime();
+  return label && isPreset
+    ? label
+    : { from: r.startDate.toISOString(), to: r.endDate.toISOString() };
+};
+
+const unpackRange = (v: unknown): DateRangeValue | null => {
+  if (typeof v === 'string') return PRESETS.find(p => p.label === v)?.getValue() ?? null;
+  const raw = v as { from?: string; to?: string } | null;
+  if (!raw?.from || !raw.to) return null;
+  const startDate = new Date(raw.from);
+  const endDate = new Date(raw.to);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  return { startDate, endDate };
+};
+
+interface StoredView {
+  query: string;
+  filters: AutomationFilters;
+  sort: AutomationSort;
+  pageSize: number;
+}
+
+/** Restored filters reach `filterAutomations` before first paint, so a non-array would crash the screen. */
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+
+export function loadAutomationView(key: string): StoredView {
+  const stored = read(key);
+  const filters = (stored['filters'] ?? {}) as Partial<AutomationFilters>;
+  const statuses = strings(filters.statuses) as AutomationStatus[];
+  return {
+    query: typeof stored['query'] === 'string' ? stored['query'] : '',
+    filters: {
+      ...DEFAULT_AUTOMATION_FILTERS,
+      ...filters,
+      triggerTypes: strings(filters.triggerTypes) as WorkflowEventType[],
+      channelIds: strings(filters.channelIds),
+      // An empty selection means "show nothing" — restoring one is a blank list forever.
+      statuses: statuses.length ? statuses : DEFAULT_AUTOMATION_FILTERS.statuses,
+      createdByUserIds: strings(filters.createdByUserIds),
+      dateField: filters.dateField === 'updatedAt' ? 'updatedAt' : 'createdAt',
+      dateRange: unpackRange(filters.dateRange),
+    },
+    sort: (stored['sort'] as AutomationSort | undefined) ?? DEFAULT_AUTOMATION_SORT,
+    pageSize: typeof stored['pageSize'] === 'number' ? stored['pageSize'] : 100,
+  };
+}
+
+export function saveAutomationView(key: string, view: StoredView): void {
+  write(key, {
+    ...view,
+    filters: { ...view.filters, dateRange: packRange(view.filters.dateRange) },
+  });
+}
+
+export function loadRunFilters(automationId: string): {
+  status: string;
+  dateRange: DateRangeValue | null;
+} {
+  const stored = read(runsKey(automationId));
+  const status = stored['status'];
+  return {
+    status: Object.values(AutomationRunStatusValues).some(s => s === status)
+      ? (status as string)
+      : 'all',
+    dateRange: unpackRange(stored['range']),
+  };
+}
+
+export function saveRunFilters(
+  automationId: string,
+  status: string,
+  dateRange: DateRangeValue | null,
+): void {
+  write(runsKey(automationId), { status, range: packRange(dateRange) });
 }
