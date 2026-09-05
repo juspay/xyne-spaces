@@ -305,6 +305,19 @@ export class AttachmentController {
 
       const buffer = await service.getFileBuffer(filePath);
 
+      // Guard: a zero-byte / empty storage object must never be served as a valid
+      // 200. Otherwise the client builds a 0-byte File, the image decoder fails,
+      // and the viewer shows "Failed to load image" (XYNE-61758). Treat an empty
+      // object as a missing/corrupt file so the client can show a clear error and
+      // retry, instead of silently caching a broken preview.
+      if (!buffer || buffer.length === 0) {
+        logger.error(
+          `Empty storage object for attachment ${attachmentId} at path: ${filePath} (0 bytes)`,
+        );
+        res.status(404).json({ error: 'Attachment file is empty or unavailable' });
+        return;
+      }
+
       // Set response headers (safe disposition/type to prevent stored XSS)
       res.setHeader('Content-Length', buffer.length);
       setSafeDownloadHeaders(res, {
