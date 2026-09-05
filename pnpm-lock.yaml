@@ -472,8 +472,8 @@ importers:
         specifier: ^0.12.3
         version: 0.12.5
       uuid:
-        specifier: 11.1.1
-        version: 11.1.1
+        specifier: ^14.0.0
+        version: 14.0.2
       winston:
         specifier: ^3.11.0
         version: 3.19.0
@@ -1180,8 +1180,8 @@ importers:
         specifier: ^11.0.5
         version: 11.0.5
       uuid:
-        specifier: ^13.0.1
-        version: 13.0.2
+        specifier: ^14.0.0
+        version: 14.0.2
       validate:
         specifier: ^5.2.0
         version: 5.2.0
@@ -1464,8 +1464,8 @@ importers:
         specifier: 7.5.21
         version: 7.5.21
       uuid:
-        specifier: 11.1.1
-        version: 11.1.1
+        specifier: ^14.0.0
+        version: 14.0.2
     devDependencies:
       '@types/archiver':
         specifier: ^7.0.0
@@ -1985,8 +1985,8 @@ importers:
         specifier: 1.0.0
         version: 1.0.0
       uuid:
-        specifier: 11.1.1
-        version: 11.1.1
+        specifier: ^14.0.0
+        version: 14.0.2
       zod:
         specifier: ^3.24.4
         version: 3.25.76
@@ -2111,8 +2111,8 @@ importers:
         specifier: '>=18.0.0'
         version: 19.2.3
       uuid:
-        specifier: 11.1.1
-        version: 11.1.1
+        specifier: ^14.0.0
+        version: 14.0.2
       xstate:
         specifier: ^5.24.0
         version: 5.32.5
@@ -2169,8 +2169,8 @@ importers:
         specifier: ^7.7.0
         version: 7.21.0
       uuid:
-        specifier: 11.1.1
-        version: 11.1.1
+        specifier: ^14.0.0
+        version: 14.0.2
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -3081,6 +3081,9 @@ packages:
 
   '@codemirror/commands@6.10.4':
     resolution: {integrity: sha512-Ryk9y9T0FFVF0cUGhAknveAyUOl/A1qReTFi+qPKtOh2Z9F4AUBz3XOrYD4ZEgZirdugVzHvd/2/Wcwy5OliTg==}
+
+  '@codemirror/commands@6.11.0':
+    resolution: {integrity: sha512-/K4Rl5BN0OtTiPWmJCdqODu38XnDMsDxKY5rgrPnCkutPTJf2wVbkoixLfealF5Kwse/s8P8M5jAiURiwSwnFA==}
 
   '@codemirror/lang-css@6.3.1':
     resolution: {integrity: sha512-kr5fwBGiGtmz6l0LSJIbno9QrifNMUusivHbnA1H6Dmqy4HZFte3UAICix1VuKo0lMPKQr2rqB+0BkKi/S3Ejg==}
@@ -19477,12 +19480,8 @@ packages:
     resolution: {integrity: sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==}
     hasBin: true
 
-  uuid@13.0.2:
-    resolution: {integrity: sha512-vzi9uRZ926x4XV73S/4qQaTwPXM2JBj6/6lI/byHH1jOpCzb0zDbfytgA9LcN/hzb2l7WQSQnxITOVx5un/wGw==}
-    hasBin: true
-
-  uuid@14.0.1:
-    resolution: {integrity: sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew==}
+  uuid@14.0.2:
+    resolution: {integrity: sha512-xZe/16rV4aa+HGSOCiY2YeLT1OybRLrrkL/Rqaq7p7GMVXjFh+6wN4oMYgjFmnSnhY8t6Xpdl2l9qmnHYuMHwQ==}
     hasBin: true
 
   uuid@3.4.0:
@@ -21023,6 +21022,13 @@ snapshots:
       '@lezer/common': 1.5.2
 
   '@codemirror/commands@6.10.4':
+    dependencies:
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.1
+      '@codemirror/view': 6.43.7
+      '@lezer/common': 1.5.2
+
+  '@codemirror/commands@6.11.0':
     dependencies:
       '@codemirror/language': 6.12.4
       '@codemirror/state': 6.7.1
@@ -23916,7 +23922,7 @@ snapshots:
       strip-ansi: 7.2.0
       typebox: 1.3.8
       undici: 7.29.0
-      uuid: 14.0.1
+      uuid: 14.0.2
       yaml: 2.9.0
     optionalDependencies:
       '@mariozechner/clipboard': 0.3.9
@@ -30760,7 +30766,7 @@ snapshots:
   codemirror@6.0.2:
     dependencies:
       '@codemirror/autocomplete': 6.20.3
-      '@codemirror/commands': 6.10.4
+      '@codemirror/commands': 6.11.0
       '@codemirror/language': 6.12.4
       '@codemirror/lint': 6.9.7
       '@codemirror/search': 6.7.1
@@ -41521,9 +41527,7 @@ snapshots:
 
   uuid@11.1.1: {}
 
-  uuid@13.0.2: {}
-
-  uuid@14.0.1: {}
+  uuid@14.0.2: {}
 
   uuid@3.4.0: {}
 
