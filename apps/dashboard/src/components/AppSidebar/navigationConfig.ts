@@ -37,6 +37,7 @@ import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
 import type { usePermissions } from '../../hooks/usePermissions';
 import { AccessType } from '@xyne/shared';
+import { XyneAISidebarIcon } from '../icons/xyne-ai';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
@@ -63,10 +64,25 @@ export interface NavigationItem {
   iconSize?: number;
 }
 
+// Adapts XyneAISidebarIcon — a plain {color?, size?: number} SVG component,
+// not a pika-icon — to the PikaIcon shape NavigationItem.icon requires.
+// PikaIconProps.size is `number | string`, so it's coerced rather than
+// widening XyneAISidebarIcon's own signature. Pika-only props (variant/
+// strokeWidth/...) are dropped: this glyph has no stroke/variant concept and
+// renders identically regardless of active state, unlike every other item.
+const XyneAINavIcon: PikaIcon = ({ size, color }) =>
+  createElement(XyneAISidebarIcon, {
+    // exactOptionalPropertyTypes rejects an explicit `undefined` for an
+    // optional prop — omit the key entirely instead of assigning it.
+    ...(typeof size === 'number' ? { size } : {}),
+    ...(color !== undefined ? { color } : {}),
+  });
+
 // Items are listed toolbar-first: the default toolbar paths come first in the
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
+  { path: '/ai', label: 'Xyne AI', icon: XyneAINavIcon },
   { path: '/chat/dir', label: 'Chat', icon: Hashtag },
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn },
@@ -110,6 +126,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
 // Core items that are always in the toolbar. Users cannot remove these — their
 // toggle is locked on in the customize UI.
 export const REQUIRED_TOOLBAR_PATHS: string[] = [
+  '/ai',
   '/chat/dir',
   '/chat/dm',
   '/calls',
@@ -128,6 +145,29 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS];
 // Whether a path is locked into the toolbar (cannot be toggled off).
 export const isRequiredToolbarPath = (path: string): boolean =>
   REQUIRED_TOOLBAR_PATHS.includes(path);
+
+// One-line description per toolbar-manageable path, shown under the label in
+// the workspace admin's Toolbar tab — same { name, description } shape as
+// the RESOURCES registry backing the Roles access grid (seed-acl.ts), so an
+// admin sees what they're hiding, not just a bare label.
+export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
+  '/ai': 'AI chat assistant panel',
+  '/chat/dir': 'Channel-based team chat',
+  '/chat/dm': 'Direct messages between users',
+  '/chat/activity': 'Mentions and notification activity feed',
+  '/calls': 'Voice and video calling',
+  '/recordings': 'Call and meeting recordings',
+  '/chat/canvas': 'Personal canvas documents',
+  '/automations': 'Workflow automation triggers and actions',
+  '/scheduled-messages': 'Messages scheduled for later delivery',
+  '/browser': 'In-app browser tabs (desktop app only)',
+  '/apps': 'Installed app integrations',
+  '/guide': 'Product documentation and onboarding guide',
+  '/knowledge-base': 'File and folder knowledge base for Ask AI',
+  '/memory': 'Saved context and memory for AI',
+  '/releaseManager': 'Release and deployment tracking',
+  '/claw-agents': 'Claw AI agents dashboard',
+};
 
 type Permissions = ReturnType<typeof usePermissions>;
 

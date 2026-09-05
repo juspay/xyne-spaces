@@ -22,6 +22,11 @@ export interface StreamOverrides {
   channelIds?: string[];
   collectionIds?: string[];
   fileIds?: string[];
+  /** Folder scopes from the composer picker. Sent to claw-auth as a single
+   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
+   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
+   *  at Vespa-query time. */
+  folderIds?: string[];
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
@@ -61,6 +66,11 @@ interface UseXyneAIStreamParams {
   researchContext?: ResearchContext | null;
   collectionIds?: string[];
   fileIds?: string[];
+  /** Folder scopes from the composer picker. Sent to claw-auth as a single
+   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
+   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
+   *  at Vespa-query time. */
+  folderIds?: string[];
   createCanvasEnabled?: boolean;
   instant?: boolean;
   isV2?: boolean;
@@ -131,6 +141,7 @@ export const useXyneAIStream = ({
   researchContext,
   collectionIds,
   fileIds,
+  folderIds,
   createCanvasEnabled = false,
   instant = false,
   isV2 = false,
@@ -314,6 +325,7 @@ export const useXyneAIStream = ({
       const eChannelIds = ov?.channelIds ?? channelIds;
       const eCollectionIds = ov?.collectionIds ?? collectionIds ?? [];
       const eFileIds = ov?.fileIds ?? fileIds ?? [];
+      const eFolderIds = ov?.folderIds ?? folderIds ?? [];
       const eTicketIds = ov?.ticketIds ?? ticketIds;
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
@@ -423,6 +435,7 @@ export const useXyneAIStream = ({
           channelIds: eChannelIds,
           collectionIds: eCollectionIds,
           fileIds: eFileIds,
+          folderIds: eFolderIds,
           conversationId,
           threadConversationId,
           attachmentIds,
@@ -466,6 +479,7 @@ export const useXyneAIStream = ({
       attachmentIds,
       canvasId,
       fileIds,
+      folderIds,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,

@@ -1,15 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { cn } from '../../utils/classNames';
 import {
+  AlertCircle,
   ArrowLeft,
+  CheckCircle2,
   ChevronDown,
   File,
+  Folder,
   FolderOpen,
   FolderPlus,
   Link2,
   Loader2,
   Plus,
-  Upload,
+  X,
 } from 'lucide-react';
 import { useProjectCollections } from '../../components/knowledgeBase/hooks/useProjectCollections';
 import { useProjectCollectionMutations } from '../../components/knowledgeBase/hooks/useProjectCollectionMutations';
@@ -20,11 +24,11 @@ import {
   CollectionChild,
   CollectionSummary,
   NodeType,
-  searchCollectionItems,
   uploadFilesInBatches,
 } from '../../services/Knowledge/collectionService';
 import CreateCollectionModal from '../../components/knowledgeBase/upload/CreateCollectionModal';
 import { ShareCollectionModal } from '../../components/knowledgeBase/upload/ShareCollectionModal';
+import { ShareLinkModal } from '../../components/knowledgeBaseV2/components/ShareLinkModal';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,11 +55,11 @@ import {
   runDriveImport,
   takePendingDriveImport,
 } from '../../components/knowledgeBaseV2/utils/driveImport';
-import { SearchFieldV2 } from '../../components/knowledgeBaseV2/components/SearchFieldV2';
 import { ViewToggleV2, ViewMode } from '../../components/knowledgeBaseV2/components/ViewToggleV2';
 import { EmptyPaneV2 } from '../../components/knowledgeBaseV2/components/EmptyPaneV2';
+import { StatusBadgeV2 } from '../../components/knowledgeBaseV2/components/StatusBadgeV2';
 import { CrumbsV2 } from '../../components/knowledgeBaseV2/components/CrumbsV2';
-import { SearchResultsV2 } from '../../components/knowledgeBaseV2/components/SearchResultsV2';
+import { resolveKbBasePath } from './utils/kbRoutePaths';
 import { NameDialogV2 } from '../../components/knowledgeBaseV2/components/NameDialogV2';
 import { toast } from 'sonner';
 import { useGlobalCollections } from './hooks/useGlobalCollections';
@@ -64,7 +68,6 @@ import { XyneAIStar } from '../../components/icons/xyne-ai';
 import Tooltip from '../../components/ui/Tooltip';
 
 const KB_COLUMNS: ReadonlyArray<ColumnDef> = [
-  { key: 'kind', header: 'Kind', width: '120px' },
   { key: 'size', header: 'Size', width: '120px' },
   { key: 'updated', header: 'Updated', width: '140px' },
 ];
@@ -77,12 +80,70 @@ const KB_ROOT_COLUMNS: ReadonlyArray<ColumnDef> = [
   { key: 'updated', header: 'Updated', width: '140px' },
 ];
 
-// Mirrors xyne-search /kb: collection id, optional folder id, and free-text
-// search live in the URL as search params so back/forward and deep links
-// behave the same as in xyne-search.
+type StatusFilterValue = 'ALL' | 'PENDING' | 'PROCESSING' | 'FAILED' | 'COMPLETED';
+
+// Collapses a raw ingestionStatus (null/NONE/COMPLETED all mean "nothing left
+// to do") down to the four buckets the filter dropdown offers.
+function normalizeStatusFilter(
+  status: IngestionStatus | string | null | undefined,
+): StatusFilterValue {
+  const s = (status ?? '').toUpperCase();
+  if (s === 'PENDING' || s === 'PROCESSING' || s === 'FAILED') return s;
+  return 'COMPLETED';
+}
+
+const STATUS_FILTER_OPTIONS: ReadonlyArray<{ value: StatusFilterValue; label: string }> = [
+  { value: 'PROCESSING', label: 'Processing' },
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'FAILED', label: 'Failed' },
+  { value: 'COMPLETED', label: 'Ready' },
+];
+
+// Same icon language as CollectionStatusBadgeV2 / FileFailedBadgeV2, just
+// inline-sized for a dropdown row instead of a circular overlay badge.
+function statusFilterIcon(value: StatusFilterValue): React.ReactElement {
+  switch (value) {
+    case 'PROCESSING':
+      return (
+        <Loader2 className='h-3.5 w-3.5 shrink-0 animate-spin text-amber-500' strokeWidth={2} />
+      );
+    case 'PENDING':
+      return (
+        <Loader2 className='h-3.5 w-3.5 shrink-0 animate-spin text-gray-400' strokeWidth={2} />
+      );
+    case 'FAILED':
+      return <AlertCircle className='h-3.5 w-3.5 shrink-0 text-red-500' strokeWidth={2} />;
+    default:
+      return <CheckCircle2 className='h-3.5 w-3.5 shrink-0 text-green-600' strokeWidth={2} />;
+  }
+}
+
+// 'FOLDER' for folders, else the uppercased file extension (e.g. 'MD', 'PDF') —
+// same bucketing EntryListV2's Kind column already uses for files.
+function typeFilterValueFor(entry: CollectionChild): string {
+  if (entry.type === 'FOLDER') return 'FOLDER';
+  const ext = entry.name.split('.').pop()?.toUpperCase();
+  return ext || 'FILE';
+}
+
+function typeFilterLabelFor(value: string): string {
+  return value === 'FOLDER' ? 'Folders' : value;
+}
+
+// Same file-type color language as the grid/list icons (StatusBadgeV2) —
+// `file.<ext>` is a throwaway name, only its extension is ever read.
+function typeFilterIcon(value: string): React.ReactElement {
+  if (value === 'FOLDER') {
+    return <Folder className='h-4 w-4 shrink-0 text-muted-foreground' strokeWidth={1.75} />;
+  }
+  return <StatusBadgeV2 name={`file.${value.toLowerCase()}`} size='sm' />;
+}
+
+// Mirrors xyne-search /kb: collection id and optional folder id live in the
+// URL as search params so back/forward and deep links behave the same as in
+// xyne-search.
 const SP_COLLECTION = 'cl';
 const SP_PARENT = 'parent';
-const SP_QUERY = 'q';
 
 /** A folder id + all descendant folder ids (used to scope a file listing to a subtree). */
 function collectSubtreeFolderIds(
@@ -106,12 +167,16 @@ function collectSubtreeFolderIds(
 
 export const KnowledgeBaseV2Screen: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  // This screen is a leaf under both /knowledge-base and /ai/knowledge; the
+  // file viewer route it navigates to lives at the same prefix as whichever
+  // of the two it's currently mounted under.
+  const browseBasePath = useMemo(() => resolveKbBasePath(location.pathname), [location.pathname]);
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const spCollectionId = searchParams.get(SP_COLLECTION);
   const spParentId = searchParams.get(SP_PARENT);
-  const spQuery = searchParams.get(SP_QUERY) ?? '';
 
   // Resume a Drive import after the full-page "Connect Google Drive" OAuth redirect.
   // The backend returns us to this KB URL with ?driveOAuth=success|driveOAuthError;
@@ -177,8 +242,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     s => s.currentUpload?.isUploading === true && s.currentUpload.collectionId === spCollectionId,
   );
 
-  const [view, setView] = useState<ViewMode>('grid');
-  const [query, setQueryState] = useState(spQuery);
+  const [view, setView] = useState<ViewMode>('list');
   const [dragging, setDragging] = useState(false);
   const [dialog, setDialog] = useState<'folder' | null>(null);
   // Open rename target. Holds the original entry so the dialog can both
@@ -189,6 +253,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // `activeCollection` machine slot, so opening the modal also seeds that
   // slot from the chosen card and we restore it on close.
   const [shareTarget, setShareTarget] = useState<CollectionChild | null>(null);
+  // Open share target for a regular folder/file (copy-link-only dialog —
+  // no ACL of its own, see ShareLinkModal). Distinct from `shareTarget`
+  // (collections), which drives the full access-management dialog.
+  const [linkShareTarget, setLinkShareTarget] = useState<CollectionChild | null>(null);
   // Collection whose ingestion status drawer is open (root view only).
   const [statusFor, setStatusFor] = useState<StatusDrawerTarget | null>(null);
   // "Add from Google Drive link" modal (inside a collection).
@@ -208,14 +276,6 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       el.setAttribute('directory', '');
     }
   }, []);
-
-  // Search
-  const [searchHits, setSearchHits] = useState<CollectionChild[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const searchTokenRef = useRef(0);
-  const trimmedQuery = query.trim();
-  const searching = trimmedQuery.length > 0;
 
   // No local upload state — V1's `useUploadHandler` registers each upload in
   // a global zustand store and `GlobalUploadProgress` (rendered by AppRoot)
@@ -245,12 +305,6 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spParentId]);
 
-  // Keep the local search input in sync with the URL when the URL changes
-  // (e.g. browser back/forward).
-  useEffect(() => {
-    setQueryState(spQuery);
-  }, [spQuery]);
-
   // Once the active collection's data has loaded, fill in its name on the
   // breadcrumb. Falls back to the global collections cache for the deep-link
   // case where the user lands straight on ?cl=<id>.
@@ -273,6 +327,11 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const collectionId = spCollectionId;
   const isAtRoot = !collectionId;
   const isAtCollectionRoot = !!collectionId && !spParentId;
+  // Write access to an open collection's contents (upload, new folder,
+  // rename, delete) requires being a collaborator — owner or explicit
+  // EDITOR grant. Public collections are read-only by default; sub-folders
+  // have no ACL of their own, so this is depth-independent.
+  const canEdit = activeCollection?.role === 'EDITOR' || activeCollection?.role === 'OWNER';
 
   // Inside a collection, load ALL its files so each subfolder can show the same
   // rolled-up ingestion badge the root collections do. (The tree loads files
@@ -373,8 +432,52 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     subfolderRollup,
   ]);
 
-  const folderCount = entries.filter(e => e.type === 'FOLDER').length;
-  const fileCount = entries.filter(e => e.type === 'FILE').length;
+  // Status filter — works the same at every level (root collections list or
+  // any folder), since every CollectionChild (collection, folder, or file)
+  // already carries a rolled-up `ingestionStatus`. Options are the fixed
+  // full list (like Type's "Folders"), not limited to whatever's present —
+  // picking one with no matches just shows an empty result.
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('ALL');
+  // Type filter — same idea as status, but bucketed by "Folders" vs. each
+  // file extension actually present (mirrors EntryListV2's own Kind column
+  // logic) instead of a fixed list.
+  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const availableTypeFilters = useMemo(() => {
+    // 'Folders' is always offered (mirrors Drive's Type menu, which always
+    // lists Folders as a category) even when the current view has none —
+    // picking it then just filters down to nothing, same as any other type
+    // with zero matches.
+    const seen = new Map<string, string>([['FOLDER', 'Folders']]);
+    for (const e of entries) {
+      const value = typeFilterValueFor(e);
+      if (!seen.has(value)) seen.set(value, typeFilterLabelFor(value));
+    }
+    return [...seen.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) =>
+        a.value === 'FOLDER' ? -1 : b.value === 'FOLDER' ? 1 : a.label.localeCompare(b.label),
+      );
+  }, [entries]);
+  useEffect(() => {
+    if (typeFilter !== 'ALL' && !availableTypeFilters.some(o => o.value === typeFilter)) {
+      setTypeFilter('ALL');
+    }
+  }, [availableTypeFilters, typeFilter]);
+
+  const filteredEntries = useMemo(
+    () =>
+      entries.filter(e => {
+        if (statusFilter !== 'ALL' && normalizeStatusFilter(e.ingestionStatus) !== statusFilter) {
+          return false;
+        }
+        if (typeFilter !== 'ALL' && typeFilterValueFor(e) !== typeFilter) return false;
+        return true;
+      }),
+    [entries, statusFilter, typeFilter],
+  );
+
+  const folderCount = filteredEntries.filter(e => e.type === 'FOLDER').length;
+  const fileCount = filteredEntries.filter(e => e.type === 'FILE').length;
 
   // ── Breadcrumb chain ─────────────────────────────────────────────────
   const chain = useMemo(() => {
@@ -389,69 +492,9 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     return result;
   }, [collectionId, spParentId, nodes]);
 
-  // ── Search ───────────────────────────────────────────────────────────
-  // Two regimes:
-  //   • Root (`/knowledge-base`, no `cl`): no dedicated KB-wide endpoint, so
-  //     we filter the already-loaded collections list client-side by name.
-  //   • Inside a collection: hit `searchCollectionItems` for full-text search
-  //     across files in that collection.
-  useEffect((): (() => void) | undefined => {
-    if (!searching) {
-      setSearchHits([]);
-      setSearchLoading(false);
-      setSearchError(null);
-      return undefined;
-    }
-    if (!collectionId) {
-      // Client-side filter on the root collections list.
-      const q = trimmedQuery.toLowerCase();
-      const hits: CollectionChild[] = globalCollections.collections
-        .filter(c => c.name.toLowerCase().includes(q))
-        .map(c => ({
-          id: c.id,
-          name: c.name,
-          type: 'FOLDER' as NodeType,
-          size: 0,
-          updatedAt: new Date().toISOString(),
-          ingestionStatus: null,
-          mimeType: '',
-          parentId: null,
-        }));
-      setSearchHits(hits);
-      setSearchLoading(false);
-      setSearchError(null);
-      return undefined;
-    }
-    setSearchLoading(true);
-    setSearchError(null);
-    const myToken = ++searchTokenRef.current;
-    const runSearch = async (): Promise<void> => {
-      try {
-        const results = await searchCollectionItems(collectionId, trimmedQuery);
-        if (myToken !== searchTokenRef.current) return;
-        setSearchHits(results);
-      } catch (err: unknown) {
-        if (myToken !== searchTokenRef.current) return;
-        const msg = err instanceof Error ? err.message : 'Search failed';
-        setSearchError(msg);
-        setSearchHits([]);
-      } finally {
-        if (myToken === searchTokenRef.current) {
-          setSearchLoading(false);
-        }
-      }
-    };
-    const handle = window.setTimeout((): void => {
-      void runSearch();
-    }, 160);
-    return (): void => {
-      window.clearTimeout(handle);
-    };
-  }, [searching, trimmedQuery, collectionId, globalCollections.collections]);
-
   // ── URL writers ─────────────────────────────────────────────────────
   const updateParams = useCallback(
-    (next: { cl?: string | null; parent?: string | null; q?: string | null }, replace = false) => {
+    (next: { cl?: string | null; parent?: string | null }, replace = false) => {
       const sp = new URLSearchParams(searchParams);
       const apply = (key: string, val: string | null | undefined): void => {
         if (val === undefined) return;
@@ -460,7 +503,6 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       };
       apply(SP_COLLECTION, next.cl);
       apply(SP_PARENT, next.parent);
-      apply(SP_QUERY, next.q);
       setSearchParams(sp, { replace });
     },
     [searchParams, setSearchParams],
@@ -468,12 +510,12 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   // ── Navigation helpers ───────────────────────────────────────────────
   const goToCollections = useCallback((): void => {
-    updateParams({ cl: null, parent: null, q: null });
+    updateParams({ cl: null, parent: null });
   }, [updateParams]);
 
   const goToCollection = useCallback(
     (clId: string): void => {
-      updateParams({ cl: clId, parent: null, q: null });
+      updateParams({ cl: clId, parent: null });
     },
     [updateParams],
   );
@@ -481,7 +523,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const goToFolder = useCallback(
     (folderId: string): void => {
       if (!collectionId) return;
-      updateParams({ cl: collectionId, parent: folderId, q: null });
+      updateParams({ cl: collectionId, parent: folderId });
     },
     [collectionId, updateParams],
   );
@@ -489,7 +531,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const goToParent = useCallback(
     (parentId: string | null): void => {
       if (!collectionId) return;
-      updateParams({ cl: collectionId, parent: parentId, q: null });
+      updateParams({ cl: collectionId, parent: parentId });
     },
     [collectionId, updateParams],
   );
@@ -533,6 +575,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     (entry: CollectionChild): string => {
       const owning = globalCollections.byId(entry.id);
       if (!owning) return 'Collection';
+      if (owning.scopeType === 'WORKSPACE') return 'Workspace';
       const channelName = channelNameById.get(owning.scopeId);
       const projectName = owning.projectId ? projectNameById.get(owning.projectId) : undefined;
       if (channelName && projectName) return `#${channelName} · ${projectName}`;
@@ -580,21 +623,37 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       if (!collectionId) return;
       // File viewer still reads projectId/channelId from URL path params, so
       // look up the owning channel via the global collections cache and route
-      // to the existing nested viewer URL.
+      // to the existing nested viewer URL. Use the entry's own `parentId`,
+      // not `spParentId` (the currently-browsed folder) — search results can
+      // come from anywhere in the collection, so a match outside the folder
+      // you're currently viewing would otherwise point the URL, and so
+      // `nodes[fileId]` resolution in FileViewerPanel, at the wrong folder
+      // and show "No file selected".
       const found = globalCollections.byId(collectionId);
-      const projectId = found?.projectId;
       const channelId = found?.scopeId;
-      if (projectId && channelId) {
+      if (channelId) {
+        // `projectId` is only known for CHANNEL-scoped collections whose
+        // channel is in our visible-channel list — '_' for workspace-scoped
+        // (or unresolvable) collections, same sentinel as the folder segment.
+        const projectId = found?.projectId ?? '_';
         void navigate(
-          `/knowledge-base/${projectId}/${channelId}/${collectionId}/${
-            spParentId ?? '_'
+          `${browseBasePath}/${projectId}/${channelId}/${collectionId}/${
+            entry.parentId ?? '_'
           }/${entry.id}`,
         );
       } else {
         toast.error('Could not resolve collection scope');
       }
     },
-    [isAtRoot, goToCollection, goToFolder, navigate, collectionId, spParentId, globalCollections],
+    [
+      isAtRoot,
+      goToCollection,
+      goToFolder,
+      navigate,
+      collectionId,
+      globalCollections,
+      browseBasePath,
+    ],
   );
 
   // ── Mutations ─────────────────────────────────────────────────────────
@@ -602,6 +661,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     if (!collectionId) return;
     if (!user) {
       toast.error('You must be logged in');
+      return;
+    }
+    if (!canEdit) {
+      toast.error("You don't have permission to add to this collection");
       return;
     }
     try {
@@ -642,6 +705,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         toast.error('Open a collection before uploading');
         return;
       }
+      if (!canEdit) {
+        toast.error("You don't have permission to add to this collection");
+        return;
+      }
       const files = Array.from(fileList);
       if (files.length === 0) return;
 
@@ -674,6 +741,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     },
     [
       collectionId,
+      canEdit,
       spParentId,
       activeCollection?.name,
       globalCollections,
@@ -730,6 +798,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       return;
     }
     if (!collectionId) return;
+    if (!canEdit) {
+      toast.error("You don't have permission to delete from this collection");
+      return;
+    }
     const what = entry.type === 'FOLDER' ? 'folder' : 'file';
     const ok = window.confirm(`Delete ${what} "${entry.name}"?`);
     if (!ok) return;
@@ -760,6 +832,9 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         toast.error('Only the collection owner can rename');
         return;
       }
+    } else if (!canEdit) {
+      toast.error("You don't have permission to rename items in this collection");
+      return;
     }
     setRenameTarget(entry);
   };
@@ -794,6 +869,11 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             setRenameTarget(null);
             return;
           }
+          if (!canEdit) {
+            toast.error("You don't have permission to rename items in this collection");
+            setRenameTarget(null);
+            return;
+          }
           await renameNode(entry.id, trimmed);
         }
         toast.success(`Renamed to "${trimmed}"`);
@@ -804,23 +884,67 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         setRenameTarget(null);
       }
     },
-    [user, isAtRoot, collectionId, renameCollection, renameNode, globalCollections],
+    [user, isAtRoot, collectionId, canEdit, renameCollection, renameNode, globalCollections],
   );
 
-  // ── Share (root-only) ────────────────────────────────────────────────
-  // Matches V1's TreeSidebar gate (`canShare = perm?.canShare ?? isOwner`).
-  // The modal validates against `activeCollection.role/canShare` internally,
-  // so we seed those on the machine before opening — the URL→machine sync
-  // effect only re-runs when spCollectionId changes, so our seed sticks for
-  // the lifetime of the modal.
+  // ── Entry deep link ──────────────────────────────────────────────────
+  // Same URL shape onOpenEntry navigates to. There's no separate ACL for
+  // this: whoever opens it needs access to the owning collection already
+  // (or gets Shared it separately), matching how every other "copy link"
+  // button in the app works (Canvas, messages). Used by onShare below to
+  // seed both the collection dialog's link and the folder/file dialog's link.
+  const buildEntryLink = useCallback(
+    (entry: CollectionChild): string | null => {
+      const base = window.location.origin + browseBasePath;
+      if (entry.type === 'FOLDER') {
+        if (isAtRoot) return `${base}?cl=${entry.id}`;
+        if (!collectionId) return null;
+        return `${base}?cl=${collectionId}&parent=${entry.id}`;
+      }
+      if (!collectionId) return null;
+      const owning = globalCollections.byId(collectionId);
+      const channelId = owning?.scopeId;
+      if (!channelId) return null;
+      // `projectId` is only known for CHANNEL-scoped collections whose channel
+      // is in our visible-channel list; '_' mirrors the existing "no folder"
+      // sentinel below — the file-viewer route only needs a 5-segment URL,
+      // it doesn't require projectId/channelId to resolve to real entities.
+      const projectId = owning?.projectId ?? '_';
+      return `${base}/${projectId}/${channelId}/${collectionId}/${entry.parentId ?? '_'}/${entry.id}`;
+    },
+    [browseBasePath, isAtRoot, collectionId, globalCollections],
+  );
+
+  // ── Share ─────────────────────────────────────────────────────────────
+  // One entry point for every "Share" button in the screen — it routes to
+  // one of two dialogs depending on what's being shared:
+  //   - At root (collection cards): the full access-management dialog
+  //     (ShareCollectionModal — per-user roles, public/private visibility).
+  //     Open to anyone with a resolved role; the dialog itself bounds what
+  //     each role can actually do.
+  //   - Inside a collection (a regular folder/file): those have no ACL of
+  //     their own — access is entirely inherited from the owning collection
+  //     — so there's nothing to grant, just a copy-link-only dialog
+  //     (ShareLinkModal).
   const onShare = (entry: CollectionChild): void => {
+    if (!isAtRoot) {
+      const link = buildEntryLink(entry);
+      if (!link) {
+        toast.error('Could not build a link for this item');
+        return;
+      }
+      setLinkShareTarget(entry);
+      return;
+    }
+    // The modal validates against `activeCollection.role` internally, so we
+    // seed it on the machine before opening — the URL→machine sync effect
+    // only re-runs when spCollectionId changes, so our seed sticks for the
+    // lifetime of the modal. Anyone with a resolved role (Viewer/Editor/
+    // Owner) can open the dialog — there's no separate "canShare" gate;
+    // what they can actually do inside it is bounded by role escalation.
     const owning = globalCollections.byId(entry.id);
     if (!owning) {
       toast.error('Could not resolve collection');
-      return;
-    }
-    if (!owning.canShare) {
-      toast.error("You don't have permission to share this collection");
       return;
     }
     setActiveCollection({
@@ -843,26 +967,78 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     }
   };
 
-  // ── Search field writer ─────────────────────────────────────────────
-  const setQuery = (next: string): void => {
-    setQueryState(next);
-    updateParams({ q: next === '' ? null : next }, /* replace */ true);
-  };
-
   // ── Ask AI ──────────────────────────────────────────────────────────
-  // Only rendered when `!isAtRoot` (i.e. a collection is open), so we always
-  // have a real collectionId to scope to. The channelId comes from the global
-  // collections cache because V2 doesn't carry it in the URL.
+  // Rendered at every level, including the root Knowledge listing (isAtRoot,
+  // no collectionId) — the tooltip has dedicated copy for that case. At root
+  // there's nothing to scope to, so just open a fresh, unscoped chat instead
+  // of silently no-oping. The channelId comes from the global collections
+  // cache because V2 doesn't carry it in the URL.
+  //
+  // Inside a sub-folder (spParentId set), attach BOTH chips — the folder
+  // (for scope) and its collection (for context) — same "harmless overlap"
+  // the composer's own picker already allows when you select a collection
+  // and one of its folders together. At the collection root there's no
+  // folder to add, so just the collection chip shows, as before.
   const handleOpenAI = useCallback((): void => {
-    if (!collectionId) return;
+    if (!collectionId) {
+      xyneAIActor.send({ type: 'OPEN', startFreshChat: true });
+      return;
+    }
     const owning = globalCollections.byId(collectionId);
+    const currentFolder = spParentId ? nodes[spParentId] : undefined;
     xyneAIActor.send({
       type: 'OPEN',
       startFreshChat: true,
       kbCollectionId: collectionId,
       kbChannelId: owning?.scopeId ?? null,
+      ...(currentFolder && { kbFolderId: currentFolder.id, kbFolderName: currentFolder.name }),
     });
-  }, [collectionId, globalCollections]);
+  }, [collectionId, globalCollections, spParentId, nodes]);
+
+  // Per-row Ask AI (hover action on every folder/file, next to Share). A
+  // file gets precise scoping via kbDocId/kbDocName — the machine already
+  // supports asking about one specific document (same path FileViewerLayout
+  // uses from inside the viewer). A folder row attaches BOTH itself
+  // (kbFolderId) and its collection (kbCollectionId) when it's a genuine
+  // sub-folder inside an open collection — same "harmless overlap" as
+  // handleOpenAI; at root, `entry` IS a root collection (isAtRoot only
+  // lists root collections), so it scopes as just a collection instead.
+  const onAskAIAboutEntry = useCallback(
+    (entry: CollectionChild): void => {
+      if (entry.type === 'FILE') {
+        const owning = collectionId ? globalCollections.byId(collectionId) : null;
+        xyneAIActor.send({
+          type: 'OPEN',
+          startFreshChat: true,
+          kbCollectionId: collectionId ?? null,
+          kbChannelId: owning?.scopeId ?? null,
+          kbDocId: entry.id,
+          kbDocName: entry.name,
+        });
+        return;
+      }
+      if (isAtRoot) {
+        const owning = globalCollections.byId(entry.id);
+        xyneAIActor.send({
+          type: 'OPEN',
+          startFreshChat: true,
+          kbCollectionId: entry.id,
+          kbChannelId: owning?.scopeId ?? null,
+        });
+        return;
+      }
+      const owning = collectionId ? globalCollections.byId(collectionId) : null;
+      xyneAIActor.send({
+        type: 'OPEN',
+        startFreshChat: true,
+        kbCollectionId: collectionId ?? null,
+        kbChannelId: owning?.scopeId ?? null,
+        kbFolderId: entry.id,
+        kbFolderName: entry.name,
+      });
+    },
+    [collectionId, globalCollections, isAtRoot],
+  );
 
   // ── Header label ─────────────────────────────────────────────────────
   const rootLabel = isAtRoot
@@ -871,12 +1047,370 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   const loading = isInitialLoading || (isAtRoot && globalCollections.isLoading);
 
+  const header = (
+    <div className='flex flex-wrap items-center justify-end gap-2 border-b border-border ai-page-bg px-5 py-2.5'>
+      <Tooltip
+        content={isAtRoot ? 'Ask AI' : `Ask AI about this ${spParentId ? 'folder' : 'collection'}`}
+        side='bottom'
+      >
+        <button
+          type='button'
+          onClick={handleOpenAI}
+          aria-label='Ask AI'
+          data-track-category='knowledge-base'
+          data-track-name='kb-open-ai-chat'
+          className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
+        >
+          <XyneAIStar size={22} />
+        </button>
+      </Tooltip>
+      {isAtRoot ? (
+        // Collections are channel-scoped, so creation must go through the
+        // CreateCollectionModal (it owns the channel picker + name step).
+        // The single-field NameDialog can't capture scope, so we wire
+        // root creation through the scoped modal.
+        <button
+          type='button'
+          onClick={() => setIsCreateModalOpen(true)}
+          className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-sm transition hover:bg-muted'
+          data-track-category='knowledge-base'
+          data-track-name='new-collection'
+        >
+          <Plus className='h-4 w-4' strokeWidth={1.75} />
+          New collection
+        </button>
+      ) : canEdit ? (
+        <>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type='button'
+                className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-sm transition hover:bg-muted'
+                data-track-category='knowledge-base'
+                data-track-name='open-new-menu'
+              >
+                {isUploadingForThisCollection ? (
+                  <Loader2 className='h-4 w-4 animate-spin' strokeWidth={1.75} />
+                ) : (
+                  <Plus className='h-4 w-4' strokeWidth={1.75} />
+                )}
+                New
+                <ChevronDown className='h-3.5 w-3.5' strokeWidth={1.75} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end'>
+              <DropdownMenuItem onClick={() => setDialog('folder')}>
+                <FolderPlus className='h-4 w-4' strokeWidth={1.75} />
+                New folder
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onPickFiles}>
+                <File className='h-4 w-4' strokeWidth={1.75} />
+                Upload files
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => folderInputRef.current?.click()}>
+                <FolderOpen className='h-4 w-4' strokeWidth={1.75} />
+                Upload folder
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDriveLinkOpen(true)}>
+                <Link2 className='h-4 w-4' strokeWidth={1.75} />
+                Add from Drive
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <input
+            ref={fileInputRef}
+            type='file'
+            multiple
+            className='sr-only'
+            onChange={onFileInputChange}
+          />
+          <input
+            ref={setFolderInputRef}
+            type='file'
+            multiple
+            className='sr-only'
+            onChange={onFileInputChange}
+          />
+        </>
+      ) : null}
+      <ViewToggleV2 value={view} onChange={setView} />
+    </div>
+  );
+
+  const breadcrumbRow = (
+    <div className='flex min-w-0 items-center gap-2 px-5 py-2.5'>
+      <button
+        type='button'
+        aria-label={
+          isAtRoot ? 'Back to Ask AI' : isAtCollectionRoot ? 'Back to collections' : 'Up one level'
+        }
+        onClick={() => {
+          if (isAtRoot) {
+            void navigate(workspaceId ? `/${workspaceId}/ai` : '/ai');
+          } else if (collectionId && !spParentId) {
+            goToCollections();
+          } else {
+            goUp();
+          }
+        }}
+        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+        title={isAtRoot ? 'Back to Ask AI' : isAtCollectionRoot ? 'Back to collections' : 'Up'}
+        data-track-category='knowledge-base'
+        data-track-name='navigate-up'
+      >
+        <ArrowLeft className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+      </button>
+
+      {isAtRoot ? (
+        <span className='text-[13px] font-medium text-foreground'>Knowledge</span>
+      ) : (
+        <CrumbsV2
+          currentCollectionId={collectionId}
+          currentFolderId={spParentId}
+          collectionName={rootLabel}
+          chain={chain}
+          onGoToCollections={goToCollections}
+          onGoToParent={parentId => {
+            goToParent(parentId);
+          }}
+          isAtRoot={isAtRoot}
+        />
+      )}
+    </div>
+  );
+
+  // A second, labeled Ask AI entry point sitting inline with the folder/file
+  // count, directly above the list — mirrors Drive's "Ask Gemini" pill,
+  // which sits in the same spot relative to its file table. The header's
+  // circular icon is the primary action; this is a secondary, more
+  // discoverable prompt right where you're about to look for it while
+  // browsing.
+  const askAiPill = (
+    <button
+      type='button'
+      onClick={handleOpenAI}
+      data-track-category='knowledge-base'
+      data-track-name='kb-open-ai-chat-pill'
+      className='inline-flex h-8 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-[12.5px] font-medium text-foreground transition hover:bg-primary/15'
+    >
+      <XyneAIStar size={14} />
+      Ask AI
+    </button>
+  );
+
+  const mainContent = (
+    <main ref={mainRef} className='relative flex-1 overflow-auto px-5 py-5'>
+      {dragging ? (
+        <div className='pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/80 text-[14px] font-medium text-foreground'>
+          Drop files to upload
+        </div>
+      ) : null}
+      <div className='mx-auto w-full max-w-7xl'>
+        <div className='mb-3 flex items-center gap-3'>
+          {askAiPill}
+          <p className='text-[12px] text-muted-foreground'>
+            {loading
+              ? 'Loading...'
+              : isAtRoot
+                ? filteredEntries.length === 0
+                  ? 'No collections yet'
+                  : `${String(filteredEntries.length)} collection${filteredEntries.length === 1 ? '' : 's'}`
+                : filteredEntries.length === 0
+                  ? 'This folder is empty'
+                  : [
+                      folderCount > 0
+                        ? `${String(folderCount)} folder${folderCount === 1 ? '' : 's'}`
+                        : null,
+                      fileCount > 0
+                        ? `${String(fileCount)} file${fileCount === 1 ? '' : 's'}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+          </p>
+
+          {/* Type / Status filters — Drive-style pill buttons, always present
+              at every level (root or any folder), not just when more than
+              one option happens to be available right now. */}
+          <div className='ml-auto flex items-center gap-2'>
+            <div className='inline-flex items-center gap-1'>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    className={cn(
+                      'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium shadow-sm transition',
+                      typeFilter === 'ALL'
+                        ? 'border-border bg-background text-foreground hover:bg-muted'
+                        : 'border-primary/20 bg-primary/10 text-foreground hover:bg-primary/15',
+                    )}
+                    data-track-category='knowledge-base'
+                    data-track-name='kb-type-filter'
+                  >
+                    {typeFilter === 'ALL'
+                      ? 'Type'
+                      : (availableTypeFilters.find(o => o.value === typeFilter)?.label ?? 'Type')}
+                    <ChevronDown
+                      className={cn(
+                        'h-3.5 w-3.5',
+                        typeFilter === 'ALL' ? 'text-muted-foreground' : 'text-foreground',
+                      )}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end'>
+                  <DropdownMenuItem onClick={() => setTypeFilter('ALL')}>All</DropdownMenuItem>
+                  {availableTypeFilters.map(opt => (
+                    <DropdownMenuItem key={opt.value} onClick={() => setTypeFilter(opt.value)}>
+                      <span className='flex items-center gap-2'>
+                        {typeFilterIcon(opt.value)}
+                        {opt.label}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {typeFilter !== 'ALL' ? (
+                <button
+                  type='button'
+                  onClick={() => setTypeFilter('ALL')}
+                  aria-label='Clear type filter'
+                  title='Clear type filter'
+                  className='grid h-8 w-8 place-items-center rounded-full border border-primary/20 bg-primary/10 text-foreground transition hover:bg-primary/15'
+                  data-track-category='knowledge-base'
+                  data-track-name='kb-type-filter-clear'
+                >
+                  <X className='h-3.5 w-3.5' strokeWidth={1.75} />
+                </button>
+              ) : null}
+            </div>
+            <div className='inline-flex items-center gap-1'>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    className={cn(
+                      'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium shadow-sm transition',
+                      statusFilter === 'ALL'
+                        ? 'border-border bg-background text-foreground hover:bg-muted'
+                        : 'border-primary/20 bg-primary/10 text-foreground hover:bg-primary/15',
+                    )}
+                    data-track-category='knowledge-base'
+                    data-track-name='kb-status-filter'
+                  >
+                    {statusFilter === 'ALL'
+                      ? 'Status'
+                      : (STATUS_FILTER_OPTIONS.find(o => o.value === statusFilter)?.label ??
+                        'Status')}
+                    <ChevronDown
+                      className={cn(
+                        'h-3.5 w-3.5',
+                        statusFilter === 'ALL' ? 'text-muted-foreground' : 'text-foreground',
+                      )}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end'>
+                  <DropdownMenuItem onClick={() => setStatusFilter('ALL')}>All</DropdownMenuItem>
+                  {STATUS_FILTER_OPTIONS.map(opt => (
+                    <DropdownMenuItem key={opt.value} onClick={() => setStatusFilter(opt.value)}>
+                      <span className='flex items-center gap-2'>
+                        {statusFilterIcon(opt.value)}
+                        {opt.label}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {statusFilter !== 'ALL' ? (
+                <button
+                  type='button'
+                  onClick={() => setStatusFilter('ALL')}
+                  aria-label='Clear status filter'
+                  title='Clear status filter'
+                  className='grid h-8 w-8 place-items-center rounded-full border border-primary/20 bg-primary/10 text-foreground transition hover:bg-primary/15'
+                  data-track-category='knowledge-base'
+                  data-track-name='kb-status-filter-clear'
+                >
+                  <X className='h-3.5 w-3.5' strokeWidth={1.75} />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        {filteredEntries.length === 0 && !loading && !isUploadingForThisCollection ? (
+          entries.length > 0 ? (
+            <div className='mx-auto flex max-w-md flex-col items-center justify-center gap-2 py-24 text-center'>
+              <p className='text-[14px] font-medium text-foreground'>No items match this filter</p>
+              <p className='max-w-xs text-[12.5px] text-muted-foreground'>
+                Try a different status, or clear the filter to see everything here.
+              </p>
+            </div>
+          ) : (
+            <EmptyPaneV2 isRoot={isAtRoot} />
+          )
+        ) : view === 'grid' ? (
+          <EntryGridV2
+            entries={filteredEntries}
+            onOpen={onOpenEntry}
+            {...(isAtRoot || canEdit
+              ? {
+                  onDelete: (e: CollectionChild): void => {
+                    void onDelete(e);
+                  },
+                  onRename,
+                }
+              : {})}
+            editingId={renameTarget?.id ?? null}
+            onRenameCommit={onRenameCommit}
+            onRenameCancel={onRenameCancel}
+            scrollParentRef={mainRef}
+            onOpenStatus={onOpenStatus}
+            onAskAI={onAskAIAboutEntry}
+            onShare={onShare}
+            {...(isAtRoot ? { folderCaption: locationOf } : {})}
+          />
+        ) : (
+          <EntryListV2
+            entries={filteredEntries}
+            columns={isAtRoot ? [...KB_ROOT_COLUMNS] : [...KB_COLUMNS]}
+            onOpen={onOpenEntry}
+            {...(isAtRoot || canEdit
+              ? {
+                  onDelete: (e: CollectionChild): void => {
+                    void onDelete(e);
+                  },
+                  onRename,
+                }
+              : {})}
+            editingId={renameTarget?.id ?? null}
+            onRenameCommit={onRenameCommit}
+            onRenameCancel={onRenameCancel}
+            scrollParentRef={mainRef}
+            onOpenStatus={onOpenStatus}
+            onAskAI={onAskAIAboutEntry}
+            onShare={onShare}
+            {...(isAtRoot
+              ? {
+                  resolveColumnValue: (entry, key): string | undefined =>
+                    key === 'location' ? locationOf(entry) : undefined,
+                }
+              : {})}
+          />
+        )}
+      </div>
+    </main>
+  );
+
   return (
     <div
       className='flex h-full flex-col bg-background'
       onDragOver={e => {
         e.preventDefault();
-        if (collectionId) {
+        if (collectionId && canEdit) {
           setDragging(true);
         }
       }}
@@ -887,236 +1421,9 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       }}
       onDrop={onDrop}
     >
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-5 py-2.5'>
-        <div className='flex min-w-0 flex-1 items-center gap-2'>
-          <button
-            type='button'
-            aria-label={
-              isAtRoot
-                ? 'Back to Ask AI'
-                : isAtCollectionRoot
-                  ? 'Back to collections'
-                  : 'Up one level'
-            }
-            onClick={() => {
-              if (isAtRoot) {
-                void navigate(workspaceId ? `/${workspaceId}/ai` : '/ai');
-              } else if (collectionId && !spParentId) {
-                goToCollections();
-              } else {
-                goUp();
-              }
-            }}
-            className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
-            title={isAtRoot ? 'Back to Ask AI' : isAtCollectionRoot ? 'Back to collections' : 'Up'}
-            data-track-category='knowledge-base'
-            data-track-name='navigate-up'
-          >
-            <ArrowLeft className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-          </button>
-
-          {isAtRoot ? (
-            <span className='text-[13px] font-medium text-foreground'>Knowledge</span>
-          ) : (
-            <CrumbsV2
-              currentCollectionId={collectionId}
-              currentFolderId={spParentId}
-              collectionName={rootLabel}
-              chain={chain}
-              onGoToCollections={goToCollections}
-              onGoToParent={parentId => {
-                goToParent(parentId);
-              }}
-              isAtRoot={isAtRoot}
-            />
-          )}
-        </div>
-
-        <div className='flex items-center gap-2'>
-          {!isAtRoot && (
-            <Tooltip
-              content={`Ask AI about this ${spParentId ? 'folder' : 'collection'}`}
-              side='bottom'
-            >
-              <button
-                type='button'
-                onClick={handleOpenAI}
-                data-track-category='knowledge-base'
-                data-track-name='kb-open-ai-chat'
-                className='inline-flex h-7 items-center gap-1 rounded-md border border-border bg-secondary px-2 text-[12px] text-foreground transition hover:bg-muted'
-              >
-                <XyneAIStar size={14} />
-                Ask AI
-              </button>
-            </Tooltip>
-          )}
-          {isAtRoot ? (
-            // Collections are channel-scoped, so creation must go through the
-            // CreateCollectionModal (it owns the channel picker + name step).
-            // The single-field NameDialog can't capture scope, so we wire
-            // root creation through the scoped modal.
-            <button
-              type='button'
-              onClick={() => setIsCreateModalOpen(true)}
-              className='inline-flex h-7 items-center gap-1 rounded-md border border-border bg-secondary px-2 text-[12px] text-foreground transition hover:bg-muted'
-              data-track-category='knowledge-base'
-              data-track-name='new-collection'
-            >
-              <Plus className='h-3.5 w-3.5' strokeWidth={1.75} />
-              New collection
-            </button>
-          ) : (
-            <>
-              <button
-                type='button'
-                onClick={() => setDialog('folder')}
-                className='inline-flex h-7 items-center gap-1 rounded-md border border-border bg-secondary px-2 text-[12px] text-foreground transition hover:bg-muted'
-                data-track-category='knowledge-base'
-                data-track-name='new-folder'
-              >
-                <FolderPlus className='h-3.5 w-3.5' strokeWidth={1.75} />
-                New folder
-              </button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type='button'
-                    className='inline-flex h-7 items-center gap-1 rounded-md border border-border bg-secondary px-2 text-[12px] text-foreground transition hover:bg-muted'
-                    data-track-category='knowledge-base'
-                    data-track-name='open-upload-menu'
-                  >
-                    {isUploadingForThisCollection ? (
-                      <Loader2 className='h-3.5 w-3.5 animate-spin' strokeWidth={1.75} />
-                    ) : (
-                      <Upload className='h-3.5 w-3.5' strokeWidth={1.75} />
-                    )}
-                    Upload
-                    <ChevronDown className='h-3 w-3' strokeWidth={1.75} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align='end'>
-                  <DropdownMenuItem
-                    onClick={onPickFiles}
-                    data-track-category='knowledge-base'
-                    data-track-name='PICK_KB_FILES'
-                  >
-                    <File className='h-4 w-4' strokeWidth={1.75} />
-                    Upload files
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => folderInputRef.current?.click()}
-                    data-track-category='knowledge-base'
-                    data-track-name='PICK_KB_FOLDER'
-                  >
-                    <FolderOpen className='h-4 w-4' strokeWidth={1.75} />
-                    Upload folder
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setDriveLinkOpen(true)}>
-                    <Link2 className='h-4 w-4' strokeWidth={1.75} />
-                    Add from Drive link
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <input
-                ref={fileInputRef}
-                type='file'
-                multiple
-                className='sr-only'
-                onChange={onFileInputChange}
-              />
-              <input
-                ref={setFolderInputRef}
-                type='file'
-                multiple
-                className='sr-only'
-                onChange={onFileInputChange}
-              />
-            </>
-          )}
-          <ViewToggleV2 value={view} onChange={setView} />
-          <SearchFieldV2
-            value={query}
-            onChange={setQuery}
-            className='w-64'
-            ariaLabel='Search files'
-            placeholder='Search files by name'
-          />
-        </div>
-      </div>
-
-      <main ref={mainRef} className='relative flex-1 overflow-auto px-5 py-5'>
-        {dragging ? (
-          <div className='pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/80 text-[14px] font-medium text-foreground'>
-            Drop files to upload
-          </div>
-        ) : null}
-        <div className='mx-auto w-full max-w-7xl'>
-          {searching ? (
-            <SearchResultsV2
-              query={trimmedQuery}
-              loading={searchLoading}
-              error={searchError}
-              hits={searchHits}
-              onOpen={onOpenEntry}
-            />
-          ) : (
-            <>
-              <p className='mb-3 text-[12px] text-muted-foreground'>
-                {loading
-                  ? 'Loading...'
-                  : isAtRoot
-                    ? entries.length === 0
-                      ? 'No collections yet'
-                      : `${String(entries.length)} collection${entries.length === 1 ? '' : 's'}`
-                    : entries.length === 0
-                      ? 'This folder is empty'
-                      : `${String(folderCount)} folder${folderCount === 1 ? '' : 's'} · ${String(fileCount)} file${fileCount === 1 ? '' : 's'}`}
-              </p>
-
-              {entries.length === 0 && !loading && !isUploadingForThisCollection ? (
-                <EmptyPaneV2 isRoot={isAtRoot} />
-              ) : view === 'grid' ? (
-                <EntryGridV2
-                  entries={entries}
-                  onOpen={onOpenEntry}
-                  onDelete={(e): void => {
-                    void onDelete(e);
-                  }}
-                  onRename={onRename}
-                  editingId={renameTarget?.id ?? null}
-                  onRenameCommit={onRenameCommit}
-                  onRenameCancel={onRenameCancel}
-                  scrollParentRef={mainRef}
-                  onOpenStatus={onOpenStatus}
-                  {...(isAtRoot ? { folderCaption: locationOf, onShare } : {})}
-                />
-              ) : (
-                <EntryListV2
-                  entries={entries}
-                  columns={isAtRoot ? [...KB_ROOT_COLUMNS] : [...KB_COLUMNS]}
-                  onOpen={onOpenEntry}
-                  onDelete={(e): void => {
-                    void onDelete(e);
-                  }}
-                  onRename={onRename}
-                  editingId={renameTarget?.id ?? null}
-                  onRenameCommit={onRenameCommit}
-                  onRenameCancel={onRenameCancel}
-                  scrollParentRef={mainRef}
-                  onOpenStatus={onOpenStatus}
-                  {...(isAtRoot
-                    ? {
-                        onShare,
-                        resolveColumnValue: (entry, key): string | undefined =>
-                          key === 'location' ? locationOf(entry) : undefined,
-                      }
-                    : {})}
-                />
-              )}
-            </>
-          )}
-        </div>
-      </main>
+      {header}
+      {breadcrumbRow}
+      {mainContent}
 
       <NameDialogV2
         open={dialog === 'folder'}
@@ -1149,19 +1456,30 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       {shareTarget
         ? (() => {
             const owning = globalCollections.byId(shareTarget.id);
+            const link = buildEntryLink(shareTarget);
             return (
               <ShareCollectionModal
                 isOpen
                 onClose={closeShare}
                 collectionId={shareTarget.id}
                 collectionName={shareTarget.name}
-                channelId={owning?.scopeId ?? null}
+                channelId={owning?.scopeType === 'CHANNEL' ? (owning.scopeId ?? null) : null}
                 isPrivate={owning?.isPrivate ?? false}
                 canEditVisibility={owning?.role === 'OWNER'}
+                {...(link ? { link } : {})}
               />
             );
           })()
         : null}
+
+      {linkShareTarget ? (
+        <ShareLinkModal
+          isOpen
+          onClose={() => setLinkShareTarget(null)}
+          title={linkShareTarget.name}
+          link={buildEntryLink(linkShareTarget) ?? ''}
+        />
+      ) : null}
 
       <CollectionStatusDrawer collection={statusFor} onClose={() => setStatusFor(null)} />
 
