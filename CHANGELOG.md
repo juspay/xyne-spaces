@@ -1,3 +1,10 @@
+## [1.277.3](https://github.com/juspay/xyne-spaces/compare/v1.277.2...v1.277.3) (2026-09-05)
+
+
+### Bug Fixes
+
+* Added ticket creation flow in the canvas ([#1352](https://github.com/juspay/xyne-spaces/issues/1352)) ([93c1bc5](https://github.com/juspay/xyne-spaces/commit/93c1bc52ede71affd99ab73d2fd5948a6e3d6cee))
+
 ## [1.277.2](https://github.com/juspay/xyne-spaces/compare/v1.277.1...v1.277.2) (2026-09-04)
 
 
