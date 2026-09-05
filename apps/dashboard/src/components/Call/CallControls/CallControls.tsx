@@ -22,6 +22,7 @@ import {
   SmilePlus,
   UserCog,
   ImagePlus,
+  Flag,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -39,6 +40,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
+import { useCallMarkMoment } from '../hooks/useCallMarkMoment';
 import {
   getAiButtonColorClass,
   getAiButtonDisabled,
@@ -188,6 +190,13 @@ export function CallControls({
     return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
   }, [activeCalls, externalId]);
   const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
+  // `calls.markMoment` accepts the call's creator only, and with transcription off
+  // there is no transcript to rebase onto — so hide the flag rather than hand over
+  // a button that cannot work.
+  const { markMoment, canMark: canMarkMoment } = useCallMarkMoment(
+    externalId,
+    isHost && isTranscriptionEnabled,
+  );
   // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
     return (
@@ -738,6 +747,28 @@ export function CallControls({
             midnightPopoverClass={midnightPopoverClass}
             callId={callId}
           />
+        )}
+
+        {/* Flag this moment — lands on the call's timeline once the call ends */}
+        {canMarkMoment && (
+          <button
+            onClick={markMoment}
+            className={cn(buttonClasses, midnightControlClass)}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            title='Mark this moment'
+            aria-label='Mark this moment'
+            data-track-event='BUTTON_CLICK'
+            data-track-category='CALLS'
+            data-track-name='MARK_MOMENT'
+            data-track-metadata={JSON.stringify({ callId })}
+          >
+            <Flag
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={
+                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+              }
+            />
+          </button>
         )}
 
         {/* Annotate (Draw) Toggle — only shown when a screen share is active */}

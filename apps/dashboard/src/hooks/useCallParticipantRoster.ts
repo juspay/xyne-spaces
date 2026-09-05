@@ -25,6 +25,12 @@ export interface CallParticipantRow {
   isCurrentUser: boolean;
   /** Actually showed up, as opposed to merely being invited. */
   hasJoined: boolean;
+  /**
+   * Epoch ms of the latest join/leave, for placing them on a timeline. One row per
+   * person, so a rejoin overwrites the earlier join — latest, not a history.
+   */
+  joinedAtMs: number | null;
+  leftAtMs: number | null;
 }
 
 interface UseCallParticipantRosterResult {
@@ -36,25 +42,28 @@ interface UseCallParticipantRosterResult {
  * Merges a call's inlined participants with its preview ids and — when the inlined
  * list is known to be truncated — the full roster fetched from Zero.
  *
- * `isEnabled` gates that fetch, so a closed modal or popover costs nothing. The
- * inlined and preview participants still resolve while closed, which is what lets
- * a trigger render avatars before it is opened.
+ * `isEnabled` gates that fetch, so a caller not showing the roster yet costs
+ * nothing. The inlined and preview participants resolve either way, which is what
+ * lets a trigger render avatars before anything is opened.
+ *
+ * `call` is nullable because screens route on state that may not have arrived yet
+ * and hooks cannot be called conditionally — an absent call yields an empty roster.
  */
 export function useCallParticipantRoster(
-  call: Call,
+  call: Call | null | undefined,
   isEnabled: boolean,
   currentUserId: string | undefined,
 ): UseCallParticipantRosterResult {
   const hasFullParticipants =
-    call.status === CallStatus.ACTIVE ||
-    (call.participantCount !== null &&
-      call.participantCount !== undefined &&
+    call?.status === CallStatus.ACTIVE ||
+    (call?.participantCount !== null &&
+      call?.participantCount !== undefined &&
       call.participantCount <= (call.participants?.length ?? 0));
 
   const [fullParticipants, fullParticipantsDetails] = useCachedQuery(
-    queries.callParticipantsByCallId({ callId: call.id }),
+    queries.callParticipantsByCallId({ callId: call?.id ?? '' }),
     {
-      enabled: isEnabled && !hasFullParticipants,
+      enabled: Boolean(call) && isEnabled && !hasFullParticipants,
     },
   );
 
@@ -68,15 +77,15 @@ export function useCallParticipantRoster(
   }, [allUsers]);
 
   const previewParticipantEntries = useMemo(
-    () => getPreviewParticipantEntries(call.participantPreviewUserIds, currentUserId).slice(0, 3),
-    [call.participantPreviewUserIds, currentUserId],
+    () => getPreviewParticipantEntries(call?.participantPreviewUserIds, currentUserId).slice(0, 3),
+    [call?.participantPreviewUserIds, currentUserId],
   );
 
   const previewParticipants = useMemo(() => {
     const nextParticipants: MergedParticipant[] = [];
     const seen = new Set<string>();
 
-    for (const participant of call.participants ?? []) {
+    for (const participant of call?.participants ?? []) {
       if (participant.userId && !seen.has(participant.userId)) {
         nextParticipants.push({
           ...participant,
@@ -99,7 +108,7 @@ export function useCallParticipantRoster(
     }
 
     return nextParticipants;
-  }, [call.participants, currentUserId, previewParticipantEntries]);
+  }, [call?.participants, currentUserId, previewParticipantEntries]);
 
   const participants = useMemo<CallParticipantRow[]>(() => {
     const merged = [...previewParticipants];
@@ -130,12 +139,18 @@ export function useCallParticipantRoster(
           participant.joinedAt !== null && participant.joinedAt !== undefined
             ? true
             : Boolean(participant.previewHasJoined),
+        joinedAtMs: typeof participant.joinedAt === 'number' ? participant.joinedAt : null,
+        leftAtMs: typeof participant.leftAt === 'number' ? participant.leftAt : null,
       };
     });
   }, [currentUserId, fullParticipants, previewParticipants, usersById]);
 
   return {
     participants,
-    isLoading: isEnabled && !hasFullParticipants && fullParticipantsDetails.type !== 'complete',
+    isLoading:
+      Boolean(call) &&
+      isEnabled &&
+      !hasFullParticipants &&
+      fullParticipantsDetails.type !== 'complete',
   };
 }

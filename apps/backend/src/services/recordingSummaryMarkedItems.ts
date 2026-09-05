@@ -148,3 +148,37 @@ export function mergeRecordingSummaryMarkedItems(
   merged.sort((left, right) => markedItemTimestamp(left) - markedItemTimestamp(right));
   return merged;
 }
+
+/**
+ * Rebase `markedAtEpochSeconds` — wall-clock, because a live call has no
+ * client-side transcript to measure against — onto the transcript's clock, which
+ * starts at its first spoken line.
+ *
+ * Idempotent: only entries still carrying the field are touched, and it is
+ * dropped once applied.
+ */
+export function rebaseMarkedMoments(
+  markedItems: unknown,
+  firstEntryEpochSeconds: number
+): { items: unknown[]; rebasedCount: number } {
+  if (!Array.isArray(markedItems)) return { items: [], rebasedCount: 0 };
+
+  let rebasedCount = 0;
+  const items = markedItems.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+
+    const candidate = item as Record<string, unknown>;
+    const markedAt = candidate.markedAtEpochSeconds;
+    if (candidate.type !== 'moment' || typeof markedAt !== 'number') return item;
+
+    const { markedAtEpochSeconds: _applied, ...rest } = candidate;
+    rebasedCount += 1;
+    return {
+      ...rest,
+      // A moment flagged before anyone spoke belongs to the transcript's start.
+      timestampSeconds: Math.max(0, Math.round(markedAt - firstEntryEpochSeconds)),
+    };
+  });
+
+  return { items, rebasedCount };
+}
