@@ -768,44 +768,75 @@ export function inferRepositoryNameFromUrl(raw: string): string | null {
   return segments.length >= 3 ? segments.at(-1)! : null;
 }
 
-/** Where to open in an SDLC hub, as entity ids only — `buildSdlcPath` makes the route. */
-export interface SdlcNavTarget {
-  channelId: string;
-  canvasId?: string | null | undefined;
-  ticketId?: string | null | undefined;
-  conversationId?: string | null | undefined;
-  messageId?: string | null | undefined;
-  blockId?: string | null | undefined;
-  commentThreadId?: string | null | undefined;
+export const SDLC_SECTIONS = [
+  "overview",
+  "wiki",
+  "baseline",
+  "tracks",
+  "tickets",
+  "artifacts",
+] as const;
+export type SdlcSection = (typeof SDLC_SECTIONS)[number];
+
+/** A schema because it crosses the wire. */
+export const sdlcNavTargetSchema = z.object({
+  channelId: z.string().min(1),
+  section: z.enum(SDLC_SECTIONS),
+  canvasId: z.string().min(1).optional(),
+  folderId: z.string().min(1).optional(),
+  trackId: z.string().min(1).optional(),
+  ticketId: z.string().min(1).optional(),
+  conversationId: z.string().min(1).optional(),
+  messageId: z.string().min(1).optional(),
+  blockId: z.string().min(1).optional(),
+  commentThreadId: z.string().min(1).optional(),
+});
+export type SdlcNavTarget = z.infer<typeof sdlcNavTargetSchema>;
+
+export function parseSdlcNavTarget(value: unknown): SdlcNavTarget | null {
+  const parsed = sdlcNavTargetSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Baselines and the wiki get their own sections; every other artifact a folder. */
+export function sdlcSectionForCanvas(
+  artifactType: string | null | undefined,
+  folderId: string | null | undefined,
+): { section: SdlcSection; folderId?: string } {
+  if (isBaselineCanvasType(artifactType)) return { section: "baseline" };
+  if (artifactType === "WIKI") return { section: "wiki" };
+  return { section: "artifacts", ...(folderId ? { folderId } : {}) };
+}
+
+function messageAnchor(target: SdlcNavTarget): string {
+  if (!target.conversationId) return "";
+  const anchor = new URLSearchParams({ origin: target.conversationId });
+  if (target.messageId) anchor.set("messageId", target.messageId);
+  return `#${anchor.toString()}`;
 }
 
 /** The repository is chosen inside the screen; the workspace prefix by the caller. */
 export function buildSdlcPath(target: SdlcNavTarget): string {
-  const search = new URLSearchParams();
-  let section = "overview";
-
-  if (target.canvasId) {
-    section = "artifacts";
-    search.set("canvas", target.canvasId);
-    // CanvasScreen reads both straight off the URL to focus an inline comment.
-    if (target.blockId) search.set("blockId", target.blockId);
-    if (target.commentThreadId) search.set("commentThreadId", target.commentThreadId);
-  } else if (target.ticketId) {
-    section = "tickets";
-    search.set("ticket", target.ticketId);
+  const hub = `/sdlc/${encodeURIComponent(target.channelId)}`;
+  if (target.ticketId) {
+    return `${hub}/tickets/${encodeURIComponent(target.ticketId)}${messageAnchor(target)}`;
   }
 
-  // A discussion hangs off whatever was opened above, not a section of its own.
-  // Without a message to scroll to, opening the panel is a guess — every ticket
-  // notification carries the ticket's conversationId whether or not it is about one.
-  let hash = "";
-  if (target.conversationId && target.messageId) {
+  const search = new URLSearchParams();
+  if (target.canvasId) search.set("canvas", target.canvasId);
+  if (target.folderId) search.set("type", target.folderId);
+  if (target.trackId) search.set("track", target.trackId);
+  if (target.blockId) search.set("blockId", target.blockId);
+  if (target.commentThreadId) search.set("commentThreadId", target.commentThreadId);
+
+  // Opens on any artifact or track, showing that owner's threads when none is named.
+  if (target.conversationId || target.canvasId || target.trackId) {
     search.set("discussion", "1");
     search.set("chat", "conversations");
-    search.set("conversation", target.conversationId);
-    hash = `#${new URLSearchParams({ origin: target.conversationId, messageId: target.messageId }).toString()}`;
   }
+  if (target.conversationId) search.set("conversation", target.conversationId);
+  const hash = messageAnchor(target);
 
   const query = search.toString();
-  return `/sdlc/${encodeURIComponent(target.channelId)}/${section}${query ? `?${query}` : ""}${hash}`;
+  return `${hub}/${target.section}${query ? `?${query}` : ""}${hash}`;
 }

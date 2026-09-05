@@ -11,6 +11,7 @@ import { Outlet, useLocation, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
 import { ActivityItem } from '../ActivityItem';
+import { isCanvasActivity } from '../isCanvasActivity';
 import { NofocusRefProvider } from '../ActivityItemCard';
 import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -181,7 +182,7 @@ const TABS: TabConfig[] = [
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
       activity.actorAction === 'canvas_access_revoked' ||
-      (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
+      (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity)),
   },
   {
     value: 'calls',
@@ -778,7 +779,7 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'canvas_shared' ||
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
-        (activity.actorAction === 'mentioned_user' && activity.canvasId)
+        (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity))
       ) {
         counts.canvas++;
       }

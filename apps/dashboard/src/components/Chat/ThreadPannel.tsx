@@ -59,7 +59,13 @@ import { useShowThreadTags } from '../../hooks/useShowThreadTags';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
-import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
+import {
+  MessageType,
+  ChannelScopeType,
+  ChannelType,
+  BaseTicketType,
+  parseTicketMd,
+} from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
 import { ShortcutTooltip } from '../ui/ShortcutTooltip';
@@ -195,7 +201,7 @@ export const ThreadMessages = ({
   const [derivedConversationId, setDerivedConversationId] = useState(conversationId || '');
   const [derivedChannelId, setDerivedChannelId] = useState(channelId || '');
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
   const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
   const selectedTab: TabType =
@@ -929,6 +935,14 @@ export const ThreadMessages = ({
   const openTicketDetailsExpandedView = (): void => {
     if (!ticket?.channelId || !ticket.conversationId) return;
 
+    // An SDLC ticket has its own page under the hub, not a panel over the chat channel.
+    if (channel?.type === ChannelType.SDLC) {
+      standaloneNavigate(navigate, `/sdlc/${ticket.channelId}/tickets/${ticket.id}`, {
+        state: { activeTab },
+      });
+      return;
+    }
+
     standaloneNavigate(
       navigate,
       buildChannelRoute(ticket.channelId, {
@@ -1565,7 +1579,14 @@ export const ThreadMessages = ({
           /* Ticket Thread: Header with Tabs */
           <Tabs.Root
             value={activeTab}
-            onValueChange={value => setActiveTab(value as TabType)}
+            onValueChange={value => {
+              setActiveTab(value as TabType);
+              // Mirror it back, or re-opening the same tab from outside is a no-op.
+              if (!searchParams.has('selectedTab')) return;
+              const next = new URLSearchParams(searchParams);
+              next.set('selectedTab', value);
+              setSearchParams(next, { replace: true });
+            }}
             className='flex-1 flex flex-col h-full overflow-hidden'
           >
             {headerActionsContainer
