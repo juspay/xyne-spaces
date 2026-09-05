@@ -1,3 +1,10 @@
+## [1.278.0](https://github.com/juspay/xyne-spaces/compare/v1.277.3...v1.278.0) (2026-09-05)
+
+
+### Features
+
+* shift all calls to google stt ([#1573](https://github.com/juspay/xyne-spaces/issues/1573)) ([4fbc05d](https://github.com/juspay/xyne-spaces/commit/4fbc05d1d449426917758f4ddc861719e21c2d65))
+
 ## [1.277.3](https://github.com/juspay/xyne-spaces/compare/v1.277.2...v1.277.3) (2026-09-05)
 
 
