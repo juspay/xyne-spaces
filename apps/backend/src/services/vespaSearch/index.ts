@@ -315,19 +315,21 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           // Access rule:
           //   - PRIVATE doc (isPrivate !== false): owner OR in `permissions`.
           //   - PUBLIC doc  (isPrivate === false): owner OR in `permissions`
-          //     OR a participant of the doc's chat channel (`channelRef`).
+          //     OR a participant of the doc's chat channel (`channelRef`)
+          //     OR, when the doc has no scoping channel at all, anyone —
+          //     matching collectionAccess.ts's resolveCollectionAccess,
+          //     where `!collection.isPrivate` grants every workspace member
+          //     implicit VIEWER with no channel gate. A KB collection created
+          //     directly (not tied to a channel) never gets a `channelRef`
+          //     (see mapper.ts's `if (rootCollection.scopeType === 'CHANNEL')`
+          //     guard), so without this branch every non-owner/non-permissions
+          //     user was permanently 403'd on a collection its own Share
+          //     dialog says is Public.
           const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
           const isOwner = fields.ownerId === userId;
           const isShared = perms.includes(userId);
           const isPublic = fields.isPrivate === false;
-          // Private docs: owner or explicit `permissions` only.
-          // Public docs: owner, `permissions`, OR a participant of the doc's
-          // chat channel (via `channelRef`).
           let allowed = isOwner || isShared;
-          // Channel-participant access: a doc may belong to a chat channel via
-          // `channelRef` (format `id:namespace:chat_container::<channelId>`).
-          // Only consulted for public docs, and only when the cheaper checks
-          // above didn't already pass.
           if (!allowed && isPublic) {
             const channelRef =
               typeof fields.channelRef === 'string' ? fields.channelRef : '';
@@ -339,6 +341,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
                   userId,
                 );
               allowed = participant !== null;
+            } else {
+              allowed = true;
             }
           }
           if (!allowed) {
