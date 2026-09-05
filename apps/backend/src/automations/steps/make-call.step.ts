@@ -243,7 +243,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       channelId,
       callOrigin: CallOrigin.CHANNEL,
       callType,
-      sttModel: 'azure',
+      sttModel: 'google',
       createdBy: initiatorUserId,
       ...(allInvitedUserIds.length > 0 && { invitedUserIds: allInvitedUserIds }),
     });
