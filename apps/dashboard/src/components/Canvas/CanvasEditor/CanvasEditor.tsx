@@ -86,6 +86,8 @@ import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasIn
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
+import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
+import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 
 const canvasDictionary = {
   ...en,
@@ -418,6 +420,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       initialCommentThreadId,
       onOpenCommentCountChange,
     });
+    const {
+      activeTicketAnchor,
+      isTicketChannelArchived,
+      openTicketForCurrentSelection,
+      closeTicketModal,
+      handleTicketCreated,
+    } = useCanvasTicketEditorBridge({
+      channelId,
+      containerRef,
+      getEditor: getCanvasCommentEditor,
+    });
 
     // Expose presentation and comment drawer methods via ref
     useImperativeHandle(
@@ -549,8 +562,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           ...(canvasId && { canvasId }),
           ...(_canvasTitle && { canvasTitle: _canvasTitle }),
           canComment: editable,
+          canCreateTicket: editable && !isTicketChannelArchived,
+          onCreateTicket: openTicketForCurrentSelection,
         }),
-      [_canvasTitle, canvasId, editable, openCommentsForCurrentBlock],
+      [
+        _canvasTitle,
+        canvasId,
+        editable,
+        isTicketChannelArchived,
+        openCommentsForCurrentBlock,
+        openTicketForCurrentSelection,
+      ],
     );
 
     const handleSave = useCallback((): void => {
@@ -650,6 +672,13 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             />
           )}
         </div>
+
+        <CanvasTicketCreationFlow
+          anchor={activeTicketAnchor}
+          channelId={channelId}
+          onClose={closeTicketModal}
+          onTicketCreated={handleTicketCreated}
+        />
 
         {/* Presentation Modal */}
         {showPresentation && (

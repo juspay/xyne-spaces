@@ -10,6 +10,7 @@ import { mentionInlineContentSpec } from './CanvasMentionSpec';
 import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
+import { canvasTicketStyleSpec } from './CanvasTicketStyleSpec/CanvasTicketStyleSpec';
 import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
 import { canvasDiagramBlockSpec } from './CanvasDiagramSpec';
 import { canvasMathBlockSpec } from './CanvasMathBlockSpec';
@@ -24,6 +25,7 @@ import { canvasLinkShortcutsExtension } from './canvasLinkShortcuts';
 import { canvasPastedLinkExtension } from './canvasPastedLink';
 import { canvasSourceBlockShortcutsExtension } from './canvasSourceBlockShortcuts';
 import { canvasTableShortcutsExtension } from './canvasTableShortcuts';
+import { canvasTicketUnlinkExtension } from './canvasTicketUnlink';
 
 // Default blocks + whiteboard, then extended with mention and citation inline content.
 // Shared by the canvas editors and the read-only previews: a preview built on a
@@ -51,6 +53,7 @@ function createCanvasSchema() {
     },
     styleSpecs: {
       canvasCommentThread: canvasCommentThreadStyleSpec,
+      canvasTicket: canvasTicketStyleSpec,
     },
   });
 }
@@ -286,6 +289,7 @@ const handleCanvasTableKeyDown = (view: EditorView, event: KeyboardEvent): boole
 
 export const canvasTiptapOptions = {
   extensions: [
+    canvasTicketUnlinkExtension,
     canvasTablePendingExitRowExtension,
     canvasPastedLinkExtension,
     canvasLinkShortcutsExtension,
