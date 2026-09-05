@@ -11,6 +11,9 @@ const THREAD_PREVIEW_CHARS = 200;
 /** Worker runs shown in one thread's debug drawer, newest first. */
 const MAX_DEBUG_RUNS = 50;
 
+const stripHtml = (html: string): string =>
+  html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+
 interface AuthContext {
   userId: string;
   workspaceId: string;
@@ -166,8 +169,6 @@ class RadarFeedService {
           },
         })
       : [];
-    const stripHtml = (html: string): string =>
-      html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
     const sourceMessages = Object.fromEntries(
       messages.map(m => [
         m.messageId,
@@ -229,7 +230,7 @@ class RadarFeedService {
       prisma.message.findFirst({
         where: { conversationId, isDeleted: false },
         orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
-        select: { messageId: true, createdAt: true },
+        select: { messageId: true, createdAt: true, senderId: true, content: true },
       }),
       // Every item the thread ever produced (resolved included), so a debug
       // lookup by thread id can render the full trail set.
@@ -239,7 +240,34 @@ class RadarFeedService {
         select: { id: true, title: true, status: true },
       }),
     ]);
-    return { runs, threadState, latestMessage, items };
+
+    // The watermark as a message rather than a timestamp: "processed till 4
+    // minutes ago" does not say which message that was, which is the thing
+    // anyone reading this panel is trying to establish.
+    const watermarkMessage = threadState?.watermarkMsgId
+      ? await prisma.message.findUnique({
+          where: { messageId: threadState.watermarkMsgId },
+          select: { messageId: true, createdAt: true, senderId: true, content: true },
+        })
+      : null;
+
+    const asPreview = (
+      m: { messageId: string; createdAt: Date; senderId: string | null; content: string } | null,
+    ) =>
+      m && {
+        messageId: m.messageId,
+        createdAt: m.createdAt,
+        senderId: m.senderId,
+        text: stripHtml(m.content).slice(0, 300),
+      };
+
+    return {
+      runs,
+      threadState,
+      latestMessage: asPreview(latestMessage),
+      watermarkMessage: asPreview(watermarkMessage),
+      items,
+    };
   }
 
   private openItems(auth: AuthContext, filter: Record<string, unknown>): Promise<FeedItem[]> {
