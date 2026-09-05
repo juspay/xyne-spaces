@@ -54,3 +54,11 @@ export {
   createBulkOptionInputHandlers,
   resolveBulkOptions,
 } from './formFieldOptionsUtils';
+
+export {
+  STAGE_STATUS_META,
+  getStageStatusMeta,
+  StageStatusIcon,
+  StageIndicator,
+  type StageIndicatorStage,
+} from './stageStatusIcon';

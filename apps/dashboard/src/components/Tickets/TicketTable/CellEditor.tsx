@@ -111,7 +111,13 @@ export const StageCellEditor = ({
     enabled: !!boardId && !stages,
   });
   const resolvedStages = useMemo(
-    () => stages ?? (boardStages ?? []).map(stage => ({ id: stage.id, name: stage.name })),
+    () =>
+      stages ??
+      (boardStages ?? []).map(stage => ({
+        id: stage.id,
+        name: stage.name,
+        defaultTicketStatusV2: stage.defaultTicketStatusV2,
+      })),
     [stages, boardStages],
   );
   const options = useStageOptions(resolvedStages);
