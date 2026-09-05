@@ -117,6 +117,13 @@ router.get('/:callId/chat-history', callController.getCallChatHistory);
 // Update a call's labels (the call's audience; recordings use /recordings/:callId)
 router.patch('/:callId/labels', callController.updateCallLabels);
 
+// Draft a follow-up email and export to Google Docs. Same handlers as the
+// /recordings routes above; both controllers branch on the call's own type.
+router.get('/:callId/email-compose-context', recordingEmailController.getComposeContext);
+router.post('/:callId/send-email', recordingEmailController.sendRecordingEmail);
+router.get('/:callId/google-doc-compose-context', recordingGoogleDocController.context);
+router.post('/:callId/export-google-doc', recordingGoogleDocController.export);
+
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
 

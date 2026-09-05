@@ -4,9 +4,11 @@ import { google } from 'googleapis';
 import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { callShareService } from '@/services/callShareService';
 import { decrypt, encrypt } from '@/services/encryptionService';
-import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import {
+  convertBlockNoteToMarkdown,
+  resolveDetailedSummaryCanvasId,
+} from '@/services/canvasService';
 import { GoogleDocsApiError, googleDocsService } from '@/services/googleDocsService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import {
@@ -107,6 +109,13 @@ async function recordCreatedGoogleDoc(
   });
 }
 
+/** Owner-only, for recordings and calls alike. */
+const canExportCall = (call: { createdByUserId: string }, userId: string): boolean =>
+  call.createdByUserId === userId;
+
+const exportDeniedMessage = (call: { callType: string }): string =>
+  `Only the ${call.callType === HEADLESS_CALL_TYPE ? 'recording' : 'call'} owner can export it`;
+
 export class RecordingGoogleDocController {
   context = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -124,29 +133,18 @@ export class RecordingGoogleDocController {
       const { callId } = parsedParams.data;
 
       const call = await repositories.calls.findByExternalId(callId);
-      if (
-        !call ||
-        call.callType !== HEADLESS_CALL_TYPE ||
-        (call.workspaceId !== null && call.workspaceId !== workspaceId)
-      ) {
+      if (!call || (call.workspaceId !== null && call.workspaceId !== workspaceId)) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
-      if (
-        call.createdByUserId !== userId ||
-        !(await callShareService.canView(call, userId, workspaceId))
-      ) {
-        res.status(403).json({ success: false, error: 'Only the recording owner can export it' });
+      if (!canExportCall(call, userId)) {
+        res.status(403).json({ success: false, error: exportDeniedMessage(call) });
         return;
       }
 
       const accessToken = await getRecordingDocAccessToken(userId);
       const canExport = !!accessToken;
-      const metadata = call.metadata as Record<string, unknown> | null;
-      const detailedSummaryCanvasId =
-        typeof metadata?.detailedSummaryCanvasId === 'string'
-          ? metadata.detailedSummaryCanvasId
-          : null;
+      const detailedSummaryCanvasId = await resolveDetailedSummaryCanvasId(call);
       const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId, userId).catch(
         () => null,
       );
@@ -159,7 +157,9 @@ export class RecordingGoogleDocController {
         // modal lists them so a second export is a deliberate choice, not a
         // duplicate someone makes because the earlier doc is out of sight.
         documents: readRecordingGoogleDocLinks(call.metadata),
-        unavailableReason: 'Connect Google Docs to create a document from this recording.',
+        unavailableReason: `Connect Google Docs to create a document from this ${
+          call.callType === HEADLESS_CALL_TYPE ? 'recording' : 'call'
+        }.`,
       });
     } catch (error) {
       logger.error('[RecordingGoogleDoc] Failed to prepare export context', { error });
@@ -184,20 +184,13 @@ export class RecordingGoogleDocController {
 
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      if (
-        !call ||
-        call.callType !== HEADLESS_CALL_TYPE ||
-        (call.workspaceId !== null && call.workspaceId !== workspaceId)
-      ) {
+      if (!call || (call.workspaceId !== null && call.workspaceId !== workspaceId)) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
 
-      if (
-        call.createdByUserId !== userId ||
-        !(await callShareService.canView(call, userId, workspaceId))
-      ) {
-        res.status(403).json({ success: false, error: 'Only the recording owner can export it' });
+      if (!canExportCall(call, userId)) {
+        res.status(403).json({ success: false, error: exportDeniedMessage(call) });
         return;
       }
 
@@ -210,11 +203,7 @@ export class RecordingGoogleDocController {
         return;
       }
 
-      const metadata = call.metadata as Record<string, unknown> | null;
-      const detailedSummaryCanvasId =
-        typeof metadata?.detailedSummaryCanvasId === 'string'
-          ? metadata.detailedSummaryCanvasId
-          : null;
+      const detailedSummaryCanvasId = await resolveDetailedSummaryCanvasId(call);
       const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId, userId).catch(
         (error) => {
           logger.warn('[RecordingGoogleDoc] Could not read detailed summary canvas', {

@@ -1,7 +1,8 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Loader2, FileText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
+import { EnvelopeDefault, File02Text } from '@xyne/icons';
 import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
@@ -24,6 +25,21 @@ import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
 import { CallLabelPicker } from './CallLabelPicker';
 import { callService } from '../../services/Call/callService';
+import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { Button } from '../../components/ui/Button/Button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../components/ui/dropdown-menu';
+import { PostRecordingToEmailModal } from '../RecordingDetailV2Screen/components/PostRecordingToEmailModal';
+import { GoogleDocPreviewModal } from '../RecordingDetailV2Screen/components/GoogleDocPreviewModal';
+import { useCallGoogleDocExport, useCallGoogleDocs } from './useCallGoogleDocExport';
+
+/** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
+const POST_BUTTON_CLASS =
+  'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -119,6 +135,23 @@ export default function CallDetailScreen(): ReactElement {
   }, [callMessage]);
 
   const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId);
+  // aiSummaryFormat is not stored — it is sniffed from the content. Recordings do
+  // this server-side in getRecordingDetail, which never runs for a call, so apply
+  // the same test here or an HTML summary gets markdown-escaped in the email body.
+  const summaryFormat: 'markdown' | 'html' = ((): 'markdown' | 'html' => {
+    const summary = call?.aiSummary?.trim();
+    if (!summary) return 'markdown';
+    const hasHtmlTags = /<[^>]+>/i.test(summary);
+    const startsWithMarkdown = /^##?\s/.test(summary);
+    return !hasHtmlTags || startsWithMarkdown ? 'markdown' : 'html';
+  })();
+
+  // The export endpoint needs summary text, so a transcript-only call can post and
+  // email but has nothing to put in a Google Doc yet. Export is owner-only, as it
+  // is for recordings, so the item stays disabled for everyone else in the audience.
+  const isCallOwner = Boolean(user?.id && call?.createdByUserId === user.id);
+  const canExportGoogleDoc =
+    isCallOwner && Boolean(detailedSummaryCanvasId || call?.aiSummary?.trim());
 
   const hasRecording = useMemo<boolean>(() => {
     if (!conversationMessages || !call?.externalId) return false;
@@ -253,6 +286,55 @@ export default function CallDetailScreen(): ReactElement {
       if (labelsUpdateSeqRef.current === seq) setLabels(previousLabels);
     }
   };
+
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showGoogleDocModal, setShowGoogleDocModal] = useState(false);
+  const [emailModalNonce, setEmailModalNonce] = useState(0);
+  const [googleDocModalNonce, setGoogleDocModalNonce] = useState(0);
+  const callGoogleDocs = useCallGoogleDocs(call?.metadata);
+  const googleDocExport = useCallGoogleDocExport(call?.externalId ?? '', () =>
+    setShowGoogleDocModal(false),
+  );
+
+  // Connecting Google sends the browser away and back with these params. Reopen
+  // the modal it came from, remounted so it refetches what it can now do. Same
+  // param names as the recordings screen — they belong to the integration, not
+  // to whichever screen started the connection.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const email = params.get('recordingEmailConnected') === 'true';
+    const emailError = params.get('recordingEmailError');
+    const doc = params.get('recordingGoogleDocConnected') === 'true';
+    const docError = params.get('recordingGoogleDocError');
+    if (!email && !emailError && !doc && !docError) return;
+
+    if (email || emailError) {
+      if (email) toast.success('Google email connected');
+      else toast.error(emailError as string);
+      setEmailModalNonce(nonce => nonce + 1);
+      setShowEmailModal(true);
+    }
+    if (doc || docError) {
+      if (doc) toast.success('Google Docs connected');
+      else toast.error('Google Docs connection failed. Please try again.');
+      setGoogleDocModalNonce(nonce => nonce + 1);
+      setShowGoogleDocModal(true);
+    }
+
+    for (const key of [
+      'recordingEmailConnected',
+      'recordingEmailError',
+      'recordingGoogleDocConnected',
+      'recordingGoogleDocError',
+    ]) {
+      params.delete(key);
+    }
+    const search = params.toString();
+    void navigate(
+      { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
+      { replace: true, state: (location.state as { call: Call } | null) ?? null },
+    );
+  }, [location.pathname, location.search, location.state, navigate]);
 
   const title = call?.title ?? 'Untitled Call';
   const heldOn = formatCallHeldOn(call?.startedAt);
@@ -457,6 +539,71 @@ export default function CallDetailScreen(): ReactElement {
                   <ChevronRight className='size-3.5' />
                 </button>
               )}
+              {canEditLabels && hasDetailedSummaryTab && (
+                <DropdownMenu>
+                  <div className='inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setShowEmailModal(true)}
+                      className={cn(POST_BUTTON_CLASS, 'text-xs font-semibold !rounded-2xl')}
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_email_modal'
+                    >
+                      <EnvelopeDefault className='size-3.5' />
+                      Draft follow-up email
+                    </Button>
+                    <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='iconSm'
+                        aria-label='More actions'
+                        className={POST_BUTTON_CLASS}
+                        data-track-category='CallDetail'
+                        data-track-name='open_call_actions_menu'
+                      >
+                        <ChevronDown className='size-3.5' />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </div>
+                  <DropdownMenuContent
+                    align='end'
+                    sideOffset={6}
+                    className='w-60 rounded-xl p-1.5 shadow-xl'
+                  >
+                    <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                      Send this summary to
+                    </p>
+                    <DropdownMenuItem
+                      onSelect={() => setShowEmailModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_email_from_menu'
+                    >
+                      <EnvelopeDefault className='size-4 text-muted-foreground' />
+                      Draft follow-up email
+                      <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                        Default
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowGoogleDocModal(true)}
+                      disabled={googleDocExport.isExporting || !canExportGoogleDoc}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='export_call_google_doc'
+                    >
+                      <File02Text className='size-4 text-muted-foreground' />
+                      {googleDocExport.isExporting
+                        ? 'Creating Google Doc…'
+                        : 'Export to Google Docs'}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
 
             {/* Tab content */}
@@ -495,6 +642,58 @@ export default function CallDetailScreen(): ReactElement {
           </div>
         </div>
       </div>
+
+      {showEmailModal && (
+        <Dialog
+          open={showEmailModal}
+          onOpenChange={open => !open && setShowEmailModal(false)}
+          title='Review draft email'
+          description='Review the call recap before sending it by email.'
+          className='max-w-[1120px] overflow-hidden rounded-xl p-0'
+          testId='post-call-to-email-dialog'
+        >
+          <PostRecordingToEmailModal
+            key={emailModalNonce}
+            recording={{
+              externalId: call.externalId,
+              // `?? ''` so the modal's own "Untitled Call" fallback applies.
+              title: call.title ?? '',
+              aiSummary: call.aiSummary,
+              aiSummaryFormat: summaryFormat,
+            }}
+            onClose={() => setShowEmailModal(false)}
+            entityLabel='call'
+            isRecording={false}
+            trackCategory='CallDetail'
+          />
+        </Dialog>
+      )}
+
+      {showGoogleDocModal && (
+        <Dialog
+          open={showGoogleDocModal}
+          onOpenChange={open => !open && setShowGoogleDocModal(false)}
+          title='Preview Google Doc'
+          description='Review the call summary before creating a Google Doc.'
+          className='max-w-[720px] overflow-hidden rounded-[18px] p-0'
+          testId='call-google-doc-preview-dialog'
+        >
+          <GoogleDocPreviewModal
+            key={googleDocModalNonce}
+            recording={{
+              externalId: call.externalId,
+              title: call.title ?? '',
+              googleDocs: callGoogleDocs,
+            }}
+            onClose={() => setShowGoogleDocModal(false)}
+            onExport={googleDocExport.exportDoc}
+            isExporting={googleDocExport.isExporting}
+            entityLabel='call'
+            isRecording={false}
+            trackCategory='CallDetail'
+          />
+        </Dialog>
+      )}
     </div>
   );
 }
