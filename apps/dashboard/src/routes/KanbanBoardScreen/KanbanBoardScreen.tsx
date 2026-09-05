@@ -5257,6 +5257,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
                           keyPrefix={`${group.key}::`}
+                          layoutScope={`${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`}
                           searchActive={hasSearchTerm}
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={localTickets ?? []}
