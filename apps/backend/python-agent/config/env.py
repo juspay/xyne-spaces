@@ -98,7 +98,11 @@ class Config:
     # Backend API Configuration
     backend_url: str
     transcription_agent_api_key: str
-    
+    # LiveKit explicit-dispatch identity for this pod — which agentName the backend can
+    # target with createDispatch. Which role this build serves is decided outside this
+    # process entirely now (a human-edited Superposition config), not self-reported.
+    transcription_agent_name: str
+
     # Redis Configuration (matching TypeScript backend)
     redis_host: str
     redis_port: int
@@ -226,7 +230,8 @@ class Config:
             # Backend API
             backend_url=os.getenv("BACKEND_URL", "http://localhost:3001"),
             transcription_agent_api_key=os.getenv("TRANSCRIPTION_AGENT_API_KEY"),
-            
+            transcription_agent_name=os.getenv("LIVEKIT_TRANSCRIPTION_AGENT_NAME", "xyne-automatic"),
+
             # Redis (matching TypeScript: REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_TLS)
             redis_host=os.getenv("REDIS_HOST", "localhost"),
             redis_port=int(os.getenv("REDIS_PORT", "6379")),

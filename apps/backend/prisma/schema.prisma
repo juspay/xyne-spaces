@@ -3374,6 +3374,13 @@ model LookupValue {
   @@schema("public")
 }
 
+// Explicit-dispatch transcription agent registry. `agentName` is deliberately NOT the
+// primary key — the same build can independently hold both 'stable' and 'test' as two
+// separate rows, so a synthetic id is required. `role` is kept on a row even after it
+// goes 'inactive', as a historical record of what it once served. At most one row can
+// be the active holder of a given role — enforced by a partial unique index added by
+// hand in the migration (Prisma's schema DSL has no partial-index syntax), see
+// migration.sql: CREATE UNIQUE INDEX ... ON (role) WHERE status = 'active'.
 model Form {
   id              String         @id @default(cuid())
   formName        String

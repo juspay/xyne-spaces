@@ -788,6 +788,24 @@ class RedisService {
     await this.redis.del(key);
   }
 
+  /**
+   * Deletes `key` only if its current value still equals `expectedValue`. Atomic
+   * via Lua so a lock holder can never release a lock it no longer owns — e.g. its
+   * own TTL expired, someone else acquired the key, and a bare DEL would otherwise
+   * delete THEIR lock instead of a stale one, letting a third caller in.
+   */
+  async deleteIfMatch(key: string, expectedValue: string): Promise<boolean> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const luaScript = `
+      if redis.call('GET', KEYS[1]) == ARGV[1] then
+        return redis.call('DEL', KEYS[1])
+      end
+      return 0
+    `;
+    const result = await this.redis.eval(luaScript, 1, key, expectedValue) as number;
+    return result === 1;
+  }
+
   async exists(key: string): Promise<boolean> {
     if (!this.redis) throw new Error('Redis not initialized');
     const result = await this.redis.exists(key);
