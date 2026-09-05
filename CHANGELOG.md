@@ -1,3 +1,10 @@
+## [1.278.2](https://github.com/juspay/xyne-spaces/compare/v1.278.1...v1.278.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* switch PostHog persistence to localStorage-only ([#1569](https://github.com/juspay/xyne-spaces/issues/1569)) ([4d2c6b6](https://github.com/juspay/xyne-spaces/commit/4d2c6b66b4db80cba7bc03c4bcf18e86fe33497d))
+
 ## [1.278.1](https://github.com/juspay/xyne-spaces/compare/v1.278.0...v1.278.1) (2026-09-05)
 
 ## [1.278.0](https://github.com/juspay/xyne-spaces/compare/v1.277.3...v1.278.0) (2026-09-05)
