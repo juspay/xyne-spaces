@@ -603,11 +603,6 @@ class NoteTakerTranscriptService {
 
     await repositories.calls.update(call.id, { transcript: storagePath });
     logger.info(`[${callId}] call_record_updated`, { fields_updated: 'transcript', path: 'note_taker' });
-
-    // Fire-and-forget: translate transcript asynchronously in the background.
-    transcriptService.translateTranscriptAsync(callId, storagePath).catch((err) => {
-      logger.error(`[${callId}] background_translation_failed`, { error: err, path: 'note_taker' });
-    });
   }
 
   /**
