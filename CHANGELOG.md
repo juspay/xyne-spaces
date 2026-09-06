@@ -1,3 +1,10 @@
+## [1.278.3](https://github.com/juspay/xyne-spaces/compare/v1.278.2...v1.278.3) (2026-09-06)
+
+
+### Bug Fixes
+
+* showing message is a thread in cmdK ([#1530](https://github.com/juspay/xyne-spaces/issues/1530)) ([2578eff](https://github.com/juspay/xyne-spaces/commit/2578eff22cbe7b770546ae1c527e57c3ab62de37))
+
 ## [1.278.2](https://github.com/juspay/xyne-spaces/compare/v1.278.1...v1.278.2) (2026-09-05)
 
 
