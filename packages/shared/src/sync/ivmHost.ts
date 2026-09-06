@@ -70,11 +70,16 @@ interface ViewEntry {
 }
 
 /** A row leaves the source only when its ref count hits zero. `pk` is kept so the row
- *  can be located in the source for removal. `version` = the cookie `stateVersion` of the
- *  last write applied to it (cross-stream apply-if-newer). */
+ *  can be located in the source for removal. */
 interface RowRef {
   count: number;
   pk: Row;
+}
+
+/** The authoritative fan-out row for a PK (independent of any optimistic overlay). `version`
+ *  = the cookie `stateVersion` of the last write applied (cross-stream apply-if-newer). */
+interface ConfirmedRow {
+  row: Row;
   version?: string;
 }
 
@@ -87,6 +92,12 @@ export class IvmHost {
   readonly #refs = new Map<string, RowRef>();
   /** instanceKey → the ref keys it currently holds (for teardown). */
   readonly #instanceRefs = new Map<string, Set<string>>();
+  /**
+   * `${table} ${pkKey}` → the authoritative fan-out row + version. The MemorySource holds
+   * the EFFECTIVE row (fold of confirmed + the optimistic overlay); this is the confirmed
+   * layer the effective row is derived from. With no overlay, effective === confirmed.
+   */
+  readonly #confirmed = new Map<string, ConfirmedRow>();
 
   /** The (lazily created) MemorySource for a table, built from the shared schema. */
   source(table: string): any {
@@ -213,22 +224,33 @@ export class IvmHost {
 
   #upsert(instanceKey: string, table: string, row: Row, version?: string): void {
     const refKey = this.#refKey(table, this.#pkKey(table, row));
-    const existing = this.#refs.get(refKey);
+    const confirmed = this.#confirmed.get(refKey);
     // Cross-stream apply-if-newer: a stale replay (older cookie stateVersion) from one
     // instance's stream must not clobber a shared row another instance advanced. Skip the
-    // source write when strictly older, but STILL take the ref (membership is independent).
+    // confirmed update when strictly older, but STILL take the ref (membership is independent).
     const stale =
-      existing?.version !== undefined && version !== undefined && version < existing.version;
-    if (!stale) {
-      const src = this.source(table);
-      const old = src.data.get(row) as Row | undefined;
-      if (old) consume(src.push(makeSourceChangeEdit(row, old)));
-      else consume(src.push(makeSourceChangeAdd(row)));
-    }
+      confirmed?.version !== undefined && version !== undefined && version < confirmed.version;
+    if (!stale) this.#confirmed.set(refKey, { row, version: version ?? confirmed?.version });
     this.#addRef(instanceKey, refKey, () => this.#pkOf(table, row));
-    if (!stale && version !== undefined) {
-      const ref = this.#refs.get(refKey);
-      if (ref) ref.version = version;
+    if (!stale) this.#reconcileSource(table, refKey, this.#pkOf(table, row));
+  }
+
+  /** The row that should be in the MemorySource for a PK: the confirmed row (folded with the
+   *  optimistic overlay once that lands in W2), or undefined if the PK holds no row. */
+  #effectiveRow(refKey: string): Row | undefined {
+    return this.#confirmed.get(refKey)?.row;
+  }
+
+  /** Push the source toward the effective row for a PK: add / edit / remove as needed. */
+  #reconcileSource(table: string, refKey: string, pk: Row): void {
+    const src = this.source(table);
+    const eff = this.#effectiveRow(refKey);
+    const current = src.data.get(pk) as Row | undefined;
+    if (eff) {
+      if (current) consume(src.push(makeSourceChangeEdit(eff, current)));
+      else consume(src.push(makeSourceChangeAdd(eff)));
+    } else if (current) {
+      consume(src.push(makeSourceChangeRemove(current)));
     }
   }
 
@@ -263,16 +285,16 @@ export class IvmHost {
     else this.#refs.set(refKey, { count: 1, pk: makePk() });
   }
 
-  /** Decrement a row's ref count; remove it from the source when the last instance lets go. */
+  /** Decrement a row's ref count; drop its confirmed row + remove it from the source when the
+   *  last instance lets go. */
   #deref(refKey: string): void {
     const ref = this.#refs.get(refKey);
     if (!ref) return;
     ref.count -= 1;
     if (ref.count > 0) return;
     this.#refs.delete(refKey);
+    this.#confirmed.delete(refKey);
     const table = refKey.slice(0, refKey.indexOf(' '));
-    const src = this.source(table);
-    const old = src.data.get(ref.pk) as Row | undefined; // may be absent — guard the remove
-    if (old) consume(src.push(makeSourceChangeRemove(old)));
+    this.#reconcileSource(table, refKey, ref.pk); // effective now undefined → source removal
   }
 }
