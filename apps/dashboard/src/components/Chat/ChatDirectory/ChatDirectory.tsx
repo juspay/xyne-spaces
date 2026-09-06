@@ -72,6 +72,9 @@ import Dialog, { cn } from '../../ui/Dialog';
 
 import { useZero } from '../../../hooks/useZero';
 import { useUsersById } from '../../../hooks/useUsers';
+import { useDmAffinityRank } from '@xyne/shared/hooks';
+import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
+import { affinityService } from '../../../services/affinityService';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -311,18 +314,49 @@ const ChatDirectory = ({
   const [suggestionsNowMs, setSuggestionsNowMs] = useState(() => Date.now());
 
   const usersById = useUsersById();
+  const dmRank = useDmAffinityRank(context.userID);
+  const affinityVersion = useAffinityCallback();
+
+  const dmCounterpartByChannelId = useMemo(() => {
+    const counterparts = new Map<string, string>();
+    for (const channel of channelData ?? []) {
+      if (channel.scopeType !== ChannelScopeType.DM) continue;
+      const others = parseDMParticipantIds(channel).filter(id => id !== context.userID);
+      const [onlyOther] = others;
+      if (others.length === 1 && onlyOther) counterparts.set(channel.id, onlyOther);
+    }
+    return counterparts;
+  }, [channelData, context.userID]);
 
   const isBotDmChannel = useCallback(
     (channel: VisibleChannel): boolean => {
-      if (channel.scopeType !== ChannelScopeType.DM) return false;
-      const others = parseDMParticipantIds(channel).filter(id => id !== context.userID);
-      const [onlyOther] = others;
-      if (others.length !== 1 || !onlyOther) return false;
-      const userType = usersById.get(onlyOther)?.userType;
+      const otherId = dmCounterpartByChannelId.get(channel.id);
+      if (!otherId) return false;
+      const userType = usersById.get(otherId)?.userType;
       return userType === UserType.BOT || userType === UserType.APP;
     },
-    [usersById, context.userID],
+    [dmCounterpartByChannelId, usersById],
   );
+
+  const contactWeightByChannelId = useMemo(() => {
+    const weights = new Map<string, number>();
+    if (suggestionDismissed) return weights;
+    void affinityVersion;
+
+    let hasAffinity = false;
+    for (const [channelId, otherId] of dmCounterpartByChannelId) {
+      const weight = affinityService.getUserWeight(otherId);
+      if (weight > 0) hasAffinity = true;
+      weights.set(channelId, weight);
+    }
+    if (hasAffinity) return weights;
+
+    const recencyScore = new Map(dmRank.map((id, index) => [id, dmRank.length - index]));
+    for (const [channelId, otherId] of dmCounterpartByChannelId) {
+      weights.set(channelId, recencyScore.get(otherId) ?? 0);
+    }
+    return weights;
+  }, [dmCounterpartByChannelId, dmRank, suggestionDismissed, affinityVersion]);
 
   const suggestionChannels = useMemo(
     () =>
@@ -335,8 +369,9 @@ const ChatDirectory = ({
             type: channel.type,
             lastActivityAt: channel.channelStats?.lastActivityAt ?? channel.lastActivityAt ?? null,
             isBotDm: isBotDmChannel(channel),
+            contactWeight: contactWeightByChannelId.get(channel.id) ?? 0,
           })),
-    [channelData, suggestionDismissed, isBotDmChannel],
+    [channelData, suggestionDismissed, isBotDmChannel, contactWeightByChannelId],
   );
 
   const candidateProjectIdsKey = useMemo(

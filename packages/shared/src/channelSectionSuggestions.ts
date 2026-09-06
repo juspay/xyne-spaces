@@ -11,8 +11,11 @@ export const DORMANT_SUGGESTION_NAME = 'Quiet';
 
 export const BOT_SUGGESTION_ID = '__bots__';
 export const GROUP_DM_SUGGESTION_ID = '__groupDms__';
+export const FREQUENT_CONTACTS_SUGGESTION_ID = '__frequentContacts__';
 export const BOT_SUGGESTION_NAME = 'Apps & Bots';
 export const GROUP_DM_SUGGESTION_NAME = 'Group DMs';
+export const FREQUENT_CONTACTS_SUGGESTION_NAME = 'Frequent contacts';
+export const MAX_FREQUENT_CONTACTS = 8;
 
 export const DEFAULT_ACTIVE_WINDOW_DAYS = 30;
 export const MIN_ACTIVE_WINDOW_DAYS = 1;
@@ -28,7 +31,13 @@ export const clampActiveWindowDays = (days: number): number => {
   return rounded;
 };
 
-export type SectionSuggestionKind = 'project' | 'active' | 'dormant' | 'bots' | 'groupDms';
+export type SectionSuggestionKind =
+  | 'project'
+  | 'active'
+  | 'dormant'
+  | 'bots'
+  | 'groupDms'
+  | 'frequentContacts';
 
 export interface SuggestionChannel {
   id: string;
@@ -37,6 +46,7 @@ export interface SuggestionChannel {
   type: string;
   lastActivityAt?: number | null;
   isBotDm?: boolean;
+  contactWeight?: number | null;
 }
 
 export interface SuggestionChannelStatus {
@@ -81,6 +91,7 @@ export interface ComputeDmSectionSuggestionsInput {
   statuses: readonly SuggestionChannelStatus[];
   existingSectionNames: readonly string[];
   minChannels?: number;
+  maxFrequentContacts?: number;
 }
 
 const normalizeName = (name: string): string => name.trim().toLowerCase();
@@ -271,6 +282,7 @@ export function computeDmSectionSuggestions(
     statuses,
     existingSectionNames,
     minChannels = DEFAULT_MIN_CHANNELS,
+    maxFrequentContacts = MAX_FREQUENT_CONTACTS,
   } = input;
 
   const candidates = selectDmCandidates(channels, indexStatuses(statuses));
@@ -279,14 +291,29 @@ export function computeDmSectionSuggestions(
 
   const botChannelIds: string[] = [];
   const groupDmChannelIds: string[] = [];
+  const contactCandidates: SuggestionChannel[] = [];
   for (const channel of candidates) {
     if (channel.scopeType === ChannelScopeType.GROUP_DM) groupDmChannelIds.push(channel.id);
     else if (channel.isBotDm) botChannelIds.push(channel.id);
+    else if ((channel.contactWeight ?? 0) > 0) contactCandidates.push(channel);
   }
+
+  const frequentContactChannelIds = contactCandidates
+    .sort(
+      (a, b) => (b.contactWeight ?? 0) - (a.contactWeight ?? 0) || a.id.localeCompare(b.id),
+    )
+    .slice(0, maxFrequentContacts)
+    .map(channel => channel.id);
 
   const suggestions: SectionSuggestion[] = [];
   const addBucket = makeBucketAdder(suggestions, existingSectionNames, minChannels);
 
+  addBucket(
+    FREQUENT_CONTACTS_SUGGESTION_ID,
+    'frequentContacts',
+    FREQUENT_CONTACTS_SUGGESTION_NAME,
+    frequentContactChannelIds,
+  );
   addBucket(BOT_SUGGESTION_ID, 'bots', BOT_SUGGESTION_NAME, botChannelIds);
   addBucket(GROUP_DM_SUGGESTION_ID, 'groupDms', GROUP_DM_SUGGESTION_NAME, groupDmChannelIds);
 

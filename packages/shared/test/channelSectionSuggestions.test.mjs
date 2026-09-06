@@ -620,3 +620,76 @@ test('suppresses a lone DM bucket that covers every DM candidate', () => {
 
   assert.deepEqual(result, []);
 });
+
+const contactDm = (id, contactWeight) => channel(id, 'dmProject', { scopeType: 'DM', contactWeight });
+
+test('suggests Frequent contacts ranked by contact weight', () => {
+  const result = computeDm({
+    channels: [
+      contactDm('d1', 3),
+      contactDm('d2', 9),
+      contactDm('d3', 5),
+      groupDm('g1'),
+      groupDm('g2'),
+    ],
+    statuses: ['d1', 'd2', 'd3', 'g1', 'g2'].map(id => status(id)),
+  });
+
+  const contacts = result.find(s => s.kind === 'frequentContacts');
+  assert.ok(contacts);
+  assert.equal(contacts.name, 'Frequent contacts');
+  assert.deepEqual(contacts.channelIds, ['d2', 'd3', 'd1']);
+});
+
+test('caps Frequent contacts at the configured maximum', () => {
+  const channels = Array.from({ length: 12 }, (_, i) => contactDm(`d${i + 1}`, 100 - i));
+  const result = computeDm({
+    channels: [...channels, groupDm('g1'), groupDm('g2')],
+    statuses: [...channels.map(c => status(c.id)), status('g1'), status('g2')],
+    maxFrequentContacts: 8,
+  });
+
+  const contacts = result.find(s => s.kind === 'frequentContacts');
+  assert.equal(contacts.channelIds.length, 8);
+  assert.deepEqual(contacts.channelIds, ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8']);
+});
+
+test('excludes zero-weight and bot DMs from Frequent contacts', () => {
+  const result = computeDm({
+    channels: [
+      contactDm('d1', 5),
+      contactDm('d2', 4),
+      contactDm('d3', 0),
+      humanDm('d4'),
+      channel('b1', 'dmProject', { scopeType: 'DM', isBotDm: true, contactWeight: 99 }),
+      channel('b2', 'dmProject', { scopeType: 'DM', isBotDm: true, contactWeight: 98 }),
+    ],
+    statuses: ['d1', 'd2', 'd3', 'd4', 'b1', 'b2'].map(id => status(id)),
+  });
+
+  const contacts = result.find(s => s.kind === 'frequentContacts');
+  assert.deepEqual(contacts.channelIds, ['d1', 'd2']);
+  const bots = result.find(s => s.kind === 'bots');
+  assert.deepEqual(bots.channelIds, ['b1', 'b2']);
+});
+
+test('produces no Frequent contacts bucket when no weights are available', () => {
+  const result = computeDm({
+    channels: [humanDm('d1'), humanDm('d2'), groupDm('g1'), groupDm('g2')],
+    statuses: ['d1', 'd2', 'g1', 'g2'].map(id => status(id)),
+  });
+
+  assert.equal(
+    result.some(s => s.kind === 'frequentContacts'),
+    false,
+  );
+});
+
+test('breaks contact-weight ties deterministically', () => {
+  const result = computeDm({
+    channels: [contactDm('zz', 5), contactDm('aa', 5), groupDm('g1'), groupDm('g2')],
+    statuses: ['zz', 'aa', 'g1', 'g2'].map(id => status(id)),
+  });
+
+  assert.deepEqual(result.find(s => s.kind === 'frequentContacts').channelIds, ['aa', 'zz']);
+});
