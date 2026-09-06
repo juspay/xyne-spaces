@@ -1547,6 +1547,7 @@ export async function processTask(
   const proposeAgentRef: ProposeAgentRef = {};
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
+  const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
   // Seed from THIS run's provider — a hardcoded default made every early
@@ -1754,6 +1755,7 @@ export async function processTask(
       mcpOutputDir,
       (att) => pushAttachment(progressUrl, sessionId, att),
       trustedSdlcBindings,
+      (serverType) => blockedConnectors.add(serverType),
     );
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
@@ -2879,7 +2881,7 @@ export async function processTask(
       allTools.push(buildDescribeAgentTool(describeAgentRef));
       // Same gate as describe-agent: a connector card is only worth posting
       // where a human is watching and can press Connect.
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef));
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
     }
 
 
@@ -4467,6 +4469,7 @@ export async function processTask(
       ...(suggestConnectorsRef.value
         ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
         : {}),
+      ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
       ...(proposeAgentRef.value || describeAgentRef.value
         ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
         : {}),
@@ -4662,6 +4665,7 @@ export async function processTask(
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
           : {}),
+        ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
