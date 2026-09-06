@@ -281,7 +281,9 @@ export async function processDriveImportJob(data: DriveImportJobData): Promise<v
         if (err instanceof DriveUnauthorizedError) progress.needsDriveAuth = true;
         progress.processed += 1;
         await writeDriveImportProgress(sessionId, progress);
-        logger.error(`[DRIVE_IMPORT] Failed to import ${df.name}:`, err);
+        // df.name is an untrusted Drive file name — pass it as a structured field
+        // rather than interpolating into the message (CodeQL js/log-injection).
+        logger.error('[DRIVE_IMPORT] Failed to import file', { fileName: df.name, error: err });
       }
     }
   } finally {

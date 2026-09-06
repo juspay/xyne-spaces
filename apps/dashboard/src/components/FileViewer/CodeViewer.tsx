@@ -106,7 +106,9 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
     ? fileName.toLowerCase().endsWith('.md') || fileName.toLowerCase().endsWith('.markdown')
     : false;
 
-  const [markdownMode, setMarkdownMode] = useState<'raw' | 'rendered'>('raw');
+  const [markdownMode, setMarkdownMode] = useState<'raw' | 'rendered'>(
+    isMarkdown ? 'rendered' : 'raw',
+  );
 
   const fileSizeMB = useMemo(() => {
     return source ? source.size / (1024 * 1024) : 0;

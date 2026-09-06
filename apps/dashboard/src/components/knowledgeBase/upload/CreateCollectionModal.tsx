@@ -72,10 +72,6 @@ const CreateCollectionModal = ({
   const handleCreateCollection = useCallback(async () => {
     const finalTitle = title.trim();
     if (!finalTitle) return;
-    if (!effectiveScopeId) {
-      toast.error('Please select a channel');
-      return;
-    }
     if (!user) {
       toast.error('You must be logged in to create a collection');
       return;
@@ -86,11 +82,16 @@ const CreateCollectionModal = ({
     try {
       const id = crypto.randomUUID();
       const timestamp = Date.now();
+      // No channel selected — the collection belongs to the whole workspace
+      // instead of a single channel. 'WORKSPACE' is just another value for
+      // the existing (non-nullable) scopeType/scopeId columns, not a schema
+      // change; visibility then follows `isPrivate` same as channel-scoped
+      // collections.
       const serverRes = await zero.mutate(
         mutators.collection.createCollection({
           id,
-          scopeType,
-          scopeId: effectiveScopeId,
+          scopeType: effectiveScopeId ? scopeType : 'WORKSPACE',
+          scopeId: effectiveScopeId ?? user.workspaceId,
           name: finalTitle,
           description: null,
           isPrivate,
@@ -133,7 +134,7 @@ const CreateCollectionModal = ({
     }
   }, [zero, title, scopeType, effectiveScopeId, isPrivate, user, onSuccess, onClose, resetForm]);
 
-  const canSubmit = title.trim().length > 0 && !!effectiveScopeId && !isCreating;
+  const canSubmit = title.trim().length > 0 && !isCreating;
 
   const channelOptions = useMemo(
     () =>
@@ -180,18 +181,22 @@ const CreateCollectionModal = ({
             />
           </div>
 
-          {/* Channel selector (only if no initialScopeId provided) */}
+          {/* Channel selector (only if no initialScopeId provided). Optional —
+              leaving it unset scopes the collection to the whole workspace
+              instead of a single channel. */}
           {!initialScopeId && (
             <div>
-              <div className='block text-sm font-medium text-foreground mb-1'>Channel</div>
+              <div className='block text-sm font-medium text-foreground mb-1'>
+                Channel <span className='text-muted-foreground font-normal'>(optional)</span>
+              </div>
               <EntitySelector
                 options={channelOptions}
                 selectedValue={selectedChannelId}
                 onSelect={setSelectedChannelId}
-                placeholder='Select a channel...'
+                placeholder='No channel — visible to the whole workspace'
                 searchPlaceholder='Search channels...'
                 width='100%'
-                showClearButton={false}
+                showClearButton
               />
             </div>
           )}
@@ -203,7 +208,10 @@ const CreateCollectionModal = ({
             onChange={value => setIsPrivate(value === 'private')}
             disabled={isCreating}
           >
-            <Radio value='public' subtext='Anyone can upload and view'>
+            <Radio
+              value='public'
+              subtext='Anyone in the workspace can view — editing requires an invite'
+            >
               Public
             </Radio>
             <Radio value='private' subtext='Invite only'>

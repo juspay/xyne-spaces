@@ -4830,7 +4830,20 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       const scoped =
         scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
       return scoped
-        .related('permissions', p => p.where('userId', ctx.userID))
+        .related('permissions', p =>
+          // Direct grant, OR a grant on a group/channel this user belongs to —
+          // otherwise a group/channel-only grant never resolves a role here
+          // (same fix as scopedCollectionsWithItems below).
+          p.where(({ or, cmp, exists }) =>
+            or(
+              cmp('userId', '=', ctx.userID),
+              exists('userGroup', ug =>
+                ug.whereExists('userGroupMappings', m => m.where('userId', ctx.userID)),
+              ),
+              exists('channel', ch => ch.whereExists('participants', cp => cp.where('userId', ctx.userID))),
+            ),
+          ),
+        )
         .orderBy('createdAt', 'asc');
     },
   ),
@@ -4847,9 +4860,36 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       const scoped =
         scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
       return scoped
-        .related('permissions', p => p.where('userId', ctx.userID))
+        .related('permissions', p =>
+          // Direct grant, OR a grant on a group/channel this user belongs to —
+          // otherwise a group/channel-only grant never reaches the client at
+          // all, and useGlobalCollections falls back to the VIEWER default
+          // even though the server mutators would allow the write.
+          p.where(({ or, cmp, exists }) =>
+            or(
+              cmp('userId', '=', ctx.userID),
+              exists('userGroup', ug =>
+                ug.whereExists('userGroupMappings', m => m.where('userId', ctx.userID)),
+              ),
+              exists('channel', ch => ch.whereExists('participants', cp => cp.where('userId', ctx.userID))),
+            ),
+          ),
+        )
         .related('allItems', i => i.where('isLatest', true).where('deletedAt', 'IS', null))
         .orderBy('createdAt', 'asc');
+    },
+  ),
+
+  // Every explicit grant (per-user or per-group) on a root collection — the
+  // "Who has access" list in ShareCollectionModal.
+  collectionPermissions: defineQuery(
+    z.object({ collectionId: z.string() }),
+    ({ args: { collectionId } }) => {
+      return zql.collection_permissions
+        .where('collectionId', collectionId)
+        .related('user')
+        .related('userGroup')
+        .related('channel');
     },
   ),
 

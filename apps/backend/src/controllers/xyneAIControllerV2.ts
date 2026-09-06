@@ -67,7 +67,7 @@ const SelectionContextSchema = z
 // `collection` and `file` are appended below from top-level `collection_ids`
 // and `file_ids` so the dashboard can keep its existing payload shape.
 const AttachedContextItemSchema = z.object({
-  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file']),
+  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file', 'folder']),
   id: z.string().min(1),
   title: z.string().min(1),
   threadId: z.string().optional(),
@@ -174,6 +174,13 @@ const XyneAIRequestSchemaV2 = z.object({
   collection_ids: z.array(z.string().min(1)).optional(),
   fileIds: z.array(z.string().min(1)).optional(),
   file_ids: z.array(z.string().min(1)).optional(),
+  // A folder scope from the composer picker. Forwarded to claw-auth as a
+  // single 'folder' attached_context pointer (like collectionIds is) — NOT
+  // expanded to individual file ids here. claw-auth resolves it to files
+  // itself at Vespa-query time; expanding it here could blow up to
+  // thousands of ids for one folder.
+  folderIds: z.array(z.string().min(1)).optional(),
+  folder_ids: z.array(z.string().min(1)).optional(),
   attachedContext: AttachedContextSchema,
   attached_context: AttachedContextSchema,
   displayQuery: z.string().optional(),
@@ -278,6 +285,8 @@ export class XyneAIControllerV2 {
       collection_ids,
       fileIds,
       file_ids,
+      folderIds,
+      folder_ids,
       attachedContext,
       attached_context,
       draftMode,
@@ -306,6 +315,7 @@ export class XyneAIControllerV2 {
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
     const effectiveCollectionIds = collectionIds?.length ? collectionIds : collection_ids;
     const effectiveFileIds = fileIds?.length ? fileIds : file_ids;
+    const effectiveFolderIds = folderIds?.length ? folderIds : folder_ids;
     // Same snake-case fallback rationale for branching params — the worker
     // sends snake_case; HTTP callers may use either.
     const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
@@ -482,16 +492,23 @@ export class XyneAIControllerV2 {
         agentSlug,
       });
 
-      // Resolve KB context (collections + files) → attached_context items so
-      // claw-auth's existing prompt-prefix mechanism surfaces them in the
-      // agent's prompt. We translate:
+      // Resolve KB context (collections + folders + files) → attached_context
+      // items so claw-auth's existing prompt-prefix mechanism surfaces them
+      // in the agent's prompt. We translate:
       //   • Collection.id (cuid)         → 'collection' attached_context item
+      //   • Collection.id (cuid, folder) → 'folder' attached_context item
       //   • CollectionItem.fileId (UUID) → CollectionItem.id (cuid) +
       //                                    'file' attached_context item
       // The cuid is what the agent's kb-* tools expect as fileId — see the
       // KB-tools handlers and the validateKbGrants files-set in claw-auth.
+      // A folder is deliberately sent as ONE pointer, not expanded to its
+      // (potentially thousands of) files here — attachedContext is a small,
+      // model-facing prompt list (claw-auth caps it at 20 items total), not a
+      // bulk id manifest. claw-auth resolves the folder to files itself, at
+      // Vespa-query time (buildVespaScope in kb-handlers.ts), from the KB
+      // tree it already fetches for permission checks.
       const kbAttachedContextItems: Array<{
-        type: 'collection' | 'file';
+        type: 'collection' | 'folder' | 'file';
         id: string;
         title: string;
       }> = [];
@@ -504,21 +521,50 @@ export class XyneAIControllerV2 {
           kbAttachedContextItems.push({ type: 'collection', id: row.id, title: row.name });
         }
       }
+      if (effectiveFolderIds && effectiveFolderIds.length > 0) {
+        const rows = await db.collection.findMany({
+          where: { id: { in: effectiveFolderIds }, deletedAt: null },
+          select: { id: true, name: true },
+        });
+        for (const row of rows) {
+          kbAttachedContextItems.push({ type: 'folder', id: row.id, title: row.name });
+        }
+      }
       if (effectiveFileIds && effectiveFileIds.length > 0) {
-        // The dashboard sends the stable `fileId` UUID, but the agent's
-        // kb-read-file expects CollectionItem.id (cuid). Resolve UUIDs to
-        // latest-version row ids in a single query.
+        // The dashboard SHOULD send the stable `fileId` UUID here, but not
+        // every picker does: the KB file viewer's own "Ask AI" button
+        // (FileViewerLayout.tsx, KnowledgeBaseV2Screen.tsx) sends
+        // CollectionItem.id (cuid) instead — that data simply isn't exposed
+        // as `fileId` at those call sites today. Rather than chase every
+        // caller, accept either id shape here: a cuid IS already the row id
+        // kb-read-file expects, so matching on `id` OR `fileId` (latest
+        // version only) resolves both conventions in one query.
         const items = await db.collectionItem.findMany({
-          where: { fileId: { in: effectiveFileIds }, isLatest: true, deletedAt: null },
+          where: {
+            OR: [{ fileId: { in: effectiveFileIds } }, { id: { in: effectiveFileIds } }],
+            isLatest: true,
+            deletedAt: null,
+          },
           select: { id: true, name: true },
         });
         for (const it of items) {
           kbAttachedContextItems.push({ type: 'file', id: it.id, title: it.name });
         }
       }
+      // The client may already have pre-built some of these (e.g. the
+      // dashboard's own toAttachedContext for file/folder/collection scopes)
+      // — kbAttachedContextItems is meant to FILL GAPS for callers that only
+      // send bare id arrays, not duplicate what's already there. Skip any
+      // (type, id) pair the client's own attached_context already covers.
+      const existingContextKeys = new Set(
+        (effectiveAttachedContext ?? []).map((item) => `${item.type}:${item.id}`),
+      );
+      const newKbAttachedContextItems = kbAttachedContextItems.filter(
+        (item) => !existingContextKeys.has(`${item.type}:${item.id}`),
+      );
       const mergedAttachedContext = [
         ...(effectiveAttachedContext ?? []),
-        ...kbAttachedContextItems,
+        ...newKbAttachedContextItems,
       ];
 
       try {
