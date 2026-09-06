@@ -80,7 +80,9 @@ import { BaseTicketType,
   WorkspaceRole,
   OrgRole,
   AccessType,
+  MessageType,
 } from '@xyne/shared';
+import { messageMetadataService } from '@/services/messageMetadataService';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
 import { backlogFlowGroup } from '@/services/flowCascadeService';
@@ -261,6 +263,11 @@ export class TicketController {
     projectId: string;
     boardId: string;
     assignedTo?: string;
+    userGroupId?: string;
+    eta?: Date;
+    tags?: string[];
+    ticketType?: string;
+    stageName?: string;
     priority?: string;
     statusV2?: string;
     metadata?: Record<string, any>;
@@ -277,6 +284,11 @@ export class TicketController {
       projectId,
       boardId,
       assignedTo,
+      userGroupId,
+      eta,
+      tags,
+      ticketType,
+      stageName,
       priority = 'MEDIUM',
       statusV2 = 'TODO',
       metadata = {},
@@ -285,7 +297,7 @@ export class TicketController {
       entityLinkContext,
     } = params;
 
-    const ticket = await createTicketWithConversationTx(this, conversationId, projectId, title, description, createdBy, updatedBy, assignedTo, boardId, statusV2, priority, messageContent, messageSubtype, metadata, entityLinkContext);
+    const ticket = await createTicketWithConversationTx(this, conversationId, projectId, title, description, createdBy, updatedBy, assignedTo, boardId, statusV2, priority, messageContent, messageSubtype, metadata, entityLinkContext, { userGroupId, eta, tags, ticketType, stageName });
 
     // Ticket committed on its initial stage — auto-create the on-entry approval
     // request if that stage's single outgoing transition is configured for it.
@@ -328,6 +340,11 @@ export class TicketController {
     projectId: string;
     boardId: string;
     assignedTo?: string;
+    userGroupId?: string;
+    eta?: Date;
+    tags?: string[];
+    ticketType?: string;
+    stageName?: string;
     priority?: string;
     statusV2?: string;
   }, createdBy: string): Promise<Ticket> {
@@ -338,16 +355,20 @@ export class TicketController {
       initialMessageId,
     });
 
+    const board = item.boardId ? await this.boardRepository.findBoardById(item.boardId) : null;
+    const creationText = `Ticket created in ${board?.name || 'Unknown Board'}: ${item.title}`;
+
     await this.messageRepository.createWithExecutionId(
       {
         conversationId: conversation.conversationId,
         senderId: createdBy,
-        content: `Ticket created: ${item.title}`,
+        content: creationText,
         msgType: MessageType.SYSTEM,
         metadata: {},
       },
       initialMessageId,
     );
+    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     return this.createTicketWithConversation({
       title: item.title,
@@ -358,9 +379,13 @@ export class TicketController {
       projectId: item.projectId,
       boardId: item.boardId,
       assignedTo: item.assignedTo,
+      userGroupId: item.userGroupId,
+      eta: item.eta,
+      ticketType: item.ticketType,
+      stageName: item.stageName,
       priority: item.priority,
       statusV2: item.statusV2,
-      messageContent: `Ticket created: ${item.title}`,
+      messageContent: creationText,
       messageSubtype: 'bulk_ticket',
     });
   }
