@@ -8,3 +8,4 @@ export type { SyncTransport } from './syncClient.js';
 export { configureObs, configureShadow } from './obs.js';
 export { noopSyncStore } from './store.js';
 export type { SyncStore, RowPut, RowKeyRef, WireRow, SeededRow } from './store.js';
+export type { OptimisticOp } from './ivmHost.js';

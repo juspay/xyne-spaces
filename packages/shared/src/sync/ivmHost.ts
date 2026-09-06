@@ -83,6 +83,26 @@ interface ConfirmedRow {
   version?: string;
 }
 
+/**
+ * One optimistic write from a client mutator, mirrored into the host so the shared view
+ * reflects it before the server round-trips. `set` = insert/upsert (full row), `patch` =
+ * update (PK + changed fields), `delete` = remove (PK). `row` always carries the PK.
+ */
+export interface OptimisticOp {
+  kind: 'set' | 'patch' | 'delete';
+  table: string;
+  row: Row;
+}
+
+/** Internal overlay op with the PK resolved once. */
+interface OverlayOp {
+  kind: 'set' | 'patch' | 'delete';
+  table: string;
+  refKey: string;
+  pk: Row;
+  row: Row;
+}
+
 export class IvmHost {
   readonly #sources = new Map<string, any>();
   readonly #pk = new Map<string, readonly string[]>();
@@ -98,6 +118,10 @@ export class IvmHost {
    * layer the effective row is derived from. With no overlay, effective === confirmed.
    */
   readonly #confirmed = new Map<string, ConfirmedRow>();
+  /** mutationID → its optimistic ops (the overlay). Folded over #confirmed into the source. */
+  readonly #ledger = new Map<number, OverlayOp[]>();
+  /** refKey → mutationIDs whose overlay touches it (reverse index for fold + re-derive). */
+  readonly #overlayByPK = new Map<string, Set<number>>();
 
   /** The (lazily created) MemorySource for a table, built from the shared schema. */
   source(table: string): any {
@@ -235,10 +259,68 @@ export class IvmHost {
     if (!stale) this.#reconcileSource(table, refKey, this.#pkOf(table, row));
   }
 
-  /** The row that should be in the MemorySource for a PK: the confirmed row (folded with the
-   *  optimistic overlay once that lands in W2), or undefined if the PK holds no row. */
+  /** The row that should be in the MemorySource for a PK: the confirmed row with the optimistic
+   *  overlay folded on top (ops applied in mutationID order), or undefined if the PK holds no
+   *  row (never confirmed / deleted by the overlay). */
   #effectiveRow(refKey: string): Row | undefined {
-    return this.#confirmed.get(refKey)?.row;
+    let row = this.#confirmed.get(refKey)?.row;
+    const mids = this.#overlayByPK.get(refKey);
+    if (!mids || mids.size === 0) return row;
+    for (const mid of [...mids].sort((a, b) => a - b)) {
+      for (const op of this.#ledger.get(mid) ?? []) {
+        if (op.refKey !== refKey) continue;
+        if (op.kind === 'delete') row = undefined;
+        else if (op.kind === 'set') row = op.row;
+        else row = row ? { ...row, ...op.row } : { ...op.row };
+      }
+    }
+    return row;
+  }
+
+  /**
+   * Record (or REPLACE) a mutation's optimistic ops and fold them into the source. Replacing
+   * handles Zero's re-invocation of the same mutation on optimistic→rebase identically. Only
+   * ops on hosted tables reach here; the caller filters.
+   */
+  applyOptimistic(mutationID: number, ops: readonly OptimisticOp[]): void {
+    const affected = new Map<string, Row>(); // refKey → pk (for re-derive)
+    const prev = this.#ledger.get(mutationID);
+    if (prev) {
+      for (const op of prev) {
+        affected.set(op.refKey, op.pk);
+        this.#overlayByPK.get(op.refKey)?.delete(mutationID);
+      }
+    }
+    const resolved: OverlayOp[] = ops.map((op) => {
+      const refKey = this.#refKey(op.table, this.#pkKey(op.table, op.row));
+      return { kind: op.kind, table: op.table, refKey, pk: this.#pkOf(op.table, op.row), row: op.row };
+    });
+    if (resolved.length > 0) this.#ledger.set(mutationID, resolved);
+    else this.#ledger.delete(mutationID);
+    for (const op of resolved) {
+      affected.set(op.refKey, op.pk);
+      const s = this.#overlayByPK.get(op.refKey) ?? new Set<number>();
+      s.add(mutationID);
+      this.#overlayByPK.set(op.refKey, s);
+    }
+    for (const [refKey, pk] of affected) {
+      this.#reconcileSource(refKey.slice(0, refKey.indexOf(' ')), refKey, pk);
+    }
+    this.flushAll();
+  }
+
+  /** Drop a mutation's overlay (retired on confirm-echo, or rejected) and revert those PKs. */
+  dropOptimistic(mutationID: number): void {
+    const ops = this.#ledger.get(mutationID);
+    if (!ops) return;
+    this.#ledger.delete(mutationID);
+    for (const op of ops) {
+      const s = this.#overlayByPK.get(op.refKey);
+      s?.delete(mutationID);
+      if (s && s.size === 0) this.#overlayByPK.delete(op.refKey);
+      this.#reconcileSource(op.table, op.refKey, op.pk);
+    }
+    this.flushAll();
   }
 
   /** Push the source toward the effective row for a PK: add / edit / remove as needed. */
