@@ -12,6 +12,8 @@ import type {
 import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { queryCacheActor, type CacheEntry, loadCacheEntryFromStorage } from '../machines/queryCacheMachine.js';
 import { consumeShadow } from '../utils/warmShadow.js';
+import { isSharedQuery } from '../sync/registry.js';
+import { useSyncEngineReady } from '../sync/useSharedQuery.js';
 import { useSelector } from '@xstate/react';
 import { useQuery } from './useQuery.js';
 import { useZero, useInstrumentation } from './useZero.js';
@@ -202,6 +204,11 @@ export function useCachedQuery<
     return { hash: fullQueryImpl.hash() as string, orderBy: extractedOrderBy };
   }, [query, zero.context, cursorEnabled]);
 
+  // A shared sync-engine query is hydrated by the SyncStore (via useSharedQuery), which is
+  // its single durable owner — the query cache holds its result in RAM only. So skip both
+  // the query-cache IDB persist (marked `ephemeral` on SET_KEY) and the lazy IDB/shadow load.
+  const isShared = useSyncEngineReady() && isSharedQuery(query.query.queryName);
+
   const cacheEntry = useSelector(queryCacheActor, state => {
     return hash ? state.context.cache.get(hash) : undefined;
   }) as CacheEntry<TReturn> | undefined;
@@ -209,7 +216,7 @@ export function useCachedQuery<
   // Lazy-load from IndexedDB on cache miss (entry was evicted or not hydrated)
   const idbLoadAttemptedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!hash || cacheEntry || idbLoadAttemptedRef.current === hash) return;
+    if (isShared || !hash || cacheEntry || idbLoadAttemptedRef.current === hash) return;
     idbLoadAttemptedRef.current = hash;
 
     void (async (): Promise<void> => {
@@ -243,7 +250,7 @@ export function useCachedQuery<
         lastUpdatedAt,
       });
     })();
-  }, [hash, cacheEntry, query, zero.context]);
+  }, [hash, cacheEntry, query, zero.context, isShared]);
 
   const hasCachedData = cacheEntry?.data?.[0] !== null && cacheEntry?.data?.[0] !== undefined;
   const lastUpdatedAt = cacheEntry?.lastUpdatedAt;
@@ -356,6 +363,7 @@ export function useCachedQuery<
           type: 'SET_KEY',
           hash,
           data: [mergedData, freshDetails],
+          ephemeral: isShared,
         });
       } else if (updatedAtEnabled) {
         // Delta sync: merge by updatedAt
@@ -375,6 +383,7 @@ export function useCachedQuery<
           hash,
           data: [mergedData, freshDetails],
           lastUpdatedAt: effectiveLastUpdatedAt,
+          ephemeral: isShared,
         });
       } else {
         // Default: just cache the fresh data
@@ -382,6 +391,7 @@ export function useCachedQuery<
           type: 'SET_KEY',
           hash,
           data: [freshData, freshDetails],
+          ephemeral: isShared,
         });
       }
     }
@@ -397,6 +407,7 @@ export function useCachedQuery<
     direction,
     orderBy,
     shouldEnableDelta,
+    isShared,
   ]);
 
   // Return based on mode

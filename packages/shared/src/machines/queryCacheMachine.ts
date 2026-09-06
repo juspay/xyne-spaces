@@ -42,6 +42,9 @@ export interface CacheEntry<T> {
   lastAccessedAt?: number;
   accessCount?: number;
   estimatedSize?: number;
+  /** RAM-only: skip IDB persistence. Set for shared sync-engine queries, whose durable
+   *  copy lives in the SyncStore — one owner per datum, no double-persist. */
+  ephemeral?: boolean;
 }
 
 export interface QueryCacheContext {
@@ -68,6 +71,7 @@ export type QueryCacheEvent =
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: QueryResult<any>;
       lastUpdatedAt?: number;
+      ephemeral?: boolean;
     }
   | {
       type: 'HYDRATE_CACHE';
@@ -148,6 +152,8 @@ export const queryCacheMachine = setup({
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         entry.lastUpdatedAt = resolvedLastUpdatedAt;
       }
+
+      if (event.ephemeral ?? existing?.ephemeral) entry.ephemeral = true;
 
       newCache.set(event.hash, entry);
 
@@ -633,6 +639,7 @@ export const setupQueryCachePersistence = (
     // The Map stores REFERENCES to objects the actor context already
     // holds (not copies), so marginal memory is key + pointer.
     cache.forEach((value, key) => {
+      if (value.ephemeral) return; // shared query — the SyncStore is its durable owner
       if (lastPersistedRefs.get(key) === value) return;
       lastPersistedRefs.set(key, value);
       storage.saveContextProperty(key, value).catch(() => {});
