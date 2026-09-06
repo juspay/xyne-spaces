@@ -153,6 +153,21 @@ export class IvmHost {
     onData(view.data as readonly Row[]);
   }
 
+  #onceSeq = 0;
+  /**
+   * Run a query ONCE against the host's current sources (the effective, confirmed+overlay
+   * rows) and return its result — used by the mutator union-read to resolve a hosted-table
+   * read that misses in Zero's store. Transient: the pipeline+view is discarded after.
+   */
+  runOnce(ast: any, format: Format): unknown {
+    const input = buildPipeline(ast, this.#delegate, `once:${(this.#onceSeq += 1)}`);
+    const view = new ArrayView(input, format, true, () => {});
+    view.flush();
+    const data = view.data;
+    view.destroy?.();
+    return data;
+  }
+
   /** Tear down a query's pipeline+view. Rows are retained until their refs drop to zero. */
   release(key: string): void {
     this.#views.get(key)?.view.destroy?.();

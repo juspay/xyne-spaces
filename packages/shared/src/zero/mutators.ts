@@ -1,4 +1,20 @@
-import { ReadonlyJSONValue, Transaction, defineMutators, defineMutator } from '@rocicorp/zero';
+import {
+  ReadonlyJSONValue,
+  Transaction,
+  defineMutators,
+  defineMutator as _defineMutator,
+} from '@rocicorp/zero';
+import { syncMutatorFn } from '../sync/mutatorSync.js';
+
+/**
+ * `defineMutator` shadowed to wrap every mutator's client tx with the sync engine's
+ * union-read + dual-write (see mutatorSync). Cast to the original signature so call-site
+ * types are unchanged; no-op on the server / before the engine initializes.
+ */
+const defineMutator = ((a: unknown, b?: unknown) =>
+  b === undefined
+    ? _defineMutator(syncMutatorFn(a as never))
+    : _defineMutator(a as never, syncMutatorFn(b as never))) as typeof _defineMutator;
 import {
   ChannelRole,
   ChannelType,

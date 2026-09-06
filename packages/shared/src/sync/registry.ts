@@ -54,3 +54,26 @@ export function tablesOfAst(ast: any): string[] {
   walk(ast);
   return [...found];
 }
+
+let hostedTablesCache: ReadonlySet<string> | undefined;
+/**
+ * The tables the sync engine hosts = every table any shared query's base AST touches. A
+ * mutator's optimistic writes to these are mirrored into the host, and its reads of them
+ * union with the host (so data that left Zero's store still resolves). Structural, so it's
+ * derived once with placeholder args.
+ */
+export function hostedTables(): ReadonlySet<string> {
+  if (hostedTablesCache) return hostedTablesCache;
+  const set = new Set<string>();
+  const ctx = { userID: '', workspaceId: '', role: '', orgRole: '', memberId: '' } as unknown as Context;
+  for (const name of SHARED_QUERY_NAMES) {
+    try {
+      const ast = resolveBaseAst(name, ctx, { channelId: '', isMember: true, limit: 1 });
+      if (ast) for (const t of tablesOfAst(ast)) set.add(t);
+    } catch {
+      /* a base that needs real args — skip; its tables just won't get optimism */
+    }
+  }
+  hostedTablesCache = set;
+  return set;
+}
