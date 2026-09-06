@@ -26,6 +26,7 @@ import { consume } from '#zql/ivm/stream.js';
 import { MemoryStorage } from '#zql/ivm/memory-storage.js';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import { schema } from '../zero/schema.js';
+import type { RowPut, RowKeyRef, SeededRow } from './store.js';
 
 export type Row = Record<string, ReadonlyJSONValue>;
 export type Format = { singular: boolean; relationships: Record<string, Format> };
@@ -69,10 +70,12 @@ interface ViewEntry {
 }
 
 /** A row leaves the source only when its ref count hits zero. `pk` is kept so the row
- *  can be located in the source for removal. */
+ *  can be located in the source for removal. `version` = the cookie `stateVersion` of the
+ *  last write applied to it (cross-stream apply-if-newer). */
 interface RowRef {
   count: number;
   pk: Row;
+  version?: string;
 }
 
 export class IvmHost {
@@ -128,20 +131,66 @@ export class IvmHost {
     }
   }
 
-  /** Apply a fan-out snapshot/delta for one instance, then flush all views once. */
-  applyDelta(instanceKey: string, upserts: readonly WireRow[], deleteKeys: readonly string[]): void {
-    for (const u of upserts) this.#upsert(instanceKey, u.tableName, u.row);
+  /** Apply a fan-out delta for one instance, then flush all views once. All upserts in the
+   *  frame share its `version` (cookie stateVersion) for cross-stream apply-if-newer. */
+  applyDelta(
+    instanceKey: string,
+    upserts: readonly WireRow[],
+    deleteKeys: readonly string[],
+    version?: string,
+  ): void {
+    for (const u of upserts) this.#upsert(instanceKey, u.tableName, u.row, version);
     for (const rowKey of deleteKeys) this.#deleteByRowKey(instanceKey, rowKey);
     this.flushAll();
   }
 
+  /**
+   * Seed an instance's persisted rows into the source on reload, each carrying its own
+   * stored `version` so the RAM apply-if-newer guard starts correct — a later resume replay
+   * of an older shared-row version (from a behind instance) is then skipped, not applied.
+   */
+  applySeed(instanceKey: string, seeds: readonly SeededRow[]): void {
+    for (const s of seeds) this.#upsert(instanceKey, s.tableName, s.row, s.version);
+    this.flushAll();
+  }
+
+  /**
+   * Apply an AUTHORITATIVE snapshot for one instance: clear-then-apply. Rows this instance
+   * previously held that aren't in the snapshot are dropped (deletes-while-away), so a
+   * hydration / trim-fallback can't leave stale rows. All rows share the snapshot `version`.
+   * One flush.
+   */
+  applySnapshot(instanceKey: string, rows: readonly WireRow[], version?: string): void {
+    this.#clear(instanceKey);
+    for (const u of rows) this.#upsert(instanceKey, u.tableName, u.row, version);
+    this.flushAll();
+  }
+
+  /** The persistence key of a wire row: `{ table, pk }` with `pk` = the IVM's PK string. */
+  rowPut(wire: WireRow): RowPut {
+    return { table: wire.tableName, pk: this.#pkKey(wire.tableName, wire.row), row: wire.row };
+  }
+
+  /** Parse a wire delete key (`${table}:${pkString}`) into a persistence key ref. */
+  keyRef(rowKey: string): RowKeyRef | null {
+    const i = rowKey.indexOf(':');
+    if (i < 0) return null;
+    return { table: rowKey.slice(0, i), pk: rowKey.slice(i + 1) };
+  }
+
   /** Drop everything an instance referenced (on unsubscribe); removes rows no one else holds. */
   dropInstance(instanceKey: string): void {
+    if (!this.#instanceRefs.has(instanceKey)) return;
+    this.#clear(instanceKey);
+    this.flushAll();
+  }
+
+  /** Deref all of an instance's rows and forget its membership. Does NOT flush (caller does). */
+  #clear(instanceKey: string): void {
     const held = this.#instanceRefs.get(instanceKey);
     if (!held) return;
     for (const refKey of held) this.#deref(refKey);
     this.#instanceRefs.delete(instanceKey);
-    this.flushAll();
   }
 
   #pkFields(table: string): readonly string[] {
@@ -162,12 +211,25 @@ export class IvmHost {
     return `${table} ${pkKey}`;
   }
 
-  #upsert(instanceKey: string, table: string, row: Row): void {
-    const src = this.source(table);
-    const old = src.data.get(row) as Row | undefined;
-    if (old) consume(src.push(makeSourceChangeEdit(row, old)));
-    else consume(src.push(makeSourceChangeAdd(row)));
-    this.#addRef(instanceKey, this.#refKey(table, this.#pkKey(table, row)), () => this.#pkOf(table, row));
+  #upsert(instanceKey: string, table: string, row: Row, version?: string): void {
+    const refKey = this.#refKey(table, this.#pkKey(table, row));
+    const existing = this.#refs.get(refKey);
+    // Cross-stream apply-if-newer: a stale replay (older cookie stateVersion) from one
+    // instance's stream must not clobber a shared row another instance advanced. Skip the
+    // source write when strictly older, but STILL take the ref (membership is independent).
+    const stale =
+      existing?.version !== undefined && version !== undefined && version < existing.version;
+    if (!stale) {
+      const src = this.source(table);
+      const old = src.data.get(row) as Row | undefined;
+      if (old) consume(src.push(makeSourceChangeEdit(row, old)));
+      else consume(src.push(makeSourceChangeAdd(row)));
+    }
+    this.#addRef(instanceKey, refKey, () => this.#pkOf(table, row));
+    if (!stale && version !== undefined) {
+      const ref = this.#refs.get(refKey);
+      if (ref) ref.version = version;
+    }
   }
 
   #deleteByRowKey(instanceKey: string, rowKey: string): void {

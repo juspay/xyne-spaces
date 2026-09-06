@@ -16,7 +16,7 @@ import { Event } from '../logger/events.js';
 import { useInstrumentation, useZero } from './useZero.js';
 import { isSharedQuery } from '../sync/registry.js';
 import { useSharedQuery, useSyncEngineReady } from '../sync/useSharedQuery.js';
-import { obsEmit } from '../sync/obs.js';
+import { obsEmit, isShadow } from '../sync/obs.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
 import { useFallbackQuery } from './useFallbackQuery.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
@@ -330,6 +330,9 @@ export function useQuery<
     () => syncReady && isSharedQuery(query.query.queryName),
     [syncReady, query.query.queryName],
   );
+  // Shadow-diff: keep Zero running alongside the sync result and DISPLAY Zero (known-good),
+  // so we can measure where the sync result deviates without corrupting the UI.
+  const shadow = isShared && isShadow();
   const sharedHash = useMemo(() => {
     if (!isShared) return undefined;
     try {
@@ -362,15 +365,53 @@ export function useQuery<
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
   }, [queryName, argsKey, isEnabled, isShared]);
 
-  // Disable Zero for shared queries — the sync engine serves them.
+  // Disable Zero for shared queries — the sync engine serves them. In shadow mode keep
+  // Zero enabled (it's displayed and used as the comparison baseline).
   const effectiveOptions = useMemo(() => {
-    if (!isShared) return options;
+    if (!isShared || shadow) return options;
     return typeof options === 'object' && options !== null
       ? { ...options, enabled: false }
       : { enabled: false };
-  }, [isShared, options]);
+  }, [isShared, shadow, options]);
   const result = useQueryWithFallback(query, effectiveOptions);
   const [data, details] = result;
+
+  // Shadow-diff: once BOTH the Zero result (`result`) and the sync result (`sharedResult`)
+  // are `complete`, compare their data — but debounced, so a live delta that lands on one
+  // a beat before the other doesn't read as a divergence. A diff that survives the settle
+  // is a real deviation and is logged to the obs.
+  const shadowTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (!shadow || !sharedResult) return;
+    const [, zDetails] = result;
+    const [, sDetails] = sharedResult;
+    if (zDetails.type !== 'complete' || sDetails.type !== 'complete') return;
+    if (shadowTimer.current) clearTimeout(shadowTimer.current);
+    shadowTimer.current = setTimeout(() => {
+      const [zData] = result;
+      const [sData] = sharedResult;
+      const zeroLen = Array.isArray(zData) ? zData.length : zData == null ? 0 : 1;
+      const syncLen = Array.isArray(sData) ? sData.length : sData == null ? 0 : 1;
+      let match = zeroLen === syncLen;
+      if (match) {
+        try {
+          match = shadowStable(zData) === shadowStable(sData);
+        } catch {
+          match = false;
+        }
+      }
+      obsEmit('shadow-diff', {
+        queryName,
+        match,
+        zeroLen,
+        syncLen,
+        ...(match ? {} : { zeroIds: shadowIds(zData), syncIds: shadowIds(sData) }),
+      });
+    }, 600);
+    return () => {
+      if (shadowTimer.current) clearTimeout(shadowTimer.current);
+    };
+  }, [shadow, result, sharedResult, queryName]);
 
   useEffect(() => {
     if (details.type === 'complete' && !hasLoggedCompleteRef.current) {
@@ -428,8 +469,9 @@ export function useQuery<
   }, [hasPending, triggerRerender, data, shouldDecrypt]);
 
   // Shared queries return the hosted-IVM result directly (Zero disabled above).
-  // Decryption of shared rows is a follow-up.
-  if (isShared) return sharedResult ?? result;
+  // Decryption of shared rows is a follow-up. In shadow mode we DISPLAY Zero (baseline)
+  // and only observe the sync result via the diff above.
+  if (isShared) return shadow ? result : sharedResult ?? result;
 
   if (!shouldDecrypt) {
     return result;
@@ -538,4 +580,20 @@ export function useRawQuery<
     hasPending && stableDecryptedRef.current !== null ? stableDecryptedRef.current : decryptedData;
 
   return [outputData, details] as unknown as QueryResult<TReturn>;
+}
+
+/** Stable JSON of a query result for shadow-diff equality (object keys sorted; array order
+ *  preserved since result order is significant). */
+function shadowStable(value: unknown): string {
+  return JSON.stringify(value, (_k, v) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : v,
+  );
+}
+
+/** Top-level row ids of a query result, for reporting which rows diverged. */
+function shadowIds(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((r) => (r && typeof r === 'object' ? (r as Record<string, unknown>).id : r));
 }

@@ -10,6 +10,7 @@
  */
 import { IvmHost } from './ivmHost.js';
 import { SyncClient, type SyncTransport } from './syncClient.js';
+import { noopSyncStore, type SyncStore } from './store.js';
 
 let host: IvmHost | null = null;
 let client: SyncClient | null = null;
@@ -17,10 +18,10 @@ let ready = false;
 const readyListeners = new Set<() => void>();
 
 /** Initialize the client sync engine with the app's socket transport. Idempotent. */
-export function initSyncEngine(transport: SyncTransport): void {
+export function initSyncEngine(transport: SyncTransport, store: SyncStore = noopSyncStore): void {
   if (client) return;
   host = new IvmHost();
-  client = new SyncClient(host, transport);
+  client = new SyncClient(host, transport, store);
   // NOTE: don't call client.start() here — this runs from a mount effect that can fire
   // before the socket exists, and the dashboard transport's `on` no-ops on a null socket.
   // start() is called lazily on the first subscribe (socket present by then); its

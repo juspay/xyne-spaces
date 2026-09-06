@@ -8,6 +8,12 @@ import { logger, Event as LogEvent } from '../utils/logger';
 
 const DB_PREFIX = 'xyne-state-machine';
 const STORE_NAME = 'state';
+/** DB version — bump when adding object stores below (onupgradeneeded creates missing ones). */
+const DB_VERSION = 2;
+/** Sync-engine persistence stores (see @xyne/shared/sync SyncStore). */
+export const SYNC_ROWS_STORE = 'sync_rows'; // keyPath [table, pk] → { table, pk, row, version }
+export const SYNC_MEMBERS_STORE = 'sync_members'; // keyPath [inst, table, pk], index byRow [table, pk]
+export const SYNC_META_STORE = 'sync_meta'; // keyPath inst → { inst, offset, lastActiveAt }
 const SCHEMA_VERSION_KEY = '_schemaVersion';
 const ENCRYPTION_KEYS_DB_NAME = 'xyne-encryption-keys';
 
@@ -55,14 +61,28 @@ class IndexedDBService {
   private async openDatabase(userId: string, schemaVersion: string): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const dbName = this.getDatabaseName(userId);
-      const request = indexedDB.open(dbName, 1);
+      const request = indexedDB.open(dbName, DB_VERSION);
 
       request.onerror = () => {
         reject(new Error('Failed to open IndexedDB'));
       };
 
+      request.onblocked = () => {
+        // Another tab holds an older version open; the upgrade waits for it. Surface it.
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String(`IndexedDB upgrade blocked by another tab for ${dbName}`),
+        });
+      };
+
       request.onsuccess = async () => {
         const db = request.result;
+
+        // Let a newer-version open in another tab proceed by closing this connection.
+        db.onversionchange = () => {
+          db.close();
+          this.db = null;
+        };
 
         try {
           const storedVersion = await this.getStoredSchemaVersion(db);
@@ -83,6 +103,20 @@ class IndexedDBService {
         // Create object store if it doesn't exist
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME);
+        }
+        // Sync-engine persistence stores (added in DB_VERSION 2). Rows are single-copy,
+        // members is the persisted CVR (with a reverse index for the last-member check).
+        if (!db.objectStoreNames.contains(SYNC_ROWS_STORE)) {
+          db.createObjectStore(SYNC_ROWS_STORE, { keyPath: ['table', 'pk'] });
+        }
+        if (!db.objectStoreNames.contains(SYNC_MEMBERS_STORE)) {
+          const members = db.createObjectStore(SYNC_MEMBERS_STORE, {
+            keyPath: ['inst', 'table', 'pk'],
+          });
+          members.createIndex('byRow', ['table', 'pk'], { unique: false });
+        }
+        if (!db.objectStoreNames.contains(SYNC_META_STORE)) {
+          db.createObjectStore(SYNC_META_STORE, { keyPath: 'inst' });
         }
       };
     });
@@ -230,6 +264,11 @@ class IndexedDBService {
    */
   isInitialized(): boolean {
     return this.db !== null;
+  }
+
+  /** The raw DB handle (for the sync-engine SyncStore, which owns its own object stores). */
+  getDb(): IDBDatabase | null {
+    return this.db;
   }
 
   /**

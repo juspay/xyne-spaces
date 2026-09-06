@@ -10,11 +10,8 @@
  */
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import type { IvmHost, WireRow } from './ivmHost.js';
+import type { SyncStore, RowKeyRef } from './store.js';
 import { obsEmit } from './obs.js';
-import { loadPersistedOffsets, savePersistedOffsets } from './persistence.js';
-
-/** Debounce for persisting offsets — a crash-recovery cache, not a source of truth. */
-const OFFSET_PERSIST_DEBOUNCE_MS = 1000;
 
 /**
  * Minimal transport the host app adapts from its existing socket. `emit`'s optional
@@ -53,17 +50,23 @@ interface SubscribePayload {
 interface SubscribeAck {
   instanceKey: string;
 }
-/** Server → client. `offset` = the op-stream id this frame brings the client current to. */
+/**
+ * Server → client. `offset` = the op-stream id this frame brings the client current to
+ * (per-stream resume cursor). `version` = the Zero cookie `stateVersion` the rows reflect
+ * (the logical change clock) — used for cross-stream apply-if-newer, NOT for resume.
+ */
 interface SnapshotMsg {
   instanceKey: string;
   rows: WireRow[];
   offset?: string;
+  version?: string;
 }
 interface DeltaMsg {
   instanceKey: string;
   upserts?: WireRow[];
   deletes?: string[];
   offset?: string;
+  version?: string;
 }
 interface RevokeMsg {
   instanceKey: string;
@@ -72,9 +75,18 @@ interface RevokeMsg {
 const subKey = (queryName: string, args: ReadonlyJSONValue[]): string =>
   `${queryName}:${JSON.stringify(args)}`;
 
+/**
+ * The content stamp is the cookie `stateVersion`; a `:minorVersion` suffix is per-CVR
+ * config-only (not a data-change clock), so strip it before comparing. Equal `stateVersion`
+ * = same DB state → apply-if-newer uses `>=` so ties accept.
+ */
+const contentVersion = (v: string | undefined): string | undefined =>
+  v === undefined ? undefined : v.split(':', 1)[0];
+
 export class SyncClient {
   readonly #host: IvmHost;
   readonly #transport: SyncTransport;
+  readonly #store: SyncStore;
   /** subKey → active subscription (reference-counted, with its server instanceKey). */
   readonly #subs = new Map<
     string,
@@ -90,16 +102,13 @@ export class SyncClient {
    * survives a socket reconnect (rows are still in the IVM) but not a reload (rows gone
    * too — a fresh snapshot is correct there). Kept until the instance is dropped/revoked.
    */
+  /** subKey → last applied op-stream offset (drives `sinceOffset`). Keyed by subKey, which
+   *  is client-known pre-ack, so a reload can look it up before the server assigns an
+   *  instanceKey. Set live from frames and on reload from the persisted `meta`. */
   readonly #offsets = new Map<string, string>();
-  /**
-   * Persisted `subKey → offset` map (survives reload via the StorageAdapter). DORMANT for
-   * now — nothing promotes it into `#offsets`, so reload still snapshots. The reload
-   * flatten-seed step will consume it once it can seed the source. Kept current so it's
-   * ready then. (Distinct from `#offsets`, which is keyed by instanceKey and drives the
-   * in-memory socket-reconnect resume.)
-   */
-  #persistedOffsets: Record<string, string> = {};
-  #offsetPersistTimer: ReturnType<typeof setTimeout> | undefined;
+  /** server instanceKey → our subKey, so incoming frames route to the subKey everything
+   *  else (host, store, offsets, hydration) is keyed by. Established on the subscribe ack. */
+  readonly #instToSub = new Map<string, string>();
   #started = false;
   /**
    * Whether the server has signalled this connection is initialized (`sync:ready`).
@@ -129,9 +138,10 @@ export class SyncClient {
     return () => set.delete(onChange);
   }
 
-  constructor(host: IvmHost, transport: SyncTransport) {
+  constructor(host: IvmHost, transport: SyncTransport, store: SyncStore) {
     this.#host = host;
     this.#transport = transport;
+    this.#store = store;
   }
 
   /** Attach protocol listeners once. Idempotent. Call at engine init so `sync:ready`
@@ -139,13 +149,6 @@ export class SyncClient {
   start(): void {
     if (this.#started) return;
     this.#started = true;
-    // Restore persisted offsets (merge without clobbering any advanced this session).
-    void loadPersistedOffsets().then((saved) => {
-      for (const k in saved) if (!(k in this.#persistedOffsets)) this.#persistedOffsets[k] = saved[k];
-    });
-    if (typeof window !== 'undefined') {
-      window.addEventListener('pagehide', this.#flushOffsets);
-    }
     this.#transport.on<SnapshotMsg>(EVT.snapshot, this.#onSnapshot);
     this.#transport.on<DeltaMsg>(EVT.delta, this.#onDelta);
     this.#transport.on<RevokeMsg>(EVT.revoke, this.#onRevoke);
@@ -164,10 +167,44 @@ export class SyncClient {
     }
     const sub = { queryName, args, refs: 1, instanceKey: undefined as string | undefined };
     this.#subs.set(key, sub);
-    // Declarative: only send now if the connection is already initialized. Otherwise the
-    // send happens on `sync:ready` (initial connect or reconnect), so we never emit into a
-    // socket that isn't connected yet.
-    if (this.#connectionReady) this.#send(key);
+    void this.#hydrateAndSend(key);
+  }
+
+  /**
+   * Look up the resume offset (fast, a single `meta` read) and send `sinceOffset` — the
+   * send needs only the offset, not the rows, so a channel-switch (already connected)
+   * resumes instead of snapshotting. Row seeding runs in PARALLEL for instant paint; the
+   * local seed completes well before the network resume deltas arrive, so they apply on
+   * top of the seeded base. On a fresh reload the connection isn't ready yet, so the send
+   * happens on `sync:ready` — by then both the offset and the seed have run.
+   */
+  async #hydrateAndSend(key: string): Promise<void> {
+    try {
+      const offset = await this.#store.loadOffset(key);
+      if (offset) this.#offsets.set(key, offset);
+    } catch {
+      // best-effort — subscribe fresh (snapshot) on failure
+    }
+    if (this.#connectionReady && this.#subs.has(key)) this.#send(key);
+    void this.#seedFromStore(key);
+  }
+
+  /** Load an instance's persisted rows + offset into the IVM and mark it hydrated (paint). */
+  async #seedFromStore(key: string): Promise<void> {
+    try {
+      const persisted = await this.#store.loadInstance(key);
+      if (!persisted || !this.#subs.has(key)) return;
+      if (persisted.rows.length > 0) this.#host.applySeed(key, persisted.rows);
+      if (persisted.offset) this.#offsets.set(key, persisted.offset);
+      // Instant paint from the persisted base — this is what flips `complete` on reload,
+      // so a resume (which delivers no snapshot) still hydrates. No `sync:current` needed.
+      if (!this.#hydrated.has(key)) {
+        this.#hydrated.add(key);
+        this.#hydrationListeners.get(key)?.forEach((cb) => cb());
+      }
+    } catch {
+      // Seed is best-effort; on failure we simply subscribe fresh (server snapshots).
+    }
   }
 
   /** Drop a reference; unsubscribes and releases the instance's rows on the last one. */
@@ -179,21 +216,21 @@ export class SyncClient {
     if (entry.refs > 0) return;
     this.#subs.delete(key);
     this.#hydrated.delete(key);
-    delete this.#persistedOffsets[key];
-    this.#scheduleOffsetPersist();
     obsEmit('client-ws', { dir: 'up', event: 'unsubscribe', queryName, instanceKey: entry.instanceKey });
     this.#transport.emit<SubscribePayload>(EVT.unsubscribe, { queryName, args });
-    if (entry.instanceKey) {
-      this.#offsets.delete(entry.instanceKey);
-      this.#host.dropInstance(entry.instanceKey);
-    }
+    // Everything (host rows, offset) is keyed by subKey; the seed may have populated the
+    // host even before an ack. Disk (SyncStore) is intentionally KEPT — eviction is
+    // RAM-only, so a revisit resumes.
+    this.#offsets.delete(key);
+    this.#host.dropInstance(key);
+    if (entry.instanceKey) this.#instToSub.delete(entry.instanceKey);
   }
 
   /** Emit a subscribe and record the instanceKey the server replies with. */
   #send(key: string): void {
     const sub = this.#subs.get(key);
     if (!sub) return;
-    const sinceOffset = sub.instanceKey ? this.#offsets.get(sub.instanceKey) : undefined;
+    const sinceOffset = this.#offsets.get(key);
     obsEmit('client-ws', { dir: 'up', event: 'subscribe', queryName: sub.queryName, sinceOffset });
     this.#transport.emit<SubscribePayload, SubscribeAck>(
       EVT.subscribe,
@@ -201,6 +238,7 @@ export class SyncClient {
       (resp) => {
         const current = this.#subs.get(key);
         if (current) current.instanceKey = resp.instanceKey;
+        this.#instToSub.set(resp.instanceKey, key);
         obsEmit('client-ws', {
           dir: 'down',
           event: 'ack',
@@ -227,54 +265,26 @@ export class SyncClient {
     this.#connectionReady = false;
   };
 
-  /** The subKey an instance is subscribed under (for keying its persisted offset). */
-  #subKeyOf(instanceKey: string): string | undefined {
-    for (const [key, sub] of this.#subs) if (sub.instanceKey === instanceKey) return key;
-    return undefined;
-  }
-
-  /** Record an instance's latest offset in the persisted (reload) map + schedule a save. */
-  #recordOffset(instanceKey: string, offset: string): void {
-    const key = this.#subKeyOf(instanceKey);
-    if (!key) return;
-    this.#persistedOffsets[key] = offset;
-    this.#scheduleOffsetPersist();
-  }
-
-  #scheduleOffsetPersist(): void {
-    if (this.#offsetPersistTimer) return;
-    this.#offsetPersistTimer = setTimeout(() => {
-      this.#offsetPersistTimer = undefined;
-      savePersistedOffsets(this.#persistedOffsets);
-    }, OFFSET_PERSIST_DEBOUNCE_MS);
-  }
-
-  readonly #flushOffsets = (): void => {
-    if (this.#offsetPersistTimer) {
-      clearTimeout(this.#offsetPersistTimer);
-      this.#offsetPersistTimer = undefined;
-    }
-    savePersistedOffsets(this.#persistedOffsets);
-  };
-
   readonly #onSnapshot = (msg: SnapshotMsg): void => {
+    const key = this.#instToSub.get(msg.instanceKey);
+    if (!key) return;
     obsEmit('client-ws', {
       dir: 'down',
       event: 'snapshot',
       instanceKey: msg.instanceKey,
       rows: msg.rows?.length ?? 0,
     });
-    this.#host.applyDelta(msg.instanceKey, msg.rows ?? [], []);
-    if (msg.offset) {
-      this.#offsets.set(msg.instanceKey, msg.offset);
-      this.#recordOffset(msg.instanceKey, msg.offset);
-    }
-    // Mark the subscription(s) for this instance hydrated (a query becomes `complete`).
-    for (const [key, sub] of this.#subs) {
-      if (sub.instanceKey === msg.instanceKey && !this.#hydrated.has(key)) {
-        this.#hydrated.add(key);
-        this.#hydrationListeners.get(key)?.forEach((cb) => cb());
-      }
+    const rows = msg.rows ?? [];
+    const version = contentVersion(msg.version);
+    // Authoritative: clear-then-apply in RAM and on disk (drops deletes-while-away).
+    this.#host.applySnapshot(key, rows, version);
+    void this.#store
+      .applySnapshot(key, rows.map((r) => this.#host.rowPut(r)), msg.offset, version)
+      .catch(() => {});
+    if (msg.offset) this.#offsets.set(key, msg.offset);
+    if (!this.#hydrated.has(key)) {
+      this.#hydrated.add(key);
+      this.#hydrationListeners.get(key)?.forEach((cb) => cb());
     }
   };
 
@@ -286,21 +296,27 @@ export class SyncClient {
       upserts: msg.upserts?.length ?? 0,
       deletes: msg.deletes?.length ?? 0,
     });
-    this.#host.applyDelta(msg.instanceKey, msg.upserts ?? [], msg.deletes ?? []);
-    if (msg.offset) {
-      this.#offsets.set(msg.instanceKey, msg.offset);
-      this.#recordOffset(msg.instanceKey, msg.offset);
-    }
+    const key = this.#instToSub.get(msg.instanceKey);
+    if (!key) return;
+    const upserts = msg.upserts ?? [];
+    const deletes = msg.deletes ?? [];
+    const version = contentVersion(msg.version);
+    this.#host.applyDelta(key, upserts, deletes, version);
+    const puts = upserts.map((r) => this.#host.rowPut(r));
+    const dels = deletes
+      .map((k) => this.#host.keyRef(k))
+      .filter((x): x is RowKeyRef => x !== null);
+    void this.#store.applyDelta(key, puts, dels, msg.offset, version).catch(() => {});
+    if (msg.offset) this.#offsets.set(key, msg.offset);
   };
 
   readonly #onRevoke = (msg: RevokeMsg): void => {
     obsEmit('client-ws', { dir: 'down', event: 'revoke', instanceKey: msg.instanceKey });
-    const subKey = this.#subKeyOf(msg.instanceKey);
-    if (subKey) {
-      delete this.#persistedOffsets[subKey];
-      this.#scheduleOffsetPersist();
-    }
-    this.#offsets.delete(msg.instanceKey);
-    this.#host.dropInstance(msg.instanceKey);
+    const key = this.#instToSub.get(msg.instanceKey);
+    if (!key) return;
+    this.#offsets.delete(key);
+    this.#host.dropInstance(key);
+    // Access lost → drop the persisted copy too (the one place disk is evicted).
+    void this.#store.dropInstance(key).catch(() => {});
   };
 }

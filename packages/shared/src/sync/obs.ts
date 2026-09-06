@@ -6,10 +6,24 @@
  * injected. Inert until configured; fire-and-forget, never throws into a caller.
  */
 let sink: string | null = null;
+let shadow = false;
 
 /** Point the client obs tap at a collector `/ingest` URL (or `null` to disable). */
 export function configureObs(url: string | null): void {
   sink = url;
+}
+
+/**
+ * Shadow-diff mode: when on, a shared query ALSO runs the real Zero query; Zero is
+ * displayed (known-good), the sync result is observed. We only compare once BOTH results
+ * are `complete` and settled (debounced) — during loading they legitimately differ — and
+ * log a divergence only if the data still differs then. Purely diagnostic; off normally.
+ */
+export function configureShadow(on: boolean): void {
+  shadow = on;
+}
+export function isShadow(): boolean {
+  return shadow;
 }
 
 export function obsEmit(kind: string, data: Record<string, unknown>): void {

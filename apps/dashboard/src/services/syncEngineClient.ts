@@ -7,16 +7,20 @@
  * Opt-in via `VITE_ENABLE_SYNC_ENGINE=true` (must match the backend's ENABLE_SYNC_ENGINE);
  * when off, shared queries fall back to Zero unchanged.
  */
-import { initSyncEngine, configureObs, type SyncTransport } from '@xyne/shared/sync';
+import { initSyncEngine, configureObs, configureShadow, type SyncTransport } from '@xyne/shared/sync';
 import { websocketService } from './clients/socketClient';
+import { idbSyncStore } from './syncStore';
 
 const ENABLED = import.meta.env['VITE_ENABLE_SYNC_ENGINE'] === 'true';
 /** Dev-only: point the client obs tap at the local collector (scratchpad/obs). */
 const OBS_URL = import.meta.env['VITE_SYNC_OBS_URL'] as string | undefined;
+/** Dev-only: shadow-diff — display Zero, observe sync, log divergences. */
+const SHADOW = import.meta.env['VITE_SYNC_SHADOW'] === 'true';
 
 export function startSyncEngineClient(): void {
   if (!ENABLED) return;
   if (OBS_URL) configureObs(OBS_URL);
+  if (SHADOW) configureShadow(true);
 
   const transport: SyncTransport = {
     emit<P, A = void>(event: string, payload: P, ack?: (response: A) => void): void {
@@ -37,5 +41,5 @@ export function startSyncEngineClient(): void {
     },
   };
 
-  initSyncEngine(transport);
+  initSyncEngine(transport, idbSyncStore);
 }
