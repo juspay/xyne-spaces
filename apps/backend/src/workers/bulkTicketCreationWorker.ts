@@ -214,7 +214,7 @@ class BulkTicketCreationWorker {
         sourceId: data.sourceMessageId!,
         sourceType: (data.sourceType as SurfaceAreaType) ?? SurfaceAreaType.MESSAGE,
         nudgeKind: NudgeKind.BULK_TICKET_CREATION_FAILED,
-        projectId: data.projectId!,
+        workspaceId: data.parentWorkspaceId,
         priority: 'high',
         candidates: [
           {

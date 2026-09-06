@@ -15,7 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { TextAlignJustify, FileSpreadsheet, Archive, Copy, List } from 'lucide-react';
+import { TextAlignJustify, FileSpreadsheet, Archive, List } from 'lucide-react';
 import {
   PlusDefault as Plus,
   FilterHorizontal as Settings2,
