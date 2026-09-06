@@ -37,7 +37,11 @@ interface ClientSub {
   grantByTable: Map<string, string>;
   /** Client's last applied op-stream offset — resume from here instead of a full snapshot. */
   sinceOffset?: string;
+  /** Gate passed (ACL-admitted). */
   admitted: boolean;
+  /** Snapshot/resume delivered — only then does the client receive live deltas. A client
+   *  is admitted-but-not-hydrated while it waits for the instance to materialize. */
+  hydrated: boolean;
 }
 
 /**
@@ -68,8 +72,8 @@ export class Fanout {
     this.#tail = null;
   }
 
-  async addClient(sub: Omit<ClientSub, 'admitted'>): Promise<void> {
-    const client: ClientSub = { ...sub, admitted: false };
+  async addClient(sub: Omit<ClientSub, 'admitted' | 'hydrated'>): Promise<void> {
+    const client: ClientSub = { ...sub, admitted: false, hydrated: false };
     this.#setAdd(this.#dataSubs, client.dataInstanceKey, client);
     await this.#ensureCursorHead(client.dataInstanceKey);
     for (const grantKey of client.grantByTable.values()) {
@@ -110,10 +114,24 @@ export class Fanout {
       (table) => grantRows.get(table) ?? [],
     );
     if (admitted && !client.admitted) {
-      await this.#hydrate(client);
+      client.admitted = true;
+      await this.#tryHydrate(client);
     } else if (!admitted && client.admitted) {
       client.admitted = false;
+      client.hydrated = false;
       this.#emit(client, 'sync:revoke', { instanceKey: client.dataInstanceKey });
+    }
+  }
+
+  /**
+   * Send the snapshot/resume IF the instance has materialized (zero-cache "got" it — even
+   * empty). Otherwise the client stays admitted-but-not-hydrated and the dispatch loop
+   * hydrates it the moment the instance's hydrated marker lands. This is what prevents the
+   * cold-instance premature-empty snapshot.
+   */
+  async #tryHydrate(client: ClientSub): Promise<void> {
+    if (await this.#store.isHydrated(client.dataInstanceKey)) {
+      await this.#hydrate(client);
     }
   }
 
@@ -133,13 +151,14 @@ export class Fanout {
         const diffs = await this.#store.readSince(instanceKey, client.sinceOffset);
         // A `cleared` op in the range = a reset — can't resume across it, fall back to snapshot.
         if (!diffs.some((d) => d.diff.cleared)) {
-          client.admitted = true;
-          for (const { id, diff } of diffs) {
+          client.hydrated = true;
+          for (const { id, version, diff } of diffs) {
             this.#emit(client, 'sync:delta', {
               instanceKey,
               upserts: diff.upserts,
               deletes: diff.deletes,
               offset: id,
+              version,
             });
           }
           obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: diffs.length });
@@ -147,10 +166,10 @@ export class Fanout {
         }
       }
     }
-    const head = await this.#store.head(instanceKey);
+    const { id: head, version } = await this.#store.headWithVersion(instanceKey);
     const rows = await this.#store.snapshot(instanceKey);
-    client.admitted = true;
-    this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head });
+    client.hydrated = true;
+    this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head, version });
   }
 
   #emit(client: ClientSub, event: string, payload: unknown): void {
@@ -194,23 +213,27 @@ export class Fanout {
   async #dispatch(key: string, id: string, fields: string[]): Promise<void> {
     const diffIdx = fields.indexOf('diff');
     const diff = diffIdx >= 0 ? JSON.parse(fields[diffIdx + 1]) : undefined;
+    const vIdx = fields.indexOf('v');
+    const version = vIdx >= 0 ? fields[vIdx + 1] : undefined;
     const instanceKey = instanceOfStream(key);
 
     const dataSubs = this.#dataSubs.get(instanceKey);
     if (dataSubs) {
-      const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id };
-      let admittedCount = 0;
-      for (const client of dataSubs) {
-        if (client.admitted) {
-          admittedCount += 1;
-          this.#emit(client, 'sync:delta', delta);
-        }
+      // Clients already live get this entry as a delta. Deferred clients (admitted, waiting
+      // on hydration) instead snapshot to the CURRENT state — which already includes this
+      // entry — so they must not also receive it as a delta.
+      const liveBefore = [...dataSubs].filter((c) => c.admitted && c.hydrated);
+      const deferred = [...dataSubs].filter((c) => c.admitted && !c.hydrated);
+      if (deferred.length > 0 && !diff?.cleared) {
+        for (const c of deferred) await this.#hydrate(c);
       }
+      const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id, version };
+      for (const client of liveBefore) this.#emit(client, 'sync:delta', delta);
       obsEmit('stream-diff', {
         instanceKey,
         upserts: delta.upserts.length,
         deletes: delta.deletes.length,
-        clients: admittedCount,
+        clients: liveBefore.length,
         subscribers: dataSubs.size,
       });
     }

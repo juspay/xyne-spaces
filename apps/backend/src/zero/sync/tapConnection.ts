@@ -54,7 +54,8 @@ export class PackConnection {
   readonly #opts: PackConnectionOptions;
   readonly #demux: PackDemux;
 
-  readonly #clientID: string;
+  #clientID: string;
+  #zeroClientGroupID: string;
   readonly #profileID: string;
 
   /** Target desired set (instanceKey → entry). */
@@ -73,11 +74,16 @@ export class PackConnection {
   #reconnectTimer: NodeJS.Timeout | null = null;
 
   readonly #pending = new Map<string, RowPatchOp[]>();
+  /** Accumulated `gotQueriesPatch` ops per in-flight poke (hash = instanceKey). */
+  readonly #pendingGot = new Map<string, { op: string; hash: string }[]>();
+  /** Instances already marked hydrated (gotQueriesPatch is a diff — mark once). */
+  readonly #got = new Set<string>();
 
   constructor(opts: PackConnectionOptions) {
     this.#opts = opts;
     this.#demux = new PackDemux(opts.meta, opts.pkFields);
-    this.#clientID = `${opts.clientGroupID}-c`;
+    this.#zeroClientGroupID = opts.clientGroupID;
+    this.#clientID = `${opts.clientGroupID}-c-${randomUUID()}`;
     this.#profileID = `${opts.clientGroupID}-p`;
   }
 
@@ -93,6 +99,7 @@ export class PackConnection {
     if (!this.#desired.has(instanceKey)) return;
     const { hash } = this.#desired.get(instanceKey)!;
     this.#desired.delete(instanceKey);
+    this.#got.delete(instanceKey); // a re-add must re-observe gotQueriesPatch to re-hydrate
     this.#demux.removeInstance(instanceKey, partitionValue);
     if (this.#connected) this.#sendDesiredPatch([{ op: 'del', hash }]);
   }
@@ -104,7 +111,7 @@ export class PackConnection {
   async start(): Promise<void> {
     this.#closed = false;
     this.#stopped = false;
-    this.#baseCookie = await this.#opts.store.loadCookie(this.#opts.clientGroupID);
+    this.#baseCookie = await this.#opts.store.loadCookie(this.#zeroClientGroupID);
     this.#connect();
   }
 
@@ -129,7 +136,7 @@ export class PackConnection {
     const origin = this.#opts.zeroCacheUrl.replace(/^http/, 'ws').replace(/\/$/, '');
     const p = new URLSearchParams({
       clientID: this.#clientID,
-      clientGroupID: this.#opts.clientGroupID,
+      clientGroupID: this.#zeroClientGroupID,
       userID: SYNC_SERVICE_SUB,
       baseCookie: this.#baseCookie,
       ts: String(Date.now()),
@@ -175,10 +182,12 @@ export class PackConnection {
       this.#demux.resetAll();
       this.#baseCookie = '';
       try {
-        await this.#opts.store.reset(this.#opts.clientGroupID, this.#demux.instanceKeys());
+        await this.#opts.store.reset(this.#zeroClientGroupID, this.#demux.instanceKeys());
       } catch (error) {
         logger.error('sync_pack_reset_failed', { clientGroupID: this.#opts.clientGroupID, error });
       }
+      this.#zeroClientGroupID = `${this.#opts.clientGroupID}-${randomUUID()}`;
+      this.#clientID = `${this.#zeroClientGroupID}-c`;
     }
     const backoff = this.#pendingBackoff;
     this.#pendingBackoff = undefined;
@@ -218,11 +227,18 @@ export class PackConnection {
         break;
       case 'pokeStart':
         this.#pending.set(String(body.pokeID), []);
+        this.#pendingGot.set(String(body.pokeID), []);
         break;
       case 'pokePart': {
-        const acc = this.#pending.get(String(body.pokeID));
+        const id = String(body.pokeID);
+        const acc = this.#pending.get(id);
         const rowsPatch = body.rowsPatch as RowPatchOp[] | undefined;
         if (acc && rowsPatch) acc.push(...rowsPatch);
+        // gotQueriesPatch is zero-cache's per-query "materialized" signal (fires even for
+        // an empty result) — the exact thing its own client uses to flip `complete`.
+        const gotAcc = this.#pendingGot.get(id);
+        const gotPatch = body.gotQueriesPatch as { op: string; hash: string }[] | undefined;
+        if (gotAcc && gotPatch) gotAcc.push(...gotPatch);
         break;
       }
       case 'pokeEnd':
@@ -264,13 +280,17 @@ export class PackConnection {
   async #onPokeEnd(body: Record<string, unknown>): Promise<void> {
     const pokeID = String(body.pokeID);
     const ops = this.#pending.get(pokeID) ?? [];
+    const gotOps = this.#pendingGot.get(pokeID) ?? [];
     this.#pending.delete(pokeID);
+    this.#pendingGot.delete(pokeID);
     if (body.cancel) return;
 
     const cookie = String(body.cookie);
     const diffs = this.#demux.applyPoke(cookie, ops);
     this.#baseCookie = cookie;
     try {
+      // Persist row diffs FIRST so an instance's snapshot HSET reflects its data before it
+      // is marked hydrated (a deferred fan-out client snapshots on the hydrated marker).
       for (const [instanceKey, diff] of diffs) {
         await this.#opts.store.applyDiff(instanceKey, cookie, diff);
         if (diff.upserts.length || diff.deletes.length) {
@@ -283,7 +303,15 @@ export class PackConnection {
           });
         }
       }
-      await this.#opts.store.saveCookie(this.#opts.clientGroupID, cookie);
+      // Mark newly-"got" instances hydrated (once each). The hash IS the instanceKey.
+      for (const { op, hash } of gotOps) {
+        if (op === 'put' && this.#desired.has(hash) && !this.#got.has(hash)) {
+          this.#got.add(hash);
+          await this.#opts.store.markHydrated(hash, cookie);
+          obsEmit('tap', { action: 'hydrated', instanceKey: hash, clientGroupID: this.#opts.clientGroupID });
+        }
+      }
+      await this.#opts.store.saveCookie(this.#zeroClientGroupID, cookie);
     } catch (error) {
       logger.error('sync_pack_persist_failed', { clientGroupID: this.#opts.clientGroupID, error });
     }

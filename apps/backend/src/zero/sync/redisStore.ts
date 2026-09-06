@@ -15,6 +15,7 @@ const cookieKey = (clientGroupID: string): string => `${PREFIX}:cookie:${clientG
 
 const STREAM_MAXLEN = 10_000;
 const CLEAR_DIFF = JSON.stringify({ upserts: [], deletes: [], cleared: true });
+const EMPTY_DIFF = JSON.stringify({ upserts: [], deletes: [] });
 
 /** XRANGE returns fields as a flat [f, v, f, v, …] array — collapse to an object. */
 function fieldsToObject(fields: string[]): Record<string, string> {
@@ -53,10 +54,56 @@ export class RedisStreamStore {
     return Object.values(hash).map((v) => JSON.parse(v) as CompactedRow);
   }
 
+  /** The op-stream's last entry (id + cookie version + parsed diff), or null if empty. */
+  async #lastEntry(
+    instanceKey: string,
+  ): Promise<{ id: string; version: string; diff: StreamDiff } | null> {
+    const last = await redisService.getClient().xrevrange(streamKey(instanceKey), '+', '-', 'COUNT', 1);
+    if (last.length === 0) return null;
+    const map = fieldsToObject(last[0][1]);
+    return { id: last[0][0], version: map.v ?? '', diff: JSON.parse(map.diff ?? CLEAR_DIFF) as StreamDiff };
+  }
+
+  /**
+   * Make a materialized instance visible to the fan-out. A NON-EMPTY instance already has
+   * data entries in its op-stream, so it's hydrated the moment its first `applyDiff` lands.
+   * An EMPTY instance writes no rows — zero-cache reports it via `gotQueriesPatch` but the
+   * stream carries no data — so we append a single empty marker to flip `isHydrated` and
+   * wake any deferred client. No-op once the tail is a real materialization; a `cleared`
+   * tail (reset in progress) is NOT one, so an empty re-materialize still marks.
+   */
+  async markHydrated(instanceKey: string, version: string): Promise<void> {
+    const last = await this.#lastEntry(instanceKey);
+    if (last && !last.diff.cleared) return;
+    await redisService
+      .getClient()
+      .xadd(streamKey(instanceKey), 'MAXLEN', '~', STREAM_MAXLEN, '*', 'v', version, 'diff', EMPTY_DIFF);
+  }
+
+  /**
+   * Whether the instance is currently materialized. The op-stream's tail tells us: a data
+   * entry or empty marker = hydrated; nothing, or a `cleared` tail (a reset that dropped
+   * the snapshot and is awaiting re-materialize), = NOT hydrated — so the fan-out defers
+   * rather than snapshotting the just-emptied state.
+   */
+  async isHydrated(instanceKey: string): Promise<boolean> {
+    const last = await this.#lastEntry(instanceKey);
+    return last !== null && !last.diff.cleared;
+  }
+
   /** An instance op-stream's head id — the cursor a fresh subscriber tails from after a snapshot. */
   async head(instanceKey: string): Promise<string> {
-    const last = await redisService.getClient().xrevrange(streamKey(instanceKey), '+', '-', 'COUNT', 1);
-    return last.length > 0 ? last[0][0] : '0';
+    return (await this.#lastEntry(instanceKey))?.id ?? '0';
+  }
+
+  /**
+   * The head id AND its content version (cookie `stateVersion`). A snapshot's rows all
+   * reflect the DB state at the latest applied poke, so the client stamps them with this
+   * one version for cross-stream apply-if-newer.
+   */
+  async headWithVersion(instanceKey: string): Promise<{ id: string; version: string }> {
+    const last = await this.#lastEntry(instanceKey);
+    return last ? { id: last.id, version: last.version } : { id: '0', version: '' };
   }
 
   /** The oldest surviving op-stream id, or null if empty. Used for the resume trim check. */
