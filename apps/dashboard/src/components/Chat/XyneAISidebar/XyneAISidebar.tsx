@@ -788,6 +788,12 @@ const XyneAISidebar = ({
       canvases: selectedCanvases,
       transcripts: selectedTranscripts,
       recordings: selectedRecordings,
+      files: fileScopes,
+      folders: folderScopes,
+      collections: selectedCollectionIds
+        .map(id => collectionsList.find(c => c.id === id))
+        .filter((c): c is CollectionSummary => c !== undefined)
+        .map(c => ({ id: c.id, name: c.name })),
     }),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
