@@ -25,10 +25,14 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
 
   const [zero, setZero] = useState<Zero | null>(null);
+  // Latest Zero instance, for the sync engine's LMID watermark accessor (a stable getter,
+  // since the engine initializes once but the Zero instance is created/replaced later).
+  const zeroRef = useRef<Zero | null>(null);
+  zeroRef.current = zero;
 
   // Initialize the shared-base sync engine client once (no-op unless enabled).
   useEffect(() => {
-    startSyncEngineClient();
+    startSyncEngineClient(() => zeroRef.current?.lastMutationID() ?? 0);
   }, []);
 
   useEffect(() => {

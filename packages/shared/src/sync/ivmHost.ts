@@ -122,6 +122,24 @@ export class IvmHost {
   readonly #ledger = new Map<number, OverlayOp[]>();
   /** refKey → mutationIDs whose overlay touches it (reverse index for fold + re-derive). */
   readonly #overlayByPK = new Map<string, Set<number>>();
+  /**
+   * Reads Zero's durable last-mutation-ID watermark. An overlay is CONFIRMED once
+   * `#lmid() >= mutationID` (server-persisted, reconnect-durable, covers success AND reject —
+   * both advance the watermark). We retire a confirmed overlay when the fan-out shows its
+   * effect (flicker-free — the confirmed row is already the base), with a low-frequency sweep
+   * as the fallback for the reject / effect-out-of-window case. Injected via `attachLmid`
+   * (the Zero instance lives in the app, not this package); absent in tests / pre-init.
+   */
+  #lmid?: () => number;
+  #sweepTimer?: ReturnType<typeof setInterval>;
+
+  /** Wire the LMID watermark source + start the periodic confirmed-overlay sweep (fallback). */
+  attachLmid(getLastMutationID: () => number, sweepMs = 2500): void {
+    this.#lmid = getLastMutationID;
+    if (this.#sweepTimer !== undefined) clearInterval(this.#sweepTimer);
+    this.#sweepTimer = setInterval(() => this.reconcileConfirmed(), sweepMs);
+    (this.#sweepTimer as { unref?: () => void }).unref?.();
+  }
 
   /** The (lazily created) MemorySource for a table, built from the shared schema. */
   source(table: string): any {
@@ -189,9 +207,19 @@ export class IvmHost {
     deleteKeys: readonly string[],
     version?: string,
   ): void {
-    for (const u of upserts) this.#upsert(instanceKey, u.tableName, u.row, version);
-    for (const rowKey of deleteKeys) this.#deleteByRowKey(instanceKey, rowKey);
+    const touched: string[] = [];
+    for (const u of upserts) {
+      this.#upsert(instanceKey, u.tableName, u.row, version);
+      touched.push(this.#refKey(u.tableName, this.#pkKey(u.tableName, u.row)));
+    }
+    for (const rowKey of deleteKeys) {
+      this.#deleteByRowKey(instanceKey, rowKey);
+      const i = rowKey.indexOf(':');
+      if (i >= 0) touched.push(`${rowKey.slice(0, i)} ${rowKey.slice(i + 1)}`);
+    }
     this.flushAll();
+    // The fan-out just delivered these PKs' confirmed state — retire any overlay it confirms.
+    this.#retireEchoed(touched);
   }
 
   /**
@@ -324,7 +352,32 @@ export class IvmHost {
     this.flushAll();
   }
 
-  /** Drop a mutation's overlay (retired on confirm-echo, or rejected) and revert those PKs. */
+  /** Retire every confirmed overlay (`#lmid() >= mutationID`). The periodic fallback that
+   *  catches rejects and effects that never echo through a subscribed instance. */
+  reconcileConfirmed(): void {
+    if (!this.#lmid) return;
+    const lmid = this.#lmid();
+    const done: number[] = [];
+    for (const mutationID of this.#ledger.keys()) if (mutationID <= lmid) done.push(mutationID);
+    for (const mutationID of done) this.dropOptimistic(mutationID);
+  }
+
+  /** Retire confirmed overlays whose effect the fan-out just delivered on `refKeys` — the
+   *  flicker-free path (the confirmed row is already applied, so the drop is a visual no-op). */
+  #retireEchoed(refKeys: Iterable<string>): void {
+    if (!this.#lmid) return;
+    const lmid = this.#lmid();
+    const done = new Set<number>();
+    for (const refKey of refKeys) {
+      for (const mutationID of this.#overlayByPK.get(refKey) ?? []) {
+        if (mutationID <= lmid) done.add(mutationID);
+      }
+    }
+    for (const mutationID of done) this.dropOptimistic(mutationID);
+  }
+
+  /** Drop a mutation's overlay (retired on confirm-echo / sweep, or rejected) and revert
+   *  those PKs to confirmed. */
   dropOptimistic(mutationID: number): void {
     const ops = this.#ledger.get(mutationID);
     if (!ops) return;

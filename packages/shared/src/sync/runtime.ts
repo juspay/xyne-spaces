@@ -17,10 +17,19 @@ let client: SyncClient | null = null;
 let ready = false;
 const readyListeners = new Set<() => void>();
 
-/** Initialize the client sync engine with the app's socket transport. Idempotent. */
-export function initSyncEngine(transport: SyncTransport, store: SyncStore = noopSyncStore): void {
+/**
+ * Initialize the client sync engine with the app's socket transport. Idempotent.
+ * `getLastMutationID` (Zero's durable LMID watermark) drives optimistic-overlay retirement:
+ * an overlay is confirmed once the watermark passes its mutationID. Omit before Zero exists.
+ */
+export function initSyncEngine(
+  transport: SyncTransport,
+  store: SyncStore = noopSyncStore,
+  opts?: { getLastMutationID?: () => number },
+): void {
   if (client) return;
   host = new IvmHost();
+  if (opts?.getLastMutationID) host.attachLmid(opts.getLastMutationID);
   client = new SyncClient(host, transport, store);
   // NOTE: don't call client.start() here — this runs from a mount effect that can fire
   // before the socket exists, and the dashboard transport's `on` no-ops on a null socket.
