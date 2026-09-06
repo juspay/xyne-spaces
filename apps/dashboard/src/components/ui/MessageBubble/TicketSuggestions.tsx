@@ -184,8 +184,6 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
             data-track-name='START_TICKET_FROM_SUGGESTION'
             disabled={isUpdating}
             className='text-sm font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed bg-transparent border-none p-0'
-            data-track-category='Tickets'
-            data-track-name='TicketSuggestionsCreateSelected'
           >
             {isUpdating ? 'Creating...' : `Create Tickets (${selectedIds.length})`}
           </button>

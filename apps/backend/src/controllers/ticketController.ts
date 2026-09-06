@@ -233,6 +233,11 @@ export class TicketController {
     projectId: string;
     boardId: string;
     assignedTo?: string;
+    userGroupId?: string;
+    eta?: Date;
+    tags?: string[];
+    ticketType?: string;
+    stageName?: string;
     priority?: string;
     statusV2?: string;
     metadata?: Record<string, any>;
@@ -249,6 +254,11 @@ export class TicketController {
       projectId,
       boardId,
       assignedTo,
+      userGroupId,
+      eta,
+      tags,
+      ticketType,
+      stageName,
       priority = 'MEDIUM',
       statusV2 = 'TODO',
       metadata = {},
@@ -281,6 +291,11 @@ export class TicketController {
         createdBy,
         updatedBy,
         assignedTo: assignedTo || undefined,
+        userGroupId,
+        eta,
+        tags,
+        ticketType,
+        stageName,
         conversationId,
         channelId,
         projectId,
@@ -312,13 +327,31 @@ export class TicketController {
         },
       });
 
-      // Update conversation reply count and set ticketId
+      // Update conversation reply count, ticketId, and the ticket card (ticket_md)
+      // so bulk-created tickets render the same chat card as single-ticket creation.
+      const ticketMd = serializeTicketMd({
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description,
+        statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
+        priority: ticket.priority as TicketCardSummary['priority'],
+        assignedTo: ticket.assignedTo ?? null,
+        createdBy: ticket.createdBy,
+        createdAt: ticket.createdAt.getTime(),
+        eta: ticket.eta ? ticket.eta.getTime() : null,
+        xyneId: ticket.xyneId,
+        stageName: ticket.stageName,
+        ticketType: ticket.ticketType ?? null,
+        channelId: ticket.channelId,
+        conversationId: ticket.conversationId,
+      });
       await tx.conversation.update({
         where: { conversationId },
         data: {
           replyCount: { increment: 1 },
           lastActivityAt: now,
           ticketId: ticket.id,
+          ticket_md: ticketMd,
         },
       });
 
@@ -402,6 +435,11 @@ export class TicketController {
     projectId: string;
     boardId: string;
     assignedTo?: string;
+    userGroupId?: string;
+    eta?: Date;
+    tags?: string[];
+    ticketType?: string;
+    stageName?: string;
     priority?: string;
     statusV2?: string;
   }, createdBy: string): Promise<Ticket> {
@@ -412,16 +450,20 @@ export class TicketController {
       initialMessageId,
     });
 
+    const board = item.boardId ? await this.boardRepository.findBoardById(item.boardId) : null;
+    const creationText = `Ticket created in ${board?.name || 'Unknown Board'}: ${item.title}`;
+
     await this.messageRepository.createWithExecutionId(
       {
         conversationId: conversation.conversationId,
         senderId: createdBy,
-        content: `Ticket created: ${item.title}`,
+        content: creationText,
         msgType: MessageType.SYSTEM,
         metadata: {},
       },
       initialMessageId,
     );
+    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     return this.createTicketWithConversation({
       title: item.title,
@@ -432,9 +474,13 @@ export class TicketController {
       projectId: item.projectId,
       boardId: item.boardId,
       assignedTo: item.assignedTo,
+      userGroupId: item.userGroupId,
+      eta: item.eta,
+      ticketType: item.ticketType,
+      stageName: item.stageName,
       priority: item.priority,
       statusV2: item.statusV2,
-      messageContent: `Ticket created: ${item.title}`,
+      messageContent: creationText,
       messageSubtype: 'bulk_ticket',
     });
   }

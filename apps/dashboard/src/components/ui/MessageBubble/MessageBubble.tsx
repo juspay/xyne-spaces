@@ -1319,7 +1319,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           ? (() => {
                               const parsed = parseTicketMd(conversation.ticket_md);
                               if (!parsed?.id) return null;
-                              const parent: { id: string; conversationId: string; xyneId?: string } = {
+                              const parent: {
+                                id: string;
+                                conversationId: string;
+                                xyneId?: string;
+                              } = {
                                 id: parsed.id,
                                 conversationId: parsed.conversationId ?? message.conversationId,
                               };
