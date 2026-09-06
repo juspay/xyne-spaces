@@ -31,6 +31,7 @@ import {
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
 import { designShareUrl } from "./design-shares.js";
+import { buildScheduledJobApprovalFlow } from "xyne-claw-shared";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
 // `import { parseExpression } from "cron-parser"` throws at runtime even
@@ -231,6 +232,73 @@ async function postScheduledFailureNotice(row: {
   }, appToken);
 }
 
+function withSpacesAppIdFlow<T extends { data?: Record<string, unknown> }>(flow: T, spacesAppId?: string | null): T {
+  if (!spacesAppId) return flow;
+  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
+}
+
+/**
+ * Post the channel-broadcast approval card for a `pending_approval` scheduled
+ * job to the thread the request came from (falling back to a DM to the creator
+ * when there is no origin thread). The job stays inert until the creator taps
+ * Approve, which the flow-action handler turns into an `active` + enqueued job.
+ * Fail-soft: any post failure leaves the pending row in place — the creator can
+ * still see/cancel it in the Scheduled Jobs UI — and is surfaced to the caller.
+ */
+async function postScheduledJobApprovalCard(opts: {
+  row: { id: string; userId: string; agentSlug: string; orgId: string; channelId: string | null; conversationId: string | null; workspaceId: string | null; label: string | null; task: string };
+  targetChannelId: string;
+  scheduleSummary: string;
+}): Promise<void> {
+  const { row, targetChannelId, scheduleSummary } = opts;
+  const agent = await prisma.agent.findFirst({ where: { slug: row.agentSlug, orgId: row.orgId } });
+  if (!agent?.spacesAppToken || !agent.spacesAppId) {
+    log.error(`[scheduled-jobs/approval] Agent ${row.agentSlug} has no Spaces app credentials — cannot post approval card for job ${row.id}`);
+    throw new Error("Agent has no Spaces app credentials to post the approval card");
+  }
+  let workspaceId = row.workspaceId;
+  if (!workspaceId) workspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job").catch(() => null);
+  if (!workspaceId) {
+    log.error(`[scheduled-jobs/approval] Job ${row.id}: missing workspaceId — cannot post approval card`);
+    throw new Error("Missing workspaceId to post the approval card");
+  }
+
+  const appToken = decryptStoredField(agent.spacesAppToken);
+  const spacesAppUserId = agent.spacesAppUserId ?? "";
+
+  const flow = withSpacesAppIdFlow(buildScheduledJobApprovalFlow({
+    scheduledJobId: row.id,
+    creatorUserId: row.userId,
+    scheduleSummary,
+    task: row.task,
+    targetChannelId,
+    ...(row.label ? { label: row.label } : {}),
+    agentSlug: row.agentSlug,
+  }), agent.spacesAppId);
+
+  // Prefer the origin thread so the creator sees the card in context; otherwise DM them.
+  if (row.channelId && row.conversationId) {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: row.channelId,
+      conversationId: row.conversationId,
+      flow,
+      userId: spacesAppUserId,
+      workspaceId,
+    }, appToken);
+    return;
+  }
+  const dmResult = (await spacesAppFetch("/channel/openDm", {
+    targetUserId: row.userId,
+    workspaceId,
+  }, appToken)) as { channelId: string };
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: dmResult.channelId,
+    flow,
+    userId: spacesAppUserId,
+    workspaceId,
+  }, appToken);
+}
+
 // ── POST / — create a scheduled job ─────────────────────────────────
 
 router.post("/", asyncHandler(async (req: Request, res: Response) => {
@@ -353,6 +421,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
 
   const nextRunAt = type === "once" ? new Date(Date.now() + delayMs!) : null;
 
+  // A channel-targeted result (`replyMode === "channel"`) is a broadcast into a
+  // shared channel. It must never be armed silently — gate it behind an explicit
+  // approval card. When there is no channel to post into, there is nothing to
+  // broadcast, so the normal (thread/DM) path applies.
+  const isChannelBroadcast = (replyMode === "channel") && !!channelId;
+
   // Create Prisma row
   const row = await prisma.scheduledJob.create({
     data: {
@@ -370,6 +444,9 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       label: label ?? null,
       workspaceId: workspaceId ?? null,
       replyMode: replyMode ?? "thread",
+      // A channel broadcast is armed only AFTER the creator approves the card
+      // posted below; until then it sits inert (the worker skips non-active rows).
+      ...(isChannelBroadcast ? { status: "pending_approval" } : {}),
       orgId: agent.orgId,
     },
   });
@@ -383,6 +460,34 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     channelId: channelId ?? undefined,
     conversationId: conversationId ?? undefined,
   };
+
+  // Channel broadcast: DO NOT enqueue. Persist as pending_approval and post the
+  // approval card to the origin thread. Approve → flow-action arms + enqueues it.
+  if (isChannelBroadcast) {
+    const scheduleSummary = type === "once"
+      ? (nextRunAt ? `Once — runs ${nextRunAt.toISOString()}` : "Once")
+      : `Recurring — ${normalizedCron} (Asia/Kolkata)`;
+    try {
+      await postScheduledJobApprovalCard({
+        row: { ...row, task },
+        targetChannelId: channelId!,
+        scheduleSummary,
+      });
+    } catch (err) {
+      log.error(`[scheduled-jobs] Failed to post approval card for channel job ${row.id}: ${errMsg(err)}`);
+    }
+    log.info(`[scheduled-jobs] Created ${type} channel job ${row.id} for agent ${agentSlug} as pending_approval (awaiting creator approval)`);
+    ok(res, {
+      id: row.id,
+      type: row.type,
+      status: "pending_approval",
+      requiresApproval: true,
+      nextRunAt: nextRunAt?.toISOString(),
+      cronExpression: row.cronExpression,
+      label: row.label,
+    });
+    return;
+  }
 
   // Enqueue in BullMQ
   if (type === "once") {

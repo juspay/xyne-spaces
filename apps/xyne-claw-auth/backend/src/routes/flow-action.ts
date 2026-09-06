@@ -9,6 +9,7 @@
  * Three patterns handled:
  *   1. approve-write / decline-write  — HITL write tool approval
  *   2. twin-approve / twin-decline    — Digital Twin draft approve/decline
+ *   2b. schedule-approve / schedule-decline — Scheduled-job channel-broadcast approval
  *   3. user-answer                    — Agent question answered via radio/select
  */
 
@@ -53,6 +54,7 @@ import { resolveFastMode } from "../lib/fast-mode.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
+import { enqueueDelayedJob, enqueueCronJob, type ScheduledJobData } from "../queue/scheduled-jobs-queue.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
 
 import { createLogger } from "../logger.js";
@@ -1139,6 +1141,89 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       } catch (err) {
         log.error("[flow-action] Twin approval error:", err);
         resp = { type: "error", message: "Failed to deliver response" };
+        res.json(resp);
+      }
+      return;
+    }
+
+    // ── 2b. Scheduled-job channel-broadcast approval ──────────────────────────
+    // A scheduled job whose result posts as a NEW message into a shared channel
+    // is created inert (`pending_approval`) by claw-auth; only the creator may
+    // arm it. Approve → enqueue in BullMQ + flip to `active`. Decline → cancel.
+    if (actionType === "schedule-approval") {
+      const scheduledJobId = data["scheduledJobId"] as string | undefined;
+      const creatorUserId = data["creatorUserId"] as string | undefined;
+      const cardAgentSlug = data["agentSlug"] as string | undefined;
+      const cardSpacesAppId = data["spacesAppId"] as string | undefined;
+
+      if (!scheduledJobId || !creatorUserId) {
+        res.status(400).json({ type: "error", message: "Missing schedule-approval fields in flowJSON.data" } satisfies AppActionResponse);
+        return;
+      }
+
+      // Only the job's creator may arm a channel broadcast. Fail closed on a
+      // missing caller identity so a stripped signature can't approve.
+      if (!callerUserId || callerUserId !== creatorUserId) {
+        log.error(`[flow-action] Unauthorized schedule-approval: caller ${callerUserId ?? "(none)"} != creator ${creatorUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      const row = await prisma.scheduledJob.findUnique({ where: { id: scheduledJobId } });
+      if (!row) {
+        resp = { type: "close_screen", finalMessage: "This scheduled job no longer exists." };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, "⚠️ **This scheduled job no longer exists.**", conversationId, undefined, cardSpacesAppId);
+        return;
+      }
+
+      if (actionId === "schedule-decline") {
+        if (row.status === "pending_approval") {
+          await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "cancelled" } });
+        }
+        resp = { type: "close_screen", finalMessage: "❌ Channel post declined." };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, "❌ **Channel post declined — the job was not scheduled.**", conversationId, undefined, cardSpacesAppId);
+        return;
+      }
+
+      // actionId === "schedule-approve". Idempotent: only arm a row that is still
+      // awaiting approval (guards against a double-tap or a replayed card).
+      if (row.status !== "pending_approval") {
+        resp = { type: "close_screen", finalMessage: "This job was already handled." };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, "✓ **Already handled.**", conversationId, undefined, cardSpacesAppId);
+        return;
+      }
+
+      const jobData: ScheduledJobData = {
+        scheduledJobId: row.id,
+        userId: row.userId,
+        agentSlug: row.agentSlug,
+        task: row.task,
+        ...(row.context ? { context: row.context } : {}),
+        ...(row.channelId ? { channelId: row.channelId } : {}),
+        ...(row.conversationId ? { conversationId: row.conversationId } : {}),
+      };
+
+      try {
+        if (row.type === "once") {
+          // Preserve the originally intended fire time; if it has already passed
+          // (approval came late), fire almost immediately.
+          const delay = row.nextRunAt ? Math.max(1000, row.nextRunAt.getTime() - Date.now()) : Number(row.delayMs ?? 0n);
+          const bullJobId = await enqueueDelayedJob(jobData, delay);
+          await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "active", bullJobId } });
+        } else {
+          const schedulerId = `cron-${row.id}`;
+          await enqueueCronJob(schedulerId, jobData, row.cronExpression!);
+          await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "active", bullSchedulerId: schedulerId } });
+        }
+        resp = { type: "close_screen", finalMessage: "✓ Scheduled." };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, "✓ **Approved — this job is now scheduled to post to the channel.**", conversationId, undefined, cardSpacesAppId);
+      } catch (err) {
+        log.error("[flow-action] schedule-approval enqueue error:", err);
+        resp = { type: "error", message: "Failed to schedule the job" } satisfies AppActionResponse;
         res.json(resp);
       }
       return;
