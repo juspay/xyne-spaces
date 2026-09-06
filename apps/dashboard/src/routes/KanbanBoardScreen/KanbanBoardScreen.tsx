@@ -8,7 +8,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { TextAlignJustify, FileSpreadsheet, Archive } from 'lucide-react';
+import { TextAlignJustify, FileSpreadsheet, Archive, List } from 'lucide-react';
 import {
   PlusDefault as Plus,
   FilterHorizontal as Settings2,
@@ -60,6 +60,7 @@ import {
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import { BulkCreateTicketsModal } from '../../components/Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import {
   clearCreateTicketParams,
   hasCreateTicketFlag,
@@ -474,6 +475,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isBulkCreateModalOpen, setIsBulkCreateModalOpen] = useState(false);
   const [createTicketSeed, setCreateTicketSeed] = useState<{
     status?: TicketStatusV2 | undefined;
     stageName?: string | undefined;
@@ -3891,6 +3893,21 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               <span className='sm:hidden'>Create</span>
             </button>
           )}
+          {canCreateTicket && channel && !channel.isArchived && (
+            <button
+              data-testid='kanban-bulk-create-ticket-button'
+              data-track-event='BUTTON_CLICK'
+              data-track-category='TICKETS'
+              data-track-name='BULK_CREATE_TICKET_KANBAN'
+              data-track-metadata={JSON.stringify({ boardId, channelId })}
+              onClick={() => setIsBulkCreateModalOpen(true)}
+              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-foreground bg-secondary hover:bg-secondary/80 rounded-lg transition-colors flex-shrink-0'
+            >
+              <List className='w-4 h-4' />
+              <span className='hidden sm:inline font-semibold text-sm'>Bulk Create</span>
+              <span className='sm:hidden'>Bulk</span>
+            </button>
+          )}
           {/* Layout View Toggle (flow boards only have the flow view) */}
           <div className='flex items-center gap-2'>
             {!isFlowBoard && (
@@ -5355,6 +5372,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           onClose={() => setIsShareViewDialogOpen(false)}
           viewId={viewId}
           viewName={initialName ?? ''}
+        />
+      )}
+
+      {/* Bulk Create Tickets Modal */}
+      {effectiveProjectId && channel && (
+        <BulkCreateTicketsModal
+          isOpen={isBulkCreateModalOpen}
+          onClose={() => setIsBulkCreateModalOpen(false)}
+          channelId={channel.id}
+          projectId={effectiveProjectId}
+          boardId={currentBoardId ?? ''}
+          boardName={selectedBoardDetail?.name}
         />
       )}
 
