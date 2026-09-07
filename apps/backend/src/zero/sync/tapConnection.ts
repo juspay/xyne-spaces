@@ -150,6 +150,14 @@ export class PackConnection {
   }
 
   async start(): Promise<void> {
+    // A fence-lost connection is single-use: its guard token, cookie and #got/#seeded state are
+    // stale, so restarting it would reconnect, have every fenced write return stale, and (since
+    // #demoteFenceLost is idempotent) run forever persisting nothing. The manager must discard
+    // it and re-acquire with a fresh connection instead.
+    if (this.#fenceLost) {
+      logger.error('sync_pack_start_after_fence_lost', { clientGroupID: this.#opts.clientGroupID });
+      return;
+    }
     this.#closed = false;
     this.#stopped = false;
     this.#baseCookie = await this.#opts.store.loadCookie(this.#zeroClientGroupID);
