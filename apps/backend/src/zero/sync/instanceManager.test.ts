@@ -29,6 +29,17 @@ const skip = InstanceManager && ownership && redisService ? false : reason || 'u
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** Poll a predicate until true or timeout — robust to async acquire/materialize latency under the
+ *  parallel-test Redis load that a fixed sleep can't bound. */
+async function waitFor(pred: () => boolean | Promise<boolean>, label: string, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pred()) return;
+    await sleep(10);
+  }
+  throw new Error(`waitFor timed out: ${label}`);
+}
+
 interface Rec {
   opts: import('./tapConnection').PackConnectionOptions;
   started: number;
@@ -46,6 +57,8 @@ function fakeFactory(created: Rec[]): (opts: import('./tapConnection').PackConne
       addInstance(ik: string) { if (!rec.added.includes(ik)) rec.added.push(ik); },
       removeInstance(ik: string) { rec.removed.push(ik); },
       size() { return rec.added.length - rec.removed.length; },
+      isConnected() { return true; },
+      msSinceLastPoke() { return 0; },
     };
   };
 }
@@ -74,9 +87,8 @@ test('InstanceManager single-pod: unfenced materialize + teardown', { skip }, as
   assert.equal(mgr.activeGroups(), 1);
 
   mgr.unsubscribe(ik!, 'sub1');
-  await sleep(80); // > graceMs
+  await waitFor(() => mgr.activeGroups() === 0, 'empty group closed after grace');
   assert.equal(mgr.activeInstances(), 0, 'instance torn down after grace');
-  assert.equal(mgr.activeGroups(), 0, 'empty group closed');
   assert.equal(created[0].stopped, 1, 'connection stopped');
   mgr.stopAll();
 });
@@ -94,12 +106,12 @@ test('InstanceManager multi-pod: acquire → fenced materialize → interest, te
     createConnection: fakeFactory(created),
   });
   const ik = mgr.subscribe(QUERY, argsFor('multi-' + Math.floor(Math.random() * 1e9)), 'sub1')!;
-  await sleep(60); // materialization is async (awaits the lease acquire)
+  await waitFor(() => created.length > 0, 'owner materialized the group'); // async: awaits the lease acquire
 
-  assert.equal(created.length, 1, 'owner materialized the group');
   const G = created[0].opts.clientGroupID;
   const guard = created[0].opts.guard;
   try {
+    assert.equal(created.length, 1);
     assert.ok(guard, 'fenced guard present when owned');
     assert.equal(guard!.groupKey, G);
     assert.equal(guard!.token, await own.fenceOf(G), 'guard token == the acquired fence');
@@ -108,14 +120,13 @@ test('InstanceManager multi-pod: acquire → fenced materialize → interest, te
     assert.deepEqual(created[0].added, [ik]);
 
     mgr.unsubscribe(ik, 'sub1');
-    await sleep(80);
-    assert.equal(await own.liveInterest(ik), 0, 'interest dropped on teardown');
-    assert.equal(await own.ownsGroup(G), false, 'lease released when the group emptied');
+    await waitFor(async () => (await own.liveInterest(ik)) === 0 && !(await own.ownsGroup(G)), 'teardown drains + releases');
     assert.equal(mgr.activeInstances(), 0);
     assert.equal(created[0].stopped, 1, 'connection stopped');
   } finally {
     mgr.stopAll();
-    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`);
+    await sleep(40); // let any in-flight heartbeat observe #stopped before we wipe the keys
+    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`, `sync:ginst:${G}`);
   }
 });
 
@@ -141,35 +152,32 @@ test('InstanceManager two pods: exactly one owns; non-owner never reclaims; inte
 
   // A subscribes first and wins the lease deterministically; then B subscribes and sees it owned.
   const ik = mgrA.subscribe(QUERY, argsFor(channel), 'subA')!;
-  await sleep(60);
+  await waitFor(() => createdA.length > 0, 'A materializes (owns) before B subscribes');
   assert.equal(mgrB.subscribe(QUERY, argsFor(channel), 'subB'), ik, 'same channel → same instanceKey');
-  await sleep(60);
 
   const G = createdA[0].opts.clientGroupID;
   try {
+    await waitFor(async () => (await ownA.liveInterest(ik)) === 2, 'both pods registered interest');
     assert.equal(await ownA.ownsGroup(G), true, 'A owns');
     assert.equal(await ownB.ownsGroup(G), false, 'B does not own');
     assert.equal(createdA.length, 1, 'owner A materialized');
     assert.equal(createdB.length, 0, 'non-owner B never opened a connection');
-    assert.equal(await ownA.liveInterest(ik), 2, 'both pods registered interest');
 
     // B (non-owner) drops its subscriber: LOCAL cleanup only, no Redis reclamation — A keeps serving.
     mgrB.unsubscribe(ik, 'subB');
-    await sleep(70);
+    await waitFor(async () => (await ownA.liveInterest(ik)) === 1, 'interest drains to just the owner (no resurrection)');
     assert.equal(await ownA.ownsGroup(G), true, 'A still owns after B leaves');
     assert.equal(createdA[0].stopped, 0, "non-owner did NOT tear down the owner's connection");
-    assert.equal(await ownA.liveInterest(ik), 1, 'interest drained to just the owner (no re-stamp resurrection)');
 
     // A (owner) drops its subscriber: fleet interest hits 0 → owner reclaims (fenced) + releases.
     mgrA.unsubscribe(ik, 'subA');
-    await sleep(70);
-    assert.equal(await ownA.liveInterest(ik), 0, 'fleet interest fully drained');
-    assert.equal(await ownA.ownsGroup(G), false, 'owner released the lease on reclaim');
+    await waitFor(async () => (await ownA.liveInterest(ik)) === 0 && !(await ownA.ownsGroup(G)), 'owner reclaims + releases');
     assert.equal(createdA[0].stopped, 1, 'owner stopped its connection on reclaim');
   } finally {
     mgrA.stopAll();
     mgrB.stopAll();
-    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`);
+    await sleep(40); // let any in-flight heartbeat observe #stopped before we wipe the keys
+    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`, `sync:ginst:${G}`);
   }
 });
 
@@ -191,7 +199,7 @@ test('InstanceManager owner reconcile: materialize remote-only interest, sweep o
   // in the same group: it announces the descriptor + stamps interest under its own podId. The
   // owner's reconcile must materialize I2 even though no local subscriber ever asked for it.
   const ikX = mgr.subscribe(QUERY, argsFor('own-' + rnd), 'subX')!;
-  await sleep(60);
+  await waitFor(() => created.length > 0, 'this pod owns the group');
   const G = created[0].opts.clientGroupID;
   const remote = new Ownership!(`podFar-${rnd}`);
   const i2 = `remoteinst-${rnd}`;
@@ -199,18 +207,48 @@ test('InstanceManager owner reconcile: materialize remote-only interest, sweep o
     assert.equal(await own.ownsGroup(G), true);
     await remote.addInterest(i2);
     await store.registerInstance(G, i2, JSON.stringify({ args: [{ channelId: 'chY', limit: 25 }], partitionValue: 'chY' }));
-    await sleep(60); // owner reconcile picks it up from the registry
-    assert.ok(created[0].added.includes(i2), 'owner materialized the remote-only instance');
+    await waitFor(() => created[0].added.includes(i2), 'owner reconcile materializes the remote-only instance');
 
     // Remote drops interest → owner sweeps it: removeInstance + fenced teardown + deregister.
     await remote.removeInterest(i2);
-    await sleep(60);
-    assert.ok(created[0].removed.includes(i2), 'owner removed the drained remote instance');
-    assert.equal((await store.groupInstances(G))[i2], undefined, 'registry entry deregistered');
+    await waitFor(async () => created[0].removed.includes(i2) && (await store.groupInstances(G))[i2] === undefined, 'owner sweeps + deregisters the drained remote instance');
     assert.ok(created[0].added.includes(ikX) && !created[0].removed.includes(ikX), 'local instance untouched');
   } finally {
     mgr.stopAll();
+    await sleep(40);
     await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:ginst:${G}`, `sync:cookie:${G}`, `sync:interest:${ikX}`, `sync:interest:${i2}`, `sync:snap:${ikX}`, `sync:stream:${ikX}`, `sync:snap:${i2}`, `sync:stream:${i2}`);
+  }
+});
+
+test('InstanceManager heartbeat re-registers a swept instance (registry self-heal)', { skip }, async () => {
+  const own = ownership!;
+  const client = redisService!.getClient();
+  const store = new RedisStreamStore!();
+  const rnd = Math.floor(Math.random() * 1e9);
+  const created: Rec[] = [];
+  const mgr = new InstanceManager!('http://zero', {
+    multiPod: true,
+    ownership: own,
+    assertRedisSafe: async () => {},
+    heartbeatMs: 20,
+    graceMs: 60_000,
+    createConnection: fakeFactory(created),
+  });
+  const ik = mgr.subscribe(QUERY, argsFor('heal-' + rnd), 'sub1')!;
+  await waitFor(() => created.length > 0, 'owns the group');
+  const G = created[0].opts.clientGroupID;
+  try {
+    await waitFor(async () => (await store.groupInstances(G))[ik] !== undefined, 'registered on subscribe');
+    // Simulate a sweep (owner deleted the entry during a remote stall). Interest is still live
+    // because this pod's subscriber never left → the heartbeat must re-announce the descriptor,
+    // else no owner would ever re-materialize it.
+    await client.hdel(`sync:ginst:${G}`, ik);
+    assert.equal((await store.groupInstances(G))[ik], undefined, 'entry gone after the sweep');
+    await waitFor(async () => (await store.groupInstances(G))[ik] !== undefined, 'heartbeat re-registered the descriptor');
+  } finally {
+    mgr.stopAll();
+    await sleep(40);
+    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`, `sync:ginst:${G}`);
   }
 });
 
@@ -227,18 +265,17 @@ test('InstanceManager multi-pod: heartbeat demotes a stolen lease', { skip }, as
     createConnection: fakeFactory(created),
   });
   const ik = mgr.subscribe(QUERY, argsFor('steal-' + Math.floor(Math.random() * 1e9)), 'sub1')!;
-  await sleep(60);
-  assert.equal(created.length, 1);
+  await waitFor(() => created.length > 0, 'owns + materializes');
   const G = created[0].opts.clientGroupID;
   try {
     // A foreign pod steals the lease (no TTL → re-acquire keeps failing). Next heartbeat's
     // refreshGroup sees owner != us → demote: stop + discard the connection, no reuse.
     await client.set(`sync:owner:${G}`, 'pod-foreign');
-    await sleep(90); // a few heartbeats
-    assert.equal(created[0].stopped, 1, 'demoted connection stopped');
+    await waitFor(() => created[0].stopped === 1, 'heartbeat demotes the connection on lost lease');
     assert.equal(created.length, 1, 'not re-materialized while the foreign owner holds the lease');
   } finally {
     mgr.stopAll();
-    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`);
+    await sleep(40);
+    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`, `sync:ginst:${G}`);
   }
 });

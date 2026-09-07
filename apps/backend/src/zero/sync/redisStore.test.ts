@@ -37,7 +37,7 @@ test('redisStore: fenced writes apply with a matching token, STALE otherwise', {
   const CG = `testgrp-cookie-${rnd}`;
   const keys = [
     `sync:snap:${I}`, `sync:stream:${I}`, `sync:snap:${J}`, `sync:stream:${J}`,
-    `sync:cookie:${CG}`, `sync:owner:${G}`, fenceKey!(G),
+    `sync:cookie:${CG}`, `sync:owner:${G}`, fenceKey!(G), `sync:zgroup:${CG}`, `sync:ginst:${CG}`,
   ];
   const cleanup = () => client.del(...keys);
 
@@ -97,7 +97,23 @@ test('redisStore: fenced writes apply with a matching token, STALE otherwise', {
     assert.equal(await store.teardownInstance(I, guard), 'applied');
     assert.equal(await client.exists(`sync:snap:${I}`, `sync:stream:${I}`), 0, 'fenced teardown removed both keys');
 
+    // zgroup pointer + subscription registry: fenced save, plain load, dropped by teardownGroup
+    assert.equal(await store.saveZGroup(CG, 'zg-rotated', badGuard), 'stale');
+    assert.equal(await store.loadZGroup(CG), null, 'stale saveZGroup wrote nothing');
+    assert.equal(await store.saveZGroup(CG, 'zg-rotated', guard), 'applied');
+    assert.equal(await store.loadZGroup(CG), 'zg-rotated');
+    await store.registerInstance(CG, I, JSON.stringify({ args: [], partitionValue: 'p' }));
+    assert.equal((await store.groupInstances(CG))[I], JSON.stringify({ args: [], partitionValue: 'p' }));
+    assert.equal(await store.deregisterInstance(CG, I, badGuard), 'stale');
+    assert.equal((await store.groupInstances(CG))[I] !== undefined, true, 'stale deregister kept the entry');
+    assert.equal(await store.deregisterInstance(CG, I, guard), 'applied');
+    assert.equal((await store.groupInstances(CG))[I], undefined, 'fenced deregister removed the entry');
+
+    await store.saveZGroup(CG, 'zg-rotated', guard);
+    await store.registerInstance(CG, I, '{}');
     assert.equal(await store.teardownGroup(CG, guard), 'applied');
+    assert.equal(await store.loadZGroup(CG), null, 'teardownGroup dropped the zgroup pointer');
+    assert.equal(Object.keys(await store.groupInstances(CG)).length, 0, 'teardownGroup dropped the registry');
 
     // Missing fence key ⇒ STALE (never a 0-default match): DEL the fence, then any token fails.
     await client.del(fenceKey!(G));

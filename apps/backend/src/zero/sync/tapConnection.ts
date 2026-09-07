@@ -74,6 +74,9 @@ export class PackConnection {
   #ws: WebSocket | null = null;
   #baseCookie = '';
   #connected = false;
+  /** Wall-clock of the last poke processed (and of each connect) — a staleness signal: an owned
+   *  group that is disconnected AND hasn't poked in a long while is a candidate wedged owner. */
+  #lastPokeAt = Date.now();
   #closed = false;
   #stopped = false;
   #fenceLost = false;
@@ -149,6 +152,16 @@ export class PackConnection {
     return this.#demux.size();
   }
 
+  /** Whether the tap's socket is currently connected (a live materializer). */
+  isConnected(): boolean {
+    return this.#connected;
+  }
+
+  /** Milliseconds since the last poke (or connect) — staleness signal for a wedged owner. */
+  msSinceLastPoke(): number {
+    return Date.now() - this.#lastPokeAt;
+  }
+
   async start(): Promise<void> {
     // A fence-lost connection is single-use: its guard token, cookie and #got/#seeded state are
     // stale, so restarting it would reconnect, have every fenced write return stale, and (since
@@ -160,6 +173,11 @@ export class PackConnection {
     }
     this.#closed = false;
     this.#stopped = false;
+    // Resume under whatever zero-cache group id the previous owner last used (it rotates on a CVR
+    // self-heal). On a takeover this is what makes loadCookie hit the warm cursor instead of a cold
+    // base miss → ClientNotFound → rehydrate. Null (never rotated) → keep the base id.
+    const savedZGroup = await this.#opts.store.loadZGroup(this.#opts.clientGroupID);
+    if (savedZGroup) this.#zeroClientGroupID = savedZGroup;
     this.#baseCookie = await this.#opts.store.loadCookie(this.#zeroClientGroupID);
     // Seed the initial desired instances (the resume set) before the init header desires them.
     await this.#ensureSeeded([...this.#desired.keys()]);
@@ -220,9 +238,11 @@ export class PackConnection {
 
   #buildSecProtocol(): string {
     this.#sentInInit = new Set(this.#desired.keys());
+    // NOTE: no `activeClients` (it is optional). Sending `[self]` makes zero-cache EVICT any other
+    // client on the shared CVR — during a takeover overlap that would evict the outgoing owner's
+    // still-live client and could drop its desired queries. Omitting it lets both coexist.
     const body: Record<string, unknown> = {
       desiredQueriesPatch: [...this.#desired.keys()].map((ik) => this.#putPatch(ik)),
-      activeClients: [this.#clientID],
     };
     if (this.#baseCookie === '') body.clientSchema = this.#opts.clientSchema;
     const initConnection = ['initConnection', body] as const;
@@ -269,6 +289,14 @@ export class PackConnection {
       }
       this.#zeroClientGroupID = `${this.#opts.clientGroupID}-${randomUUID()}`;
       this.#clientID = `${this.#zeroClientGroupID}-c`;
+      // Persist the rotated id (fenced) so a takeover resumes under it + the cookie we're about to
+      // save there, rather than a stale base id. Losing the fence here is a lease loss → demote.
+      try {
+        const zg = await this.#opts.store.saveZGroup(this.#opts.clientGroupID, this.#zeroClientGroupID, this.#opts.guard);
+        if (zg === 'stale') return this.#demoteFenceLost();
+      } catch (error) {
+        logger.error('sync_pack_zgroup_save_failed', { clientGroupID: this.#opts.clientGroupID, error });
+      }
     }
     const backoff = this.#pendingBackoff;
     this.#pendingBackoff = undefined;
@@ -332,6 +360,7 @@ export class PackConnection {
   /** On connect: seed any desired instances added since start() (before their patch is sent),
    *  then reconcile the desired set. Init-header instances were seeded in start(). */
   async #onConnected(): Promise<void> {
+    this.#lastPokeAt = Date.now(); // fresh connect: reset the staleness clock
     await this.#ensureSeeded([...this.#desired.keys()]);
     this.#reconcileDesired();
     logger.info('sync_pack_connected', { clientGroupID: this.#opts.clientGroupID, instances: this.#demux.size() });
@@ -366,6 +395,7 @@ export class PackConnection {
   }
 
   async #onPokeEnd(body: Record<string, unknown>): Promise<void> {
+    this.#lastPokeAt = Date.now();
     const pokeID = String(body.pokeID);
     const ops = this.#pending.get(pokeID) ?? [];
     const gotOps = this.#pendingGot.get(pokeID) ?? [];

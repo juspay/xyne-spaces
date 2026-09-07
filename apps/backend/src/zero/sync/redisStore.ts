@@ -16,6 +16,10 @@ const cookieKey = (clientGroupID: string): string => `${PREFIX}:cookie:${clientG
 /** Per-GROUP subscription registry: instanceKey → descriptor, so a group's owner can materialize
  *  every subscribed instance — including ones only a REMOTE pod wants — that it never saw locally. */
 const registryKey = (clientGroupID: string): string => `${PREFIX}:ginst:${clientGroupID}`;
+/** The zero-cache clientGroupID a group's tap is CURRENTLY using — it rotates on a CVR self-heal
+ *  reset, and the cookie is saved under the rotated id. Persisted (fenced) under the STABLE lease
+ *  key so a takeover resumes under the same id + warm cookie instead of a cold rehydrate. */
+const zgroupKey = (clientGroupID: string): string => `${PREFIX}:zgroup:${clientGroupID}`;
 
 const STREAM_MAXLEN = 10_000;
 const CLEAR_DIFF = JSON.stringify({ upserts: [], deletes: [], cleared: true });
@@ -109,14 +113,19 @@ const TEARDOWN_INSTANCE = `${FENCE_GATE}
 redis.call('DEL', KEYS[2], KEYS[3])
 return 'OK'`;
 
-/** teardownGroup, fenced. Drops the resume cursor AND the subscription registry. KEYS=[fence,
- *  cookie, registry]  ARGV=[token] */
+/** teardownGroup, fenced. Drops the resume cursor, subscription registry, AND the zgroup pointer.
+ *  KEYS=[fence, cookie, registry, zgroup]  ARGV=[token] */
 const TEARDOWN_GROUP = `${FENCE_GATE}
-redis.call('DEL', KEYS[2], KEYS[3])
+redis.call('DEL', KEYS[2], KEYS[3], KEYS[4])
 return 'OK'`;
 
 /** saveCookie, fenced. KEYS=[fence, cookie]  ARGV=[token, cookie] */
 const SAVE_COOKIE = `${FENCE_GATE}
+redis.call('SET', KEYS[2], ARGV[2])
+return 'OK'`;
+
+/** saveZGroup, fenced. KEYS=[fence, zgroup]  ARGV=[token, zeroGroupID] */
+const SAVE_ZGROUP = `${FENCE_GATE}
 redis.call('SET', KEYS[2], ARGV[2])
 return 'OK'`;
 
@@ -351,12 +360,27 @@ export class RedisStreamStore {
     if (guard) {
       return this.#fenced(
         TEARDOWN_GROUP,
-        [fenceKey(guard.groupKey), cookieKey(clientGroupID), registryKey(clientGroupID)],
+        [fenceKey(guard.groupKey), cookieKey(clientGroupID), registryKey(clientGroupID), zgroupKey(clientGroupID)],
         [String(guard.token)],
       );
     }
-    await redisService.getClient().del(cookieKey(clientGroupID), registryKey(clientGroupID));
+    await redisService.getClient().del(cookieKey(clientGroupID), registryKey(clientGroupID), zgroupKey(clientGroupID));
     return 'applied';
+  }
+
+  /** Persist the rotated zero-cache clientGroupID under the stable lease key (fenced) so a takeover
+   *  resumes under the same id + warm cookie. Called by the tap on a CVR self-heal rotation. */
+  async saveZGroup(clientGroupID: string, zeroGroupID: string, guard?: FenceGuard): Promise<FenceOutcome> {
+    if (guard) {
+      return this.#fenced(SAVE_ZGROUP, [fenceKey(guard.groupKey), zgroupKey(clientGroupID)], [String(guard.token), zeroGroupID]);
+    }
+    await redisService.getClient().set(zgroupKey(clientGroupID), zeroGroupID);
+    return 'applied';
+  }
+
+  /** The zero-cache clientGroupID the group's tap last used (null = never rotated → use the base). */
+  async loadZGroup(clientGroupID: string): Promise<string | null> {
+    return redisService.getClient().get(zgroupKey(clientGroupID));
   }
 
   /**

@@ -16,6 +16,9 @@ const IDLE_GRACE_MS = 30_000;
 /** Owner heartbeat: refresh owned group leases + re-stamp interest well inside their TTLs
  *  (LEASE_TTL_MS 10s, INTEREST_TTL_MS 15s). Also re-acquires a lost-but-still-wanted group. */
 const HEARTBEAT_MS = 2_000;
+/** An owned group whose tap is DISCONNECTED and has had no poke for this long is a candidate wedged
+ *  owner (healthy lease, dead tap) — warn so it is not invisible. Idle-but-connected never trips. */
+const STALE_OWNER_MS = 120_000;
 /** Pack groups per query-type. Instances spread across these by hash(partition) → bounded connections. */
 const GROUPS_PER_TYPE = 8;
 
@@ -32,6 +35,8 @@ export interface PackConnectionLike {
   addInstance(instanceKey: string, args: readonly unknown[], hash: string, partitionValue: string): void;
   removeInstance(instanceKey: string, partitionValue: string): void;
   size(): number;
+  isConnected(): boolean;
+  msSinceLastPoke(): number;
 }
 
 /** The subset of `ownership` the manager drives — an injection seam for tests. */
@@ -101,6 +106,8 @@ export class InstanceManager {
   readonly #multiPod: boolean;
   /** Set when the Redis-safety assertion fails: refuse ALL materialization (fan-out only). */
   #materializeDisabled = false;
+  /** Set by stopAll — an in-flight heartbeat/reconcile must not write to Redis after shutdown. */
+  #stopped = false;
   #heartbeat: NodeJS.Timeout | null = null;
   readonly #graceMs: number;
   readonly #heartbeatMs: number;
@@ -196,23 +203,27 @@ export class InstanceManager {
    * call repeatedly and concurrently; the `acquiring` guard prevents a double-acquire.
    */
   async #ensureMaterialized(group: Group): Promise<void> {
-    if (this.#materializeDisabled) return; // fan-out only (unsafe Redis)
+    if (this.#stopped || this.#materializeDisabled) return; // shut down, or fan-out only (unsafe Redis)
     if (this.#multiPod && !group.owned) {
       if (group.acquiring) return;
       group.acquiring = true;
       try {
         await this.#ready; // never acquire before the Redis-safety gate has passed
-        if (this.#materializeDisabled) return; // the gate failed while we awaited
+        if (this.#stopped || this.#materializeDisabled) return; // stopped/gate-failed while we awaited
         const token = await this.#ownership.acquireGroup(group.clientGroupID);
         if (token == null) return; // owned elsewhere — a reconcile there materializes the members
+        if (this.#stopped) {
+          await this.#ownership.releaseGroup(group.clientGroupID); // stopAll raced our acquire — give it back
+          return;
+        }
         group.owned = true;
         group.token = token;
       } finally {
         group.acquiring = false;
       }
     }
-    // A concurrent teardown may have emptied/removed the group while we awaited the acquire.
-    if (!this.#groups.has(group.clientGroupID)) return;
+    // A concurrent teardown/shutdown may have emptied/removed the group while we awaited the acquire.
+    if (this.#stopped || !this.#groups.has(group.clientGroupID)) return;
 
     if (!group.connection) {
       group.connection = this.#createConnection({
@@ -303,7 +314,12 @@ export class InstanceManager {
       return;
     }
     try {
-      await this.#store.teardownInstance(instanceKey, guard);
+      // A `stale` here means the lease was lost between the interest check and the DEL. Safe by
+      // construction (the fenced Lua refused; Redis passes intact to the new owner; releaseGroup
+      // no-ops on the podId check) but worth a breadcrumb for observability.
+      if ((await this.#store.teardownInstance(instanceKey, guard)) === 'stale') {
+        logger.debug('sync_teardown_instance_stale', { instanceKey, clientGroupID: instance.groupKey });
+      }
       if (this.#multiPod) await this.#store.deregisterInstance(instance.groupKey, instanceKey, guard);
       if (group) await this.#closeGroupIfEmpty(group);
     } catch (error) {
@@ -317,7 +333,9 @@ export class InstanceManager {
     if (!group.connection || group.connection.size() > 0) return;
     group.connection.stop();
     this.#groups.delete(group.clientGroupID);
-    await this.#store.teardownGroup(group.clientGroupID, this.#guardFor(group));
+    if ((await this.#store.teardownGroup(group.clientGroupID, this.#guardFor(group))) === 'stale') {
+      logger.debug('sync_teardown_group_stale', { clientGroupID: group.clientGroupID });
+    }
     if (this.#multiPod && group.owned) await this.#ownership.releaseGroup(group.clientGroupID);
     logger.info('sync_group_closed', { clientGroupID: group.clientGroupID });
     obsEmit('tap', { action: 'group-close', clientGroupID: group.clientGroupID });
@@ -334,20 +352,28 @@ export class InstanceManager {
     const conn = group.connection;
     const guard = this.#guardFor(group);
     if (!conn || !guard) return;
+    // Wedged-owner staleness signal: healthy lease but the tap is down and silent for a long time.
+    if (!conn.isConnected() && conn.msSinceLastPoke() > STALE_OWNER_MS) {
+      logger.warn('sync_owner_stream_stale', { clientGroupID: group.clientGroupID, msSincePoke: conn.msSinceLastPoke() });
+      obsEmit('tap', { action: 'owner-stale', clientGroupID: group.clientGroupID, msSincePoke: conn.msSinceLastPoke() });
+    }
     const registry = await this.#store.groupInstances(group.clientGroupID);
     for (const [ik, descJSON] of Object.entries(registry)) {
+      if (this.#stopped) return;
       let desc: { args: readonly unknown[]; partitionValue: string };
       try {
         desc = JSON.parse(descJSON) as { args: readonly unknown[]; partitionValue: string };
       } catch {
+        await this.#store.deregisterInstance(group.clientGroupID, ik, guard); // prune corrupt entry (owner-only)
         continue;
       }
       if ((await this.#ownership.liveInterest(ik)) > 0) {
         conn.addInstance(ik, desc.args, ik, desc.partitionValue); // idempotent; covers remote-only
       } else {
         conn.removeInstance(ik, desc.partitionValue);
-        await this.#store.teardownInstance(ik, guard);
+        const teardown = await this.#store.teardownInstance(ik, guard);
         await this.#store.deregisterInstance(group.clientGroupID, ik, guard);
+        if (teardown === 'stale') logger.debug('sync_reconcile_teardown_stale', { instanceKey: ik, clientGroupID: group.clientGroupID });
         const local = this.#instances.get(ik); // drop any parked local record + its grace timer
         if (local?.idleTimer) clearTimeout(local.idleTimer);
         this.#instances.delete(ik);
@@ -367,7 +393,9 @@ export class InstanceManager {
    * instances a local subscriber still wants.
    */
   async #onHeartbeat(): Promise<void> {
+    if (this.#stopped) return;
     for (const group of this.#groups.values()) {
+      if (this.#stopped) return; // shutdown mid-cycle — do not write after stopAll
       try {
         if (group.owned) {
           if (!(await this.#ownership.refreshGroup(group.clientGroupID))) {
@@ -384,13 +412,19 @@ export class InstanceManager {
         logger.error('sync_heartbeat_group_failed', { clientGroupID: group.clientGroupID, error });
       }
     }
-    // Re-stamp interest ONLY for instances a local subscriber still wants (or that are within the
-    // idle grace). Stamping a zero-subscriber instance would resurrect the interest its own
-    // teardown just removed → fleet interest could never drain → nothing is ever reclaimed.
+    // Re-stamp interest AND re-announce the registry descriptor for every instance a local
+    // subscriber still wants (or within the idle grace). Interest healing alone is not enough: the
+    // registry is written once at subscribe, so a sweep during a remote pod's stall (or a
+    // register-time blip) deletes the entry while interest later heals — leaving interest live but
+    // no descriptor, so NO owner ever re-materializes it and the client sits stale forever. Both
+    // are idempotent; re-announcing keeps the owner's reconcile work-list self-healing. Only skip a
+    // zero-subscriber instance — stamping that would resurrect the interest its teardown removed.
     try {
       for (const [instanceKey, inst] of this.#instances) {
+        if (this.#stopped) return;
         if (inst.subscribers.size > 0 || inst.idleTimer != null) {
           await this.#ownership.addInterest(instanceKey);
+          await this.#store.registerInstance(inst.groupKey, instanceKey, JSON.stringify({ args: inst.args, partitionValue: inst.partitionValue }));
         }
       }
     } catch (error) {
@@ -406,6 +440,7 @@ export class InstanceManager {
   }
 
   stopAll(): void {
+    this.#stopped = true;
     this.#stopHeartbeat();
     for (const instance of this.#instances.values()) {
       if (instance.idleTimer) clearTimeout(instance.idleTimer);
