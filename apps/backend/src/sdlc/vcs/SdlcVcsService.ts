@@ -54,7 +54,8 @@ export class SdlcVcsService implements SdlcVcs {
       status: row.status,
       revision: row.revision,
       identityLogin: row.identityLogin,
-      resourceOwner: row.resourceOwner,
+      repositoryOwner: row.repositoryOwner,
+      repositoryCount: row.repositoryCount,
       fingerprint: row.fingerprint,
       validationStatus: row.validationStatus,
       validatedAt: row.validatedAt,
@@ -70,13 +71,13 @@ export class SdlcVcsService implements SdlcVcs {
   async configureCredential(
     actor: SdlcActor,
     provider: VcsProvider,
-    input: { token: string; resourceOwner: string }
+    input: { token: string }
   ): Promise<unknown> {
     await this.requireWorkspaceAdmin(actor);
     const adapter = this.adapter(provider);
     let validation;
     try {
-      validation = await adapter.validateCredential(input.token, input.resourceOwner);
+      validation = await adapter.validateCredential(input.token);
     } catch (error) {
       throw this.toAppError(error);
     }
@@ -94,7 +95,8 @@ export class SdlcVcsService implements SdlcVcs {
         token: input.token,
         revision,
         identityLogin: validation.identityLogin,
-        resourceOwner: validation.resourceOwner,
+        repositoryOwner: validation.repositoryOwner,
+        repositoryCount: validation.repositoryCount,
         fingerprint: credentialFingerprint(input.token),
         validationStatus: 'VALID',
         validatedAt: now,
@@ -124,10 +126,7 @@ export class SdlcVcsService implements SdlcVcs {
     await this.requireWorkspaceAdmin(actor);
     const row = await this.requireConnectedCredential(actor.workspaceId, provider);
     try {
-      const validation = await this.adapter(provider).validateCredential(
-        row.token,
-        row.resourceOwner
-      );
+      const validation = await this.adapter(provider).validateCredential(row.token);
       const now = new Date().toISOString();
       await this.prisma.$transaction(async (tx) => {
         await this.credentialStore.save(tx, {
@@ -137,7 +136,8 @@ export class SdlcVcsService implements SdlcVcs {
           validationErrorCode: null,
           validationErrorMessage: null,
           identityLogin: validation.identityLogin,
-          resourceOwner: validation.resourceOwner,
+          repositoryOwner: validation.repositoryOwner,
+          repositoryCount: validation.repositoryCount,
           updatedBy: actor.userId,
           updatedAt: now,
         });
@@ -316,36 +316,26 @@ export class SdlcVcsService implements SdlcVcs {
       let inspection;
       let fallbackError: VcsProviderError | null = null;
       if (token) {
-        if (
-          credential?.resourceOwner &&
-          credential.resourceOwner.toLowerCase() !== parsed.owner.toLowerCase()
-        ) {
-          fallbackError = new VcsProviderError(
-            'GITHUB_RESOURCE_OWNER_MISMATCH',
-            `Workspace credential is limited to ${credential.resourceOwner}`,
-            403
-          );
-        } else {
-          try {
-            inspection = await adapter.inspectRepository({
-              repository: parsed,
-              baseBranch: this.baseBranch(repo.baseBranch),
-              token,
+        // GitHub authorises the repository; do not re-add a local owner check here.
+        try {
+          inspection = await adapter.inspectRepository({
+            repository: parsed,
+            baseBranch: this.baseBranch(repo.baseBranch),
+            token,
+          });
+        } catch (error) {
+          fallbackError = this.providerError(error);
+          if (fallbackError.retryable) throw fallbackError;
+          if (fallbackError.code === 'GITHUB_CREDENTIAL_INVALID' && credential) {
+            await this.invalidateWorkspaceCredential({
+              workspaceId: input.workspaceId,
+              userId: input.userId,
+              provider,
+              credentialId: credential.id,
+              credentialRevision: credential.revision,
+              error: fallbackError,
             });
-          } catch (error) {
-            fallbackError = this.providerError(error);
-            if (fallbackError.retryable) throw fallbackError;
-            if (fallbackError.code === 'GITHUB_CREDENTIAL_INVALID' && credential) {
-              await this.invalidateWorkspaceCredential({
-                workspaceId: input.workspaceId,
-                userId: input.userId,
-                provider,
-                credentialId: credential.id,
-                credentialRevision: credential.revision,
-                error: fallbackError,
-              });
-              credentialInvalidated = true;
-            }
+            credentialInvalidated = true;
           }
         }
         if (!inspection) {
@@ -976,7 +966,7 @@ export class SdlcVcsService implements SdlcVcs {
   private async requireConnectedCredential(
     workspaceId: string,
     provider: VcsProvider
-  ): Promise<StoredSdlcVcsCredential & { token: string; resourceOwner: string }> {
+  ): Promise<StoredSdlcVcsCredential & { token: string }> {
     const row = await this.connectedCredential(workspaceId, provider);
     if (!row) {
       throw new AppError('Workspace GitHub credential is not connected', 409);
@@ -987,18 +977,17 @@ export class SdlcVcsService implements SdlcVcs {
   private async connectedCredential(
     workspaceId: string,
     provider: VcsProvider
-  ): Promise<(StoredSdlcVcsCredential & { token: string; resourceOwner: string }) | null> {
+  ): Promise<(StoredSdlcVcsCredential & { token: string }) | null> {
     const row = await this.credentialStore.find(this.prisma, workspaceId, provider);
     if (
       !row ||
       row.status !== 'CONNECTED' ||
       row.validationStatus !== 'VALID' ||
-      !row.token ||
-      !row.resourceOwner
+      !row.token
     ) {
       return null;
     }
-    return row as StoredSdlcVcsCredential & { token: string; resourceOwner: string };
+    return row as StoredSdlcVcsCredential & { token: string };
   }
 
   private credentialState(credential: StoredSdlcVcsCredential | null): string | null {

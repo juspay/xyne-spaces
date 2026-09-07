@@ -260,12 +260,6 @@ export const configureSdlcVcsCredentialSchema = z.object({
       /^github_pat_[A-Za-z0-9_]+$/,
       "Enter a GitHub fine-grained personal access token",
     ),
-  resourceOwner: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .regex(/^[A-Za-z0-9_.-]+$/),
 });
 export type ConfigureSdlcVcsCredentialInput = z.infer<
   typeof configureSdlcVcsCredentialSchema
