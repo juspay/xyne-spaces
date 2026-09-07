@@ -101,7 +101,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
@@ -451,7 +451,7 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
-      const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
