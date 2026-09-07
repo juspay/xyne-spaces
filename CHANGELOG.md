@@ -1,3 +1,61 @@
+## [1.282.1](https://github.com/juspay/xyne-spaces/compare/v1.282.0...v1.282.1) (2026-09-07)
+
+## [1.282.0](https://github.com/juspay/xyne-spaces/compare/v1.281.0...v1.282.0) (2026-09-07)
+
+
+### Features
+
+* downtime prevention ([#1442](https://github.com/juspay/xyne-spaces/issues/1442)) ([bf7fd7c](https://github.com/juspay/xyne-spaces/commit/bf7fd7c328880b919830b9efb06016ecc89b9a52))
+
+## [1.281.0](https://github.com/juspay/xyne-spaces/compare/v1.280.0...v1.281.0) (2026-09-07)
+
+
+### Features
+
+* eta management new ([#732](https://github.com/juspay/xyne-spaces/issues/732)) ([ebe9861](https://github.com/juspay/xyne-spaces/commit/ebe98615a5cbc16d885d5701c9a8ea27da68fe8f))
+
+## [1.280.0](https://github.com/juspay/xyne-spaces/compare/v1.279.2...v1.280.0) (2026-09-07)
+
+
+### Features
+
+* integrated workflow-sdk ([#1291](https://github.com/juspay/xyne-spaces/issues/1291)) ([edfbf10](https://github.com/juspay/xyne-spaces/commit/edfbf10307edcd270661d8f0dcdf3f7c6a38bfbb))
+* link hover card and composer link popover ([#1494](https://github.com/juspay/xyne-spaces/issues/1494)) ([2c015c7](https://github.com/juspay/xyne-spaces/commit/2c015c79ca34d7eb0d900b509725602372f801f0))
+
+
+### Bug Fixes
+
+* permission fix for play store app ([#1588](https://github.com/juspay/xyne-spaces/issues/1588)) ([48f6227](https://github.com/juspay/xyne-spaces/commit/48f6227c362796769069af0a31af4e4b5671cfd1))
+* remember last opened tab when reopening the tickets module ([#1572](https://github.com/juspay/xyne-spaces/issues/1572)) ([c253dc5](https://github.com/juspay/xyne-spaces/commit/c253dc5c2a6f800f45eda5303b9431d851cce75c))
+
+## [1.279.2](https://github.com/juspay/xyne-spaces/compare/v1.279.1...v1.279.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* close MAPT/SCR retest findings — Zero tenant scoping, CSWSH, SSRF pinning, upload screening, enum hardening, non-root ([#1131](https://github.com/juspay/xyne-spaces/issues/1131)) ([3987455](https://github.com/juspay/xyne-spaces/commit/3987455d43547472d80add7b446be98d8169e18a))
+
+## [1.279.1](https://github.com/juspay/xyne-spaces/compare/v1.279.0...v1.279.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* diff node ([#1513](https://github.com/juspay/xyne-spaces/issues/1513)) ([1912433](https://github.com/juspay/xyne-spaces/commit/19124332f7d33e925a1f95e1d9fcdf338189497c))
+
+## [1.279.0](https://github.com/juspay/xyne-spaces/compare/v1.278.6...v1.279.0) (2026-09-07)
+
+
+### Features
+
+* add playback speed control to audio player ([#1575](https://github.com/juspay/xyne-spaces/issues/1575)) ([caad243](https://github.com/juspay/xyne-spaces/commit/caad243413979cf8ca907c1f740827a61618e9c4))
+
+## [1.278.6](https://github.com/juspay/xyne-spaces/compare/v1.278.5...v1.278.6) (2026-09-07)
+
+
+### Bug Fixes
+
+* revert native-button conversions to raw <button> ([#1498](https://github.com/juspay/xyne-spaces/issues/1498)) ([72a956e](https://github.com/juspay/xyne-spaces/commit/72a956e96239c0885ad0c635cce102040e3c39b1))
+
 ## [1.278.5](https://github.com/juspay/xyne-spaces/compare/v1.278.4...v1.278.5) (2026-09-07)
 
 

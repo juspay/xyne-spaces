@@ -54,6 +54,7 @@ import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
+import { workflowsWorker } from '@/workers/workflowsWorker';
 config()
 
 process.on('unhandledRejection', reason => {
@@ -100,6 +101,7 @@ class WorkerService {
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
@@ -193,6 +195,11 @@ class WorkerService {
         await emailClassificationQueue.initialize();
         logger.info('Starting social media review sync worker...');
         socialMediaSyncWorker.start();
+      }
+
+      if (workflowsEnabled) {
+        logger.info('Starting workflows worker...');
+        await workflowsWorker.start();
       }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
@@ -441,6 +448,7 @@ class WorkerService {
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
@@ -500,6 +508,10 @@ class WorkerService {
       }
       if (messageClassificationEnabled) {
         await messageClassificationQueue.shutdown()
+      }
+
+      if (workflowsEnabled) {
+        await workflowsWorker.stop()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
