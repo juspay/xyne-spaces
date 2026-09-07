@@ -592,6 +592,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [titleValue, setTitleValue] = useState('');
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionValue, setDescriptionValue] = useState('');
+  // Remember the last value we actually dispatched a save for, per field.
+  // Each auto-save mutation bumps the ticket's updatedAt (and description saves
+  // trigger further server-side ticket writes), which changes the `ticket`
+  // object this effect depends on and re-arms the debounce. Without this guard
+  // the re-armed timer re-sends the same edit before the written value has
+  // propagated back into `ticket`, emitting one activity per cycle.
+  const lastSavedTitleRef = useRef<string | null>(null);
+  const lastSavedDescriptionRef = useRef<string | null>(null);
   const [showTagDropdown, setShowTagDropdown] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -1888,8 +1896,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket || !editingTitle || isEmailDeskTicket) return;
     const trimmed = titleValue.trim();
     if (!trimmed || trimmed === ticket.title) return;
+    if (trimmed === lastSavedTitleRef.current) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
+      lastSavedTitleRef.current = trimmed;
       void applyTicketUpdate(
         { id: ticketId, title: trimmed, updatedAt: Date.now() },
         'Failed to update title',
@@ -1904,8 +1914,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket || !editingDescription) return;
     const next = descriptionValue.trim();
     if (next === ticket.description) return;
+    if (next === lastSavedDescriptionRef.current) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
+      lastSavedDescriptionRef.current = next;
       void applyTicketUpdate(
         { id: ticketId, description: next, updatedAt: Date.now() },
         'Failed to update description',
