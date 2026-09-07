@@ -96,7 +96,14 @@ export class Fanout {
   removeClient(clientId: string, dataInstanceKey: string): void {
     const subs = this.#dataSubs.get(dataInstanceKey);
     if (!subs) return;
-    for (const s of subs) if (s.id === clientId) subs.delete(s);
+    for (const s of subs)
+      if (s.id === clientId) {
+        // Clear admission so a concurrent data dispatch that already captured this client
+        // in `liveBefore` skips it at the emit-time recheck — no stray delta for an
+        // instance the client just released.
+        s.admitted = false;
+        subs.delete(s);
+      }
     if (subs.size === 0) this.#dataSubs.delete(dataInstanceKey);
   }
 

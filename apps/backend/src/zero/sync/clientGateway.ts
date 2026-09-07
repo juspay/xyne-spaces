@@ -112,7 +112,12 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       return;
     }
     const meta = queryMetaFor(queryName, args[0]);
-    if (!meta) return;
+    if (!meta) {
+      // Roll back the data subscribe made above — this path never reaches `subs.set`, so
+      // the disconnect handler would never release it either (a permanent refcount leak).
+      syncEngine.unsubscribe(dataInstanceKey, connId);
+      return;
+    }
     const partitionValue = String((args[0] as Record<string, ReadonlyJSONValue>)[meta.partitionColumn]);
 
     // Materialize the ACL grant instances (own client groups) and gate the client.
