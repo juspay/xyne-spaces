@@ -14,13 +14,16 @@
  */
 import { randomUUID } from 'crypto';
 import { redisService } from '@/services/redisService';
+import { logger } from '@/utils/logger';
 
 /** This process's unique id — lease ownership + interest membership are keyed by it. */
 export const POD_ID = `pod-${randomUUID()}`;
 
 const P = 'sync';
 const ownerKey = (g: string): string => `${P}:owner:${g}`;
-const fenceKey = (g: string): string => `${P}:fence:${g}`;
+/** The fence-counter key for group G. Exported so redisStore's fenced writes gate on the
+ *  same key ownership INCRs on acquisition — one source of truth for the fence key format. */
+export const fenceKey = (g: string): string => `${P}:fence:${g}`;
 const interestKey = (i: string): string => `${P}:interest:${i}`;
 
 export const LEASE_TTL_MS = 10_000;
@@ -126,3 +129,38 @@ class Ownership {
 }
 
 export const ownership = new Ownership();
+
+/**
+ * Startup gate for multi-pod ownership. Call BEFORE any pod may acquire a group lease.
+ *
+ * Fencing depends on `sync:fence:{G}` being durable: an `allkeys-*` maxmemory-policy can
+ * evict the fence counter under pressure, after which a zombie ex-owner's stale token would
+ * pass the `GET fence == myToken` check against a freshly-reset (or absent) key → data
+ * corruption. So we REFUSE ownership under `allkeys-*`. `volatile-*`/`noeviction` are safe:
+ * the fence key carries no TTL, so a volatile policy never evicts it (only the TTL'd lease,
+ * whose early expiry is just a benign failover). We also loud-log a pre-7 Redis, since the
+ * interest scripts use `TIME`-before-write and rely on effect-based script replication
+ * (default ≥5, always-on in 7) — a server forcing command replication would reject them.
+ */
+export async function assertOwnershipSafeRedis(): Promise<void> {
+  const client = redisService.getClient();
+
+  const policy = (await client.config('GET', 'maxmemory-policy')) as string[];
+  const value = Array.isArray(policy) ? policy[1] : undefined;
+  if (value && value.startsWith('allkeys')) {
+    throw new Error(
+      `sync-engine multi-pod ownership requires a non-evicting Redis: maxmemory-policy=${value} ` +
+        `can evict the fence key (sync:fence:*) and void fencing → data corruption on takeover. ` +
+        `Set maxmemory-policy to noeviction or a volatile-* policy.`,
+    );
+  }
+
+  const info = await client.info('server');
+  const major = Number(/redis_version:(\d+)\./.exec(info)?.[1] ?? 0);
+  if (major > 0 && major < 7) {
+    logger.warn(
+      `[sync-ownership] Redis ${major}.x < 7: the TIME-before-write interest scripts rely on ` +
+        `effect-based Lua replication; verify this server does not force command replication.`,
+    );
+  }
+}
