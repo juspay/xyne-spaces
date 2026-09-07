@@ -2812,17 +2812,11 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({ callId: z.string() }),
     ({ ctx, args: { callId } }) =>
       zql.calls
-        .where('workspaceId', ctx.workspaceId)
         .where('callType', '!=', CallType.HEADLESS)
         .where('id', callId)
         .related('participants', p => p.where('userId', ctx.userID))
         .related('shares', shares =>
-          shares
-            .where('shareableEntityType', ShareableEntityType.CALL)
-            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .related('user')
-            .related('userGroup')
-            .related('channel'),
+          shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
         )
         .one(),
   ),

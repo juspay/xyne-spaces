@@ -2,6 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { EntityShareModal, type EntityShareEntry } from '../../components/Share/EntityShareModal';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useUsersById } from '../../hooks/useUsers';
+import { useAllChannels } from '../../hooks/useChannels';
+import { useUserGroups } from '../../hooks/useUserGroup';
 import { queries } from '../../zero/queries';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { callService, type CallShareTarget } from '../../services/Call/callService';
@@ -31,6 +34,17 @@ export const CallShareModal: React.FC<CallShareModalProps> = ({
   const [locallyRevokedShareIds, setLocallyRevokedShareIds] = useState<Set<string>>(new Set());
 
   const [callRow] = useCachedQuery(queries.callById({ callId }));
+  const usersById = useUsersById();
+  const allChannels = useAllChannels();
+  const channelNamesById = useMemo(
+    () => new Map(allChannels.map(channel => [channel.id, channel.name])),
+    [allChannels],
+  );
+  const userGroups = useUserGroups();
+  const userGroupNamesById = useMemo(
+    () => new Map(userGroups.map(group => [group.id, group.name])),
+    [userGroups],
+  );
 
   const shares = useMemo<EntityShareEntry[]>(
     () =>
@@ -42,12 +56,13 @@ export const CallShareModal: React.FC<CallShareModalProps> = ({
             : share.channelId
               ? { type: 'channel', id: share.channelId }
               : { type: 'user', id: share.userId! };
+          const user = share.userId ? usersById.get(share.userId) : undefined;
           const label = share.userGroupId
-            ? (share.userGroup?.name ?? share.userGroupId)
+            ? (userGroupNamesById.get(share.userGroupId) ?? share.userGroupId)
             : share.channelId
-              ? (share.channel?.name ?? share.channelId)
-              : share.user
-                ? getUserDisplayName(share.user)
+              ? (channelNamesById.get(share.channelId) ?? 'Private channel')
+              : user
+                ? getUserDisplayName(user)
                 : (share.userId ?? '');
           const post = getRecordingSharePost(share.metadata);
           return {
@@ -58,7 +73,7 @@ export const CallShareModal: React.FC<CallShareModalProps> = ({
             post: post ? { channelId: post.channelId, conversationId: post.conversationId } : null,
           };
         }),
-    [callRow, locallyRevokedShareIds],
+    [callRow, locallyRevokedShareIds, usersById, channelNamesById, userGroupNamesById],
   );
 
   const handleGrant = async (targets: CallShareTarget[], messageContent: string): Promise<void> => {
