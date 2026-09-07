@@ -75,11 +75,12 @@ import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
 import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
-import { useChannel } from '../../../hooks/useChannels';
+import { useChannel, useAllChannels } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
+import { getTicketStatusColor } from '../../Tickets/CalendarView/CompactTicketBadge/utils';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
@@ -117,7 +118,7 @@ import { BoardTicketNav } from '../BoardTicketNav';
 import Tooltip from '../../ui/Tooltip';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
-import { isReleaseTicket } from '@xyne/shared';
+import { isReleaseTicket, isDeskChannelType } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
 import { searchService } from '../../../services/searchService';
 import { AIClassificationPanel } from './AIClassificationPanel';
@@ -214,7 +215,6 @@ const toVespaProjectTicket = (result: {
 });
 
 const fetchProjectTicketsPageFromVespa = async (
-  projectId: string,
   query: string,
   offset: number,
 ): Promise<{
@@ -227,7 +227,6 @@ const fetchProjectTicketsPageFromVespa = async (
     query: query || '*',
     type: 'tickets',
     apps: 'ticket',
-    projectId,
     limit: 200,
     offset,
   });
@@ -1086,6 +1085,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
 
+  const allChannels = useAllChannels();
+  const channelTypeMap = useMemo(
+    () => new Map(allChannels.map(c => [c.id, c.type])),
+    [allChannels],
+  );
+
   // Detect if ticket belongs to an email/desk channel — title changes also update email subject
   // ticket.channelId is the direct field; ticket.conversation.channelId is the linked conversation's channel
   const emailChannelPreference = useEmailChannelPreference(
@@ -1117,14 +1122,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     setProjectTicketSearch('');
     setIsAddTicketMenuOpen(false);
     projectTicketsRequestIdRef.current += 1;
-  }, [ticket?.projectId]);
+  }, [ticket?.id]);
 
   const loadProjectTicketsPage = useCallback(
     async (offset: number, replace: boolean): Promise<void> => {
-      if (!ticket?.projectId) {
-        return;
-      }
-
       const normalizedQuery = projectTicketSearch.trim();
       const requestId = ++projectTicketsRequestIdRef.current;
       const isInitialLoad = replace || offset === 0;
@@ -1136,11 +1137,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       try {
-        const response = await fetchProjectTicketsPageFromVespa(
-          ticket.projectId,
-          normalizedQuery,
-          offset,
-        );
+        const response = await fetchProjectTicketsPageFromVespa(normalizedQuery, offset);
 
         if (requestId !== projectTicketsRequestIdRef.current) {
           return;
@@ -1173,7 +1170,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           message: String('[TicketDetails] Failed to load Vespa project tickets'),
           context: [
             {
-              projectId: ticket.projectId,
               offset,
               query: normalizedQuery || '*',
               error,
@@ -1194,11 +1190,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }
       }
     },
-    [projectTicketSearch, ticket?.projectId],
+    [projectTicketSearch],
   );
 
   useEffect(() => {
-    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+    if (!isAddTicketMenuOpen) {
       return;
     }
 
@@ -1208,7 +1204,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (projectTicketSearch.trim()) {
       void loadProjectTicketsPage(0, true);
     }
-  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+  }, [isAddTicketMenuOpen, loadProjectTicketsPage, projectTicketSearch]);
 
   const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
     setIsAddTicketMenuOpen(open);
@@ -2991,40 +2987,56 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             )}
           </div>
           {onUnmerge && (
-            <Button
+            <button
               type='button'
-              variant='ghost'
               onClick={onUnmerge}
-              trackId='unmerge_ticket'
+              data-ph-capture-attribute-track-id='unmerge_ticket'
               className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='UnmergeTicket'
             >
               Unmerge
-            </Button>
+            </button>
           )}
           {allowEdit && (
-            <Button
+            <button
               type='button'
-              variant='ghost'
               className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
-              trackId='remove_ticket_reference'
+              data-ph-capture-attribute-track-id='remove_ticket_reference'
               aria-label='Remove reference'
               data-track-category='Tickets'
               data-track-name='RemoveReference'
               data-track-metadata={JSON.stringify({ referenceId: reference.id })}
             >
               <X size={14} />
-            </Button>
+            </button>
           )}
         </div>
       </div>
     );
   };
 
-  const openMappedSubTicket = (mappedTicketId: string | null | undefined): void => {
+  const openMappedSubTicket = (
+    mappedTicketId: string | null | undefined,
+    mappedTicket?: {
+      channelId: string;
+      xyneId?: string | null;
+      conversationId?: string | null;
+    } | null,
+  ): void => {
     if (!mappedTicketId) return;
+
+    if (mappedTicket) {
+      const channelType = channelTypeMap.get(mappedTicket.channelId);
+      if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
+        const workspaceId = location.pathname.split('/')[1];
+        void navigate(
+          `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+        );
+        return;
+      }
+    }
 
     if (onNavigateToTicket) {
       onNavigateToTicket(mappedTicketId);
@@ -3062,11 +3074,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
     const handleRowClick = (): void => {
       if (mappedTicketId) {
-        if (isFlowBoard) {
-          openMappedSubTicket(mappedTicketId);
-          return;
+        if (mappedTicket) {
+          const channelType = channelTypeMap.get(mappedTicket.channelId);
+          if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
+            const pathParts = location.pathname.split('/');
+            const workspaceId = pathParts[1];
+            void navigate(
+              `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+            );
+          } else {
+            const workspaceId = location.pathname.split('/')[1];
+            const base = buildChannelRoute(
+              `${mappedTicket.channelId}/${mappedTicket.conversationId}/${mappedTicket.id}`,
+              { selectedTab: 'thread' },
+            );
+            void navigate(`/${workspaceId}${base}#origin=${mappedTicket.conversationId}`);
+          }
         }
-        toggleSubTicketBranch(mappedTicketId);
         return;
       }
 
@@ -3134,7 +3158,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
                   onClick={event => {
                     event.stopPropagation();
-                    openMappedSubTicket(mappedTicketId);
+                    openMappedSubTicket(mappedTicketId, mappedTicket);
                   }}
                   aria-label='Open mapped ticket'
                   data-track-category='Tickets'
@@ -3664,10 +3688,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
                             {tag.tagName}
                             {
-                              <Button
-                                variant='ghost'
+                              <button
                                 onClick={() => void handleRemoveTag(tag.id)}
-                                trackId='remove_ticket_tag'
+                                data-ph-capture-attribute-track-id='remove_ticket_tag'
                                 className={`ml-1 p-0.5 rounded transition-colors`}
                                 aria-label='Remove label'
                                 data-track-category='Tickets'
@@ -3678,7 +3701,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 })}
                               >
                                 <X size={12} />
-                              </Button>
+                              </button>
                             }
                           </span>
                         );
@@ -3716,10 +3739,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       {/* Tag List */}
                       <div className='max-h-48 overflow-y-auto'>
                         {tagSearchQuery.trim() && !exactMatch && (
-                          <Button
-                            variant='ghost'
+                          <button
                             onClick={() => void handleToggleTag(tagSearchQuery)}
-                            trackId='create_ticket_tag'
+                            data-ph-capture-attribute-track-id='create_ticket_tag'
                             className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
                             data-track-category='Tickets'
                             data-track-name='CreateTag'
@@ -3729,18 +3751,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <span className='text-foreground font-medium'>
                               Create &quot;{tagSearchQuery.trim()}&quot;
                             </span>
-                          </Button>
+                          </button>
                         )}
 
                         {filteredTags.map(tagName => {
                           const isSelected = selectedTagNames.has(tagName);
 
                           return (
-                            <Button
+                            <button
                               key={tagName}
-                              variant='ghost'
                               onClick={() => void handleToggleTag(tagName)}
-                              trackId='toggle_ticket_tag'
+                              data-ph-capture-attribute-track-id='toggle_ticket_tag'
                               className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
                               data-track-category='Tickets'
                               data-track-name='ToggleTag'
@@ -3759,7 +3780,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   <Check size={14} />
                                 </span>
                               )}
-                            </Button>
+                            </button>
                           );
                         })}
                       </div>
@@ -3790,7 +3811,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   {stageReadOnly ? (
                     <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <TicketStatusIcon size={14} />
+                      <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       {ticket.stageName || 'Not set'}
                     </span>
                   ) : (
@@ -3799,7 +3820,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       selectedValue={ticket.stageName}
                       onValueChange={handleStageChange}
                       placeholder='Set Status'
-                      icon={<TicketStatusIcon size={14} />}
+                      icon={
+                        <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
+                      }
+                      getItemIcon={item =>
+                        (() => {
+                          const stage = selectorStages.find(s => s.name === item.name);
+                          const itemStatusV2 = stage?.defaultTicketStatusV2 ?? ticket.statusV2;
+                          return (
+                            <TicketStatusIcon
+                              size={14}
+                              color={getTicketStatusColor(itemStatusV2)}
+                            />
+                          );
+                        })()
+                      }
                       noBorder={true}
                       isItemDisabled={item => item.name === ticket.stageName}
                     />
@@ -4380,8 +4415,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isDraft && !item.formId && (
-                                <Button
-                                  variant='ghost'
+                                <button
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4396,14 +4430,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Request submitted for approval');
                                   }}
-                                  trackId='submit_stage_request'
+                                  data-ph-capture-attribute-track-id='submit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='SubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Submit Request
-                                </Button>
+                                </button>
                               )}
                               {isSubmitted && item.formId && (
                                 <>
@@ -4569,8 +4603,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isRejected && !item.formId && (
-                                <Button
-                                  variant='ghost'
+                                <button
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4585,14 +4618,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Stage change request resubmitted for approval');
                                   }}
-                                  trackId='resubmit_stage_request'
+                                  data-ph-capture-attribute-track-id='resubmit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Resubmit request
-                                </Button>
+                                </button>
                               )}
                             </>
                           ) : (
@@ -4732,6 +4765,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
                 const displayProgress = stageProgress === 0 ? 1 : stageProgress;
                 const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+                const navigateToParentTicket = (): void => {
+                  const channelType = channelTypeMap.get(parentTicket.channelId);
+                  if (isDeskChannelType(channelType) && parentTicket.xyneId) {
+                    const pathParts = location.pathname.split('/');
+                    const workspaceId = pathParts[1];
+                    void navigate(
+                      `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
+                    );
+                  } else {
+                    const workspaceId = location.pathname.split('/')[1];
+                    const base = buildChannelRoute(
+                      `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
+                      { selectedTab: 'thread' },
+                    );
+                    void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`);
+                  }
+                };
+
                 const openParentTicket = (): void => {
                   if (onNavigateToTicket) {
                     onNavigateToTicket(parentTicket.id);
@@ -4745,11 +4796,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     key={parentTicket.id}
                     role='button'
                     tabIndex={0}
-                    onClick={openParentTicket}
+                    onClick={navigateToParentTicket}
                     onKeyDown={event => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        openParentTicket();
+                        navigateToParentTicket();
                       }
                     }}
                     className='flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80'

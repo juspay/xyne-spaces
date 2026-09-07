@@ -1,5 +1,5 @@
 import { DatabaseClient } from '../client';
-import { Email } from '@prisma/client';
+import { Email, Prisma } from '@prisma/client';
 import { EmailType } from '@xyne/shared';
 import { withWorkspaceScope } from '../tenant/context';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
@@ -27,16 +27,17 @@ export class EmailRepository {
     clientVersionName?: string;
     clientVersionCode?: string;
     createdAt?: Date;
-  }): Promise<Email> {
+  }, tx?: Prisma.TransactionClient): Promise<Email> {
+    const db = tx ?? this.db;
     const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
-    const channel = await this.db.channel.findUnique({
+    const channel = await db.channel.findUnique({
       where: { id: data.channelId },
       select: { workspaceId: true },
     });
     if (!channel?.workspaceId) {
       throw new Error(`Could not find workspaceId for channel ${data.channelId}`);
     }
-    const email = await this.db.email.upsert({
+    const email = await db.email.upsert({
       where: {
         externalMessageId_channelId: {
           externalMessageId: data.externalMessageId,
@@ -71,9 +72,10 @@ export class EmailRepository {
         data.channelId,
         data.externalMessageId,
         rfcMessageId,
+        tx,
       );
     }
-    await syncTicketEmailCount(this.db, data.conversationId);
+    await syncTicketEmailCount(db, data.conversationId);
     return email;
   }
 
@@ -270,11 +272,12 @@ export class EmailRepository {
     channelId: string,
     externalMessageId: string,
     rfcMessageId?: string | null,
+    tx?: Prisma.TransactionClient,
   ): Promise<{ count: number }> {
     const normalized = normalizeRfcMessageId(rfcMessageId);
     if (!normalized) return { count: 0 };
 
-    return this.db.email.updateMany({
+    return (tx ?? this.db).email.updateMany({
       where: { channelId, externalMessageId, rfcMessageId: null },
       data: { rfcMessageId: normalized },
     });

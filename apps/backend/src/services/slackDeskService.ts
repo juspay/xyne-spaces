@@ -39,7 +39,9 @@ class SlackDeskService {
     const conversation = await this.conversationRepo.findById(conversationId);
     if (!conversation) throw new Error(`Conversation not found: ${conversationId}`);
 
-    const externalSource = await this.externalSourceRepo.findByChannelId(conversation.channelId);
+    const externalSource = await this.externalSourceRepo.findChannelSource(conversation.channelId, {
+      sourceTypes: ['slack-desk'],
+    });
     if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
 
     const emails = await this.emailRepo.findByConversationId(conversationId);

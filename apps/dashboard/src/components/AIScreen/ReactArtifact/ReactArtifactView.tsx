@@ -11,6 +11,7 @@ import {
 import {
   Check,
   Code2,
+  Settings2,
   Loader2,
   Maximize2,
   Pencil,
@@ -20,7 +21,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { Button } from '../../ui/Button/Button';
+
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
   loadArtifactPayload,
@@ -191,11 +192,12 @@ export const ReactArtifactView = ({
   expandLabel = 'Open full screen',
   onClose,
   titleSlot,
+  settingsSlot,
   onSave,
   saveState = 'idle',
 }: ReactArtifactViewProps): ReactElement => {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
-  const [tab, setTab] = useState<'preview' | 'code'>('preview');
+  const [tab, setTab] = useState<'preview' | 'code' | 'settings'>('preview');
   const [refreshingData, setRefreshingData] = useState(false);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
   const auth = useAuthContextValues();
@@ -303,6 +305,9 @@ export const ReactArtifactView = ({
                 [
                   ['preview', Play],
                   ['code', Code2],
+                  // Only when a caller supplied settings — the inline card and
+                  // the dialog have no app behind them to configure.
+                  ...(settingsSlot ? ([['settings', Settings2]] as const) : []),
                 ] as const
               ).map(([value, Icon]) => (
                 <button
@@ -346,9 +351,8 @@ export const ReactArtifactView = ({
             <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (
-            <Button
-              variant='ghost'
-              trackId='react_artifact_refresh_data'
+            <button
+              data-ph-capture-attribute-track-id='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -365,12 +369,11 @@ export const ReactArtifactView = ({
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
                 aria-hidden='true'
               />
-            </Button>
+            </button>
           )}
           {onSave && (
-            <Button
-              variant='ghost'
-              trackId='react_artifact_save'
+            <button
+              data-ph-capture-attribute-track-id='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
@@ -387,7 +390,7 @@ export const ReactArtifactView = ({
               ) : (
                 <Save className='h-3.5 w-3.5' aria-hidden='true' />
               )}
-            </Button>
+            </button>
           )}
           {onExpand && (
             <button
@@ -446,6 +449,14 @@ export const ReactArtifactView = ({
       {fill && tab === 'code' && (
         <div style={bodyStyle}>
           <ArtifactCodeView payload={payload} />
+        </div>
+      )}
+      {fill && tab === 'settings' && settingsSlot && (
+        // Explicit background: Preview paints its own (the Sandpack iframe) and
+        // Code paints its own (the editor), so the pane shell deliberately has
+        // none. A plain panel has to supply it or the app behind shows through.
+        <div style={bodyStyle} className='overflow-y-auto bg-background'>
+          {settingsSlot}
         </div>
       )}
     </div>

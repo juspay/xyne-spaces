@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState, memo, type ReactElement } from 'react';
 import mermaid from 'mermaid';
-import { Code2, Image as ImageIcon, Download, Copy, Check, X } from 'lucide-react';
+import {
+  Code2,
+  Image as ImageIcon,
+  Download,
+  Copy,
+  Check,
+  X,
+  Pencil,
+  Maximize2,
+  Trash2,
+} from 'lucide-react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { type MermaidBlockProps, type ViewMode } from './MermaidBlock.types';
 import {
@@ -61,6 +71,9 @@ const MermaidBlockComponent = ({
   chart,
   messageId,
   controlsOnHover = false,
+  onEdit,
+  onDelete,
+  previewOnClick = true,
 }: MermaidBlockProps): ReactElement => {
   const isDark = useIsDarkTheme();
   const elementRef = useRef<HTMLDivElement>(null);
@@ -151,39 +164,38 @@ const MermaidBlockComponent = ({
           <div className='flex items-center gap-1 bg-background/90 backdrop-blur-sm rounded-lg shadow-sm border border-border p-1'>
             <button
               onClick={() => setViewMode('diagram')}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
+              className={`flex items-center rounded p-1.5 transition-colors ${
                 viewMode === 'diagram'
-                  ? 'bg-blue-100 text-blue-700 mermaid-tab-active'
+                  ? 'mermaid-tab-active'
                   : 'text-muted-foreground hover:bg-accent'
               }`}
               title='View diagram'
+              aria-label='View diagram'
               data-track-category='Mermaid'
               data-track-name='VIEW_DIAGRAM'
             >
               <ImageIcon className='w-3 h-3' />
-              Diagram
             </button>
             <button
               onClick={() => setViewMode('code')}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                viewMode === 'code'
-                  ? 'bg-blue-100 text-blue-700 mermaid-tab-active'
-                  : 'text-muted-foreground hover:bg-accent'
+              className={`flex items-center rounded p-1.5 transition-colors ${
+                viewMode === 'code' ? 'mermaid-tab-active' : 'text-muted-foreground hover:bg-accent'
               }`}
               title='View code'
+              aria-label='View code'
               data-track-category='Mermaid'
               data-track-name='VIEW_CODE'
             >
               <Code2 className='w-3 h-3' />
-              Code
             </button>
 
             {/* Download Button (only in diagram mode) */}
             {viewMode === 'diagram' && (
               <button
                 onClick={handleDownloadImage}
-                className='flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent transition-colors'
+                className='flex items-center rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors'
                 title='Download as PNG'
+                aria-label='Download as PNG'
                 data-track-category='Mermaid'
                 data-track-name='DOWNLOAD_PNG'
               >
@@ -195,22 +207,56 @@ const MermaidBlockComponent = ({
             {viewMode === 'code' && (
               <button
                 onClick={() => void handleCopyCode()}
-                className='flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent transition-colors'
+                className='flex items-center rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors'
                 title='Copy code'
+                aria-label='Copy code'
                 data-track-category='Mermaid'
                 data-track-name='COPY_CODE'
               >
                 {copied ? (
-                  <>
-                    <Check className='w-3 h-3 text-green-600' />
-                    <span className='text-green-600'>Copied!</span>
-                  </>
+                  <Check className='w-3 h-3 text-green-600' />
                 ) : (
-                  <>
-                    <Copy className='w-3 h-3' />
-                    Copy
-                  </>
+                  <Copy className='w-3 h-3' />
                 )}
+              </button>
+            )}
+
+            {!previewOnClick && viewMode === 'diagram' && (
+              <button
+                onClick={() => setShowPreview(true)}
+                className='flex items-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent'
+                title='Open preview'
+                aria-label='Open preview'
+                data-track-category='Mermaid'
+                data-track-name='OPEN_PREVIEW'
+              >
+                <Maximize2 className='w-3 h-3' />
+              </button>
+            )}
+
+            {onEdit && (
+              <button
+                onClick={onEdit}
+                className='flex items-center rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors'
+                title='Edit source'
+                aria-label='Edit source'
+                data-track-category='Mermaid'
+                data-track-name='EDIT_SOURCE'
+              >
+                <Pencil className='w-3 h-3' />
+              </button>
+            )}
+
+            {onDelete && (
+              <button
+                onClick={onDelete}
+                className='flex items-center rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors'
+                title='Delete'
+                aria-label='Delete'
+                data-track-category='Mermaid'
+                data-track-name='DELETE_DIAGRAM'
+              >
+                <Trash2 className='w-3 h-3' />
               </button>
             )}
           </div>
@@ -224,16 +270,20 @@ const MermaidBlockComponent = ({
               className='mermaid-diagram flex justify-center rounded-lg border border-border bg-background p-4 transition-colors hover:bg-muted/30 cursor-pointer'
               /* eslint-disable-next-line react/no-danger, @typescript-eslint/naming-convention */
               dangerouslySetInnerHTML={{ __html: svg }}
-              onClick={() => setShowPreview(true)}
-              role='button'
-              tabIndex={0}
-              onKeyDown={(e): void => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setShowPreview(true);
-                }
-              }}
-              title='Click to preview'
+              onClick={previewOnClick ? () => setShowPreview(true) : undefined}
+              role={previewOnClick ? 'button' : undefined}
+              tabIndex={previewOnClick ? 0 : undefined}
+              onKeyDown={
+                previewOnClick
+                  ? (e): void => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setShowPreview(true);
+                      }
+                    }
+                  : undefined
+              }
+              title={previewOnClick ? 'Click to preview' : undefined}
               data-track-category='Mermaid'
               data-track-name='OPEN_PREVIEW'
             />
@@ -311,6 +361,13 @@ export const MermaidBlock = memo(MermaidBlockComponent, (prevProps, nextProps): 
   return (
     prevProps.chart === nextProps.chart &&
     prevProps.messageId === nextProps.messageId &&
-    prevProps.controlsOnHover === nextProps.controlsOnHover
+    prevProps.controlsOnHover === nextProps.controlsOnHover &&
+    // Deliberately not comparing onEdit/onDelete: a block spec rebuilds them on
+    // every render, so comparing identity would re-render every diagram on the
+    // page for every keystroke anywhere in the document. What they do never
+    // changes, only which closure carries it.
+    Boolean(prevProps.onEdit) === Boolean(nextProps.onEdit) &&
+    Boolean(prevProps.onDelete) === Boolean(nextProps.onDelete) &&
+    prevProps.previewOnClick === nextProps.previewOnClick
   );
 });

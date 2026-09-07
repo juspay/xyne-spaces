@@ -41,6 +41,7 @@ export interface ElectronAPI {
     callerEmail: string;
     callType: CallType;
     callerPicture?: string;
+    body?: string;
   }) => void;
   closeCallNotification: (callId: string) => void;
   onCallNotificationClicked: (callback: (data: { callId: string }) => void) => () => void;

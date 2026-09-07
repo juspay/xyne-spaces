@@ -25,8 +25,10 @@ export interface UseAudioPlaybackReturn {
   currentTime: number;
   duration: number;
   canSeek: boolean;
+  playbackRate: number;
   toggle: () => Promise<void>;
   seek: (seconds: number) => void;
+  setPlaybackRate: (rate: number) => void;
 }
 
 export function useAudioPlayback({
@@ -37,6 +39,7 @@ export function useAudioPlayback({
   const [state, setState] = useState<AudioPlayState>('idle');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(initialDurationSec);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -89,6 +92,7 @@ export function useAudioPlayback({
       blobUrlRef.current = url;
 
       const audio = new Audio(url);
+      audio.playbackRate = playbackRate;
       audioRef.current = audio;
 
       audio.addEventListener('loadedmetadata', () => {
@@ -118,12 +122,19 @@ export function useAudioPlayback({
     setCurrentTime(seconds);
   };
 
+  const setPlaybackRate = (rate: number): void => {
+    setPlaybackRateState(rate);
+    if (audioRef.current) audioRef.current.playbackRate = rate;
+  };
+
   return {
     state,
     currentTime,
     duration,
     canSeek: state === 'playing' || state === 'paused',
+    playbackRate,
     toggle,
     seek,
+    setPlaybackRate,
   };
 }

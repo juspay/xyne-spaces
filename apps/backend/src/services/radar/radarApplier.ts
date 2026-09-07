@@ -27,6 +27,7 @@ export interface ApplyResult {
   created: number;
   resolved: number;
   reassigned: number;
+  dismissed: number;
 }
 
 /**
@@ -38,7 +39,7 @@ export interface ApplyResult {
 class RadarApplier {
   async apply(params: ApplyParams): Promise<ApplyResult> {
     const { workspaceId, conversationId, channelId, watermark } = params;
-    const result: ApplyResult = { created: 0, resolved: 0, reassigned: 0 };
+    const result: ApplyResult = { created: 0, resolved: 0, reassigned: 0, dismissed: 0 };
     const operations = params.operations.slice(0, MAX_OPERATIONS_PER_TRANSACTION);
     if (params.operations.length > operations.length) {
       logger.warn('[RADAR-APPLIER] Operation batch truncated', {
@@ -94,6 +95,37 @@ class RadarApplier {
               auditRows.push(this.auditRow(params, op, op.itemId as string));
               result.reassigned++;
               break;
+            }
+            // One person stepping away, not the item being finished.
+            case 'dismiss': {
+              const { actorId } = params;
+              if (!actorId) break;
+              // One statement, not read-then-write: two simultaneous dismisses
+              // would otherwise write back each other's removal.
+              // Never resolves. The last holder stepping away leaves the item
+              // open and ownerless, which is the schema's stated rule — it
+              // stays in its requester's Waiting On, because "nobody took
+              // this" is not the same claim as "this is done".
+              const changed = await tx.$executeRaw`
+                UPDATE "non_zero"."execution_items"
+                SET "pendingOn" = array_remove("pendingOn", ${actorId}),
+                    "updatedAt" = NOW()
+                WHERE "id" = ${op.itemId}
+                  AND "workspaceId" = ${workspaceId}
+                  AND "conversationId" = ${conversationId}
+                  AND "status" = 'OPEN'
+                  AND ${actorId} = ANY("pendingOn")
+              `;
+              if (changed === 0) break;
+              auditRows.push(this.auditRow(params, op, op.itemId as string));
+              result.dismissed++;
+              break;
+            }
+            default: {
+              // op is plain TEXT with no CHECK, so this union is the only
+              // thing between a new verb and a silently skipped operation.
+              const unhandled: never = op.op;
+              throw new Error(`Unhandled execution item operation: ${String(unhandled)}`);
             }
           }
         }

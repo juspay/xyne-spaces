@@ -35,6 +35,13 @@ router.post(
   authorize('TICKETS', AccessType.WRITE),
   ticketController.backlogFlowGroup,
 );
+// Bulk add/remove tags across many tickets in one request (additive semantics)
+router.post(
+  '/bulk-tags',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketController.bulkUpdateTags,
+);
+
 // Update a ticket (assignee, stage, group, title, description, priority, status, eta)
 router.patch('/:ticketId', ticketController.updateTicket);
 

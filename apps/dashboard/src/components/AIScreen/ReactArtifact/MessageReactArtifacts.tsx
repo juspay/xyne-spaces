@@ -120,16 +120,28 @@ function ArtifactCard({
   const { active, enterForApp } = useAppCreationModeSignal();
   const { savedAppId, versionId } = artifact;
 
-  const asked = useRef(false);
+  // Ask once per APP, not once per mount.
+  //
+  // The guard used to be set before the savedAppId check, which made the whole
+  // thing inert on the turn that matters: a card first renders while the app id
+  // is still unknown, the effect marked itself "asked" and bailed, and when the
+  // id arrived moments later the effect re-ran and returned immediately. Mode
+  // never opened on the creating turn — only after a reload. Keying on the id
+  // means the ask happens when there is something to ask WITH, and a re-render
+  // with the same app still cannot re-open a pane the user closed.
+  const askedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (asked.current) return;
-    asked.current = true;
     if (!savedAppId || active) return;
+    if (askedFor.current === savedAppId) return;
+    askedFor.current = savedAppId;
     enterForApp(savedAppId, versionId ?? null);
   }, [savedAppId, versionId, active, enterForApp]);
 
   if (shownInPane) return <ArtifactPaneReference artifact={artifact} />;
 
+  // Expand ALWAYS means the side pane for an app — never the dialog. The dialog
+  // survives only for artifacts with no app behind them (pre-session-scoping
+  // ones), which cannot be shown in a pane that addresses apps by id.
   const expand = savedAppId ? (): void => enterForApp(savedAppId, versionId ?? null) : onExpand;
 
   return (

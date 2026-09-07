@@ -1,19 +1,21 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, Conversation, Email, ExternalSource } from '@prisma/client';
 import {
   EmailType,
   MessageDirection,
   ExternalEntityType,
   AttachmentEntityType,
   ActivityType,
+  ChannelType,
 } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { decrypt } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
-import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
+import { resolveAppDeskInstalledAppId, scopeExternalMessageIdToSource } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, BaseAppEvent, DeskReplyEventPayload, DeskReplyAttachment } from '@/apps/types';
@@ -25,6 +27,7 @@ class AppDeskService {
   private prisma = DatabaseClient.getInstance();
   private conversationRepo = new ConversationRepository();
   private emailRepo = new EmailRepository();
+  private externalMessageRepo = new ExternalMessageRepository();
   private externalSourceRepo = new ExternalSourceRepository();
 
   async sendAppReply(params: {
@@ -38,14 +41,13 @@ class AppDeskService {
     const conversation = await this.conversationRepo.findById(conversationId);
     if (!conversation) throw new Error(`Conversation not found: ${conversationId}`);
 
-    const externalSource = await this.externalSourceRepo.findByChannelId(conversation.channelId);
-    if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
+    const emails = await this.emailRepo.findByConversationId(conversationId);
+    if (emails.length === 0) throw new Error(`No emails in conversation ${conversationId}`);
+
+    const externalSource = await this.resolveConversationAppSource(conversation, emails);
     if (!externalSource.isActive) {
       throw new Error('This desk is disconnected. Reconnect the Xyne App before replying.');
     }
-
-    const emails = await this.emailRepo.findByConversationId(conversationId);
-    if (emails.length === 0) throw new Error(`No emails in conversation ${conversationId}`);
 
 
     const initialEmail = emails.find(e => e.externalThreadId) ?? emails[emails.length - 1];
@@ -147,6 +149,11 @@ class AppDeskService {
         ? (ack.body as { externalId: string }).externalId
         : externalMessageId;
 
+    // Stored form of the app's id. The webhook payload above carries the bare id —
+    // that is the wire contract — while storage namespaces it by source, identically
+    // on Email.externalMessageId and ExternalMessage.externalId so the two stay equal.
+    const scopedAckExternalId = scopeExternalMessageIdToSource(externalSource.id, ackExternalId);
+
     if (ack) {
       logger.info(`${TAG} DESK_REPLY accepted by app`, {
         conversationId,
@@ -171,7 +178,7 @@ class AppDeskService {
           channelId: conversation.channelId,
           workspaceId: conversation.workspaceId,
           externalThreadId: threadId,
-          externalMessageId: ackExternalId,
+          externalMessageId: scopedAckExternalId,
           sentByUserId: userId,
         } as Prisma.EmailUncheckedCreateInput,
       });
@@ -180,7 +187,7 @@ class AppDeskService {
         await tx.externalMessage.create({
           data: {
             externalSourceId: externalSource.id,
-            externalId: ackExternalId,
+            externalId: scopedAckExternalId,
             externalThreadId: threadId,
             messageId: created.id,
             entityId: created.id,
@@ -245,6 +252,41 @@ class AppDeskService {
     );
 
     return { emailId: email.id, threadId, delivered: outboundConfigured };
+  }
+
+  private async resolveConversationAppSource(
+    conversation: Conversation,
+    emails: Email[],
+  ): Promise<ExternalSource> {
+    const channelSources = await this.externalSourceRepo.listChannelAppSources(conversation.channelId);
+    const link = await this.externalMessageRepo.findLatestAppDeskLinkByEmailIds(
+      emails.map(e => e.id),
+      channelSources.map(s => s.id),
+    );
+    const linked = link ? channelSources.find(s => s.id === link.externalSourceId) : undefined;
+    if (linked) return linked;
+
+    // No app-desk link on this conversation. On an APP channel every ticket is
+    // app-sourced by construction, so a single active app is an unambiguous
+    // answer for rows predating the link write. On any other desk type the
+    // channel also carries email/Slack/social tickets, and guessing here would
+    // ship an agent's reply to a third-party webhook instead of the customer.
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: conversation.channelId },
+      select: { type: true },
+    });
+    const activeSources = channelSources.filter(s => s.isActive);
+    if (channel?.type === ChannelType.APP && activeSources.length === 1 && activeSources[0]) {
+      return activeSources[0];
+    }
+    if (activeSources.length > 0) {
+      throw new Error(
+        `Cannot route reply: conversation ${conversation.conversationId} is not linked to an app-desk source ` +
+        `on channel ${conversation.channelId} (${channel?.type ?? 'unknown'} desk, ` +
+        `${activeSources.length} connected app(s)). This ticket did not originate from an app.`,
+      );
+    }
+    throw new Error(`No external source for channel ${conversation.channelId}`);
   }
 }
 

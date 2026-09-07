@@ -7,7 +7,7 @@ export interface BrowserSettings {
 
 const defaultSettings: BrowserSettings = {
   popups: true,
-  openLinksExternally: false,
+  openLinksExternally: true,
 };
 
 class BrowserSettingsService {

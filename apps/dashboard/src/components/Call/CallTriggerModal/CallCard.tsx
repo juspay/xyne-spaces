@@ -2,7 +2,7 @@ import React, { useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
-import { Button } from '../../ui/Button/Button';
+
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -229,12 +229,11 @@ export const CallCard: React.FC<CallCardProps> = ({
               {!isMobileLiveCall && callDuration && (
                 <div className='text-xs text-muted-foreground'>{callDuration}</div>
               )}
-              <Button
-                variant='ghost'
+              <button
                 className='p-0 h-auto hover:bg-transparent'
                 onClick={handleLeaveCall}
                 data-track-category='CALLS'
-                trackId='leave_call'
+                data-ph-capture-attribute-track-id='leave_call'
                 data-track-name='LeaveCall'
                 data-track-metadata={JSON.stringify({
                   callId: call.externalId,
@@ -249,7 +248,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 >
                   Leave
                 </span>
-              </Button>
+              </button>
             </>
           ) : (
             <CallJoinButton

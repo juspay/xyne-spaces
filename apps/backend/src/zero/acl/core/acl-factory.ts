@@ -64,6 +64,7 @@ import { SurfaceNudgesACL } from '../tables/surface-nudges-acl';
 import { SurfaceLinksACL } from '../tables/surface-links-acl';
 import { SavedUserConfigurationsACL } from '../tables/saved-user-configurations-acl';
 import { SavedUserConfigurationValuesACL } from '../tables/saved-user-configuration-values-acl';
+import { ViewAccessACL } from '../tables/view-access-acl';
 import { AppsACL } from '../tables/apps-acl';
 import { TicketAssignmentsACL } from '../tables/ticket-assignments-acl';
 import { TicketStageEtaACL } from '../tables/ticket-stage-eta-acl';
@@ -153,6 +154,7 @@ const GUEST_MUTATION_ALLOWLIST: readonly TableName[] = [
   'email_signatures',
   'saved_user_configurations',
   'saved_user_configuration_values',
+  'view_access',
   'channel_participants',
   'channel_stats',
   'draft_messages',
@@ -338,6 +340,8 @@ export class ACLFactory {
         return new SavedUserConfigurationsACL(ctx);
       case 'saved_user_configuration_values':
         return new SavedUserConfigurationValuesACL(ctx);
+      case 'view_access':
+        return new ViewAccessACL(ctx);
       case 'surface_links':
         return new SurfaceLinksACL(ctx);
       case 'delayed_messages':

@@ -20,7 +20,10 @@
 
 import type { ReactElement } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
-import { DiamondComponent, RotateLeft } from '@xyne/icons';
+import { RotateLeft } from '@xyne/icons';
+import { AppIcon } from '../../AppIcon/AppIcon';
+import { IconPicker } from '../../AppIcon/IconPicker';
+import { ArtifactAppSettings } from './ArtifactAppSettings';
 import { ReactArtifactView } from './ReactArtifactView';
 import type { ReactArtifactRef } from './ReactArtifact.types';
 import type { AppCreationMode } from './useAppCreationMode';
@@ -42,6 +45,9 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
     versions,
     headVersionId,
     title,
+    icon,
+    isOwner,
+    setIcon,
     viewVersion,
     restoreVersion,
     restoring,
@@ -62,7 +68,18 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
 
   const titleSlot = (
     <div className='flex min-w-0 items-center gap-2'>
-      <DiamondComponent size={16} className='shrink-0 text-muted-foreground' aria-hidden='true' />
+      {/* The mark doubles as the picker for the owner. A viewer of someone
+          else's published app just sees the icon. */}
+      {isOwner ? (
+        <IconPicker value={icon} onChange={setIcon} size={16} className='-ml-1' />
+      ) : (
+        <AppIcon
+          name={icon}
+          size={16}
+          className='shrink-0 text-muted-foreground'
+          aria-hidden='true'
+        />
+      )}
       <span className='truncate text-sm font-medium text-foreground'>{title ?? 'App'}</span>
 
       <DropdownMenu>
@@ -132,7 +149,20 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
         </p>
       )}
       <div className='min-h-0 flex-1'>
-        <ReactArtifactView artifact={artifact} fill titleSlot={titleSlot} onClose={exit} />
+        <ReactArtifactView
+          artifact={artifact}
+          fill
+          titleSlot={titleSlot}
+          settingsSlot={
+            <ArtifactAppSettings
+              app={mode.app}
+              viewing={viewing}
+              versions={versions}
+              onIconChange={setIcon}
+            />
+          }
+          onClose={exit}
+        />
       </div>
     </div>
   );

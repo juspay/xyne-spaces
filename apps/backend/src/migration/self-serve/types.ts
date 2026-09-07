@@ -17,6 +17,7 @@ export enum MigrationStatus {
 export enum QueueName {
   COLLECTION = 'slack-migration-collection',
   INGESTION = 'slack-migration-ingestion',
+  CONV_INGEST = 'slack-migration-conv-ingest', // fan-out: one job per conversation, drained by all worker processes in parallel
 }
 
 export interface Checkpoint {
@@ -37,6 +38,7 @@ export interface MigrationIssue {
   conversationId: string;
   kind: 'skipped' | 'truncated' | 'ingest-error';
   reason: string;
+  label?: string; // human-readable conversation identifier captured at issue time (e.g. "DM with Jane Doe" / "#general")
 }
 
 export interface MigrationJob {
@@ -58,6 +60,8 @@ export interface MigrationJob {
   slackChannelCreated?: number; // creation unix ts (secs) — lower bound for collection progress
   channelProgress?: { start: number; end: number; through: number }; // epoch secs: window [start,end] + oldest collected
   checkpoint: Checkpoint;
+  ingestedCount?: number;       // parallel ingest: count of conversations done, tracked atomically (Redis SET) instead of the checkpoint array
+  ingestStartedAt?: number;     // when ingestion first began (planner set INGESTING) — with completedAt gives the ingest duration
   stats: { conversations: number; messages: number };
   stopRequested: boolean;
   stopReason?: 'admin' | 'system';
@@ -88,6 +92,8 @@ export interface MigrationJobView {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+  ingestStartedAt?: number;
+  ingestDurationMs?: number; // completedAt − ingestStartedAt when both present — "how long ingestion took"
   error?: string;
 }
 
@@ -104,7 +110,7 @@ export const toView = (j: MigrationJob): MigrationJobView => ({
   progress: {
     total: j.checkpoint.totalConversations,
     collected: j.checkpoint.collectedConversationIds.length,
-    ingested: j.checkpoint.ingestedConversationIds.length,
+    ingested: j.ingestedCount ?? j.checkpoint.ingestedConversationIds.length,
   },
   channel: j.type === MigrationType.CHANNEL && j.channelInput ? {
     slackId: j.channelInput.slackChannelId,
@@ -121,6 +127,8 @@ export const toView = (j: MigrationJob): MigrationJobView => ({
   createdAt: j.createdAt,
   updatedAt: j.updatedAt,
   completedAt: j.completedAt,
+  ingestStartedAt: j.ingestStartedAt,
+  ingestDurationMs: j.ingestStartedAt && j.completedAt ? j.completedAt - j.ingestStartedAt : undefined,
   error: j.error,
   issues: j.issues,
 });
