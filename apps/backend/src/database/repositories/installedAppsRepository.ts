@@ -64,6 +64,9 @@ export class InstalledAppsRepository extends BaseRepository<
         webhookUrl: true,
         // signingSecret is app-level now — pulled via the relation.
         app: { select: { signingSecret: true } },
+        // Bot user email — stable cross-env key for per-app webhook
+        // contract gating (see apps/core/appWebhookEventConfigs.ts).
+        user: { select: { email: true } },
       },
     });
   }
