@@ -46,8 +46,22 @@ export function buildHandleMap(blocks: BlockNoteBlock[]): HandleMap {
     }
     if (!collision) return map;
   }
-  // Astronomically unlikely; fall back to the full cleaned id.
-  return new Map(ids.map(id => ['b' + id.replace(/[^0-9a-f]/gi, '').toLowerCase(), id]));
+  const map: HandleMap = new Map();
+  for (const id of ids) {
+    let handle = 'b' + shortHash(id);
+    for (let salt = 1; map.has(handle); salt++) handle = 'b' + shortHash(`${id}#${salt}`);
+    map.set(handle, id);
+  }
+  return map;
+}
+
+function shortHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 /** Render blocks as labelled markdown. `render` is injected so this module
