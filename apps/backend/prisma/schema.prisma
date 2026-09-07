@@ -2653,8 +2653,8 @@ model Notification {
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
   type              String
-  title             String?                     @default("")
-  message           String?                     @default("")
+  title             String?
+  message           String?
   status            String                      @default("UNREAD")
   deliveryMethods   String[]
   metadata          Json?                       // Additional context data
@@ -3056,6 +3056,7 @@ model CanvasVersion {
 
 model CanvasCommentThread {
   id              String                    @id @default(cuid())
+  workspaceId     String?                   // denormalized tenant key (stamped on insert; nullable during backfill release)
   canvasId        String
   blockId         String
   anchorText      String?
@@ -3073,13 +3074,14 @@ model CanvasCommentThread {
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
-  @@index([canvasId, createdAt])
+  @@index([ canvasId, createdAt])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
 
 model CanvasComment {
   id               String   @id @default(cuid())
+  workspaceId      String?  // denormalized tenant key (stamped on insert; nullable during backfill release)
   threadId         String
   canvasId         String
   body             String
@@ -4598,7 +4600,7 @@ model ThreadTypeVocabulary {
   workspaceId String
   name        String
   label       String
-  summary     String   @default("")
+  summary     String
   color       String
   description String
   status      String   @default("APPROVED")
@@ -4606,7 +4608,7 @@ model ThreadTypeVocabulary {
   createdBy   String?
   updatedBy   String?
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime
 
   @@unique([scope, scopeId, name])
   @@index([workspaceId, scope, status])

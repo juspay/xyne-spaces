@@ -33,7 +33,6 @@ import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { Button } from '../../ui/Button';
 
 interface ConversationHeaderMobileProps {
   channelId: string;
@@ -189,10 +188,9 @@ const ConversationHeaderMobile = ({
                 <UserPlus size={16} />
                 <span className='text-sm font-medium text-foreground'>Add</span>
               </button>
-              <Button
-                variant='ghost'
+              <button
                 onClick={handleStarToggle}
-                trackId='toggle_star_channel'
+                data-ph-capture-attribute-track-id='toggle_star_channel'
                 className={cn(
                   'w-full border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] transition-all duration-100',
                   isStarred ? 'bg-muted border-border' : 'bg-background border-border',
@@ -212,7 +210,7 @@ const ConversationHeaderMobile = ({
                 <span className='text-sm font-medium text-foreground'>
                   {isStarred ? 'Unstar' : 'Star'}
                 </span>
-              </Button>
+              </button>
               <button
                 onClick={(): void => void navigate('/chat/search')}
                 disabled={true}

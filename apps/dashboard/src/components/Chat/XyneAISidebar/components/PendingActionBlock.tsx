@@ -6,7 +6,6 @@ import {
   getStoredPendingActionResolution,
   subscribeToPendingActionResolutions,
 } from '../../../../services/XyneAI/XyneAIPendingActionStore';
-import { Button } from '../../../ui/Button/Button';
 
 interface PendingActionBlockProps {
   actions: PendingAction[];
@@ -143,10 +142,9 @@ function PendingActionItem({
 
       {/* Action buttons */}
       <div className='flex items-center gap-2'>
-        <Button
-          variant='ghost'
+        <button
           onClick={() => void handleApprove()}
-          trackId='approve_pending_action'
+          data-ph-capture-attribute-track-id='approve_pending_action'
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50'
           type='button'
@@ -159,11 +157,10 @@ function PendingActionItem({
             <Check size={10} />
           )}
           Approve
-        </Button>
-        <Button
-          variant='ghost'
+        </button>
+        <button
           onClick={() => void handleDecline()}
-          trackId='decline_pending_action'
+          data-ph-capture-attribute-track-id='decline_pending_action'
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-secondary px-2.5 py-1 text-[10px] text-secondary-foreground transition hover:bg-secondary/80 disabled:opacity-50'
           type='button'
@@ -172,7 +169,7 @@ function PendingActionItem({
         >
           <X size={10} />
           Decline
-        </Button>
+        </button>
       </div>
     </div>
   );

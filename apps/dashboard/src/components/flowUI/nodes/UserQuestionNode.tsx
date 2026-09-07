@@ -5,7 +5,7 @@ import { useFlow } from '../FlowContext';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
-import { Button } from '../../ui/Button/Button';
+
 import type { FlowAction, FlowComponent, UserQuestionItem, UserQuestionOption } from '@xyne/shared';
 
 interface UserQuestionNodeProps {
@@ -364,18 +364,17 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
               <span className='px-1'>Back</span>
             </button>
           )}
-          <Button
+          <button
             type='button'
-            variant='ghost'
             data-track-category='USER_QUESTION_ARTIFACT'
             data-track-name={isLast ? 'SUBMIT_ANSWERS' : 'NEXT_QUESTION'}
             onClick={advance}
             disabled={disabled}
             className='flex h-7 items-center rounded-lg border border-foreground/10 bg-background px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60'
-            trackId='user_question_submit'
+            data-ph-capture-attribute-track-id='user_question_submit'
           >
             <span className='px-1'>{isLast ? 'Submit' : 'Next'}</span>
-          </Button>
+          </button>
         </div>
       </footer>
     </section>

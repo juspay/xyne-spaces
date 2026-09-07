@@ -33,6 +33,8 @@ import {
   getDocuSignClientCredentials,
 } from "../lib/docusign-config.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
+import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "../lib/oauth-return.js";
+import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
@@ -155,9 +157,9 @@ export const docusignOAuthProvider: OAuthTokenProvider = {
  * POST /:userId/oauth/docusign/authorize
  * Returns the DocuSign consent URL with an HMAC-signed `state`.
  */
-router.post("/:userId/oauth/docusign/authorize", asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
+router.post("/:userId/oauth/docusign/authorize", oauthLimiter, asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
   const { userId } = req.params;
-  const { redirectUri } = req.body as { redirectUri?: string };
+  const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
 
   const callbackUri = redirectUri ?? defaultCallbackUri();
 
@@ -168,7 +170,7 @@ router.post("/:userId/oauth/docusign/authorize", asyncHandler(async (req: Reques
   authUrl.searchParams.set("redirect_uri", callbackUri);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("scope", DOCUSIGN_SCOPES);
-  authUrl.searchParams.set("state", signOAuthState(userId, { redirectUri: callbackUri }));
+  authUrl.searchParams.set("state", signOAuthState(userId, { redirectUri: callbackUri, returnTo: resolveOAuthReturn(returnTo) }));
 
   ok(res, { authUrl: authUrl.toString() });
 }));
@@ -217,7 +219,9 @@ router.post("/:userId/oauth/docusign/callback", asyncHandler(async (req: Request
 export const docusignCallbackRouter = Router();
 
 docusignCallbackRouter.get("/docusign/callback", async (req: Request, res: Response) => {
-  const frontendUrl = process.env["FRONTEND_URL"] ?? "http://localhost:5174/claw/";
+  // Default until the state verifies below — an unverified state must never
+  // steer the redirect.
+  let frontendUrl = defaultOAuthReturn();
 
   try {
     const { code, state, error: oauthError } = req.query as {
@@ -228,12 +232,12 @@ docusignCallbackRouter.get("/docusign/callback", async (req: Request, res: Respo
 
     if (oauthError) {
       log.error(`[docusign-oauth] OAuth error: ${oauthError}`);
-      res.redirect(`${frontendUrl}?docusign_error=${encodeURIComponent(oauthError)}`);
+      res.redirect(withOAuthResult(frontendUrl, "docusign_error", oauthError));
       return;
     }
 
     if (!code || !state) {
-      res.redirect(`${frontendUrl}?docusign_error=missing_code_or_state`);
+      res.redirect(withOAuthResult(frontendUrl, "docusign_error", "missing_code_or_state"));
       return;
     }
 
@@ -243,30 +247,31 @@ docusignCallbackRouter.get("/docusign/callback", async (req: Request, res: Respo
     } catch (err) {
       const reason = err instanceof OAuthStateError ? err.reason : "malformed";
       log.error(`[docusign-oauth] state ${reason}`);
-      res.redirect(`${frontendUrl}?docusign_error=invalid_state`);
+      res.redirect(withOAuthResult(frontendUrl, "docusign_error", "invalid_state"));
       return;
     }
 
     const userId = verified.userId;
+    frontendUrl = resolveOAuthReturn(verified.extra?.["returnTo"]);
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       log.error(`[docusign-oauth] User not found: ${userId}`);
-      res.redirect(`${frontendUrl}?docusign_error=user_not_found`);
+      res.redirect(withOAuthResult(frontendUrl, "docusign_error", "user_not_found"));
       return;
     }
 
     const redirectUri = (verified.extra?.["redirectUri"] as string | undefined) ?? defaultCallbackUri();
     const result = await exchangeAndStore(userId, code, redirectUri);
     if (!result.ok) {
-      res.redirect(`${frontendUrl}?docusign_error=${encodeURIComponent(result.code)}`);
+      res.redirect(withOAuthResult(frontendUrl, "docusign_error", result.code));
       return;
     }
 
     log.info(`[docusign-oauth] Stored DocuSign credentials for user ${userId} (accountId: ${result.accountId})`);
-    res.redirect(`${frontendUrl}?docusign_connected=true`);
+    res.redirect(withOAuthResult(frontendUrl, "docusign_connected", "true"));
   } catch (err) {
     log.error("[docusign-oauth] browser callback error:", err);
-    res.redirect(`${frontendUrl}?docusign_error=internal_error`);
+    res.redirect(withOAuthResult(frontendUrl, "docusign_error", "internal_error"));
   }
 });
 

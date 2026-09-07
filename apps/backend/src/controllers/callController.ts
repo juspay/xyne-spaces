@@ -511,7 +511,7 @@ export class CallController {
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
-          sttModel: sttModel || 'azure',
+          sttModel: sttModel || 'google',
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
@@ -767,7 +767,7 @@ export class CallController {
         channelId: channel.id,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
-        sttModel: sttModel || 'azure',
+        sttModel: sttModel || 'google',
         createdBy: userId,
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),

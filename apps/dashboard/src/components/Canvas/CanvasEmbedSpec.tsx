@@ -190,12 +190,18 @@ export const canvasEmbedSpec = createReactBlockSpec(
       const editable = editor.isEditable;
 
       return (
-        <div className='group relative my-1 w-full'>
+        <div className='group relative my-1 w-full' data-canvas-embed='true'>
           {video ? (
             <PlayerEmbed embedUrl={video.embedUrl} provider={video.provider} />
           ) : (
             <GenericEmbedCard url={url} />
           )}
+          {/* A player is a cross-origin frame: it swallows the click, so the
+              block could never be selected — and an embed that cannot be
+              selected cannot be commented on or asked about. The shield takes
+              the first click for the block and disappears while it is selected,
+              so a second click reaches the player and it plays as before. */}
+          {video && <div className='canvas-embed-shield' contentEditable={false} />}
           <EmbedActions
             url={url}
             editable={editable}

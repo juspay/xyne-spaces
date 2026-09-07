@@ -2,6 +2,7 @@ import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { extractUserMentions } from '@/utils/mentionParser';
+import { AttachmentEntityType } from '@xyne/shared';
 import {
   radarParser,
   type ParserOpenItem,
@@ -19,14 +20,16 @@ const MAX_WINDOW_MESSAGES = config.radar.maxWindowMessages;
 // Already-processed messages below the watermark that ride along with each
 // parse as read-only context — the model sees what the thread was about, but
 // the validator rejects any operation citing them.
-const CONTEXT_MESSAGES = 10;
+const CONTEXT_MESSAGES = config.radar.contextMessages;
+
+const MAX_OPEN_ITEMS = config.radar.maxOpenItems;
 
 /**
  * Consecutive parser failures on one window before the drain gives up on it and
  * advances past it. Without this, a window the parser deterministically cannot
  * handle is re-parsed by every subsequent message in the thread, indefinitely.
  */
-const MAX_CONSECUTIVE_FAILURES = 3;
+const MAX_CONSECUTIVE_FAILURES = config.radar.maxConsecutiveFailures;
 
 /** Users.status — deactivated accounts must never be assigned an item. */
 const ACTIVE_USER_STATUS = 'ACTIVE';
@@ -34,7 +37,7 @@ const ACTIVE_USER_STATUS = 'ACTIVE';
 // First contact with a thread has no watermark row. Rather than parsing the
 // thread's entire history, bootstrap the watermark at now - lookback: the job
 // was triggered by a fresh message, so the fresh burst is what matters.
-const BOOTSTRAP_LOOKBACK_MS = 60 * 60 * 1000;
+const BOOTSTRAP_LOOKBACK_MS = config.radar.bootstrapLookbackMinutes * 60 * 1000;
 
 /**
  * Radar execution engine — one call per drained job, one thread at a time.
@@ -176,11 +179,16 @@ class RadarExecutionService {
             for (const u of involvedUsers) nameById.set(u.id, u.name);
           }
           const knownUsers = Object.fromEntries(nameById);
+          // One lookup for both halves; a context message can carry an image too.
+          const attachmentsByMessage = await this.loadAttachments([
+            ...window.map(m => m.messageId),
+            ...context.map(m => m.messageId),
+          ]);
           const transitions = await radarParser.parseWindow(
             openItems,
-            this.toParserMessages(window, mentionsByMessage, nameById),
+            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage),
             knownUsers,
-            this.toParserMessages(context, contextMentions, nameById),
+            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage),
           );
           run.proposedOps = transitions.operations;
           run.assessment = transitions.assessment;
@@ -436,8 +444,12 @@ class RadarExecutionService {
   }
 
   private async loadOpenItems(conversationId: string): Promise<ParserOpenItem[]> {
+    // Newest first and bounded: every parse carries these, and a long-lived
+    // thread accumulates open items faster than anyone resolves them.
     const items = await prisma.executionItem.findMany({
       where: { conversationId, status: 'OPEN' },
+      orderBy: { updatedAt: 'desc' },
+      take: MAX_OPEN_ITEMS,
       select: {
         id: true,
         title: true,
@@ -460,6 +472,37 @@ class RadarExecutionService {
    * window, the context tail and known_users. The model reasons over names but
    * must answer in ids, so each message carries both.
    */
+  /**
+   * Attachments as text. A message carrying only an image reaches the parser as
+   * an empty string otherwise, and the model correctly reports there is nothing
+   * in it — so an ask made as a screenshot is invisible to Radar. This does not
+   * read the file; it says one exists, which is enough for the model to read it
+   * together with the words around it.
+   */
+  private async loadAttachments(messageIds: string[]): Promise<Map<string, string[]>> {
+    if (messageIds.length === 0) return new Map();
+    const rows = await prisma.messageAttachment.findMany({
+      where: {
+        entityId: { in: messageIds },
+        entityType: AttachmentEntityType.CHAT,
+        isDeleted: false,
+      },
+      select: { entityId: true, originalFilename: true, mimetype: true },
+    });
+    const byMessage = new Map<string, string[]>();
+    for (const row of rows) {
+      const kind = row.mimetype.startsWith('image/')
+        ? 'image'
+        : row.mimetype.startsWith('video/')
+          ? 'video'
+          : 'file';
+      const list = byMessage.get(row.entityId) ?? [];
+      list.push(`[${kind}: ${row.originalFilename}]`);
+      byMessage.set(row.entityId, list);
+    }
+    return byMessage;
+  }
+
   private toParserMessages(
     window: Array<{
       messageId: string;
@@ -470,11 +513,14 @@ class RadarExecutionService {
     }>,
     mentionsByMessage: Map<string, string[]>,
     nameById: Map<string, string>,
+    attachmentsByMessage: Map<string, string[]>,
   ): ParserWindowMessage[] {
     return window.map(m => ({
       id: m.messageId,
       author: { id: m.senderId ?? 'unknown', name: m.sender?.name ?? 'Unknown' },
-      text: stripHtml(m.content),
+      text: [stripHtml(m.content), ...(attachmentsByMessage.get(m.messageId) ?? [])]
+        .filter(Boolean)
+        .join(' '),
       mentions: (mentionsByMessage.get(m.messageId) ?? []).map(id => ({
         id,
         name: nameById.get(id) ?? id,
