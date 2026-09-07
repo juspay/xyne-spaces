@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { RedisStreamStore, compareStreamId } from './redisStore';
 import type { AclGate } from './aclGate';
 import { obsEmit } from './obs';
+import { SerialQueue } from './serialQueue';
 
 /** Extract a small summary of a fan-out payload for observability. */
 function summarize(payload: unknown): Record<string, unknown> {
@@ -56,6 +57,12 @@ export class Fanout {
   readonly #dataSubs = new Map<string, Set<ClientSub>>();
   readonly #grantToData = new Map<string, Set<string>>();
   readonly #cursors = new Map<string, string>();
+  // Serialize dispatch per stream so grant deltas (join/leave) re-gate in stream order;
+  // a `void #dispatch` let a later entry overtake an earlier one → stale admit survived
+  // a revoke. Distinct streams still dispatch concurrently.
+  readonly #dispatchQueue = new SerialQueue((error, key) =>
+    logger.error('sync_fanout_dispatch_error', { error, key }),
+  );
 
   #tail: Redis | null = null;
   #stopped = false;
@@ -204,7 +211,7 @@ export class Fanout {
       for (const [key, entries] of res) {
         for (const [id, fields] of entries) {
           this.#cursors.set(key, id);
-          void this.#dispatch(key, id, fields);
+          this.#dispatchQueue.enqueue(key, () => this.#dispatch(key, id, fields));
         }
       }
     }
