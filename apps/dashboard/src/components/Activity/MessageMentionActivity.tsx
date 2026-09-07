@@ -3,7 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { AtMark } from '@xyne/icons';
 import { ActivityItemCard } from './ActivityItemCard';
-import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -52,10 +52,8 @@ export const MessageMentionActivity = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
       ) : (
-        <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
-          {getFlowJsonPreviewText(message.content) ?? (
-            <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
-          )}
+        <div className='text-foreground text-sm line-clamp-2 whitespace-normal break-words'>
+          {getFlowJsonPreviewText(message.content) ?? htmlToPlainText(message.content)}
         </div>
       )}
     </ActivityItemCard>
