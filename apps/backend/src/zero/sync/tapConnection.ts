@@ -324,6 +324,12 @@ export class PackConnection {
     if (body.cancel) return;
 
     const cookie = String(body.cookie);
+    // zero-cache's makeRowPatch is put/del-only; an `update` should never arrive. If one does,
+    // streamState resets the instance (never a silent skip) — log it loudly here.
+    const updates = ops.filter((o) => o.op === 'update').length;
+    if (updates > 0) {
+      logger.error('sync_unexpected_update_op', { clientGroupID: this.#opts.clientGroupID, updates });
+    }
     const diffs = this.#demux.applyPoke(cookie, ops);
     this.#baseCookie = cookie;
     try {
