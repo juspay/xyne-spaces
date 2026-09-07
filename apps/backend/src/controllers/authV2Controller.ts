@@ -1250,7 +1250,11 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
+      const workspaces = this.getEnterpriseAwareWorkspaces(
+        await this.userService.getWorkspacesByEmail(googleUserData.email),
+        enterpriseLogin,
+      );
+      logger.info(`[${requestId}] User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
       // Domain-conflict detection, mirroring handleCallback. Without it the mobile client
