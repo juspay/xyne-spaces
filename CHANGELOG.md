@@ -1,3 +1,10 @@
+## [1.279.1](https://github.com/juspay/xyne-spaces/compare/v1.279.0...v1.279.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* diff node ([#1513](https://github.com/juspay/xyne-spaces/issues/1513)) ([1912433](https://github.com/juspay/xyne-spaces/commit/19124332f7d33e925a1f95e1d9fcdf338189497c))
+
 ## [1.279.0](https://github.com/juspay/xyne-spaces/compare/v1.278.6...v1.279.0) (2026-09-07)
 
 
