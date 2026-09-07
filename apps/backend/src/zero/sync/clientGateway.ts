@@ -116,7 +116,23 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     const partitionValue = String((args[0] as Record<string, ReadonlyJSONValue>)[meta.partitionColumn]);
 
     // Materialize the ACL grant instances (own client groups) and gate the client.
-    const gate = deriveAclGate(meta.rootTable);
+    // An ungateable ACL (unsupported node/op) is not shareable — refuse the subscribe and
+    // roll back the data instance we subscribed above, rather than materialize a client the
+    // gate could never evaluate.
+    let gate;
+    try {
+      gate = deriveAclGate(meta.rootTable);
+    } catch (error) {
+      syncEngine.unsubscribe(dataInstanceKey, connId);
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'ungateable-acl' });
+      logger.error('[SyncGateway] ungateable ACL — refusing subscribe', {
+        queryName,
+        rootTable: meta.rootTable,
+        error,
+      });
+      socket.emit('sync:error', { queryName, message: 'query ACL is not shareable' });
+      return;
+    }
     const grantByTable = new Map<string, string>();
     const grantInstanceKeys: string[] = [];
     for (const gs of gate.grantSources) {

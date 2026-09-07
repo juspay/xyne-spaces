@@ -114,12 +114,25 @@ export class Fanout {
     for (const [table, grantKey] of client.grantByTable) {
       grantRows.set(table, await this.#store.snapshot(grantKey).then((r) => r.map((c) => c.row)));
     }
-    const admitted = client.gate.evaluate(
-      client.scope,
-      client.userId,
-      client.workspaceId,
-      (table) => grantRows.get(table) ?? [],
-    );
+    let admitted: boolean;
+    try {
+      admitted = client.gate.evaluate(
+        client.scope,
+        client.userId,
+        client.workspaceId,
+        (table) => grantRows.get(table) ?? [],
+      );
+    } catch (error) {
+      // A gate that throws (an ACL that evolved to use an unsupported node/op) can never
+      // admit — fail CLOSED so an evolving ACL revokes rather than leaks. The per-client
+      // catch in the dispatch loop keeps this from aborting the rest of the re-gate set.
+      logger.error('sync_fanout_gate_eval_error', {
+        error,
+        instanceKey: client.dataInstanceKey,
+        userId: client.userId,
+      });
+      admitted = false;
+    }
     if (admitted && !client.admitted) {
       client.admitted = true;
       await this.#tryHydrate(client);
@@ -235,7 +248,14 @@ export class Fanout {
         for (const c of deferred) await this.#hydrate(c);
       }
       const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id, version };
-      for (const client of liveBefore) this.#emit(client, 'sync:delta', delta);
+      for (const client of liveBefore) {
+        // A grant dispatch on the (different) grant stream can revoke a client during the
+        // `await #hydrate` above; serialize-per-stream does NOT order that cross-stream pair.
+        // Re-check at emit time so a just-revoked client — which has already purged — never
+        // receives a stray delta that would resurrect the rows it can no longer see.
+        if (!client.admitted || !client.hydrated) continue;
+        this.#emit(client, 'sync:delta', delta);
+      }
       obsEmit('stream-diff', {
         instanceKey,
         upserts: delta.upserts.length,
@@ -249,7 +269,21 @@ export class Fanout {
     if (affected) {
       for (const dataKey of affected) {
         const subs = this.#dataSubs.get(dataKey);
-        if (subs) for (const client of subs) await this.#regate(client);
+        if (!subs) continue;
+        for (const client of subs) {
+          try {
+            await this.#regate(client);
+          } catch (error) {
+            // One client's transient re-gate failure (e.g. a snapshot read blip) must not
+            // abort re-gating the rest — a dropped revoke is a leak. Log and continue; the
+            // next grant delta re-gates. (Gate-eval throws are already caught in #regate.)
+            logger.error('sync_fanout_regate_error', {
+              error,
+              instanceKey: client.dataInstanceKey,
+              userId: client.userId,
+            });
+          }
+        }
       }
     }
   }

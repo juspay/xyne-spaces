@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveAclGate, type SnapshotProvider } from './aclGate';
+import { deriveAclGate, validateGateAst, type Cond, type SnapshotProvider } from './aclGate';
 
 const snap =
   (tables: Record<string, Record<string, unknown>[]>): SnapshotProvider =>
@@ -86,4 +86,66 @@ test('message_attachments: non-owner admitted via public channel', () => {
     channel_participants: [],
   });
   assert.equal(gate.evaluate(scope, 'U3', 'W1', snapshot), true);
+});
+
+// ---- fail-safe: unsupported ACL shapes are refused at derivation, not silently un-admitting ----
+
+test('validateGateAst: supported and/or/simple/EXISTS shape passes', () => {
+  const ast: Cond = {
+    type: 'and',
+    conditions: [
+      { type: 'simple', left: { name: 'workspaceId' }, op: '=', right: { value: 'W' } },
+      {
+        type: 'correlatedSubquery',
+        op: 'EXISTS',
+        related: {
+          correlation: { parentField: ['id'], childField: ['channelId'] },
+          subquery: {
+            table: 'channel_participants',
+            where: { type: 'simple', left: { name: 'userId' }, op: '=', right: { value: 'U' } },
+          },
+        },
+      },
+    ],
+  };
+  assert.doesNotThrow(() => validateGateAst(ast));
+});
+
+test('validateGateAst: unsupported simple operator is rejected', () => {
+  const ast = { type: 'simple', left: { name: 'n' }, op: 'IN', right: { value: [1] } } as unknown as Cond;
+  assert.throws(() => validateGateAst(ast), /unsupported operator 'IN'/);
+});
+
+test('validateGateAst: unsupported subquery op is rejected', () => {
+  const ast = {
+    type: 'correlatedSubquery',
+    op: 'ANY',
+    related: { correlation: { parentField: ['id'], childField: ['cid'] }, subquery: { table: 't' } },
+  } as unknown as Cond;
+  assert.throws(() => validateGateAst(ast), /unsupported subquery op 'ANY'/);
+});
+
+test('validateGateAst: unsupported node type is rejected', () => {
+  const ast = { type: 'literal' } as unknown as Cond;
+  assert.throws(() => validateGateAst(ast), /unsupported condition 'literal'/);
+});
+
+test('validateGateAst: unsupported op nested in a subquery where is rejected', () => {
+  const ast = {
+    type: 'correlatedSubquery',
+    op: 'EXISTS',
+    related: {
+      correlation: { parentField: ['id'], childField: ['cid'] },
+      subquery: {
+        table: 't',
+        where: { type: 'simple', left: { name: 'x' }, op: '>', right: { value: 1 } },
+      },
+    },
+  } as unknown as Cond;
+  assert.throws(() => validateGateAst(ast), /unsupported operator '>'/);
+});
+
+test('real allowlisted ACLs derive without over-rejecting', () => {
+  assert.doesNotThrow(() => deriveAclGate('conversations'));
+  assert.doesNotThrow(() => deriveAclGate('message_attachments'));
 });

@@ -46,7 +46,7 @@ interface ExistsCond {
     subquery: { table: string; where?: Cond };
   };
 }
-type Cond = SimpleCond | BoolCond | ExistsCond;
+export type Cond = SimpleCond | BoolCond | ExistsCond;
 
 /** A grant table the gate reads + the column its instance is scoped by (from the ACL correlation). */
 export interface GrantSource {
@@ -72,6 +72,11 @@ export function deriveAclGate(rootTable: string): AclGate {
   const acl = QueryACLFactory.getACL(rootTable as never, sentinelCtx);
   const query = acl.canSelect((zql as unknown as Record<string, never>)[rootTable]);
   const where = (query as { ast?: { where?: Cond } }).ast?.where;
+  // Enforce the fail-safe contract at derivation (subscribe) time: an ACL that uses a
+  // node/op the evaluator can't handle is NOT shareable. Without this the gap surfaces
+  // only at evaluate time — per grant delta, per client — where it would fail closed but
+  // silently (a table that never admits). Refuse the subscribe instead.
+  if (where) validateGateAst(where);
   const grantSources = where ? collectGrantSources(where) : [];
   return {
     rootTable,
@@ -82,6 +87,36 @@ export function deriveAclGate(rootTable: string): AclGate {
       return where ? evalCond(where, rootRow, { userId, workspaceId }, snapshot) : true;
     },
   };
+}
+
+const SUPPORTED_OPS = new Set(['=', 'IS', '!=', 'IS NOT']);
+
+/**
+ * Statically assert the whole ACL AST is one the evaluator supports (the same node types
+ * `evalCond` handles + the same ops `compare` handles). Throws on the first unsupported
+ * node/op so `deriveAclGate` can refuse the subscribe — the "unsupported ⇒ not shareable"
+ * fail-safe, enforced once up front rather than discovered per delta at eval time.
+ */
+export function validateGateAst(cond: Cond): void {
+  switch (cond.type) {
+    case 'and':
+    case 'or':
+      cond.conditions.forEach(validateGateAst);
+      return;
+    case 'simple':
+      if (!SUPPORTED_OPS.has(cond.op)) {
+        throw new Error(`ACL gate: unsupported operator '${cond.op}'`);
+      }
+      return;
+    case 'correlatedSubquery':
+      if (cond.op !== 'EXISTS' && cond.op !== 'NOT EXISTS') {
+        throw new Error(`ACL gate: unsupported subquery op '${cond.op}'`);
+      }
+      if (cond.related.subquery.where) validateGateAst(cond.related.subquery.where);
+      return;
+    default:
+      throw new Error(`ACL gate: unsupported condition '${(cond as { type: string }).type}'`);
+  }
 }
 
 /** Walk the ACL's correlatedSubqueries → each grant table + the column its standalone instance is keyed by. */
