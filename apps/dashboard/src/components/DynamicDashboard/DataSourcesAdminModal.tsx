@@ -20,7 +20,7 @@ import {
 } from '../../services/DynamicDashboard/dataSourcesAdminService';
 import Input from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
-import { Button } from '../ui/Button/Button';
+
 import { CaCertificateField } from './CaCertificateField';
 import { SOURCE_TYPES, type SourceType } from './dataSources.constants';
 import {
@@ -577,12 +577,11 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
         >
           Previous
         </button>
-        <Button
-          variant='default'
+        <button
           type='button'
           onClick={() => void handleSave()}
           disabled={!canSave}
-          trackId='create_data_source'
+          data-ph-capture-attribute-track-id='create_data_source'
           data-track-category='DATA_SOURCE'
           data-track-name='Wizard_Save_Ingest'
           className={`inline-flex items-center gap-1.5 h-9 px-5 rounded-lg text-[13px] leading-[18px] font-medium text-white transition-colors ${
@@ -599,7 +598,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
           ) : (
             'Save & Ingest'
           )}
-        </Button>
+        </button>
       </div>
     </div>
   );

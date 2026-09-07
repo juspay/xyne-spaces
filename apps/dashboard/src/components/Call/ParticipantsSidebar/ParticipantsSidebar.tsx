@@ -20,7 +20,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
 import { InvitationResponse, type CallParticipantMetadata } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
-import { Button } from '../../ui/Button/Button';
+
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { callService } from '../../../services/Call/callService';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
@@ -276,8 +276,7 @@ function ParticipantItem({
       )}
       {/* Mute/Unmute button - always visible for host */}
       {canMute && (
-        <Button
-          variant='ghost'
+        <button
           onClick={() => void onMuteParticipant(userId)}
           disabled={isMutingThis || !isMicrophoneEnabled}
           className={`p-1.5 rounded-md transition-colors disabled:cursor-not-allowed ${
@@ -285,7 +284,7 @@ function ParticipantItem({
               ? 'text-red-500 bg-red-50'
               : 'hover:bg-secondary text-muted-foreground hover:text-foreground'
           }`}
-          trackId='mute_participant'
+          data-ph-capture-attribute-track-id='mute_participant'
           data-track-category='CALLS'
           data-track-name='MUTE_PARTICIPANT'
           data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
@@ -298,15 +297,14 @@ function ParticipantItem({
           ) : (
             <Mic size={16} />
           )}
-        </Button>
+        </button>
       )}
       {canRemove && (
-        <Button
-          variant='ghost'
+        <button
           onClick={() => void onRemoveParticipant(userId, participantName)}
           disabled={isRemovingThis}
           className='p-1.5 rounded-md transition-colors disabled:cursor-not-allowed text-muted-foreground hover:bg-red-50 hover:text-red-600'
-          trackId='remove_participant'
+          data-ph-capture-attribute-track-id='remove_participant'
           data-track-category='CALLS'
           data-track-name='REMOVE_PARTICIPANT'
           data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
@@ -317,7 +315,7 @@ function ParticipantItem({
           ) : (
             <UserX size={16} />
           )}
-        </Button>
+        </button>
       )}
     </div>
   );
@@ -366,13 +364,12 @@ function RequestedParticipantItem({
       </div>
       {canActOnRequest && (
         <div className='flex items-center gap-1.5 shrink-0'>
-          <Button
-            variant='ghost'
+          <button
             onClick={() => onApprove(participant.id)}
             disabled={approvingId === participant.id}
             className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
             title='Admit'
-            trackId='approve_lobby_request'
+            data-ph-capture-attribute-track-id='approve_lobby_request'
             data-track-category='CALLS'
             data-track-name='APPROVE_LOBBY_REQUEST'
           >
@@ -381,14 +378,13 @@ function RequestedParticipantItem({
             ) : (
               <Check size={14} />
             )}
-          </Button>
-          <Button
-            variant='ghost'
+          </button>
+          <button
             onClick={() => onReject(participant.id)}
             disabled={rejectingId === participant.id}
             className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
             title='Decline'
-            trackId='reject_lobby_request'
+            data-ph-capture-attribute-track-id='reject_lobby_request'
             data-track-category='CALLS'
             data-track-name='REJECT_LOBBY_REQUEST'
           >
@@ -397,7 +393,7 @@ function RequestedParticipantItem({
             ) : (
               <XIcon size={14} />
             )}
-          </Button>
+          </button>
         </div>
       )}
     </div>
@@ -632,21 +628,20 @@ export function ParticipantsSidebar({
           </div>
           <div className='flex items-center gap-2'>
             {isHost && contributors.length > 1 && (
-              <Button
-                variant='ghost'
+              <button
                 onClick={() => void handleMuteAll()}
                 disabled={isMuting}
                 className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card hover:bg-accent text-foreground border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 title='Mute all participants'
                 data-testid='mute-all-button'
-                trackId='mute_all_participants'
+                data-ph-capture-attribute-track-id='mute_all_participants'
                 data-track-category='CALLS'
                 data-track-name='MUTE_ALL_PARTICIPANTS'
                 data-track-metadata={JSON.stringify({ callId })}
               >
                 <MicOff size={16} />
                 <span className='text-sm font-medium'>{isMuting ? 'Muting...' : 'Mute All'}</span>
-              </Button>
+              </button>
             )}
             {!hideInvite && (
               <button
