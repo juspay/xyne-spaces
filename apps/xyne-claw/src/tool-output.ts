@@ -29,6 +29,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join as joinPath, resolve as resolvePath } from "node:path";
+import { randomUUID } from "node:crypto";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -207,19 +208,24 @@ export async function promoteIfOversized(
   const clean = stripControlChars(rawContent);
   if (clean.length <= cap) {
     if (!forceFile) return clean;
-    const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+    // Persist the RAW bytes (not the control-stripped inline copy) so a sandbox-copy-in
+    // forward is byte-identical; the random suffix avoids same-millisecond collisions.
+    const safeCat = category.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const absPath = joinPath(
-      dir,
-      `${category.replace(/[^a-zA-Z0-9_-]/g, "_")}-${toolName.replace(/[^a-zA-Z0-9_-]/g, "_")}-${stamp}.json`,
-    );
+    const fileName = `${safeCat}-${safeName}-${stamp}-${randomUUID().slice(0, 8)}.json`;
+    const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+    const absPath = joinPath(dir, fileName);
+    const relPath = joinPath("tool-results", fileName);
     try {
       await mkdir(dir, { recursive: true });
-      await writeFile(absPath, clean, { encoding: "utf8" });
-    } catch {
+      await writeFile(absPath, rawContent, { encoding: "utf8" });
+    } catch (err) {
+      log.warn(`[tool-output] ${safeCat}/${safeName} force-file write failed: ${err instanceof Error ? err.message : String(err)}`);
       return clean;
     }
-    return `${clean}\n\n[Full raw result also saved to ${absPath} — to use it in a sandbox, forward the whole file with sandbox-copy-in (contextPath) instead of pasting its content.]`;
+    metric.count("tool_output_spill", { category: safeCat, tool: safeName });
+    return `${clean}\n\n[Full raw result also saved — forward it into a sandbox with sandbox-copy-in contextPath: "${relPath}" instead of pasting its content.]`;
   }
   // Reflow to line-structured form so the spilled file is readable/greppable by
   // the line-oriented read/grep tools (a minified single-line JSON payload is

@@ -2,17 +2,18 @@ import { describe, it, expect } from "vitest";
 import { sandboxCopyIn } from "./tools.js";
 import type { ToolExecutionContext } from "../types.js";
 
-// A run context that has a materialized skills root + a plausible session owner.
+// A run context that can carry a materialized skills root and/or a .context root.
 // The path-confinement / validation branches all return BEFORE any sandbox
 // session lookup, so these cases never need a live SESSION_STORE entry.
-function ctx(skillsRoot: string | undefined): ToolExecutionContext {
+function ctx(opts: { skillsRoot?: string; contextRoot?: string } = {}): ToolExecutionContext {
   return {
     config: {},
     meta: {
       userId: "u1",
       conversationId: "c1",
       agentSlug: "a1",
-      ...(skillsRoot ? { skillsRoot } : {}),
+      ...(opts.skillsRoot ? { skillsRoot: opts.skillsRoot } : {}),
+      ...(opts.contextRoot ? { contextRoot: opts.contextRoot } : {}),
     },
   };
 }
@@ -23,10 +24,14 @@ describe("sandbox-copy-in tool definition", () => {
     expect(sandboxCopyIn.source).toBe("custom:sandbox");
   });
 
-  it("requires sessionId and skillPath", () => {
-    expect(sandboxCopyIn.inputSchema.required).toEqual(
-      expect.arrayContaining(["sessionId", "skillPath"]),
-    );
+  it("requires only sessionId (skillPath/contextPath are XOR, enforced at runtime)", () => {
+    expect(sandboxCopyIn.inputSchema.required).toEqual(["sessionId"]);
+  });
+
+  it("exposes both skillPath and contextPath inputs", () => {
+    const props = sandboxCopyIn.inputSchema.properties ?? {};
+    expect(props).toHaveProperty("skillPath");
+    expect(props).toHaveProperty("contextPath");
   });
 
   it("is NOT an approval-gated write tool (server-side copy, no user data mutation)", () => {
@@ -36,31 +41,45 @@ describe("sandbox-copy-in tool definition", () => {
   });
 });
 
-describe("sandbox-copy-in path confinement", () => {
+describe("sandbox-copy-in source selection (skillPath XOR contextPath)", () => {
+  const ROOT = "/data/session-skills/sess-123";
+
+  it("rejects when neither skillPath nor contextPath is given", async () => {
+    const out = await sandboxCopyIn.execute({ sessionId: "s" }, ctx({ skillsRoot: ROOT }));
+    expect(out.toLowerCase()).toContain("exactly one");
+  });
+
+  it("rejects when BOTH skillPath and contextPath are given", async () => {
+    const out = await sandboxCopyIn.execute(
+      { sessionId: "s", skillPath: "slug/run.sh", contextPath: "tool-results/x.json" },
+      ctx({ skillsRoot: ROOT, contextRoot: "/data/sessions/c1/.context" }),
+    );
+    expect(out.toLowerCase()).toContain("exactly one");
+  });
+
+  it("treats a blank skillPath as 'not provided' (falls into the XOR error)", async () => {
+    const out = await sandboxCopyIn.execute({ sessionId: "s", skillPath: "   " }, ctx({ skillsRoot: ROOT }));
+    expect(out.toLowerCase()).toContain("exactly one");
+  });
+});
+
+describe("sandbox-copy-in path confinement (skillPath)", () => {
   const ROOT = "/data/session-skills/sess-123";
 
   it("refuses when no skills are materialized for the run", async () => {
     const out = await sandboxCopyIn.execute(
       { sessionId: "s", skillPath: "slug/scripts/run.sh" },
-      ctx(undefined),
+      ctx({}),
     );
     expect(out.toLowerCase()).toContain("no skills are materialized");
-  });
-
-  it("rejects an empty skillPath", async () => {
-    const out = await sandboxCopyIn.execute(
-      { sessionId: "s", skillPath: "   " },
-      ctx(ROOT),
-    );
-    expect(out.toLowerCase()).toContain("non-empty");
   });
 
   it("rejects '..' traversal that escapes the skills root", async () => {
     const out = await sandboxCopyIn.execute(
       { sessionId: "s", skillPath: "../../etc/passwd" },
-      ctx(ROOT),
+      ctx({ skillsRoot: ROOT }),
     );
-    expect(out.toLowerCase()).toContain("escapes the skill directory");
+    expect(out.toLowerCase()).toContain("escapes its root");
   });
 
   it("rejects a sibling-prefix escape (root-name is a prefix, not a parent)", async () => {
@@ -68,9 +87,9 @@ describe("sandbox-copy-in path confinement", () => {
     // starts with the root string — the separator check guards this.
     const out = await sandboxCopyIn.execute(
       { sessionId: "s", skillPath: "../sess-123-evil/secret" },
-      ctx(ROOT),
+      ctx({ skillsRoot: ROOT }),
     );
-    expect(out.toLowerCase()).toContain("escapes the skill directory");
+    expect(out.toLowerCase()).toContain("escapes its root");
   });
 
   it("neutralizes a leading '/' into the root instead of treating it as absolute", async () => {
@@ -79,7 +98,7 @@ describe("sandbox-copy-in path confinement", () => {
     // confinement and fails later on the missing session (safe outcome).
     const out = await sandboxCopyIn.execute(
       { sessionId: "no-such-session", skillPath: "/etc/shadow" },
-      ctx(ROOT),
+      ctx({ skillsRoot: ROOT }),
     );
     expect(out).toContain("no-such-session");
     expect(out.toLowerCase()).toContain("not found");
@@ -88,7 +107,7 @@ describe("sandbox-copy-in path confinement", () => {
   it("refuses paths that resolve to a credential file even inside the root", async () => {
     const out = await sandboxCopyIn.execute(
       { sessionId: "s", skillPath: "slug/.ssh/id_rsa" },
-      ctx(ROOT),
+      ctx({ skillsRoot: ROOT }),
     );
     expect(out.toLowerCase()).toContain("credential");
   });
@@ -98,7 +117,44 @@ describe("sandbox-copy-in path confinement", () => {
     // session lookup — proving the guards don't false-reject valid input.
     const out = await sandboxCopyIn.execute(
       { sessionId: "no-such-session", skillPath: "slug/scripts/run.sh" },
-      ctx(ROOT),
+      ctx({ skillsRoot: ROOT }),
+    );
+    expect(out).toContain("no-such-session");
+    expect(out.toLowerCase()).toContain("not found");
+  });
+});
+
+describe("sandbox-copy-in path confinement (contextPath)", () => {
+  const CTX_ROOT = "/data/sessions/c1/.context";
+
+  it("refuses when no .context root exists for the run", async () => {
+    const out = await sandboxCopyIn.execute(
+      { sessionId: "s", contextPath: "tool-results/x.json" },
+      ctx({ skillsRoot: "/data/session-skills/sess-123" }),
+    );
+    expect(out.toLowerCase()).toContain(".context root");
+  });
+
+  it("rejects '..' traversal that escapes the .context root", async () => {
+    const out = await sandboxCopyIn.execute(
+      { sessionId: "s", contextPath: "../../etc/passwd" },
+      ctx({ contextRoot: CTX_ROOT }),
+    );
+    expect(out.toLowerCase()).toContain("escapes its root");
+  });
+
+  it("refuses a credential file even inside the .context root", async () => {
+    const out = await sandboxCopyIn.execute(
+      { sessionId: "s", contextPath: ".ssh/id_rsa" },
+      ctx({ contextRoot: CTX_ROOT }),
+    );
+    expect(out.toLowerCase()).toContain("credential");
+  });
+
+  it("passes confinement for a normal tool-results path, then fails only on the missing session", async () => {
+    const out = await sandboxCopyIn.execute(
+      { sessionId: "no-such-session", contextPath: "tool-results/juspay_alerts-x.json" },
+      ctx({ contextRoot: CTX_ROOT }),
     );
     expect(out).toContain("no-such-session");
     expect(out.toLowerCase()).toContain("not found");
