@@ -204,6 +204,15 @@ export interface ClawDebugArtifactBundle {
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
   followUpDiagnostics?: FollowUpDiagnostic[];
+  /** Runs in the whole conversation vs. the runs on this page — xyne-claw caps
+   *  the page (default 25) and claw-auth restates both after its per-user ACL,
+   *  so the debugger can say "showing N of M" and page with `before`. */
+  totalRuns?: number;
+  truncated?: boolean;
+  /** Non-fatal read problems (evicted PVC dir, unreadable GCS object, ignored
+   *  cursor). Surfaced so a partial trace never reads as "the agent did
+   *  nothing". Passed through verbatim — never summarised or dropped here. */
+  warnings?: string[];
 }
 
 export interface FollowUpDiagnostic {
@@ -1285,20 +1294,54 @@ export async function deleteClawConversation(
   return (await response.json()) as { success: boolean; data: { deleted: number } };
 }
 
+/**
+ * Ceiling for the debug-bundle proxy hop. claw-auth already bounds its own hop
+ * to xyne-claw at 45s, so anything slower than this is a stalled connection,
+ * not a slow read — and without a signal here a stall pinned the request (and
+ * the dashboard's spinner) forever, since the browser client sets no timeout.
+ */
+const DEBUG_BUNDLE_TIMEOUT_MS = (() => {
+  const override = Number(process.env['CLAW_DEBUG_PROXY_TIMEOUT_MS']);
+  // A non-numeric override would make AbortSignal.timeout throw on every call,
+  // so an unusable value falls back rather than breaking the endpoint.
+  return Number.isFinite(override) && override > 0 ? override : 60_000;
+})();
+
 export async function getClawDebugArtifacts(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,
-  agentSlug?: string
+  agentSlug?: string,
+  // xyne-claw caps the run page and pages it with a `before` runId cursor;
+  // claw-auth forwards both. Forward them here too, otherwise `truncated`
+  // reaches the debugger with no way to ask for the withheld runs.
+  paging?: { limit?: string; before?: string }
 ): Promise<{ success: boolean; data: ClawDebugArtifactBundle }> {
   const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/debug`;
-  const response = await fetch(url, {
-    headers: {
-      ...getS2SHeaders(),
-      ...extractUserIdHeader(req.userId),
-      ...extractCookieHeader(req),
-    },
-  });
+  const query = new URLSearchParams();
+  if (paging?.limit) query.set('limit', paging.limit);
+  if (paging?.before) query.set('before', paging.before);
+  const queryString = query.toString();
+  const suffix = queryString ? `?${queryString}` : '';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/debug${suffix}`;
+  // Qualified: bare `Response` resolves to express's in this module.
+  let response: globalThis.Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        ...getS2SHeaders(),
+        ...extractUserIdHeader(req.userId),
+        ...extractCookieHeader(req),
+      },
+      signal: AbortSignal.timeout(DEBUG_BUNDLE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // An abort surfaces as a DOMException whose message ("The operation was
+    // aborted due to timeout") tells the debugger nothing about which hop died.
+    logger.error(
+      `[ClawAgentService] getDebugArtifacts fetch failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+    throw new Error('Failed to fetch debug artifacts');
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -1308,6 +1351,11 @@ export async function getClawDebugArtifacts(
     );
   }
 
+  // Deliberately an unfiltered pass-through: the bundle's event payloads carry
+  // fields this service has no schema for (blob refs, `<field>UnchangedFromSeq`
+  // back-references, folded llm_request/llm_response params). Re-mapping keys
+  // here would silently blank panels in the debugger every time claw's trace
+  // format grows a field.
   return (await response.json()) as { success: boolean; data: ClawDebugArtifactBundle };
 }
 
