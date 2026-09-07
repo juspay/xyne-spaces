@@ -304,6 +304,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             setLocalDocChanges={setLocalDocChanges}
             valuesForRender={valuesForRender}
             targetStageId={targetStage.id}
+            parentTicketId={ticket.id}
             disabled={isFormReadOnly}
             readOnlyDocs={isReviewer}
             showPersistedDocValues={shouldShowPersistedDocValues}

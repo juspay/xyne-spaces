@@ -4,6 +4,7 @@ import {
   CalendarDefault as Calendar,
   FileText,
   Hashtag as Hash,
+  TicketToken,
   UserDefault as User,
 } from '@xyne/icons';
 import { FormFieldType } from '@xyne/shared';
@@ -22,6 +23,8 @@ export const getIconForFieldType = (fieldType: FormFieldType): typeof BarChart3 
       return BarChart3;
     case FormFieldType.USER:
       return User;
+    case FormFieldType.TICKET:
+      return TicketToken;
     default:
       return Hash;
   }
