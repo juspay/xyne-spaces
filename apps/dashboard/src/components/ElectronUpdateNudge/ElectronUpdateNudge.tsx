@@ -201,30 +201,48 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
   const activationBlocked = callBlocking || isTyping || !updateNudgeSlot;
 
   useEffect(() => {
+    // Fully inert while the feature is off: no observer, no listeners, no layout reads.
+    if (!ELECTRON_UPDATE_NUDGE_ENABLED) return undefined;
+
+    const isSlotVisible = (slot: HTMLElement): boolean =>
+      // checkVisibility folds display:none / visibility:hidden / zero-box into one
+      // read; it replaces getComputedStyle + getClientRects (two forced reflows).
+      typeof slot.checkVisibility === 'function'
+        ? slot.checkVisibility({ visibilityProperty: true })
+        : slot.getClientRects().length > 0;
+
     const findVisibleSlot = (): HTMLElement | null => {
       const slots = Array.from(document.querySelectorAll<HTMLElement>(UPDATE_NUDGE_SLOT_SELECTOR));
-      return (
-        slots.find(slot => {
-          const style = window.getComputedStyle(slot);
-          return (
-            style.display !== 'none' &&
-            style.visibility !== 'hidden' &&
-            slot.getClientRects().length > 0
-          );
-        }) ?? null
-      );
+      return slots.find(isSlotVisible) ?? null;
     };
 
-    const syncSlot = (): void => setUpdateNudgeSlot(findVisibleSlot());
+    const syncSlot = (): void => {
+      const next = findVisibleSlot();
+      // Skip redundant re-renders when the resolved slot has not changed.
+      setUpdateNudgeSlot(current => (current === next ? current : next));
+    };
+
+    // Coalesce DOM-churn bursts (hover, tooltips, virtualizer rows) into at most
+    // one visibility read per frame instead of a synchronous reflow per mutation.
+    let frame: number | null = null;
+    const scheduleSync = (): void => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        syncSlot();
+      });
+    };
+
     syncSlot();
 
-    const observer = new MutationObserver(syncSlot);
+    const observer = new MutationObserver(scheduleSync);
     observer.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener('resize', syncSlot);
+    window.addEventListener('resize', scheduleSync);
 
     return (): void => {
       observer.disconnect();
-      window.removeEventListener('resize', syncSlot);
+      window.removeEventListener('resize', scheduleSync);
+      if (frame !== null) window.cancelAnimationFrame(frame);
     };
   }, []);
 
