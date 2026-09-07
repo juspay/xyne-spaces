@@ -567,10 +567,6 @@ const envSchema = Joi.object({
   // 'shadow' records what archive inspection would refuse without blocking it;
   // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
   UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
-  // Comma-separated internal host suffixes the link-preview / outbound fetch guard
-  // refuses by name (e.g. corporate or in-cluster domains). Empty by default; set
-  // per environment so no internal topology is committed to source.
-  SSRF_INTERNAL_HOST_SUFFIXES: Joi.string().allow('').default(''),
   // When true (default), the webhook SSRF guard allows private / internal
   // destinations but still refuses loopback and link-local / cloud-metadata
   // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
@@ -1220,12 +1216,6 @@ export const config = {
   },
   uploads: {
     archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
-  },
-  ssrf: {
-    internalHostSuffixes: (envVars.SSRF_INTERNAL_HOST_SUFFIXES as string)
-      .split(',')
-      .map((suffix: string) => suffix.trim().toLowerCase().replace(/^\.+/, ''))
-      .filter(Boolean),
   },
   webhooks: {
     allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
