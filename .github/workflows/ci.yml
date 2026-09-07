@@ -162,7 +162,7 @@ jobs:
   # ---------------------------------------------------------------------------
   gitleaks:
     name: Secret scan (gitleaks)
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     env:
       GITLEAKS_VERSION: "8.30.1"
     steps:
