@@ -1,11 +1,20 @@
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
 import { isValidUrl } from '@/utils/urlUtils';
-import { BaseAppEvent } from '@/apps/types';
+import { AppEventType, BaseAppEvent } from '@/apps/types';
 import { logger } from '@/utils/logger';
 import { decrypt } from '@/services/encryptionService';
 import { prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
+import { randomUUID } from 'crypto';
+import { db } from '@/database/client';
+import { MessageType } from '@xyne/shared';
+import {
+    AppWebhookEventConfig,
+    findAppWebhookEventConfig,
+    resolveAppEventDelivery,
+    withSnakeCaseAliases,
+} from './appWebhookEventConfigs';
 
 const installedAppsRepository = new InstalledAppsRepository();
 
@@ -65,6 +74,103 @@ export async function sendWebhookNotification(
     }
 }
 
+const APP_MENTION_GUIDANCE_SUBTYPE = 'app_mention_guidance';
+
+/**
+ * Post a bot-authored guidance reply in the mentioning thread when an
+ * @mentioned app's event was gated (or delivery failed), telling the user
+ * how to actually invoke the app. Mirrors the no-ticket notice pattern in
+ * prCheckApprovalService so the message renders as a normal bot reply.
+ *
+ * Deduped on (conversation, bot, subtype, mentionMessageId) so side-effect
+ * queue redelivery never double-posts.
+ */
+async function postAppMentionGuidanceMessage(params: {
+    appEventConfig: AppWebhookEventConfig;
+    botUserId: string;
+    event: BaseAppEvent;
+}): Promise<void> {
+    const { appEventConfig, botUserId, event } = params;
+    try {
+        if (!appEventConfig.mentionGuidanceMessage) return;
+        const payload = event.payload;
+        if (!('messageId' in payload)) return;
+        const { conversationId, messageId } = payload;
+
+        const existing = await db.message.findFirst({
+            where: {
+                conversationId,
+                senderId: botUserId,
+                isDeleted: false,
+                AND: [
+                    { metadata: { path: ['messageSubtype'], equals: APP_MENTION_GUIDANCE_SUBTYPE } },
+                    { metadata: { path: ['mentionMessageId'], equals: messageId } },
+                ],
+            },
+            select: { messageId: true },
+        });
+        if (existing) return;
+
+        let workspaceId = 'workspaceId' in payload ? payload.workspaceId : undefined;
+        if (!workspaceId) {
+            const conversation = await db.conversation.findUnique({
+                where: { conversationId },
+                select: { channelId: true },
+            });
+            const channel = conversation
+                ? await db.channel.findUnique({
+                      where: { id: conversation.channelId },
+                      select: { workspaceId: true },
+                  })
+                : null;
+            workspaceId = channel?.workspaceId ?? undefined;
+        }
+        if (!workspaceId) return;
+
+        const replyNow = new Date();
+        await db.$transaction([
+            db.message.create({
+                data: {
+                    messageId: randomUUID(),
+                    conversationId,
+                    workspaceId,
+                    senderId: botUserId,
+                    content: appEventConfig.mentionGuidanceMessage,
+                    msgType: MessageType.BOT,
+                    showInChannel: false,
+                    metadata: {
+                        contentFormat: 'markdown',
+                        messageSubtype: APP_MENTION_GUIDANCE_SUBTYPE,
+                        mentionMessageId: messageId,
+                    },
+                },
+            }),
+            db.conversation.update({
+                where: { conversationId },
+                data: {
+                    replyCount: { increment: 1 },
+                    lastActivityAt: replyNow,
+                },
+            }),
+            db.conversationParticipant.updateMany({
+                where: { conversationId },
+                data: { lastReplyAt: replyNow },
+            }),
+        ]);
+        logger.info('[handleEventSubscriptions] Posted app mention guidance message', {
+            conversationId,
+            botUserId,
+            mentionMessageId: messageId,
+        });
+    } catch (error) {
+        logger.error('[handleEventSubscriptions] Failed to post app mention guidance message', {
+            botUserId,
+            eventType: event.eventType,
+            error,
+        });
+    }
+}
+
 export async function handleEventSubscriptionsForUsers(
     event: BaseAppEvent,
     userIds: string[],
@@ -100,7 +206,27 @@ export async function handleEventSubscriptionsForUsers(
                 return { success: false, userId: app.userId, webhookUrl: app.webhookUrl };
             }
             const decryptedSigningSecret = decrypt(secretEnc);
-            await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret);
+            // Gate generic event delivery on the app's webhook contract:
+            // unconfigured apps keep receiving every event unchanged.
+            const appEventConfig = findAppWebhookEventConfig(app.user?.email ?? null);
+            const delivery = resolveAppEventDelivery(app.user?.email ?? null, event.eventType);
+            if (delivery === 'skip') {
+                logger.info('[handleEventSubscriptions] Skipping app event delivery (event not in app webhook contract)', {
+                    userId: app.userId,
+                    botEmail: app.user?.email,
+                    eventType: event.eventType,
+                });
+                if (event.eventType === AppEventType.APP_MENTION && appEventConfig?.mentionGuidanceMessage) {
+                    await postAppMentionGuidanceMessage({ appEventConfig, botUserId: app.userId, event });
+                }
+                return { success: true, skipped: true, userId: app.userId, webhookUrl: app.webhookUrl };
+            }
+
+            await sendWebhookNotification(
+                app.webhookUrl!,
+                delivery === 'alias' ? withSnakeCaseAliases(event) : event,
+                decryptedSigningSecret,
+            );
             return { success: true, userId: app.userId, webhookUrl: app.webhookUrl };
         } catch (error) {
             logger.error(`Failed to send webhook notification`, {

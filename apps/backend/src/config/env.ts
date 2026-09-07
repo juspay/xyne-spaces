@@ -470,6 +470,9 @@ const envSchema = Joi.object({
   // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
   // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
   INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
+  // Deliver app events with snake_case field aliases to apps whose webhook
+  // contract expects them (e.g. Bitbot/Varys). Kill-switch for the alias layer.
+  APP_EVENT_SNAKE_CASE_ALIASES_ENABLED: Joi.boolean().default(true),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -1138,6 +1141,7 @@ export const config = {
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
+    snakeCaseAliasesEnabled: envVars.APP_EVENT_SNAKE_CASE_ALIASES_ENABLED as boolean,
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
