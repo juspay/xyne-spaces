@@ -323,6 +323,11 @@ const SearchResults = (): ReactElement => {
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
     groupByDocType: true,
+    // The URL follows the results: the hook hands back the query these were fetched for,
+    // so the address bar is shareable without anyone pressing Enter.
+    onSearchComplete: (_results, searchedQuery) => {
+      handleQuerySubmitRef.current(searchedQuery.trim());
+    },
   });
 
   // The text the on-screen results actually reflect. Results update live as the user
@@ -481,6 +486,8 @@ const SearchResults = (): ReactElement => {
 
   // Declared above the memo that uses it, so the callback is reached through a ref.
   const handleFiltersChangeRef = useRef<(next: SearchResultsFilters) => void>(() => undefined);
+  // handleQuerySubmit isn't declared where the hook options are built.
+  const handleQuerySubmitRef = useRef<(next: string) => void>(() => undefined);
 
   /**
    * Applied filters as search-box tokens, labelled with the syntax that expresses them, so
@@ -533,6 +540,8 @@ const SearchResults = (): ReactElement => {
     return params.toString();
   }, [searchParams, filters, displayLabel]);
 
+  // Always replaces: refining the search edits this screen, it doesn't navigate. Back
+  // leaves the screen rather than walking every intermediate refinement.
   useEffect(() => {
     if (desiredSearch === searchParams.toString()) return;
     setSearchParams(new URLSearchParams(desiredSearch), {
@@ -574,6 +583,7 @@ const SearchResults = (): ReactElement => {
   // cmd+K search takes, so back/forward and the overlay's query restore keep working.
   // Filters live in their own params and are deliberately left untouched. Safe to write
   // separately: this runs from a user event, not alongside the combined effect above.
+  /** Commit a query to the URL. Always replaces — see the sync effect above. */
   const handleQuerySubmit = useCallback(
     (next: string) => {
       if (next === query) return;
@@ -587,11 +597,12 @@ const SearchResults = (): ReactElement => {
           params.delete('display');
           return params;
         },
-        { preventScrollReset: true },
+        { preventScrollReset: true, replace: true },
       );
     },
     [query, setSearchParams],
   );
+  handleQuerySubmitRef.current = handleQuerySubmit;
 
   // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
   // Guard against empty query so we don't show all channels before the user types.

@@ -440,14 +440,10 @@ const ChannelCommandMenu = ({
     open,
     onClose: () => onOpenChange(false),
     onRestore: restored => {
-      // The results page's parked state beats our own snapshot — it includes whatever the
-      // user filtered after leaving here. Falls back to the snapshot when there was no
-      // results visit (the palette sent them to a channel, a DM, a message).
-      const parked = restoreFromLastSearchRef.current?.() ?? null;
-      // Consumed once, then dropped, so a later restore that never went through the
-      // results page can't pick up a search the user has moved on from.
-      if (parked) clearLastSearchState();
-      const source = parked ?? restored ?? null;
+      // Back restores the search as it was launched from here, not as the results page
+      // left it. Parked state is still dropped so it can't leak into a later restore.
+      if (restoreFromLastSearchRef.current?.()) clearLastSearchState();
+      const source = restored ?? null;
       setRestoredQuery(source ? { text: source.text, mentions: source.mentions } : null);
       setRestoredToggles(source?.toggles ?? null);
       onOpenChange(true);
@@ -2426,12 +2422,9 @@ const ChannelCommandMenu = ({
     { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
   ];
 
-  // Tabs the active filters could actually fill. `in:#general` scopes to content *within* a
-  // channel, so People and Channels can only ever come back empty — this is the same
-  // relevance map that already hides the local People/Channels sections, now applied to
-  // their tabs too, so the strip and the list agree about what the filter can return.
-  // Not `enabledTabs` — that name is already a prop, and shadowing it here would put the
-  // `activeEnabledTabs` line above into the temporal dead zone.
+  // Tabs the active filters could fill — `in:#general` scopes to content within a channel,
+  // so People and Channels can only come back empty. Not named `enabledTabs`: that's a prop,
+  // and shadowing it would put `activeEnabledTabs` above into the temporal dead zone.
   const allowedTabs: TabDefinition[] = allTabDefinitions.filter(t =>
     activeEnabledTabs.includes(t.id),
   );
@@ -2442,12 +2435,9 @@ const ChannelCommandMenu = ({
   // the user, so the strip is left alone — the same call getRelevantTabs makes for itself.
   const tabs: TabDefinition[] = narrowedTabs.length > 0 ? narrowedTabs : allowedTabs;
 
-  // Adding a filter that hides the current tab has to move the user off it, or they sit on
-  // a tab that's no longer in the strip, reading results the filter can't produce. ALL is
-  // the "no tab selected" state, so it's always a safe place to land.
+  // A filter that hides the current tab has to move the user off it; ALL means "no tab".
   useEffect(() => {
-    // Same two exemptions the enabled-tabs reset above uses: with the strip hidden there's
-    // no stranding to undo, and inline mode has no ALL to fall back to.
+    // Same exemptions as the reset above: nothing to strand when hidden, no ALL when inline.
     if (hideTabs) return;
     if (activeTab === TabType.ALL || tabs.some(tab => tab.id === activeTab)) return;
     const fallback = inline ? (tabs[0]?.id ?? TabType.ALL) : TabType.ALL;
@@ -2458,13 +2448,8 @@ const ChannelCommandMenu = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relevantTabs, activeEnabledTabs, activeTab, hideTabs, inline]);
 
-  // When the filters narrow to a single tab, select it. Leaving the user on ALL with one
-  // lonely unselected tab reads as broken, and ALL and that tab return the same rows anyway
-  // — the query is already scoped by the same relevance map (getRelevantAppsParam).
-  //
-  // Keyed on the tab set rather than on `activeTab`, so this fires when relevance changes
-  // and not when the user acts: clicking the selected tab drops back to ALL, and re-running
-  // on that change would immediately re-select it and trap them.
+  // Narrowed to one tab: select it. Keyed on the tab set, not `activeTab` — clicking the
+  // selected tab drops to ALL, and re-running on that would re-select it and trap the user.
   const autoSelectedTabsRef = useRef<string | null>(null);
   useEffect(() => {
     if (hideTabs) return;

@@ -62,6 +62,7 @@ interface SearchQueryInputProps {
   filters: SearchResultsFilters;
   onFiltersChange: (next: SearchResultsFilters) => void;
   /** Runs a new search. Receives the trimmed text; '' drops the free-text query. */
+  /** Commits the query to the URL. Never adds a history entry — see handleQuerySubmit. */
   onSubmit: (next: string) => void;
   /**
    * Fires on every keystroke with the raw typed text so results refresh live as you
@@ -146,9 +147,14 @@ export function SearchQueryInput({
     [suggestions, typeahead, filters, onFiltersChange, value, onLiveChange],
   );
 
-  // Re-sync whenever the committed query changes underneath us: back/forward, a fresh
-  // cmd+K search while the screen is mounted, or our own commit landing in the URL.
+  // Latest value, read by the sync effect without making it re-run per keystroke.
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  // Re-seed only on a genuine outside change (back/forward, a fresh cmd+K search). The URL
+  // catching up to what was typed would otherwise fight the caret mid-word.
   useEffect(() => {
+    if (query === valueRef.current.trim()) return;
     setValue(query);
   }, [query]);
 
@@ -169,10 +175,7 @@ export function SearchQueryInput({
       setValue(next);
       setActiveIndex(0);
       onLiveChange(next);
-      // Emptying the box commits straight away. Every other edit waits for Enter so the URL
-      // does not churn per keystroke, but there is nothing left to confirm here — and
-      // without this the results clear while `?query=` keeps the query that is no longer
-      // in the box, so a reload or a back/forward brings it back.
+      // Emptying commits straight away — nothing left to confirm.
       if (!next.trim()) onSubmit('');
     },
     [onLiveChange, onSubmit],
@@ -294,12 +297,6 @@ export function SearchQueryInput({
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
-        // Leaving the box commits it, so the URL matches what is on screen without needing
-        // Enter. Safe to do on blur because the suggestion rows and the token remove buttons
-        // all preventDefault on mousedown — clicking those never blurs the input, so this
-        // cannot fire with a half-picked suggestion. `handleQuerySubmit` ignores a value
-        // equal to the committed query, so an unchanged box writes nothing.
-        onBlur={() => onSubmit(value.trim())}
         // The cold-start prompt only makes sense on an empty box; among applied tokens it
         // claims nothing is searched yet. The leading magnifier already says what this is,
         // so it shrinks rather than explains.
