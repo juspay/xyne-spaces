@@ -1,3 +1,15 @@
+## [1.251.0-release-20260901.15](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.14...v1.251.0-release-20260901.15) (2026-09-07)
+
+
+### Features
+
+* pnpm lock push ui fix ([#1519](https://github.com/juspay/xyne-spaces/issues/1519)) ([cafb565](https://github.com/juspay/xyne-spaces/commit/cafb565c4977f31c42f21c1e588adf3ef2ea8a6f))
+
+
+### Bug Fixes
+
+* switch PostHog persistence to localStorage-only ([#1576](https://github.com/juspay/xyne-spaces/issues/1576)) ([6143a2f](https://github.com/juspay/xyne-spaces/commit/6143a2fe7bcef0a2fa7037e3bc74bcf0ee97cadc))
+
 ## [1.251.0-release-20260901.14](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.13...v1.251.0-release-20260901.14) (2026-09-03)
 
 
