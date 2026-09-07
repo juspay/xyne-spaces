@@ -11,6 +11,7 @@ import type {
   ParsedRepository,
   PullRequestInspection,
   RepositoryInspection,
+  RepositoryReach,
   RepositoryVisibility,
   SourceLineRange,
   ValidatedCredential,
@@ -129,13 +130,11 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
         502
       );
     }
-    return { identityLogin: identity.login, ...(await this.reach(token)) };
+    return { identityLogin: identity.login };
   }
 
   // Display only, never a gate. With per_page=1 the Link header's last page is the total.
-  private async reach(
-    token: string
-  ): Promise<{ repositoryOwner: string | null; repositoryCount: number | null }> {
+  async repositoryReach(token: string): Promise<RepositoryReach> {
     try {
       const { data, response } = await this.send<GitHubRepositoryResponse[]>(
         '/user/repos?per_page=1',
