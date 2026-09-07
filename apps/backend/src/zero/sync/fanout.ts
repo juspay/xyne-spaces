@@ -87,7 +87,10 @@ export class Fanout {
       this.#setAdd(this.#grantToData, grantKey, client.dataInstanceKey);
       await this.#ensureCursorHead(grantKey);
     }
-    await this.#regate(client);
+    // Serialize the initial regate onto the data instance's queue so a subscribe-time
+    // admit can't interleave a stale grant view against a concurrent grant dispatch for
+    // the same instance (same ordering guarantee the grant path relies on).
+    this.#enqueueRegate(client.dataInstanceKey, () => this.#regate(client));
   }
 
   removeClient(clientId: string, dataInstanceKey: string): void {
@@ -117,6 +120,12 @@ export class Fanout {
    * A caller that re-gates many clients for one delta passes a single cache → M reads,
    * and all clients gate against one point-in-time view. Callers re-gating a lone client
    * (subscribe) pass none and read fresh.
+   *
+   * All callers route through `#enqueueRegate` (keyed by the data instance's stream), so
+   * regates for a given instance/client never run concurrently — the async snapshot read
+   * → synchronous `admitted` flip below is therefore not interleaved, and the freshest
+   * delta's regate always flips last. (This is what makes cross-grant-stream ordering
+   * structural rather than resting on a fragile shared-FIFO-read invariant.)
    */
   async #regate(client: ClientSub, cache?: Map<string, Record<string, unknown>[]>): Promise<void> {
     const grantRows = new Map<string, Record<string, unknown>[]>();
@@ -281,26 +290,49 @@ export class Fanout {
 
     const affected = this.#grantToData.get(instanceKey);
     if (affected) {
-      // One cache for the whole grant delta: grant instanceKeys are globally unique, so
-      // sharing it across every affected data instance and client reads each snapshot once.
-      const grantCache = new Map<string, Record<string, unknown>[]>();
+      // Serialize the regate APPLICATION per data instance (not inline here). Concurrent
+      // grant deltas for one channel — different grant streams, distinct queue keys, so
+      // dispatched in parallel — would otherwise each build a snapshot view and race to
+      // flip `admitted` last; a stale view held across the N-client loop (with awaited
+      // hydrations) could flip last and leave a revoked user admitted. Enqueuing the loop
+      // onto the DATA instance's stream key runs these regates serially in arrival order:
+      // the last job builds its cache AFTER every earlier delta's applyDiff, so the final
+      // flip always uses a view ≥ every delta. It also orders regates against that
+      // instance's data-delta dispatches (same key), so the emit-time recheck sees settled
+      // flags. Distinct channels stay parallel.
       for (const dataKey of affected) {
-        const subs = this.#dataSubs.get(dataKey);
-        if (!subs) continue;
-        for (const client of subs) {
-          try {
-            await this.#regate(client, grantCache);
-          } catch (error) {
-            // One client's transient re-gate failure (e.g. a snapshot read blip) must not
-            // abort re-gating the rest — a dropped revoke is a leak. Log and continue; the
-            // next grant delta re-gates. (Gate-eval throws are already caught in #regate.)
-            logger.error('sync_fanout_regate_error', {
-              error,
-              instanceKey: client.dataInstanceKey,
-              userId: client.userId,
-            });
-          }
-        }
+        this.#enqueueRegate(dataKey, () => this.#regateInstance(dataKey));
+      }
+    }
+  }
+
+  /** Enqueue a regate onto the data instance's stream queue (see #dispatch for why). */
+  #enqueueRegate(dataInstanceKey: string, run: () => Promise<void>): void {
+    this.#dispatchQueue.enqueue(streamKey(dataInstanceKey), run);
+  }
+
+  /**
+   * Re-gate every client of one data instance against a single fresh grant snapshot built
+   * INSIDE this (serialized) job — so the cache reflects all grant deltas applied before
+   * the job runs, and one point-in-time view is shared across the instance's clients
+   * (≈ M reads for the delta; `#grantToData` fan-out is per-channel, typically one instance).
+   */
+  async #regateInstance(dataKey: string): Promise<void> {
+    const subs = this.#dataSubs.get(dataKey);
+    if (!subs) return;
+    const grantCache = new Map<string, Record<string, unknown>[]>();
+    for (const client of subs) {
+      try {
+        await this.#regate(client, grantCache);
+      } catch (error) {
+        // One client's transient re-gate failure (e.g. a snapshot read blip) must not
+        // abort re-gating the rest — a dropped revoke is a leak. Log and continue; the
+        // next grant delta re-gates. (Gate-eval throws are already caught in #regate.)
+        logger.error('sync_fanout_regate_error', {
+          error,
+          instanceKey: client.dataInstanceKey,
+          userId: client.userId,
+        });
       }
     }
   }
