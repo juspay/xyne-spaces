@@ -115,6 +115,9 @@ export class PackConnection {
       this.#seeded.add(instanceKey);
       try {
         const rows = await this.#opts.store.snapshot(instanceKey);
+        // If a removeInstance ran during the snapshot read, don't re-seed its attribution —
+        // that would resurrect a torn-down instance (mis-route its future dels).
+        if (!this.#desired.has(instanceKey)) continue;
         if (rows.length > 0) this.#demux.seedFromSnapshot(instanceKey, rows);
       } catch (error) {
         this.#seeded.delete(instanceKey); // let a later pass retry
@@ -325,10 +328,14 @@ export class PackConnection {
 
     const cookie = String(body.cookie);
     // zero-cache's makeRowPatch is put/del-only; an `update` should never arrive. If one does,
-    // streamState resets the instance (never a silent skip) — log it loudly here.
-    const updates = ops.filter((o) => o.op === 'update').length;
-    if (updates > 0) {
-      logger.error('sync_unexpected_update_op', { clientGroupID: this.#opts.clientGroupID, updates });
+    // we can't merge it (stateless) — force a full re-materialize so the instance re-hydrates
+    // instead of being left wiped-but-unhydratable. Blunt (whole-group reset) is acceptable:
+    // this branch should never fire; skip the doomed poke and let the fresh connect rebuild.
+    if (ops.some((o) => o.op === 'update')) {
+      logger.error('sync_unexpected_update_op', { clientGroupID: this.#opts.clientGroupID });
+      this.#pendingReset = true;
+      this.#ws?.close();
+      return;
     }
     const diffs = this.#demux.applyPoke(cookie, ops);
     this.#baseCookie = cookie;
