@@ -1499,6 +1499,7 @@ export const activityTable = table("activities")
     channelId: string().optional(),
     pullRequestId: string().optional(),
     canvasId: string().optional(),
+    trackId: string().optional(),
     blockId: string().optional(),
     actorId: string(),
     classification: string(),
