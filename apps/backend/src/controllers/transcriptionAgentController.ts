@@ -413,7 +413,6 @@ class TranscriptionAgentController {
       res.status(500).json({ success: false, error: 'Failed to fetch voiceprints' });
     }
   };
-
 }
 
 export const transcriptionAgentController = new TranscriptionAgentController();
