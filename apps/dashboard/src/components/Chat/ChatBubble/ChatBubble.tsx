@@ -270,9 +270,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const metadata = message?.metadata as Record<string, unknown> | null;
 
-  // Recording anchors use recording-specific actions.
-  const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
-  const isSharedEntityMessage = isRecordingMessage || metadata?.['isCallShareMessage'] === true;
+  // Shared recording and call anchors both use entity-specific actions.
+  const isSharedEntityMessage =
+    metadata?.['isRecordingMessage'] === true || metadata?.['isCallShareMessage'] === true;
 
   // Both internal and external link previews are stored in link_preview_md.
   // Memoized: ChatBubble re-renders on every hover, and parsing per render
