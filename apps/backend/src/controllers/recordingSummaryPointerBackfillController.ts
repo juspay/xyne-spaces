@@ -17,12 +17,20 @@ import { logger } from '@/utils/logger';
  * the pointer, matching the canvas the same way findExistingDetailedSummaryCanvas
  * does (canvasService.ts).
  *
- * RUN WITH NO ACTIVE RECORDINGS. Prisma cannot express a partial JSON update, so
- * each row is a read-merge-write of the whole metadata column. If a pipeline were
- * writing the same row concurrently (transcriptEntryCount, notesCanvasId,
- * linkedTicketId), the merge could drop its key — the same failure mode as the
- * stale-snapshot merge in noteTakerTranscriptService.finalizeCallUpdates. With
- * recordings quiesced there is no concurrent writer and the merge is safe.
+ * Regular calls need the same pointer, for a different reader: a call shared out
+ * of its own channel is opened by someone who cannot read the call message, so
+ * both the detail screen (CallDetailScreen) and the share itself
+ * (recordingSharingService.getShareCanvasIds) fall back to the row. Calls
+ * summarised before callDocumentService.linkDetailedSummaryCanvasToCall existed
+ * have no pointer either, so they are in scope here too.
+ *
+ * RUN WITH NO ACTIVE CALLS OR RECORDINGS. Prisma cannot express a partial JSON
+ * update, so each row is a read-merge-write of the whole metadata column. If a
+ * pipeline were writing the same row concurrently (transcriptEntryCount,
+ * notesCanvasId, linkedTicketId), the merge could drop its key — the same failure
+ * mode as the stale-snapshot merge in noteTakerTranscriptService
+ * .finalizeCallUpdates. With calls and recordings quiesced there is no concurrent
+ * writer and the merge is safe.
  *
  * Idempotent: only rows whose pointer is still absent are selected, so re-running
  * after the pipeline cutover picks up just the stragglers.
@@ -102,12 +110,12 @@ export class RecordingSummaryPointerBackfillController {
   }
 
   /**
-   * Recordings whose pointer is absent. `AnyNull` covers both a missing key and an
-   * explicit JSON null, matching `metadata ->> 'detailedSummaryCanvasId' IS NULL`.
+   * Calls and recordings whose pointer is absent. `AnyNull` covers both a missing
+   * key and an explicit JSON null, matching
+   * `metadata ->> 'detailedSummaryCanvasId' IS NULL`.
    */
   private static candidateWhere(): Prisma.CallWhereInput {
     return {
-      callType: 'HEADLESS',
       metadata: { path: [POINTER_KEY], equals: Prisma.AnyNull },
     };
   }
@@ -232,8 +240,8 @@ export class RecordingSummaryPointerBackfillController {
    *
    * Pass the `nextCursor` from the previous response back in to continue where the
    * last request stopped; omit it to start from the beginning. Continuing by cursor
-   * is what stops each new request re-scanning the ~768 recordings that have no
-   * canvas and never will.
+   * is what stops each new request re-scanning the rows that have no canvas and
+   * never will.
    */
   static run = async (req: Request, res: Response): Promise<void> => {
     const options = RecordingSummaryPointerBackfillController.buildOptions(req.body);
@@ -322,8 +330,8 @@ export class RecordingSummaryPointerBackfillController {
 
   /**
    * GET /api/admin/recording-pointer-backfill/status
-   * `linkable` is the real work outstanding; `pointerAbsent` includes recordings
-   * that have no canvas to link and never will (no transcript, or a short summary
+   * `linkable` is the real work outstanding; `pointerAbsent` includes rows that
+   * have no canvas to link and never will (no transcript, or a short summary
    * only), which is why the two differ.
    */
   static status = async (_req: Request, res: Response): Promise<void> => {
