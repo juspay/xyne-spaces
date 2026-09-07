@@ -14,6 +14,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
+import { resolveSdlcNavTarget } from '@/sdlc/sdlcNavTarget';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
@@ -861,6 +862,33 @@ class NotificationService {
    * disconnect between send and check, or WebSocket "send" only confirms server push, not client
    * receipt. This is acceptable for reducing duplicate notifications but is not deterministic.
    */
+  /** No builder knows the SDLC routes, so the target is resolved once in the funnel they share. */
+  private async withSdlcTarget(data: NotificationData): Promise<NotificationData> {
+    // Builders put objects in metadata too, so every id is read as one or dropped.
+    const meta: Record<string, unknown> =
+      data.metadata && typeof data.metadata === 'object' ? data.metadata : {};
+    const id = (key: string): string | undefined =>
+      typeof meta[key] === 'string' ? (meta[key] as string) : undefined;
+    try {
+      const target = await resolveSdlcNavTarget({
+        channelId: id('channelId'),
+        canvasId: id('canvasId'),
+        ticketId: id('ticketId'),
+        conversationId: id('conversationId'),
+        messageId: id('messageId'),
+        blockId: id('blockId'),
+        commentThreadId: id('commentThreadId'),
+      });
+      if (!target) return data;
+      // actionUrl is left alone: mobile and web push have no SDLC routes, so they keep
+      // the builder's chat path. Clients that can render a hub read sdlcTarget instead.
+      return { ...data, metadata: { ...meta, sdlcTarget: target } };
+    } catch (error) {
+      logger.error('[NOTIFICATION-SERVICE] SDLC routing failed', { error });
+      return data;
+    }
+  }
+
   async createNotification(
     userId: string,
     data: NotificationData,
@@ -869,6 +897,7 @@ class NotificationService {
     let deliveredViaApp = false;
 
     try {
+      data = await this.withSdlcTarget(data);
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
         notificationType: data.type,
@@ -2510,6 +2539,80 @@ class NotificationService {
       );
     } catch (error) {
       logger.error('[NotificationService] Failed to send ticket due date changed notification:', error);
+    }
+  }
+
+  /**
+   * Planning-risk detected/reopened : the current stage deadline is later than
+   * the ticket due date, not yet overdue. Sent only to "action recipients" (awareness
+   * recipients who also satisfy the board's ETA-update permission policy) - unlike every
+   * other ticket notification here, which goes to the full awareness set - since a
+   * planning-risk alert is only actionable for someone who can actually change the due
+   * date or stage deadline. Caller is responsible for the "once per fingerprint" dedup
+   * (comparing the previous vs. new fingerprint before calling).
+   */
+  async sendPlanningRiskDetectedNotification(
+    ticketId: string,
+    actionRecipients: string[],
+    details: { stageDeadline: number; ticketDue: number },
+  ): Promise<void> {
+    if (actionRecipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+          channel: { select: { type: true } },
+        },
+      });
+      if (!ticket) {
+        logger.warn('[NotificationService] Ticket not found', { ticketId });
+        return;
+      }
+
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Planning Risk';
+      const message = `Ticket '${ticketDisplayId}' has a stage deadline later than its due date`;
+
+      await Promise.allSettled(
+        actionRecipients.map(async (userId) => {
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_ETA_PLANNING_RISK,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_ETA_PLANNING_RISK, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_ETA_PLANNING_RISK,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              stageDeadline: details.stageDeadline,
+              ticketDue: details.ticketDue,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send planning risk notification:', error);
     }
   }
 
