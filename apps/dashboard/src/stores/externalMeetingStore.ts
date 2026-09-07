@@ -1,16 +1,20 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Whether the user is in a meeting on another platform — Zoom, Teams, Google
- * Meet, a Slack huddle, or a browser tab that has the mic open.
+ * What the user is doing outside Xyne, as seen by the Electron main process
+ * (mic-monitor + `meeting-detector.ts`, macOS only). This store is just the
+ * renderer's copy, fed by `NotificationHandler`; off Electron both halves stay
+ * empty forever, which is correct — nothing is watching there.
  *
- * The detection itself lives in the Electron main process (mic-monitor +
- * `meeting-detector.ts`) and is macOS-only; this store is just the renderer's
- * copy, fed by `NotificationHandler`. Off Electron it stays null forever, which
- * is correct — there is nothing detecting meetings there.
+ * Two separate signals, and the distinction matters:
  *
- * Set at *detection*, independently of whether the user then accepted the
- * "record this meeting?" popup, so it covers both halves of that flow.
+ * - `micBusy` — something holds the mic. This is what silences an incoming
+ *   call, precisely because it asks nothing else: not which app, and not
+ *   whether the user left meeting detection on.
+ * - `meeting` — which app, once identified. Attribution for telemetry only, so
+ *   a silenced ring with no meeting app is visible as a possible false
+ *   positive. Set at *detection*, whether or not the user then accepted the
+ *   "record this meeting?" popup.
  */
 export interface ExternalMeeting {
   /** `zoom` | `microsoft-teams` | `slack-huddle` | `google-meet` | `browser-meeting`. */
@@ -42,4 +46,32 @@ export function subscribeExternalMeeting(listener: () => void): () => void {
 
 export function useExternalMeeting(): ExternalMeeting | null {
   return useSyncExternalStore(subscribeExternalMeeting, getExternalMeeting);
+}
+
+// ── Mic activity ───────────────────────────────────────────────────
+
+let micBusy = false;
+const micListeners = new Set<() => void>();
+
+export function setMicBusy(next: boolean): void {
+  if (micBusy === next) return;
+  micBusy = next;
+  for (const listener of micListeners) {
+    listener();
+  }
+}
+
+export function getMicBusy(): boolean {
+  return micBusy;
+}
+
+export function subscribeMicBusy(listener: () => void): () => void {
+  micListeners.add(listener);
+  return (): void => {
+    micListeners.delete(listener);
+  };
+}
+
+export function useMicBusy(): boolean {
+  return useSyncExternalStore(subscribeMicBusy, getMicBusy);
 }

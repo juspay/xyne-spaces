@@ -86,7 +86,8 @@ export interface IncomingCallViewModel {
   isInActiveCall: boolean;
   /**
    * The call arrived without a ringtone because the user was already busy —
-   * on a call, recording, or in a meeting elsewhere. Purely an explanation for
+   * on a call, recording, or talking to someone outside Xyne. Purely an
+   * explanation for
    * the muted-bell glyph; the sound itself is suppressed by the modal, and the
    * card is otherwise identical either way.
    */

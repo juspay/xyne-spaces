@@ -121,6 +121,25 @@ class MeetingDetectorService {
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
 
+  /**
+   * Whether *something* is holding the mic, meeting app or not.
+   *
+   * Deliberately separate from `currentMeeting`: this is what silences an
+   * incoming call's ringtone, and it must not depend on the meeting-detection
+   * preference or on `identifyMeetingApp()` recognising the app. Silencing a
+   * call that should have rung is a smaller failure than a full-volume ringtone
+   * landing in the middle of a live meeting.
+   */
+  private micActive = false;
+  private micInactiveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The user's meeting-detection preference. Gates the "record this meeting?"
+   * popup and nothing else — detection, its broadcasts and its telemetry all
+   * keep running so the ring-silencing signal above is never at its mercy.
+   */
+  private popupEnabled = true;
+
   /** Last known frontmost app — updated by app_activated events from the native binary */
   private lastFrontApp: { bundleId: string; name: string } | null = null;
 
@@ -155,6 +174,7 @@ class MeetingDetectorService {
         // A dead mic-monitor can never report the mic going quiet, so any
         // meeting it was tracking has to be closed out here.
         this.clearMeeting('detector-crashed');
+        this.clearMicActive();
         this.scheduleRestart();
       });
 
@@ -163,6 +183,7 @@ class MeetingDetectorService {
         Logger.info(ElectronEvent.MEETING_DETECTOR_PROCESS_EXIT, { code, signal }, 'MeetingDetector');
         this.process = null;
         this.clearMeeting('detector-crashed');
+        this.clearMicActive();
 
         if (!this.stopped && code !== 0) {
           this.scheduleRestart();
@@ -177,9 +198,10 @@ class MeetingDetectorService {
 
   public stop(): void {
     this.stopped = true;
-    // Turning detection off mid-meeting kills the mic-monitor, so the
-    // mic-inactive event that would normally end this meeting never arrives.
+    // Only app quit reaches here now, but the mic events that would normally
+    // close these out still stop arriving, so both have to be released by hand.
     this.clearMeeting('detector-stopped');
+    this.clearMicActive();
 
     if (this.meetingEndTimer) {
       clearTimeout(this.meetingEndTimer);
@@ -218,6 +240,21 @@ class MeetingDetectorService {
     return this.currentMeeting;
   }
 
+  /** Seeds a renderer that mounted after the last `mic:state-changed`. */
+  public getMicActive(): boolean {
+    return this.micActive;
+  }
+
+  /**
+   * Apply the meeting-detection preference. It no longer starts or stops the
+   * monitor: doing so meant a user who turned detection off got a full-volume
+   * ringtone during every Zoom call, because nothing was left to notice the mic.
+   */
+  public setPopupEnabled(enabled: boolean): void {
+    this.popupEnabled = enabled;
+    if (!enabled) hideMeetingPopup();
+  }
+
   // ── Private ────────────────────────────────────────────────────
 
   /**
@@ -243,6 +280,57 @@ class MeetingDetectorService {
     Logger.info(ElectronEvent.MEETING_ENDED, { ...meeting, reason }, 'MeetingDetector');
     this.notifyRenderer('meeting:ended', meeting);
     hideMeetingPopup();
+  }
+
+  /**
+   * Track the raw mic signal, ahead of and independently of everything the
+   * meeting logic does with it.
+   *
+   * Only the release edge is debounced — swapping headsets mid-meeting drops the
+   * mic for a moment, and un-silencing across that gap would let the next call
+   * ring at full volume while the user is still talking.
+   */
+  private setMicActive(active: boolean): void {
+    if (active) {
+      if (this.micInactiveTimer) {
+        clearTimeout(this.micInactiveTimer);
+        this.micInactiveTimer = null;
+      }
+      if (this.micActive) return;
+
+      this.micActive = true;
+      log.info('[MeetingDetector] Mic in use — incoming calls will ring silently');
+      this.notifyRenderer('mic:state-changed', { active: true });
+      return;
+    }
+
+    if (!this.micActive || this.micInactiveTimer) return;
+
+    this.micInactiveTimer = setTimeout(() => {
+      this.micInactiveTimer = null;
+      this.clearMicActive();
+    }, MEETING_END_DEBOUNCE_MS);
+  }
+
+  /**
+   * Release the mic signal immediately, skipping the debounce.
+   *
+   * Every path that makes further mic events impossible has to come through
+   * here. A stranded `micActive` silences every call for the rest of the
+   * session, which reads to the user as a broken ringtone rather than as a
+   * monitor that quietly died.
+   */
+  private clearMicActive(): void {
+    if (this.micInactiveTimer) {
+      clearTimeout(this.micInactiveTimer);
+      this.micInactiveTimer = null;
+    }
+
+    if (!this.micActive) return;
+    this.micActive = false;
+
+    log.info('[MeetingDetector] Mic released — incoming calls ring normally again');
+    this.notifyRenderer('mic:state-changed', { active: false });
   }
 
   private getBinaryPath(): string {
@@ -299,6 +387,12 @@ class MeetingDetectorService {
   private handleMicEvent(event: MicEvent): void {
     const active = event.active ?? false;
 
+    // First, unconditionally: the ring-silencing signal cannot sit behind the
+    // early returns below, which skip a Xyne-owned mic and an already-tracked
+    // meeting. A Xyne call or recording is not filtered out here either — the
+    // renderer's precedence attributes those to 'in-call'/'recording' anyway.
+    this.setMicActive(active);
+
     if (active && !this.currentMeeting) {
       // A Xyne call or recording is what just turned the mic on. Bail out before
       // identifying anything — checkProcesses() would otherwise match a Zoom or
@@ -341,7 +435,8 @@ class MeetingDetectorService {
           log.info('[MeetingDetector] Meeting detected:', this.currentMeeting);
           Logger.info(ElectronEvent.MEETING_DETECTED, { ...this.currentMeeting }, 'MeetingDetector');
           this.notifyRenderer('meeting:detected', this.currentMeeting);
-          showMeetingPopup(this.currentMeeting);
+          // The preference reaches only this line — the state above still flows.
+          if (this.popupEnabled) showMeetingPopup(this.currentMeeting);
         })
         .catch((err) => {
           log.error('[MeetingDetector] Failed to identify meeting app:', err);

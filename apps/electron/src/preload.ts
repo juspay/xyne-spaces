@@ -334,6 +334,18 @@ const electronAPI = {
       ipcRenderer.invoke('meeting:get-current'),
   },
 
+  // Deliberately its own namespace rather than part of `meetingDetector`: this
+  // is raw mic activity, and unlike everything above it the meeting-detection
+  // preference has no say over it.
+  micMonitor: {
+    onStateChanged: (callback: (active: boolean) => void) => {
+      const listener = (_event: unknown, data: { active: boolean }) => callback(data.active);
+      ipcRenderer.on('mic:state-changed', listener);
+      return () => ipcRenderer.removeListener('mic:state-changed', listener);
+    },
+    getState: (): Promise<boolean> => ipcRenderer.invoke('mic:get-state'),
+  },
+
   // Meeting popup (used by the popup window itself)
   meetingPopup: {
     onShow: (callback: (data: { app: string; startedAt: string }) => void) => {

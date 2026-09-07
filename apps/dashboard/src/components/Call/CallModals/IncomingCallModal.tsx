@@ -23,7 +23,7 @@ import {
 } from '../IncomingCall/IncomingCallCard.utils';
 import type { IncomingCallViewModel } from '../IncomingCall/IncomingCallCard.types';
 import { useRecordingStore } from '../../../hooks/useRecordingStore';
-import { useExternalMeeting } from '../../../stores/externalMeetingStore';
+import { useExternalMeeting, useMicBusy } from '../../../stores/externalMeetingStore';
 import { logger, Event } from '../../../utils/logger';
 
 type CallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
@@ -64,6 +64,8 @@ export function IncomingCallModal(): React.ReactElement | null {
     roomState === 'idle' || (typeof roomState === 'object' && 'connected' in roomState);
 
   const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const micBusy = useMicBusy();
+  // Not part of the decision — only the telemetry below, as attribution.
   const externalMeeting = useExternalMeeting();
 
   const allChannels = useAllChannels();
@@ -186,12 +188,12 @@ export function IncomingCallModal(): React.ReactElement | null {
   const incomingCallData = incomingCallQueue[0];
 
   // Whether the user is busy enough that this call should arrive quietly. The
-  // meeting half is Electron/macOS only; on web it is always null and the other
-  // two carry the feature on their own.
+  // mic half is Electron/macOS only; on web it is always false and the other two
+  // carry the feature on their own.
   const liveSilenceReason = getRingSilenceReason({
     isInActiveCall,
     recordingStatus,
-    externalMeetingActive: externalMeeting !== null,
+    micBusy,
   });
 
   // Decided once per call and then held. Recomputing live would mean hanging up
@@ -210,10 +212,10 @@ export function IncomingCallModal(): React.ReactElement | null {
         callId: incomingCallData.callId,
         eventName: 'incoming_call_silenced',
         reason: liveSilenceReason,
-        // Carried separately because 'recording' outranks it: this is what
-        // distinguishes a meeting the user chose to record from one they only
-        // dismissed, and it is the only way to spot a browser-meeting false
-        // positive from the outside.
+        // The mic tells us the user is busy but not with what. Null here means
+        // no meeting app was identified — a Zoom call detection missed, or the
+        // mic held by something that was never a meeting at all. It is the only
+        // way to see the false-positive rate from the outside.
         externalMeetingApp: externalMeeting?.app ?? null,
       });
     }

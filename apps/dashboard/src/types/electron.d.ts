@@ -135,6 +135,15 @@ export interface ElectronAPI {
     /** Seeds state on mount — detection broadcasts are not replayed. */
     getCurrentMeeting: () => Promise<{ app: string; startedAt: string } | null>;
   };
+  /**
+   * Raw mic activity, meeting app or not. Separate from `meetingDetector`
+   * because the meeting-detection preference does not gate it: this is what
+   * keeps a call quiet while the user is talking to someone else.
+   */
+  micMonitor?: {
+    onStateChanged: (callback: (active: boolean) => void) => () => void;
+    getState: () => Promise<boolean>;
+  };
   meetingPopup?: {
     onShow: (callback: (data: { app: string; startedAt: string }) => void) => () => void;
     onUpdate: (callback: (data: { app: string; startedAt: string }) => void) => () => void;

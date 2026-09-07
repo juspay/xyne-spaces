@@ -29,7 +29,7 @@ import {
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
-import { setExternalMeeting } from '../../stores/externalMeetingStore';
+import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
@@ -681,6 +681,36 @@ export const NotificationHandler: React.FC = () => {
       // Nothing is listening for meeting:ended any more; leaving this set would
       // silence every later call.
       setExternalMeeting(null);
+    };
+  }, [isElectron]);
+
+  // The signal that actually silences an incoming call: is anything holding the
+  // mic. Gated on Electron and nothing else — in particular not on the
+  // meeting-detection preference, which used to take this whole path down with
+  // it and leave the user's Zoom call fighting a full-volume ringtone.
+  useEffect(() => {
+    const micMonitor = window.electronAPI?.micMonitor;
+    if (!isElectron || !micMonitor?.onStateChanged) return;
+
+    // Broadcasts are not replayed, so a renderer that reloaded mid-meeting has
+    // to ask.
+    let cancelled = false;
+    void micMonitor.getState?.().then(active => {
+      // A live event that landed while the seed was in flight is newer.
+      if (!cancelled) setMicBusy(active);
+    });
+
+    const cleanup = micMonitor.onStateChanged(active => {
+      cancelled = true;
+      setMicBusy(active);
+    });
+
+    return (): void => {
+      cancelled = true;
+      cleanup();
+      // Nothing is listening for the release any more; leaving this set would
+      // silence every later call.
+      setMicBusy(false);
     };
   }, [isElectron]);
 

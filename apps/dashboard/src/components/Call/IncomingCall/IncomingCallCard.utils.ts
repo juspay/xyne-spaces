@@ -80,7 +80,7 @@ export function isRingableCall(input: {
 }
 
 /** Why a call that is ringing is doing so without a sound. */
-export type RingSilenceReason = 'in-call' | 'recording' | 'external-meeting';
+export type RingSilenceReason = 'in-call' | 'recording' | 'mic-busy';
 
 /**
  * Whether a ringing call should stay quiet, and why.
@@ -102,14 +102,22 @@ export function getRingSilenceReason(input: {
   isInActiveCall: boolean;
   recordingStatus: RecordingStatus;
   /**
-   * A meeting on another platform. True whether or not the user accepted the
-   * offer to record it — detection alone means they are talking to someone.
+   * Something outside Xyne holds the mic — Zoom, Teams, Meet, a huddle, a
+   * browser tab. Deliberately not "a meeting was identified": the ring stays
+   * quiet whether or not the app was recognised, and whether or not the user
+   * left meeting detection switched on, because the cost of getting it wrong is
+   * asymmetric — a call that arrives quietly can still be seen and answered, a
+   * ringtone in a live meeting cannot be taken back.
+   *
+   * Electron/macOS only, and it inherits that platform's bluntness: macOS
+   * reports the mic as busy per *device*, so a dictation tool or QuickTime
+   * holding it silences calls too.
    */
-  externalMeetingActive: boolean;
+  micBusy: boolean;
 }): RingSilenceReason | null {
   if (input.isInActiveCall) return 'in-call';
   if (isRecordingSessionActive(input.recordingStatus)) return 'recording';
-  if (input.externalMeetingActive) return 'external-meeting';
+  if (input.micBusy) return 'mic-busy';
   return null;
 }
 
