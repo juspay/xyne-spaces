@@ -576,63 +576,6 @@ export class LiveKitService {
     }
   }
 
-  /**
-   * Guards the room-create-or-recreate-then-dispatch sequence for one call against
-   * concurrent joins racing each other (see `joinCall`'s delete-and-recreate branch for
-   * SCHEDULED calls — two participants joining at once could each delete+recreate the
-   * room and each request a dispatch). Fails OPEN if Redis is down. When the lock isn't
-   * acquired, the caller is expected to skip its own create+dispatch entirely rather than
-   * race the lock holder.
-   */
-  async withCallCreationLock<T>(callId: string, fn: () => Promise<T>): Promise<{ acquired: boolean; result?: T }> {
-    const lockKey = `livekit:call-creation:lock:${callId}`;
-    // Unique per acquisition — lets release verify it still owns the lock before
-    // deleting it (see the `finally` block below).
-    const lockToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    let acquired: boolean;
-    try {
-      acquired = await redisService.set(lockKey, lockToken, 10, true);
-    } catch (error) {
-      logger.warn(`[${callId}] call_creation_lock_unavailable | proceeding_without_guard, error=${error}`);
-      acquired = true;
-    }
-
-    if (!acquired) return { acquired: false };
-
-    try {
-      const result = await fn();
-      return { acquired: true, result };
-    } finally {
-      // Compare-and-delete: if `fn()` outlived the 10s TTL, this key may already
-      // belong to a different caller who acquired it after ours expired — a bare
-      // DEL here would delete THEIR lock and let a third caller in.
-      await redisService.deleteIfMatch(lockKey, lockToken).catch((error) => {
-        logger.warn(`[${callId}] call_creation_lock_release_failed | error=${error}`);
-      });
-    }
-  }
-
-  /**
-   * For the `withCallCreationLock` LOSER: a fixed sleep-then-proceed can't actually
-   * guarantee the winner is done — `fn()` (CAC lookup + createRoom + dispatch) has no
-   * fixed cost, so a blind timeout either wastes time when the winner finishes early or,
-   * worse, lets the loser generate a join token and respond to the client BEFORE the room
-   * (and its agentName metadata / dispatch) actually exist. Poll for the real completion
-   * signal instead — the room existing — bounded so a stuck/crashed winner can't hang the
-   * loser forever; the lock's own 10s TTL is the actual worst case, so this only needs to
-   * cover slightly past that.
-   */
-  async waitForRoomReady(roomName: string, maxWaitMs = 11000, pollIntervalMs = 300): Promise<boolean> {
-    const deadline = Date.now() + maxWaitMs;
-    while (Date.now() < deadline) {
-      const room = await this.getRoomInfo(roomName);
-      if (room) return true;
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    }
-    logger.warn(`[${roomName}] call_creation_lock_wait_timed_out | waited_ms=${maxWaitMs}, room_still_missing=true`);
-    return false;
-  }
-
   async muteTrack(roomName: string, identity: string, trackSid: string, muted: boolean): Promise<void> {
     try {
       await this.roomService.mutePublishedTrack(roomName, identity, trackSid, muted);
