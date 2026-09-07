@@ -229,7 +229,7 @@ const MAX_LIVENESS_REARMS = Number(process.env["RUN_RECOVERY_MAX_LIVENESS_REARMS
  * is unreachable the run really is unrecoverable, and preserving the old
  * behaviour there matters more than avoiding a duplicate.
  */
-async function isRunStillExecuting(sessionId: string): Promise<boolean> {
+export async function isRunStillExecuting(sessionId: string): Promise<boolean> {
   try {
     const res = await fetch(
       `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/alive`,
