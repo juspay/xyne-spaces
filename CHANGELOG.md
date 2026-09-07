@@ -1,3 +1,15 @@
+## [1.286.0](https://github.com/juspay/xyne-spaces/compare/v1.285.1...v1.286.0) (2026-09-07)
+
+
+### Features
+
+* reorder kanban stage columns by drag and persist col… ([#1553](https://github.com/juspay/xyne-spaces/issues/1553)) ([f39a142](https://github.com/juspay/xyne-spaces/commit/f39a142b0dd0497d3244c943c11cfc65171a689a))
+
+
+### Bug Fixes
+
+* render blank lines in text file preview as real non-breaking space ([#1618](https://github.com/juspay/xyne-spaces/issues/1618)) ([e606163](https://github.com/juspay/xyne-spaces/commit/e6061637ff388400d69e1bc4c95fe9fd6ed64ebc))
+
 ## [1.285.1](https://github.com/juspay/xyne-spaces/compare/v1.285.0...v1.285.1) (2026-09-07)
 
 
