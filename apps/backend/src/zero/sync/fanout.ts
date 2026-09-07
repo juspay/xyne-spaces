@@ -169,6 +169,11 @@ export class Fanout {
       admitted = false;
     }
     if (admitted && !client.admitted) {
+      // Re-check after the snapshot-read awaits above: an unsubscribe landing during them
+      // reset `client.admitted` to false, which would otherwise let this flip it back true
+      // and emit a stray snapshot for a released instance. (Revoke branch needs no re-check
+      // — removeClient already cleared `admitted`, so it won't fire for an orphan.)
+      if (!this.#dataSubs.get(client.dataInstanceKey)?.has(client)) return;
       client.admitted = true;
       await this.#tryHydrate(client);
     } else if (!admitted && client.admitted) {
