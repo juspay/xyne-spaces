@@ -100,15 +100,14 @@ export const MessageRepliedActivityV2 = ({
           message={latestReplyMessage}
           showAvatar={false}
           variant='default'
-          contentOnly={true}
+          contentOnly={true} disableLinks={true}
         />
       ) : (
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
           {getFlowJsonPreviewText(latestReplyMessage.content) ?? (
             <RenderMessageWithHTML
               message={latestReplyMessage.content}
-              showEdited={latestReplyMessage.edited}
-            />
+              showEdited={latestReplyMessage.edited} disableLinks />
           )}
         </div>
       )}
