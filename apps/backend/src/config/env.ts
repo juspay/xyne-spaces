@@ -537,6 +537,11 @@ const envSchema = Joi.object({
   // Submit (OCR wrapper) concurrency permits + leases
   DOCLING_ASYNC_SUBMIT_PERMITS: Joi.number().default(16),
   DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS: Joi.number().default(21600000),
+  // Redis key prefix for the OCR submit/vespa-write semaphore permits. Internal to this
+  // repo only (no external wrapper reads/writes these keys), but MUST still be set to a
+  // distinct value per deployment environment (prod vs pre-prod) if they share a Redis
+  // instance, or the two environments' semaphores will share capacity accounting.
+  DOCLING_PERMIT_KEY_PREFIX: Joi.string().default('docling:scheduler:permit'),
   // Redis results stream + consumer group (wrapper publishes to docling:results)
   DOCLING_RESULTS_STREAM: Joi.string().default('docling:results'),
   DOCLING_RESULT_KEY_PREFIX: Joi.string().default('docling:result'),
@@ -1203,6 +1208,7 @@ export const config = {
     keepTempResults: envVars.DOCLING_KEEP_TEMP_RESULTS as boolean,
     submitPermits: envVars.DOCLING_ASYNC_SUBMIT_PERMITS as number,
     submitPermitLeaseTtlMs: envVars.DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS as number,
+    permitKeyPrefix: envVars.DOCLING_PERMIT_KEY_PREFIX as string,
     resultsStream: envVars.DOCLING_RESULTS_STREAM as string,
     resultKeyPrefix: envVars.DOCLING_RESULT_KEY_PREFIX as string,
     resultGroup: envVars.DOCLING_SCHEDULER_RESULT_GROUP as string,

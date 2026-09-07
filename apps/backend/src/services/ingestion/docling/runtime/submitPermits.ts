@@ -8,8 +8,9 @@
  */
 import { randomUUID } from 'node:crypto'
 import { redisService } from '@/services/redisService'
+import { config } from '@/config/env'
 
-const PERMIT_PREFIX = 'docling:scheduler:permit'
+const PERMIT_PREFIX = () => config.doclingScheduler.permitKeyPrefix
 
 const ACQUIRE_SCRIPT = `
 local active_key = KEYS[1]
@@ -69,8 +70,8 @@ return removed
 
 export type DoclingSchedulerPermit = { kind: string; permitId: string }
 
-const activeKey = (kind: string) => `${PERMIT_PREFIX}:${kind}:active`
-const metaKey = (kind: string, permitId: string) => `${PERMIT_PREFIX}:${kind}:${permitId}`
+const activeKey = (kind: string) => `${PERMIT_PREFIX()}:${kind}:active`
+const metaKey = (kind: string, permitId: string) => `${PERMIT_PREFIX()}:${kind}:${permitId}`
 const getClient = () => redisService.getClient()
 
 export const tryAcquireDoclingSchedulerPermit = async (input: {
