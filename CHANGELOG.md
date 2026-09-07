@@ -1,3 +1,10 @@
+## [1.285.1](https://github.com/juspay/xyne-spaces/compare/v1.285.0...v1.285.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* domain conflict for native and electron ([#1585](https://github.com/juspay/xyne-spaces/issues/1585)) ([8ccd523](https://github.com/juspay/xyne-spaces/commit/8ccd523ac2e18efbb00ab4d1eadd7308da19c512))
+
 ## [1.285.0](https://github.com/juspay/xyne-spaces/compare/v1.284.1...v1.285.0) (2026-09-07)
 
 
