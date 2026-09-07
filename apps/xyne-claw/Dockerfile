@@ -78,9 +78,19 @@ WORKDIR /repo/apps/xyne-claw
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs --create-home claw
 
-COPY --from=builder --chown=claw:nodejs /repo /repo
+# Ownership: uid 1001 (claw) primary, GROUP 0 (root). Hardened clusters run
+# containers with an enforced non-root uid — often an arbitrary one whose
+# primary group is 0 — so every writable path must be group-root + g=u
+# (OpenShift-style), otherwise a non-1001 uid cannot write data/ or /repos.
+COPY --from=builder --chown=1001:0 /repo /repo
 
-RUN mkdir -p data /repos && chown claw:nodejs data /repos
+RUN mkdir -p data /repos && \
+    chown -R 1001:0 data /repos /home/claw && \
+    chmod -R g=u data /repos /home/claw
+
+# HOME is set via the entrypoint when it stays root; default it here too so
+# enforced-non-root runs (which bypass setpriv) do not inherit root's HOME.
+ENV HOME=/home/claw
 
 COPY apps/xyne-claw/infra/kata/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
