@@ -200,7 +200,13 @@ export const InternalXyneLink = ({
   return (
     <span className='group/internal-link inline-flex items-center gap-1.5 align-baseline max-w-full'>
       {parsedLink.kind === 'canvas' ? (
-        <CanvasLink href={href} className={linkClassName} onClick={onClick} {...props}>
+        <CanvasLink
+          href={href}
+          canvasId={parsedLink.canvasId}
+          className={linkClassName}
+          onClick={onClick}
+          {...props}
+        >
           {linkContent}
         </CanvasLink>
       ) : (
@@ -238,9 +244,12 @@ export const InternalXyneLink = ({
 
 const CanvasLink = ({
   href,
+  canvasId,
   children,
   ...props
-}: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element => {
+}: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  canvasId?: string | undefined;
+}): JSX.Element => {
   const resolvedHref = href ?? '';
   const navigate = useNavigate();
   const location = useLocation();
@@ -259,14 +268,12 @@ const CanvasLink = ({
       return;
     }
 
-    if (url.origin === window.location.origin && url.pathname.startsWith('/chat/canvas/')) {
+    if (url.origin === window.location.origin) {
       event.preventDefault();
-      const parts = url.pathname.split('/');
-      const targetCanvasId = parts[parts.length - 1];
 
-      if (targetCanvasId && channelId) {
+      if (canvasId && channelId) {
         // Open as overlay in current channel
-        void navigate(`${location.pathname}#canvas=${targetCanvasId}`);
+        void navigate(`${location.pathname}#canvas=${canvasId}`);
       } else {
         // Fallback to full page navigation
         void navigate(url.pathname);
@@ -281,8 +288,8 @@ const CanvasLink = ({
   return (
     <a
       href={resolvedHref}
-      onClick={handleClick}
       {...props}
+      onClick={handleClick}
       data-track-category='MESSAGE'
       data-track-name='OPEN_CANVAS_LINK'
       data-track-metadata={JSON.stringify({ href: resolvedHref })}

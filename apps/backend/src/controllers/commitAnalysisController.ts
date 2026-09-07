@@ -618,16 +618,26 @@ export class CommitAnalysisController {
       // it. The workspace prefix is required — a bare /chat/canvas/:id route 404s.
       if (hotfixSync) {
         try {
-          const canvasLink = canvasId
-            ? ` ${config.slackFrontendUrl}/${params.workspaceId}/chat/canvas/${canvasId}`
-            : '';
+          const frontendBaseUrl = (config.slackFrontendUrl ?? '').replace(/\/+$/, '');
+          let content: string;
+          if (canvasId && frontendBaseUrl) {
+            content = `Hotfix synced — release analysis canvas updated ${frontendBaseUrl}/${params.workspaceId}/chat/canvas/${canvasId}`;
+          } else if (canvasId) {
+            content = 'Hotfix synced — release analysis canvas updated. No link available: the frontend URL is not configured.';
+          } else if (viewResults.length === 0) {
+            content = 'Hotfix synced — no new commits to analyse, so the analysis canvas was left unchanged. Nothing to open.';
+          } else {
+            content = 'Hotfix synced — the analysis canvas could not be updated, so there is no link to open. Re-run the sync to refresh it.';
+          }
           await recordTicketTimelineEvent({
             message: {
               conversationId,
               senderId: userId,
-              content: `Hotfix synced — release analysis canvas updated${canvasLink}`,
+              content,
               activityType: 'RELEASE_SYNC',
               workspaceId: params.workspaceId,
+              // bot-authored
+              isAutomation: true,
             },
           });
         } catch (noticeError) {

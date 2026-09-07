@@ -85,7 +85,9 @@ const PR_LOOKUP_RETRY_DELAY_MS = 2000;
 export function countDistinctMigrationFiles(
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined | null
 ): number {
-  return new Set((migrationLinks ?? []).map(link => link.filePath)).size;
+  return new Set(
+    (migrationLinks ?? []).map(link => `${link.diffUrl.replace(/\/commits?\/[^/#?]+/, '')}::${link.filePath}`),
+  ).size;
 }
 
 export class CommitAnalysisService {
