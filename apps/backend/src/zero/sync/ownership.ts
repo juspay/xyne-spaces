@@ -76,25 +76,32 @@ for idx = 1, #f, 2 do
 end
 return live`;
 
-class Ownership {
+export class Ownership {
+  readonly #podId: string;
+
+  /** `podId` defaults to this process's id; tests pass distinct ids to simulate multiple pods. */
+  constructor(podId: string = POD_ID) {
+    this.#podId = podId;
+  }
+
   #eval(script: string, numKeys: number, ...args: (string | number)[]): Promise<unknown> {
     return redisService.getClient().eval(script, numKeys, ...(args as never[]));
   }
 
   /** Try to become owner of group G. Returns the fence token if acquired, else null. */
   async acquireGroup(g: string): Promise<number | null> {
-    const r = await this.#eval(ACQUIRE, 2, ownerKey(g), fenceKey(g), POD_ID, LEASE_TTL_MS);
+    const r = await this.#eval(ACQUIRE, 2, ownerKey(g), fenceKey(g), this.#podId, LEASE_TTL_MS);
     return r == null ? null : Number(r);
   }
 
   /** Extend our lease on G. Returns false if we no longer own it (→ demote). */
   async refreshGroup(g: string): Promise<boolean> {
-    return (await this.#eval(REFRESH, 1, ownerKey(g), POD_ID, LEASE_TTL_MS)) === 1;
+    return (await this.#eval(REFRESH, 1, ownerKey(g), this.#podId, LEASE_TTL_MS)) === 1;
   }
 
   /** Release our lease on G (only if we still hold it). */
   async releaseGroup(g: string): Promise<void> {
-    await this.#eval(RELEASE, 1, ownerKey(g), POD_ID);
+    await this.#eval(RELEASE, 1, ownerKey(g), this.#podId);
   }
 
   /** The current owner podId of G, or null. */
@@ -104,7 +111,7 @@ class Ownership {
 
   /** Whether THIS pod currently owns G. */
   async ownsGroup(g: string): Promise<boolean> {
-    return (await this.ownerOf(g)) === POD_ID;
+    return (await this.ownerOf(g)) === this.#podId;
   }
 
   /** The current fence token for G (0 = never acquired). */
@@ -114,12 +121,12 @@ class Ownership {
 
   /** Register/refresh this pod's interest in instance I (expiry stamped from the server clock). */
   async addInterest(i: string): Promise<void> {
-    await this.#eval(ADD_INTEREST, 1, interestKey(i), POD_ID, INTEREST_TTL_MS);
+    await this.#eval(ADD_INTEREST, 1, interestKey(i), this.#podId, INTEREST_TTL_MS);
   }
 
   /** Drop this pod's interest in instance I. */
   async removeInterest(i: string): Promise<void> {
-    await redisService.getClient().hdel(interestKey(i), POD_ID);
+    await redisService.getClient().hdel(interestKey(i), this.#podId);
   }
 
   /** Live interest count for I across the fleet (prunes expired pods against the server clock). */

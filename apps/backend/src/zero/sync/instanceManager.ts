@@ -98,7 +98,9 @@ export class InstanceManager {
 
   readonly #ownership: OwnershipApi;
   readonly #createConnection: (opts: PackConnectionOptions) => PackConnectionLike;
-  #multiPod: boolean;
+  readonly #multiPod: boolean;
+  /** Set when the Redis-safety assertion fails: refuse ALL materialization (fan-out only). */
+  #materializeDisabled = false;
   #heartbeat: NodeJS.Timeout | null = null;
   readonly #graceMs: number;
   readonly #heartbeatMs: number;
@@ -115,13 +117,15 @@ export class InstanceManager {
 
     if (this.#multiPod) {
       const assertSafe = deps.assertRedisSafe ?? assertOwnershipSafeRedis;
-      // Refuse ownership on a Redis that would evict the fence. Degrade to single unfenced
-      // owner (safe on ONE replica, on any Redis) with a FATAL log rather than run fencing
-      // that silently doesn't fence — the operator must fix Redis before scaling out.
+      // An `allkeys-*` Redis can evict the fence, voiding fencing. We CANNOT know whether we're
+      // the only replica, and the flag being on means the operator says we aren't — so we must
+      // NOT fall back to an unfenced owner (that would make every pod an unfenced writer racing
+      // the same snapshot). Degrade to FAN-OUT ONLY: refuse all materialization, FATAL-log, and
+      // let a pod with safe Redis (or an ops fix) own it. Clients still read whatever is in Redis.
       this.#ready = assertSafe().catch((error) => {
-        this.#multiPod = false;
+        this.#materializeDisabled = true;
         this.#stopHeartbeat();
-        logger.error('sync_ownership_unsafe_redis_disabled_multipod', { error });
+        logger.error('sync_ownership_unsafe_redis_fanout_only', { error });
       });
       this.#heartbeat = setInterval(() => void this.#onHeartbeat(), this.#heartbeatMs);
     } else {
@@ -185,18 +189,17 @@ export class InstanceManager {
    * call repeatedly and concurrently; the `acquiring` guard prevents a double-acquire.
    */
   async #ensureMaterialized(group: Group): Promise<void> {
+    if (this.#materializeDisabled) return; // fan-out only (unsafe Redis)
     if (this.#multiPod && !group.owned) {
       if (group.acquiring) return;
       group.acquiring = true;
       try {
         await this.#ready; // never acquire before the Redis-safety gate has passed
-        if (this.#multiPod) {
-          const token = await this.#ownership.acquireGroup(group.clientGroupID);
-          if (token == null) return; // owned elsewhere — a reconcile there materializes the members
-          group.owned = true;
-          group.token = token;
-        }
-        // else: the assertion downgraded us to single unfenced owner → fall through, open unfenced
+        if (this.#materializeDisabled) return; // the gate failed while we awaited
+        const token = await this.#ownership.acquireGroup(group.clientGroupID);
+        if (token == null) return; // owned elsewhere — a reconcile there materializes the members
+        group.owned = true;
+        group.token = token;
       } finally {
         group.acquiring = false;
       }
@@ -258,13 +261,23 @@ export class InstanceManager {
   async #teardownInstance(instanceKey: string): Promise<void> {
     const instance = this.#instances.get(instanceKey);
     if (!instance || instance.subscribers.size > 0) return;
+    instance.idleTimer = null; // grace consumed
     const group = this.#groups.get(instance.groupKey);
 
     if (this.#multiPod) {
-      // Drop our interest, then only reclaim if NO pod still wants it. If another pod does, we
-      // may be its materializing owner — leave everything in place and let a reconcile (item 3)
-      // reclaim it once fleet interest finally drops. Never delete data another pod is tailing.
       await this.#ownership.removeInterest(instanceKey);
+      // Redis reclamation is OWNER-ONLY. A non-owner DELeting the snapshot/stream would race the
+      // live owner's fenced writes → a snapshot rebuilt from only post-DEL diffs (torn). A pod
+      // without the group token does LOCAL cleanup and stops; reclaiming an instance whose owner
+      // is gone belongs to the item-3 reconcile, which will hold the fresh lease when it does it.
+      if (!group?.owned) {
+        group?.connection?.removeInstance(instanceKey, instance.partitionValue);
+        this.#instances.delete(instanceKey);
+        group?.members.delete(instanceKey);
+        obsEmit('tap', { action: 'instance-close', instanceKey, clientGroupID: instance.groupKey });
+        return;
+      }
+      // Owner: only reclaim if NO pod still wants it; else keep materializing for the remote pod.
       if ((await this.#ownership.liveInterest(instanceKey)) > 0) return;
     }
 
@@ -273,12 +286,21 @@ export class InstanceManager {
     this.#instances.delete(instanceKey);
     group?.members.delete(instanceKey);
     obsEmit('tap', { action: 'instance-close', instanceKey, clientGroupID: instance.groupKey });
+
+    // Under multi-pod the destructive ops MUST carry the group's fence token (owner-only, checked
+    // above). Refuse an unfenced destructive op rather than risk racing another owner. Single-pod
+    // (token null) is the only legitimate unfenced path — it is the sole owner by construction.
+    const guard = group ? this.#guardFor(group) : undefined;
+    if (this.#multiPod && !guard) {
+      logger.error('sync_teardown_refused_no_fence', { instanceKey, clientGroupID: instance.groupKey });
+      return;
+    }
     try {
-      await this.#store.teardownInstance(instanceKey, group ? this.#guardFor(group) : undefined);
+      await this.#store.teardownInstance(instanceKey, guard);
       if (group && group.connection && group.connection.size() === 0) {
         group.connection.stop();
         this.#groups.delete(instance.groupKey);
-        await this.#store.teardownGroup(instance.groupKey, this.#guardFor(group));
+        await this.#store.teardownGroup(instance.groupKey, guard);
         if (this.#multiPod && group.owned) await this.#ownership.releaseGroup(group.clientGroupID);
         logger.info('sync_group_closed', { clientGroupID: instance.groupKey });
         obsEmit('tap', { action: 'group-close', clientGroupID: instance.groupKey });
@@ -296,16 +318,29 @@ export class InstanceManager {
    */
   async #onHeartbeat(): Promise<void> {
     for (const group of this.#groups.values()) {
-      if (group.owned) {
-        if (!(await this.#ownership.refreshGroup(group.clientGroupID))) {
-          this.#demoteGroup(group);
+      try {
+        if (group.owned) {
+          if (!(await this.#ownership.refreshGroup(group.clientGroupID))) this.#demoteGroup(group);
         }
-      }
-      if (!group.owned && group.members.size > 0) {
-        void this.#ensureMaterialized(group);
+        if (!group.owned && group.members.size > 0) void this.#ensureMaterialized(group);
+      } catch (error) {
+        // A Redis blip on one group's refresh must not abort the others or spray unhandled
+        // rejections from setInterval; log and retry next cycle (a truly lost lease re-demotes).
+        logger.error('sync_heartbeat_group_failed', { clientGroupID: group.clientGroupID, error });
       }
     }
-    for (const instanceKey of this.#instances.keys()) void this.#ownership.addInterest(instanceKey);
+    // Re-stamp interest ONLY for instances a local subscriber still wants (or that are within the
+    // idle grace). Stamping a zero-subscriber instance would resurrect the interest its own
+    // teardown just removed → fleet interest could never drain → nothing is ever reclaimed.
+    try {
+      for (const [instanceKey, inst] of this.#instances) {
+        if (inst.subscribers.size > 0 || inst.idleTimer != null) {
+          await this.#ownership.addInterest(instanceKey);
+        }
+      }
+    } catch (error) {
+      logger.error('sync_heartbeat_interest_failed', { error });
+    }
   }
 
   #stopHeartbeat(): void {

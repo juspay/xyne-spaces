@@ -12,11 +12,12 @@ import assert from 'node:assert/strict';
 type Mod = typeof import('./instanceManager');
 let InstanceManager: Mod['InstanceManager'] | undefined;
 let ownership: (typeof import('./ownership'))['ownership'] | undefined;
+let Ownership: (typeof import('./ownership'))['Ownership'] | undefined;
 let redisService: (typeof import('@/services/redisService'))['redisService'] | undefined;
 let reason = '';
 try {
   ({ InstanceManager } = await import('./instanceManager.js'));
-  ({ ownership } = await import('./ownership.js'));
+  ({ ownership, Ownership } = await import('./ownership.js'));
   ({ redisService } = await import('@/services/redisService'));
   await redisService.getClient().ping();
 } catch (e) {
@@ -112,6 +113,60 @@ test('InstanceManager multi-pod: acquire → fenced materialize → interest, te
     assert.equal(created[0].stopped, 1, 'connection stopped');
   } finally {
     mgr.stopAll();
+    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`);
+  }
+});
+
+test('InstanceManager two pods: exactly one owns; non-owner never reclaims; interest drains', { skip }, async () => {
+  const client = redisService!.getClient();
+  const rnd = Math.floor(Math.random() * 1e9);
+  const ownA = new Ownership!(`podA-${rnd}`);
+  const ownB = new Ownership!(`podB-${rnd}`);
+  const createdA: Rec[] = [];
+  const createdB: Rec[] = [];
+  const mk = (own: import('./ownership').Ownership, created: Rec[]) =>
+    new InstanceManager!('http://zero', {
+      multiPod: true,
+      ownership: own,
+      assertRedisSafe: async () => {},
+      heartbeatMs: 25,
+      graceMs: 20,
+      createConnection: fakeFactory(created),
+    });
+  const mgrA = mk(ownA, createdA);
+  const mgrB = mk(ownB, createdB);
+  const channel = `twopod-${rnd}`;
+
+  // A subscribes first and wins the lease deterministically; then B subscribes and sees it owned.
+  const ik = mgrA.subscribe(QUERY, argsFor(channel), 'subA')!;
+  await sleep(60);
+  assert.equal(mgrB.subscribe(QUERY, argsFor(channel), 'subB'), ik, 'same channel → same instanceKey');
+  await sleep(60);
+
+  const G = createdA[0].opts.clientGroupID;
+  try {
+    assert.equal(await ownA.ownsGroup(G), true, 'A owns');
+    assert.equal(await ownB.ownsGroup(G), false, 'B does not own');
+    assert.equal(createdA.length, 1, 'owner A materialized');
+    assert.equal(createdB.length, 0, 'non-owner B never opened a connection');
+    assert.equal(await ownA.liveInterest(ik), 2, 'both pods registered interest');
+
+    // B (non-owner) drops its subscriber: LOCAL cleanup only, no Redis reclamation — A keeps serving.
+    mgrB.unsubscribe(ik, 'subB');
+    await sleep(70);
+    assert.equal(await ownA.ownsGroup(G), true, 'A still owns after B leaves');
+    assert.equal(createdA[0].stopped, 0, "non-owner did NOT tear down the owner's connection");
+    assert.equal(await ownA.liveInterest(ik), 1, 'interest drained to just the owner (no re-stamp resurrection)');
+
+    // A (owner) drops its subscriber: fleet interest hits 0 → owner reclaims (fenced) + releases.
+    mgrA.unsubscribe(ik, 'subA');
+    await sleep(70);
+    assert.equal(await ownA.liveInterest(ik), 0, 'fleet interest fully drained');
+    assert.equal(await ownA.ownsGroup(G), false, 'owner released the lease on reclaim');
+    assert.equal(createdA[0].stopped, 1, 'owner stopped its connection on reclaim');
+  } finally {
+    mgrA.stopAll();
+    mgrB.stopAll();
     await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`);
   }
 });
