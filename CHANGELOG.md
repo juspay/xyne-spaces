@@ -1,3 +1,10 @@
+## [1.279.2](https://github.com/juspay/xyne-spaces/compare/v1.279.1...v1.279.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* close MAPT/SCR retest findings — Zero tenant scoping, CSWSH, SSRF pinning, upload screening, enum hardening, non-root ([#1131](https://github.com/juspay/xyne-spaces/issues/1131)) ([3987455](https://github.com/juspay/xyne-spaces/commit/3987455d43547472d80add7b446be98d8169e18a))
+
 ## [1.279.1](https://github.com/juspay/xyne-spaces/compare/v1.279.0...v1.279.1) (2026-09-07)
 
 
