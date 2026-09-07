@@ -780,7 +780,7 @@ export const channelTable = table('channels')
     lastActivityAt: number(),
     createdBy: string(),
     metadata: json().optional(),
-    projectId: string(),
+    projectId: string().optional(), // Nullable — channels are being decoupled from projects (boards live in channel_board_mappings)
     workspaceId: string(), // Workspace for ACL optimization (denormalized from project)
     participantCount: number(),
     isMigrated: boolean().optional(),

@@ -1774,7 +1774,7 @@ model Channel {
   lastActivityAt  DateTime          @default(now())
   createdBy       String            // User ID (no FK constraint)
   metadata        Json?             // Additional metadata for future extension
-  projectId       String            // Project to which the channel is linked
+  projectId       String?           // Project the channel is linked to (nullable — projects are being decoupled from channels; boards live in channel_board_mappings)
   workspaceId     String            // Workspace for ACL optimization (denormalized from project)
   participantCount Int                    @default(0)
   isMigrated      Boolean?                @default(false)
@@ -1789,7 +1789,7 @@ model Channel {
   conversationParticipants   ConversationParticipant[]
   participantsStatus ChannelUserStatus[]
   createdByUser      User                 @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
-  project            Project              @relation(fields: [projectId], references: [id])
+  project            Project?             @relation(fields: [projectId], references: [id])
   tickets            Ticket[]             @relation("TicketChannel")
   calls              Call[]
   channelStats       ChannelStats?

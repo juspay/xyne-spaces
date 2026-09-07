@@ -2996,8 +2996,6 @@ export class JiraMigrationImportService {
     if (!channel) throw new Error('Target channel not found');
     if (initialStages.length === 0) throw new Error('Target board has no stages');
     if (board.projectId !== project.id) throw new Error('Board does not belong to target project');
-    if (channel.projectId !== project.id) throw new Error('Channel does not belong to target project');
-
     // Workspace scoping: some Prisma client types in this repo omit `workspaceId` even though the DB schema
     // contains it (denormalized on Board/Channel and present on Project). Resolve it defensively.
     const workspaceId: string =

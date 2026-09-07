@@ -19,17 +19,13 @@ import { RecapSubscription, RecapCard } from './RecapPanel.types';
 import { getYesterdayIST, formatRecapDate } from './RecapPanel.utils';
 import RecapSettings from './RecapSettings';
 import { RecapCalendarView } from './RecapCalendarView';
-import ProjectRecapPanel from './ProjectRecapPanel';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useCacConfig } from '@xyne/shared/hooks';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { Tooltip } from '../ui/Tooltip';
 import { Button } from '../ui/Button/Button';
-
-type RecapTab = 'channel' | 'project';
 
 // Random greetings for the recap header
 const RECAP_GREETINGS = [
@@ -57,10 +53,6 @@ const RecapPanel = (): ReactElement => {
   const params = useParams<{ channelId?: string; conversationId?: string }>();
   const zero = useZero();
   const { isMobile } = usePlatform();
-  const { config: projectRecapEnabled } = useCacConfig<boolean>({
-    key: 'project_recap_enabled',
-    fallbackConfig: false,
-  });
 
   // Show right panel when a cited thread is open
   const showThreadPanel = !!params.channelId;
@@ -69,7 +61,6 @@ const RecapPanel = (): ReactElement => {
   const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime } = useRecapData();
 
   // Active tab: channel or project
-  const [activeTab, setActiveTab] = useState<RecapTab>('channel');
 
   // Settings modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -740,35 +731,6 @@ const RecapPanel = (): ReactElement => {
                 )}
                 <h3 className='font-bold text-foreground text-xl'>Recap</h3>
                 <Sparkles size={20} className='text-blue-500' />
-                {/* Channel / Project toggle — only shown when project recap is enabled */}
-                {projectRecapEnabled && (
-                  <div className='flex items-center gap-0.5 ml-2 bg-muted rounded-md p-0.5'>
-                    <button
-                      onClick={() => setActiveTab('channel')}
-                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
-                        activeTab === 'channel'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                      data-track-category='RECAP_PANEL'
-                      data-track-name='TAB_CHANNEL'
-                    >
-                      Channel
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('project')}
-                      className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
-                        activeTab === 'project'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                      data-track-category='RECAP_PANEL'
-                      data-track-name='TAB_PROJECT'
-                    >
-                      Project
-                    </button>
-                  </div>
-                )}
               </div>
               {!isFirstTime && (
                 <div className='flex items-center gap-1'>
@@ -827,9 +789,7 @@ const RecapPanel = (): ReactElement => {
           </div>
 
           {/* Scrollable recap cards */}
-          <div className='flex-1 overflow-y-auto bg-muted/30'>
-            {activeTab === 'channel' ? renderChannelContent() : <ProjectRecapPanel />}
-          </div>
+          <div className='flex-1 overflow-y-auto bg-muted/30'>{renderChannelContent()}</div>
         </div>
 
         {/* Right: Thread panel — full screen on mobile, half width on desktop */}

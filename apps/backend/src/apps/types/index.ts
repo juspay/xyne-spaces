@@ -294,7 +294,9 @@ export interface ChannelsResponse {
     type: string;
     scopeType: string;
     visibility: string;
-    projectId: string;
+    // Nullable: a channel may have no project (channel.projectId is being decoupled).
+    // Passthrough — present → same value, else null.
+    projectId: string | null;
     createdBy: string;
     createdAt: Date;
     participantCount: number;
@@ -309,7 +311,9 @@ export interface ChannelListItem {
     description?: string;
     scopeType: string;
     visibility?: string;
-    projectId: string;
+    // Nullable: a channel may have no project (channel.projectId is being decoupled).
+    // Passthrough — present → same value, else null.
+    projectId: string | null;
     createdBy: string;
     createdAt: Date;
 }

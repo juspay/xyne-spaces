@@ -269,14 +269,37 @@ export class ApplicationBackfillService {
         );
       }
 
+      // channel.projectId is nullable (decoupling). Release backfill is inherently
+      // project-scoped, so it only runs for channels that HAVE a project — a
+      // projectless channel is skipped (no-op), not an error.
+      const channelProjectId = validChannel.projectId;
+      if (!channelProjectId) {
+        logger.info(
+          `Channel "${channelId}" has no project; skipping application backfill (no-op).`
+        );
+        return {
+          success: true,
+          summary: {
+            totalApplications: 0,
+            created: 0,
+            skipped: 0,
+            projectId: null,
+            channelId: validChannel.id,
+          },
+          applications: [],
+          createdApps: [],
+          skippedApps: [],
+        };
+      }
+
       // Setup ReleaseChangeType, forms, and lookup values first
-      await this.backFillReleaseForms(createdBy, validChannel.workspaceId, validChannel.projectId);
+      await this.backFillReleaseForms(createdBy, validChannel.workspaceId, channelProjectId);
       await this.backFillTicketTypeLookups();
 
       const mainReleaseBoard = await db.board.findFirst({
         where: {
           id: mainReleaseBoardId,
-          projectId: validChannel.projectId,
+          projectId: channelProjectId,
           boardType: BoardType.RELEASE,
         },
       });
@@ -311,14 +334,14 @@ export class ApplicationBackfillService {
         let board = await db.board.findFirst({
           where: {
             name: boardName,
-            projectId: validChannel.projectId,
+            projectId: channelProjectId,
           },
         });
 
         if (!board) {
           // Fetch project to get workspaceId
           const project = await db.project.findUnique({
-            where: { id: validChannel.projectId },
+            where: { id: channelProjectId },
             select: { workspaceId: true },
           });
           if (!project) {
@@ -328,7 +351,7 @@ export class ApplicationBackfillService {
           board = await db.board.create({
             data: {
               name: boardName,
-              projectId: validChannel.projectId,
+              projectId: channelProjectId,
               workspaceId: project.workspaceId,
               createdBy,
               createdAt: new Date(),
@@ -347,7 +370,7 @@ export class ApplicationBackfillService {
         const application = await db.application.create({
           data: {
             name: app.name,
-            projectId: validChannel.projectId,
+            projectId: channelProjectId,
             workspaceId: validChannel.workspaceId,
             boardId: board.id,
             mainReleaseBoardId,
@@ -369,11 +392,11 @@ export class ApplicationBackfillService {
 
       // Get summary
       const totalApps = await db.application.count({
-        where: { projectId: validChannel?.projectId },
+        where: { projectId: channelProjectId },
       });
 
       const allApps = await db.application.findMany({
-        where: { projectId: validChannel?.projectId },
+        where: { projectId: channelProjectId },
         orderBy: { name: 'asc' },
         select: {
           id: true,

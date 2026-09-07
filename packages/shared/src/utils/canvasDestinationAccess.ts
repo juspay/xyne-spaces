@@ -15,7 +15,9 @@ export class CanvasDestinationAccessError extends Error {
 }
 
 interface CanvasDestinationChannelRecord {
-  projectId: string;
+  // Not read here (access is by channel membership); nullable to match the decoupled
+  // channel row where projectId may be null.
+  projectId?: string | null;
   isArchived?: boolean | null;
 }
 

@@ -13,9 +13,14 @@ export interface CreateChannelInput {
   description?: string;
   visibility?: ChannelVisibility;
   createdBy: string;
-  projectId: string;
+  /** Optional — channels may be created without a project (decoupling). When set, all of
+   *  the project's boards are mirrored into channel_board_mappings; when null, no mappings. */
+  projectId?: string | null;
   workspaceId: string;
   type?: ChannelType;
+  /** Desk channels: board to mark isDefault in channel_board_mappings. Falls back to the
+   *  oldest board when absent or not part of the project's boards. */
+  defaultBoardId?: string;
 }
 
 export interface UpdateChannelInput {
@@ -45,7 +50,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     }
     await this.validateString(data.createdBy, 'createdBy');
     await this.validateString(data.scopeType, 'scopeType');
-    await this.validateString(data.projectId, 'projectId');
     await this.validateEnum(data.scopeType, 'scopeType', ['DEFAULT', 'DM', 'TICKET', 'DOCUMENT', 'GROUP_DM']);
 
     // Validate visibility if provided
@@ -66,33 +70,42 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         description: data.description,
         visibility: data.visibility || 'PUBLIC',
         createdBy: data.createdBy,
-        projectId: data.projectId,
+        projectId: data.projectId ?? null,
         workspaceId: data.workspaceId,
         ...(data.type && { type: data.type }),
       }
     });
 
-    // Dual-write: mirror the channel→project board set into ChannelBoardMapping
-    // so downstream consumers never need to read channel.projectId.
-    const boards = await this.db.board.findMany({
-      where: { projectId: data.projectId },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true },
-    });
-    if (boards.length > 0) {
-      const now = new Date();
-      await this.db.channelBoardMapping.createMany({
-        data: boards.map((board, index) => ({
-          channelId: result.id,
-          boardId: board.id,
-          workspaceId: data.workspaceId,
-          isDefault: index === 0,
-          createdBy: data.createdBy,
-          createdAt: now,
-          updatedAt: now,
-        })),
-        skipDuplicates: true,
+    // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
+    // downstream consumers never read channel.projectId. Skipped entirely when the
+    // channel has no project (nothing to map).
+    if (data.projectId) {
+      const boards = await this.db.board.findMany({
+        where: { projectId: data.projectId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
       });
+      if (boards.length > 0) {
+        // Default board = the caller-supplied one when it belongs to this project,
+        // otherwise the oldest board. Guarding against an out-of-project boardId keeps
+        // exactly one isDefault row (see the desk-integration fix).
+        const requested = data.defaultBoardId;
+        const defaultBoardId =
+          requested && boards.some(b => b.id === requested) ? requested : boards[0].id;
+        const now = new Date();
+        await this.db.channelBoardMapping.createMany({
+          data: boards.map((board) => ({
+            channelId: result.id,
+            boardId: board.id,
+            workspaceId: data.workspaceId,
+            isDefault: board.id === defaultBoardId,
+            createdBy: data.createdBy,
+            createdAt: now,
+            updatedAt: now,
+          })),
+          skipDuplicates: true,
+        });
+      }
     }
 
     return result;

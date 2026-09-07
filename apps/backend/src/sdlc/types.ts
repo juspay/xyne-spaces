@@ -26,7 +26,9 @@ export interface SdlcRepository {
 export interface SdlcChannel {
   id: string;
   name: string;
-  projectId: string;
+  // Nullable: channel.projectId is being decoupled. SDLC hubs are still created
+  // with a project, so this is populated for them; typed nullable for the general case.
+  projectId: string | null;
   repoIds: string[];
 }
 

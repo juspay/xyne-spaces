@@ -517,7 +517,7 @@ class DeskLabelRulesService {
 
     const channel = await tx.channel.findFirst({
       where: { id: payload.channelId, workspaceId: auth.workspaceId },
-      select: { projectId: true, workspaceId: true },
+      select: { workspaceId: true },
     });
     if (!channel) {
       throw serviceError('Channel not found', 'not-found');
@@ -536,7 +536,8 @@ class DeskLabelRulesService {
         name: labelName,
         ...(payload.color ? { color: payload.color } : {}),
         channelId: payload.channelId,
-        projectId: channel.projectId,
+        // projectId intentionally omitted — conversationLabel.projectId is nullable
+        // (channel.projectId is being decoupled); labels are scoped by channel.
         workspaceId: channel.workspaceId,
         createdBy: auth.userId,
         createdAt: now,

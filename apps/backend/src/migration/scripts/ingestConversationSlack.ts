@@ -654,15 +654,13 @@ export async function ingestConversationSlack(
       const channel = await channelRepo.findById(channelId);
       if (channel && !(channel as any).isMigrated) {
         await channelRepo.update(channelId, { isMigrated: true });
-        const project = channel.projectId
-          ? await db.project.findUnique({ where: { id: channel.projectId }, select: { name: true } })
-          : null;
         logger.info('analytics_event', {
           event: 'channel_migrated',
           timestamp: new Date().toISOString(),
           channelId,
           channelName: channel.name,
-          channelProjectName: project?.name ?? null,
+          // channel.projectId is decoupled; no project-name enrichment.
+          channelProjectName: null,
           sourceType: 'slack',
         });
       }

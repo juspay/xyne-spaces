@@ -162,6 +162,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   hideVisibility = false,
   requireConnector = false,
 }) => {
+  // Project is optional only for NATIVE channel creation. Desk channels
+  // (requireConnector) and group-DM promotion keep it required.
+  const projectRequired = requireConnector || mode === 'promote';
+  // Sentinel for the "None (no project)" dropdown option (native channels only).
+  const NO_PROJECT_OPTION = '__none__';
   const [debouncedChannelName, setDebouncedChannelName] = useState('');
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
@@ -383,7 +388,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     !nameValue ||
     nameValue.length < 2 ||
     nameValue.length > 80 ||
-    !projectIdValue ||
+    (projectRequired && !projectIdValue) ||
     (requireConnector && deskType === DeskType.EMAIL && !selectedConnector) ||
     (requireConnector &&
       deskType === DeskType.DL &&
@@ -400,7 +405,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     if (!nameValue || nameValue.length < 2) return 'Channel name must be at least 2 characters';
     if (nameValue.length > 80) return 'Channel name must be 80 characters or less';
     if (duplicateCheck?.isDuplicate) return 'Channel name already exists';
-    if (!projectIdValue) return 'Please select a project';
+    if (projectRequired && !projectIdValue) return 'Please select a project';
     if (requireConnector) {
       if (deskType === DeskType.EMAIL && !selectedConnector)
         return 'Please select an email provider (Google or Microsoft)';
@@ -433,7 +438,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     return null;
   })();
 
-  // Auto-select first project if none selected
+  // Auto-select the first project by default (previous behavior) for all modes.
+  // Native channels can still switch to the "None (no project)" option; desk/promote
+  // keep it required.
   useEffect(() => {
     if (!form.getFieldValue('projectId') && projects && projects.length > 0) {
       form.setFieldValue('projectId', projects[0]!.id);
@@ -1008,33 +1015,48 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         name='projectId'
         validators={{
           onChange: ({ value }) => {
-            if (!value?.trim()) return 'Project is required';
+            if (projectRequired && !value?.trim()) return 'Project is required';
             return undefined;
           },
         }}
       >
-        {field => (
-          <div className='space-y-1.5'>
-            <p className='text-sm font-medium text-foreground'>Project *</p>
-            <EntitySelector
-              testId='project-select-trigger'
-              options={projectOptions}
-              selectedValue={field.state.value || null}
-              onSelect={val => field.handleChange(val ?? '')}
-              placeholder={projectOptions.length > 0 ? 'Select a project' : 'No projects available'}
-              searchPlaceholder='Search projects...'
-              width='100%'
-            />
-            {field.state.meta.errors.length > 0 && (
-              <p className='text-sm text-destructive'>{field.state.meta.errors[0] as string}</p>
-            )}
-            {projectOptions.length === 0 && (
-              <p className='text-sm text-status-pending mt-1'>
-                No projects found. Please create a project first.
+        {field => {
+          // Native channels get a "None" option so they can be created project-less.
+          const selectorOptions = projectRequired
+            ? projectOptions
+            : [
+                ...projectOptions,
+                { value: NO_PROJECT_OPTION, label: 'None (no project)', icon: null },
+              ];
+          return (
+            <div className='space-y-1.5'>
+              <p className='text-sm font-medium text-foreground'>
+                {projectRequired ? 'Project *' : 'Project (optional)'}
               </p>
-            )}
-          </div>
-        )}
+              <EntitySelector
+                testId='project-select-trigger'
+                options={selectorOptions}
+                selectedValue={
+                  field.state.value ? field.state.value : projectRequired ? null : NO_PROJECT_OPTION
+                }
+                onSelect={val => field.handleChange(val && val !== NO_PROJECT_OPTION ? val : '')}
+                placeholder={
+                  projectOptions.length > 0 ? 'Select a project' : 'No projects available'
+                }
+                searchPlaceholder='Search projects...'
+                width='100%'
+              />
+              {field.state.meta.errors.length > 0 && (
+                <p className='text-sm text-destructive'>{field.state.meta.errors[0] as string}</p>
+              )}
+              {projectRequired && projectOptions.length === 0 && (
+                <p className='text-sm text-status-pending mt-1'>
+                  No projects found. Please create a project first.
+                </p>
+              )}
+            </div>
+          );
+        }}
       </form.Field>
 
       {/* Board Selection (desk channels only) */}
