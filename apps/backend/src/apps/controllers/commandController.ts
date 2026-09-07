@@ -11,7 +11,7 @@ import {
 } from '@/database/repositories/appCommandRepository';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { SsrfBlockedError } from '@/utils/ssrfGuard';
+import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { ConversationParticipation, MessageType } from '@xyne/shared';
 
@@ -631,9 +631,11 @@ export class CommandController {
         'X-Xyne-Event': eventType,
       };
       let dispatchUrl: string;
+      let dispatchIsInternal = false;
       try {
         const prepared = await prepareAppWebhookDispatch(match.webhookUrl, dispatchHeaders);
         dispatchUrl = prepared.url;
+        dispatchIsInternal = prepared.isInternal;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           logger.warn('[COMMAND-DISPATCH] Blocked SSRF-unsafe webhook URL', {
@@ -649,13 +651,18 @@ export class CommandController {
         throw new Error('App webhook URL is not allowed');
       }
 
-      const appResponse = await fetch(dispatchUrl, {
+      // Internal = trusted-config pod URL (plain client); external = user-supplied,
+      // so validate + pin the connection (rebinding-safe).
+      const dispatchInit: RequestInit = {
         method: 'POST',
         headers: dispatchHeaders,
         body: JSON.stringify(payload),
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
-      });
+      };
+      const appResponse = dispatchIsInternal
+        ? await fetch(dispatchUrl, dispatchInit)
+        : await safeWebhookFetch(dispatchUrl, dispatchInit);
 
       if (!appResponse.ok) {
         const errorBody = await appResponse.text().catch(() => 'unknown error');
