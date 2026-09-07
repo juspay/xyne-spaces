@@ -5,8 +5,13 @@ import { FormFieldType, User } from '@xyne/shared';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { useUsers } from '../../../hooks/useUsers';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useAuth } from '../../../hooks/useAuth';
+import { queries } from '../../../zero/queries';
 import { MultiSelect } from '../../ui/MultiSelect';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
+import { TicketFieldSelector } from '../../ui/TicketFieldSelector/TicketFieldSelector';
+import { looksLikeXyneId } from '../TicketLinkField/ticketLinkUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface EditableFormFieldProps {
@@ -194,6 +199,31 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       .filter((user): user is User => user !== undefined);
   }, [selectedUserIds, userMap]);
 
+  // For TICKET field, resolve the selected ticket for display. Values are
+  // xyneIds; legacy stored values (ticket uuids) still resolve by id.
+  const selectedTicketValue = useMemo(() => {
+    if (fieldType === FormFieldType.TICKET) {
+      return jsonToString(fieldValue);
+    }
+    return '';
+  }, [fieldValue, fieldType]);
+
+  const { user } = useAuth();
+  const workspaceId = user?.workspaceId ?? '';
+  const selectedValueIsXyneId = looksLikeXyneId(selectedTicketValue);
+  const [selectedTicketById] = useCachedQuery(
+    queries.ticketRowById({ ticketId: !selectedValueIsXyneId ? selectedTicketValue : '' }),
+    { enabled: Boolean(selectedTicketValue) && !selectedValueIsXyneId },
+  );
+  const [selectedTicketByXyneId] = useCachedQuery(
+    queries.ticketByXyneIdV3({
+      xyneId: selectedValueIsXyneId ? selectedTicketValue : '',
+      workspaceId,
+    }),
+    { enabled: selectedValueIsXyneId && Boolean(workspaceId) },
+  );
+  const selectedTicket = selectedValueIsXyneId ? selectedTicketByXyneId : selectedTicketById;
+
   if (isEditing) {
     if (fieldType === FormFieldType.BOOLEAN) {
       const booleanOptions = [
@@ -343,6 +373,28 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       );
     }
 
+    // TICKET field - TicketFieldSelector with vespa search
+    if (fieldType === FormFieldType.TICKET) {
+      return (
+        <div className='flex items-start gap-2 w-full'>
+          <span
+            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+            title={fieldName}
+          >
+            {fieldName}
+          </span>
+          <div className='flex-1 bg-background border border-input rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
+            <TicketFieldSelector
+              selectedValue={selectedTicketValue || null}
+              onSelect={ticketXyneId => {
+                onSave(ticketXyneId ? [ticketXyneId] : []);
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
+
     // STRING or NUMBER fields (fallback for MULTI_SELECT without fieldEnum)
     return (
       <div className='flex items-center gap-2 w-full'>
@@ -414,6 +466,41 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
           ) : (
             <span className='text-sm text-muted-foreground'>—</span>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  // Read mode for TICKET field - display the linked ticket's title
+  if (fieldType === FormFieldType.TICKET) {
+    const ticketLabel = selectedTicket
+      ? selectedTicket.title || selectedTicket.xyneId || selectedTicket.id
+      : selectedTicketValue;
+
+    return (
+      <div className='flex items-center gap-2 w-full'>
+        <span
+          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+          title={fieldName}
+        >
+          {fieldName}
+        </span>
+        <div
+          role='button'
+          tabIndex={0}
+          className='flex-1 text-sm text-muted-foreground break-all cursor-text hover:bg-muted rounded px-1 py-0.5 -mx-1'
+          onClick={() => setIsEditing(true)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setIsEditing(true);
+            }
+          }}
+          data-track-category='TicketDetails'
+          data-track-name='EditTicketField'
+          data-track-metadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
+        >
+          {ticketLabel || '—'}
         </div>
       </div>
     );

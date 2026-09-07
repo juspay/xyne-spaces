@@ -343,6 +343,7 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
               setLocalDocChanges={setLocalDocChanges}
               valuesForRender={valuesForRender}
               targetStageId={targetStage.id}
+              parentTicketId={ticket.id}
               disabled={isApproved || isSubmitted || !isEditing}
               readOnlyDocs={!isEditing}
               readOnlySummary={!isEditing}
