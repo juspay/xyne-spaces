@@ -1,3 +1,10 @@
+## [1.278.5](https://github.com/juspay/xyne-spaces/compare/v1.278.4...v1.278.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* stamp thread-type vocabulary updatedAt from code ([#1556](https://github.com/juspay/xyne-spaces/issues/1556)) ([377f703](https://github.com/juspay/xyne-spaces/commit/377f703522abc722991adb27846f341d4a0a6634))
+
 ## [1.278.4](https://github.com/juspay/xyne-spaces/compare/v1.278.3...v1.278.4) (2026-09-07)
 
 
