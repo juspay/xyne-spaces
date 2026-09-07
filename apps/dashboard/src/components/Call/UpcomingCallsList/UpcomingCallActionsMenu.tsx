@@ -1,6 +1,8 @@
 import { Copy, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { copyHtmlToClipboard } from '../../../utils/clipboardUtils';
+import { buildCallInviteHtml } from '../../../utils/callControls';
+import { useUser } from '../../../hooks/useUsers';
 import { DropdownMenuItem } from '../../ui/dropdown-menu';
 import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 
@@ -29,14 +31,27 @@ export function UpcomingCallActionsMenuItems({
   onEdit,
   onCancel,
 }: UpcomingCallActionsMenuItemsProps): React.JSX.Element {
+  const hostUser = useUser(call.organizerId ?? call.createdByUserId);
+
   const handleCopyLink = (e: React.MouseEvent): void => {
     e.stopPropagation();
     if (!call.roomLink) {
       toast.error('No link available');
       return;
     }
-    copyTextToClipboard(call.roomLink)
-      .then(() => toast.success('Link copied to clipboard'))
+    const html = buildCallInviteHtml({
+      title: call.title,
+      hostName: hostUser?.name,
+      roomLink: call.roomLink,
+      status: call.status,
+      startsAt: call.startsAt,
+      endsAt: call.endsAt,
+      startedAt: call.startedAt,
+      endedAt: call.endedAt,
+      timezone: call.timezone,
+    });
+    copyHtmlToClipboard(html)
+      .then(() => toast.success('Invite copied to clipboard'))
       .catch(() => toast.error('Failed to copy link'));
   };
 

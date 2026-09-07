@@ -1,3 +1,7 @@
+import { CallStatus } from '@xyne/shared';
+import { formatRelativeTime } from './dateUtils';
+import { escapeHtml } from './clipboardUtils';
+
 interface AiControllerLike {
   id: string;
   name: string;
@@ -80,6 +84,72 @@ export function getAiButtonColorClass({
     return 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-yellow-500/50';
   }
   return defaultControlClass;
+}
+
+interface CallInviteInfo {
+  title?: string | null | undefined;
+  hostName?: string | null | undefined;
+  roomLink: string;
+  status?: CallStatus | null | undefined;
+  startsAt?: number | null | undefined;
+  endsAt?: number | null | undefined;
+  startedAt?: number | null | undefined;
+  endedAt?: number | null | undefined;
+  timezone?: string | null | undefined;
+}
+
+export function buildCallInviteHtml({
+  title,
+  hostName,
+  roomLink,
+  status,
+  startsAt,
+  endsAt,
+  startedAt,
+  endedAt,
+  timezone,
+}: CallInviteInfo): string {
+  const rangeStart = status === CallStatus.SCHEDULED ? startsAt : startedAt;
+  const rangeEnd = status === CallStatus.ENDED ? endedAt : endsAt;
+
+  const scheduleLines: string[] = [];
+  if (rangeStart) {
+    // 'UTC' means no real timezone was captured for this call (e.g. an instant call), so
+    // fall back to the viewer's own local zone instead of mislabeling times as UTC.
+    const timeZone = timezone && timezone.toUpperCase() !== 'UTC' ? timezone : undefined;
+    const dateLabel = new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      month: 'long',
+      day: 'numeric',
+      timeZone,
+    }).format(rangeStart);
+    const timeFmt = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone,
+    });
+    scheduleLines.push(
+      rangeEnd
+        ? `${dateLabel} · ${timeFmt.format(rangeStart)} – ${timeFmt.format(rangeEnd)}`
+        : `${dateLabel} · ${timeFmt.format(rangeStart)}`,
+    );
+    if (timeZone) scheduleLines.push(`Time zone: ${timeZone}`);
+    if (status === CallStatus.ACTIVE || status === CallStatus.IN_PROGRESS) {
+      scheduleLines.push(`This call started ${formatRelativeTime(rangeStart)}`);
+    }
+  }
+
+  const heading = title || (hostName ? `${hostName} is inviting you to join the call` : null);
+  const lines = [
+    ...(heading ? [`<b>${escapeHtml(heading)}</b>`] : []),
+    ...(title && hostName ? [`Hosted by ${escapeHtml(hostName)}`] : []),
+    ...scheduleLines.map(escapeHtml),
+    '',
+    'Xyne Call joining info',
+    `Video call link: ${escapeHtml(roomLink)}`,
+  ];
+  return lines.join('<br>');
 }
 
 export function handleAiButtonClick({
