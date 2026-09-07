@@ -1,0 +1,213 @@
+/**
+ * Suggestion storage and accept orchestration.
+ *
+ * createSuggestionBatch parks an agent's derived ops as PENDING rows (the
+ * document is untouched). applySuggestionChanges applies accepted rows in one
+ * batch: one read, pure apply (suggestionApply.ts), one Y-Sweet write, then
+ * statuses — all under a per-canvas lock
+ */
+
+import { randomUUID } from 'node:crypto';
+import { DatabaseClient } from '@/database/client';
+import { redisService } from '@/services/redisService';
+import { logger } from '@/utils/logger';
+import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
+import type { BlockNoteBlock } from '@/types/blockNoteTypes';
+import { createBlockRenderer } from './blockRender';
+import type { DerivedOp } from './blockLabels';
+// Relative imports on purpose: the backend's "@xyne/shared" alias points at
+// the package's BUILT output, and these pure modules must be usable (and
+// testable) without a rebuild. The dashboard imports them via "@xyne/shared".
+import { applyOps, type SuggestionRowLike } from '../../../../../packages/shared/src/canvas/suggestionApply';
+import { computeDeletionEvents } from '../../../../../packages/shared/src/canvas/blockDeletionEvents';
+
+function stableStringify(value: unknown): string {
+  const normalize = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(normalize);
+    if (v && typeof v === 'object') {
+      const record = v as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .filter(k => record[k] !== undefined)
+          .map(k => [k, normalize(record[k])])
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(normalize(value));
+}
+
+const LOCK_TTL_SECONDS = 30;
+
+/** Serialises concurrent accepts on one canvas; the loser gets onBusy(). */
+async function withCanvasLock<T>(canvasId: string, fn: () => Promise<T>, onBusy: () => T): Promise<T> {
+  const key = `canvas-apply-lock:${canvasId}`;
+  const acquired = await redisService
+    .set(key, '1', LOCK_TTL_SECONDS, true)
+    .catch(() => true); // Redis down: proceed rather than block the feature
+  if (!acquired) return onBusy();
+  try {
+    return await fn();
+  } finally {
+    await redisService.del(key).catch(() => undefined);
+  }
+}
+
+/** stableStringify drops undefined values Prisma rejects (e.g. table columnWidths). */
+function toJsonSafe(value: unknown): unknown {
+  return JSON.parse(stableStringify(value));
+}
+
+const topLevelIds = (blocks: BlockNoteBlock[]): string[] =>
+  blocks.map(b => (b as { id?: string }).id).filter((id): id is string => Boolean(id));
+
+export interface CreateBatchInput {
+  workspaceId: string;
+  canvasId: string;
+  ops: DerivedOp[];
+}
+
+export async function createSuggestionBatch({ workspaceId, canvasId, ops }: CreateBatchInput): Promise<{ batchId: string; created: number }> {
+  const prisma = DatabaseClient.getInstance();
+  const batchId = randomUUID();
+
+  // An insert's row id doubles as its future block id.
+  const idByKey = new Map(ops.map(op => [op.key, randomUUID()]));
+
+  const rows = ops.map(op => ({
+    workspaceId,
+    id: idByKey.get(op.key) as string,
+    canvasId,
+    batchId,
+    op: op.op,
+    blockId: op.blockId ?? null,
+    proposedAnchorId: op.op === 'insert' || op.op === 'move' ? (op.anchor ?? null) : null,
+    currentAnchorId: op.op === 'insert' || op.op === 'move' ? (op.anchor ?? null) : null,
+    orderIndex: op.orderIndex,
+    ...(op.beforeContent !== undefined ? { beforeContent: toJsonSafe(op.beforeContent) as never } : {}),
+    ...(op.afterMarkdown !== undefined ? { afterContent: { markdown: op.afterMarkdown } as never } : {}),
+    status: 'PENDING',
+  }));
+
+  const targetIds = ops.map(op => op.blockId).filter((id): id is string => Boolean(id));
+  await prisma.$transaction(async tx => {
+    if (targetIds.length) {
+      // A newer proposal supersedes older pending rows for the same blocks.
+      await tx.canvasSuggestionChange.updateMany({
+        where: { canvasId, status: 'PENDING', blockId: { in: targetIds } },
+        data: { status: 'SUPERSEDED' },
+      });
+    }
+    await tx.canvasSuggestionChange.createMany({ data: rows });
+  });
+
+  logger.info(`[Suggestions] Parked batch ${batchId} on canvas ${canvasId}: ${rows.length} changes`);
+  return { batchId, created: rows.length };
+}
+
+export interface BatchResult {
+  applied: number;
+  stale: number;
+  error?: string;
+}
+
+export async function applySuggestionChanges(changeIds: string[]): Promise<BatchResult> {
+  const empty: BatchResult = { applied: 0, stale: 0 };
+  if (!changeIds.length) return empty;
+
+  const prisma = DatabaseClient.getInstance();
+  const rows = await prisma.canvasSuggestionChange.findMany({
+    where: { id: { in: changeIds }, status: 'PENDING' },
+    orderBy: { orderIndex: 'asc' },
+  });
+  if (!rows.length) return empty;
+
+  const canvasIds = new Set(rows.map(r => r.canvasId));
+  if (canvasIds.size > 1) return { ...empty, error: 'Changes span multiple canvases' };
+  const canvasId = rows[0]!.canvasId;
+
+  return withCanvasLock(
+    canvasId,
+    async () => {
+      const current = await readFromYSweet(canvasId);
+      const renderer = await createBlockRenderer(current);
+      const preIds = topLevelIds(current);
+
+      // Every placement row of the involved batches — accepted ones included —
+      // so placements land behind siblings that precede them in the reply.
+      const batchIds = [...new Set(rows.map(r => r.batchId))];
+      const siblings = await prisma.canvasSuggestionChange.findMany({
+        where: { batchId: { in: batchIds }, op: { in: ['insert', 'move'] } },
+        select: { id: true, op: true, blockId: true, orderIndex: true },
+      });
+      const siblingOrder = new Map<string, number>();
+      for (const s of siblings) {
+        const blockId = s.op === 'insert' ? s.id : s.blockId;
+        if (blockId) siblingOrder.set(blockId, s.orderIndex);
+      }
+
+      const outcome = await applyOps(current, rows as SuggestionRowLike[], renderer.toBlocks, siblingOrder);
+
+      const markStatuses = async (ids: string[], status: string): Promise<void> => {
+        if (!ids.length) return;
+        await prisma.canvasSuggestionChange.updateMany({ where: { id: { in: ids } }, data: { status } });
+      };
+
+      if (!outcome.applied.length) {
+        await markStatuses(outcome.stale, 'STALE');
+        return { applied: 0, stale: outcome.stale.length };
+      }
+
+      const ok = await syncToYSweet(canvasId, outcome.blocks);
+      if (!ok) {
+        logger.error(`[Suggestions] Y-Sweet write failed for canvas ${canvasId}; no statuses written`);
+        return { ...empty, error: 'Collaboration sync failed; no changes applied' };
+      }
+
+      await markStatuses(outcome.applied, 'ACCEPTED');
+      await markStatuses(outcome.stale, 'STALE');
+
+      // An accepted placement row hands its still-pending same-anchor
+      // followers (same batch, higher orderIndex) to the block it placed.
+      // Descending orderIndex so simultaneous accepts chain: d→c, c→b, b→a.
+      const appliedSet = new Set(outcome.applied);
+      const placedRows = rows
+        .filter(r => appliedSet.has(r.id) && (r.op === 'insert' || r.op === 'move'))
+        .sort((a, b) => b.orderIndex - a.orderIndex);
+      for (const row of placedRows) {
+        const newAnchor = row.op === 'insert' ? row.id : row.blockId;
+        if (!newAnchor) continue;
+        await prisma.canvasSuggestionChange.updateMany({
+          where: {
+            canvasId,
+            batchId: row.batchId,
+            status: 'PENDING',
+            op: { in: ['insert', 'move'] },
+            currentAnchorId: row.currentAnchorId,
+            orderIndex: { gt: row.orderIndex },
+          },
+          data: { currentAnchorId: newAnchor },
+        });
+      }
+
+      // Forward anchors of OTHER pending rows past blocks this batch deleted.
+      const events = computeDeletionEvents(preIds, topLevelIds(outcome.blocks));
+      for (const event of events) {
+        await prisma.canvasSuggestionChange.updateMany({
+          where: { canvasId, status: 'PENDING', currentAnchorId: event.deletedId },
+          data: { currentAnchorId: event.previousAliveId },
+        });
+      }
+
+      logger.info(
+        `[Suggestions] canvas ${canvasId}: applied ${outcome.applied.length}, stale ${outcome.stale.length}`
+      );
+      return {
+        applied: outcome.applied.length,
+        stale: outcome.stale.length,
+      };
+    },
+    () => ({ ...empty, error: 'Another change is being applied to this canvas; try again' })
+  );
+}

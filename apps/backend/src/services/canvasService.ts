@@ -590,6 +590,7 @@ export async function approveKnowledgeCanvas(
 export async function getCanvasById(canvasId: string) {
   const prisma = DatabaseClient.getInstance();
   const select = {
+    workspaceId: true,
     id: true,
     title: true,
     content: true,
