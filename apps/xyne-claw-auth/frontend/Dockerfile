@@ -42,17 +42,30 @@ RUN printf 'server {\n\
     }\n\
 }\n' > /etc/nginx/conf.d/default.conf
 
-# Run as the image's built-in non-root "nginx" user. The master no longer runs as
-# root, so the pid file and the dirs nginx writes at runtime are relocated/owned
-# accordingly. The port stays 80 (no Service targetPort change); binding a
-# privileged port as non-root requires NET_BIND_SERVICE, which the pod's
-# securityContext.capabilities must add (add: ["NET_BIND_SERVICE"]) in the deploy
-# manifest — otherwise nginx fails to bind on startup.
-RUN sed -i 's|pid .*nginx.pid;|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
-    && chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /etc/nginx/conf.d
+# Arbitrary-UID safe, for hardened clusters that enforce a non-root
+# securityContext.runAsUser (often with primary group 0). Symptoms seen in prod:
+#   mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)
+#   can not modify /etc/nginx/conf.d/default.conf (read-only file system?)
+# Both are EACCES againt the image's nginx(101)-owned dirs when the runtime uid
+# is NOT 101. The OpenShift fix: make every path nginx writes OWNED BY THE ROOT
+# GROUP and group-writable (g=u), move the pid to /tmp, and strip the `user`
+# directive (it's root-only and would just warn).
 
+RUN sed -i 's|^user .*;$|# user directive removed — runs unprivileged (arbitrary uid)|' /etc/nginx/nginx.conf \
+    && sed -i 's|pid .*nginx.pid;|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
+    && chgrp -R 0 /usr/share/nginx/html /var/cache/nginx /var/log/nginx /etc/nginx/conf.d /run /var/run \
+    && chmod -R g=u /usr/share/nginx/html /var/cache/nginx /var/log/nginx /etc/nginx/conf.d /etc/nginx/nginx.conf
+
+# The port stays 80 (no Service targetPort change); binding a privileged port as
+# non-root requires NET_BIND_SERVICE in the pod's securityContext.capabilities
+# (add: ["NET_BIND_SERVICE"]) in the deploy manifest — otherwise nginx fails to
+# bind on startup.
 EXPOSE 80
 
-USER nginx
+# No fixed USER on purpose: the image must tolerate whatever uid the cluster
+# enforces. The dynamic entrypoint scripts (ipv6 / envsubst / worker tuning)
+# are read-only-warn-tolerant; only 10-listen-on-ipv6 wants conf.d write access,
+# which the root-group permissions above grant for any gid-0 uid.
+USER 1001
 
 CMD ["nginx", "-g", "daemon off;"]
