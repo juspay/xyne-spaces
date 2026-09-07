@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown } from '@xyne/icons';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Popover } from '../../ui/Popover/Popover';
@@ -665,6 +665,7 @@ export function StagePicker({
             <button
               key={stage}
               type='button'
+              data-ph-capture-attribute-track-id='ticket_set_stage_row'
               onClick={e => {
                 e.stopPropagation();
                 setStage(stage);

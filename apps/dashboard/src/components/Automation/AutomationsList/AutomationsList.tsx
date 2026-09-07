@@ -352,6 +352,7 @@ export function AutomationsList({
               variant='outline'
               size='sm'
               disabled={disableMutation.isPending}
+              trackId='disable_automation_keep_queued'
               onClick={() => {
                 if (pendingDisable) {
                   disableMutation.mutate({ id: pendingDisable.id, cancelQueued: false });
@@ -368,6 +369,7 @@ export function AutomationsList({
               size='sm'
               disabled={disableMutation.isPending}
               loading={disableMutation.isPending}
+              trackId='disable_automation_cancel_queued'
               onClick={() => {
                 if (pendingDisable) {
                   disableMutation.mutate({ id: pendingDisable.id, cancelQueued: true });
@@ -411,6 +413,7 @@ export function AutomationsList({
               size='sm'
               disabled={deleteMutation.isPending}
               loading={deleteMutation.isPending}
+              trackId='delete_automation_confirm'
               onClick={() => {
                 if (pendingDelete) {
                   deleteMutation.mutate(pendingDelete.id);
@@ -467,6 +470,8 @@ function SortDropdown({
     >
       <SelectTrigger
         size='sm'
+        data-track-category='automations-list'
+        data-track-name='open-sort-menu'
         className='h-8 flex-shrink-0 gap-1.5 text-xs'
         aria-label='Sort automations'
       >
@@ -475,7 +480,12 @@ function SortDropdown({
       </SelectTrigger>
       <SelectContent align='end'>
         {SORT_OPTIONS.map(opt => (
-          <SelectItem key={opt.value} value={opt.value}>
+          <SelectItem
+            key={opt.value}
+            value={opt.value}
+            data-track-category='automations-list'
+            data-track-name='select-sort-option'
+          >
             {opt.label}
           </SelectItem>
         ))}
@@ -504,12 +514,23 @@ function PaginationBar({
       <div className='flex items-center gap-2'>
         <span className='text-xs text-muted-foreground'>Rows per page</span>
         <Select value={String(pageSize)} onValueChange={v => onPageSizeChange(Number(v))}>
-          <SelectTrigger size='sm' className='h-8 w-[68px] text-xs' aria-label='Rows per page'>
+          <SelectTrigger
+            size='sm'
+            data-track-category='automations-list'
+            data-track-name='open-page-size-menu'
+            className='h-8 w-[68px] text-xs'
+            aria-label='Rows per page'
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent align='start'>
             {PAGE_SIZE_OPTIONS.map(size => (
-              <SelectItem key={size} value={String(size)}>
+              <SelectItem
+                key={size}
+                value={String(size)}
+                data-track-category='automations-list'
+                data-track-name='select-page-size'
+              >
                 {size}
               </SelectItem>
             ))}
@@ -526,6 +547,8 @@ function PaginationBar({
           disabled={page <= 1}
           aria-label='Previous page'
           onClick={() => onPageChange(page - 1)}
+          data-track-category='automations-list'
+          data-track-name='page-prev'
         >
           <ChevronLeft className='size-4' />
         </Button>
@@ -535,6 +558,8 @@ function PaginationBar({
           disabled={page >= totalPages}
           aria-label='Next page'
           onClick={() => onPageChange(page + 1)}
+          data-track-category='automations-list'
+          data-track-name='page-next'
         >
           <ChevronRight className='size-4' />
         </Button>
@@ -724,6 +749,8 @@ function AutomationRow({
                       : `Activate automation ${automation.name}`
                   }
                   onCheckedChange={onToggleActive}
+                  data-track-category='automations-list'
+                  data-track-name='row-toggle-active'
                 />
               </Tooltip>
             ) : null}

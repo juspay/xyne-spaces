@@ -192,7 +192,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground',
             )}
-            data-track-category='ask-ai'
+            data-track-category='AskAI'
             data-track-name='citation-doc-raw'
           >
             Raw
@@ -207,7 +207,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground',
             )}
-            data-track-category='ask-ai'
+            data-track-category='AskAI'
             data-track-name='citation-doc-preview'
           >
             Preview
@@ -394,7 +394,7 @@ export function CitationDocsPanel(): ReactElement | null {
           aria-label='Expand documents panel'
           title='Expand'
           className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-          data-track-category='ask-ai'
+          data-track-category='AskAI'
           data-track-name='citation-docs-expand'
         >
           <PanelRightOpen className='h-4 w-4' />
@@ -414,7 +414,7 @@ export function CitationDocsPanel(): ReactElement | null {
               type='button'
               className='flex h-7 flex-shrink-0 items-center gap-0.5 rounded px-1.5 text-[12px] font-medium text-foreground hover:bg-secondary/60'
               aria-label='List open documents'
-              data-track-category='ask-ai'
+              data-track-category='AskAI'
               data-track-name='citation-docs-list-open'
             >
               {docs.length}
@@ -463,7 +463,7 @@ export function CitationDocsPanel(): ReactElement | null {
                     'flex h-7 min-w-0 items-center gap-1.5 pl-2 pr-1 text-[12px]',
                     isActive ? 'text-foreground' : 'text-muted-foreground',
                   )}
-                  data-track-category='ask-ai'
+                  data-track-category='AskAI'
                   data-track-name='citation-doc-tab-select'
                 >
                   {iconForSource(doc.source)}
@@ -474,7 +474,7 @@ export function CitationDocsPanel(): ReactElement | null {
                   aria-label={`Close ${doc.title}`}
                   onClick={() => closeDoc(doc.id)}
                   className='grid h-4 w-4 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10'
-                  data-track-category='ask-ai'
+                  data-track-category='AskAI'
                   data-track-name='citation-doc-tab-close'
                 >
                   <X className='h-3 w-3' strokeWidth={2} />
@@ -492,7 +492,7 @@ export function CitationDocsPanel(): ReactElement | null {
               aria-label='Jump to Source'
               title='Jump to Source'
               className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-              data-track-category='ask-ai'
+              data-track-category='AskAI'
               data-track-name='citation-docs-open-source'
             >
               <SquareArrowOutUpRight className='h-4 w-4' />
@@ -504,7 +504,7 @@ export function CitationDocsPanel(): ReactElement | null {
             aria-label='Collapse panel'
             title='Collapse'
             className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-            data-track-category='ask-ai'
+            data-track-category='AskAI'
             data-track-name='citation-docs-collapse'
           >
             <PanelRightClose className='h-4 w-4' />
@@ -515,7 +515,7 @@ export function CitationDocsPanel(): ReactElement | null {
             aria-label='Close all documents'
             title='Close all'
             className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-            data-track-category='ask-ai'
+            data-track-category='AskAI'
             data-track-name='citation-docs-close-all'
           >
             <X className='h-4 w-4' />

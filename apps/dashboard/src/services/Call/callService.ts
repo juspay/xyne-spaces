@@ -180,6 +180,18 @@ function isApiErrorResponse(data: unknown): data is ApiErrorResponse {
 // ============================================================================
 
 export class CallService {
+  /**
+   * Replace a call's labels. Returns the resolved Tag ids — raw text typed in the
+   * picker becomes a real Tag server-side, so the response is what to store.
+   */
+  async updateCallLabels(callId: string, labels: string[]): Promise<string[]> {
+    const response = await apiInstance.patch<{ success: true; labels: string[] }>(
+      `/calls/${callId}/labels`,
+      { labels },
+    );
+    return response.data.labels;
+  }
+
   async updateMeetingStatus(callId: string, data: UpdateRsvpRequest): Promise<void> {
     try {
       await apiInstance.post(`/calls/${callId}/rsvp`, data);

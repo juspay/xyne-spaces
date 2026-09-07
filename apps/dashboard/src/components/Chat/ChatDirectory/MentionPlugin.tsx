@@ -334,12 +334,6 @@ export function MentionPlugin({
         if (currentItems.length === 0) {
           return true;
         }
-        // First ArrowDown activates the resting candidate (index 0) in place (gray -> blue +
-        // " - Select") instead of skipping to index 1.
-        if (!hasNavigated) {
-          onNavigate?.();
-          return true;
-        }
         setSelectedMentionIndex(prev => (prev + 1) % currentItems.length);
         onNavigate?.();
         return true;
@@ -352,12 +346,6 @@ export function MentionPlugin({
       event => {
         event?.preventDefault();
         if (currentItems.length === 0) {
-          return true;
-        }
-        // First ArrowUp activates the resting candidate (index 0) in place, same as ArrowDown,
-        // instead of wrapping to the last candidate.
-        if (!hasNavigated) {
-          onNavigate?.();
           return true;
         }
         setSelectedMentionIndex(prev => (prev - 1 + currentItems.length) % currentItems.length);

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
-import { User, X } from 'lucide-react';
+import { UserDefault as User, MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';

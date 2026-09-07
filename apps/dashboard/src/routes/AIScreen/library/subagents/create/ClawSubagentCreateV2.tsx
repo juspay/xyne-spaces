@@ -38,7 +38,8 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
 
   const { user } = useAuth();
-  const builtBy = user?.name ?? user?.email ?? 'you';
+  const builtBy =
+    subagent?.createdByName ?? subagent?.createdByEmail ?? user?.name ?? user?.email ?? 'you';
 
   const { data: subagents = [] } = useClawSubagents();
   const { data: catalog, isLoading: toolsLoading } = useClawAvailableTools();

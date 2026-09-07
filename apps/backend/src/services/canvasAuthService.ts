@@ -47,9 +47,10 @@ class CanvasAuthService {
   }
 
   private async getCurrentUserContext(
-    userId: string
+    userId: string,
+    dbClient: typeof db = db
   ): Promise<{ role: WorkspaceRole; workspaceId: string } | null> {
-    const user = await db.user.findUnique({
+    const user = await dbClient.user.findUnique({
       where: { id: userId },
       select: { role: true, workspaceId: true },
     });
@@ -62,9 +63,10 @@ class CanvasAuthService {
   private async hasGuestChannelAccess(
     userId: string,
     workspaceId: string,
-    channelId: string
+    channelId: string,
+    dbClient: typeof db = db
   ): Promise<boolean> {
-    const channel = await db.channel.findUnique({
+    const channel = await dbClient.channel.findUnique({
       where: { id: channelId },
       select: { workspaceId: true },
     });
@@ -72,7 +74,7 @@ class CanvasAuthService {
       return false;
     }
 
-    const directGuestAccess = await db.guestAccess.findFirst({
+    const directGuestAccess = await dbClient.guestAccess.findFirst({
       where: {
         workspaceId,
         userId,
@@ -87,9 +89,10 @@ class CanvasAuthService {
   private async hasEffectiveChannelAccess(
     userId: string,
     context: { role: WorkspaceRole; workspaceId: string } | null,
-    channelId: string
+    channelId: string,
+    dbClient: typeof db = db
   ): Promise<boolean> {
-    const membership = await db.channelParticipant.findUnique({
+    const membership = await dbClient.channelParticipant.findUnique({
       where: {
         channelId_userId: {
           channelId,
@@ -106,15 +109,16 @@ class CanvasAuthService {
       return false;
     }
 
-    return this.hasGuestChannelAccess(userId, context.workspaceId, channelId);
+    return this.hasGuestChannelAccess(userId, context.workspaceId, channelId, dbClient);
   }
 
   private async getChannelSharedRole(
     canvasId: string,
     userId: string,
-    context: { role: WorkspaceRole; workspaceId: string } | null
+    context: { role: WorkspaceRole; workspaceId: string } | null,
+    dbClient: typeof db = db
   ): Promise<{ role: CanvasRole } | null> {
-    const channelParticipants = await db.canvasParticipant.findMany({
+    const channelParticipants = await dbClient.canvasParticipant.findMany({
       where: {
         canvasId,
         channelId: { not: null },
@@ -125,7 +129,7 @@ class CanvasAuthService {
     let strongestRole: { role: CanvasRole } | null = null;
     for (const participant of channelParticipants) {
       if (!participant.channelId) continue;
-      if (await this.hasEffectiveChannelAccess(userId, context, participant.channelId)) {
+      if (await this.hasEffectiveChannelAccess(userId, context, participant.channelId, dbClient)) {
         strongestRole = this.strongerRole(strongestRole, { role: participant.role as CanvasRole });
       }
     }
@@ -136,14 +140,15 @@ class CanvasAuthService {
   private async hasPublicVisibilityAccess(
     canvas: { visibility: string; channelId: string | null; projectId: string | null },
     userId: string,
-    context: { role: WorkspaceRole; workspaceId: string } | null
+    context: { role: WorkspaceRole; workspaceId: string } | null,
+    dbClient: typeof db = db
   ): Promise<boolean> {
     if (canvas.visibility !== 'PUBLIC') {
       return false;
     }
     if (context?.role === WorkspaceRole.GUEST) {
       if (canvas.channelId) {
-        return this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId);
+        return this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId, dbClient);
       }
       return false;
     }
@@ -153,23 +158,28 @@ class CanvasAuthService {
   private async hasGuestContainerAccess(
     canvas: { channelId: string | null; projectId: string | null },
     userId: string,
-    context: { role: WorkspaceRole; workspaceId: string } | null
+    context: { role: WorkspaceRole; workspaceId: string } | null,
+    dbClient: typeof db = db
   ): Promise<boolean> {
     if (context?.role !== WorkspaceRole.GUEST) {
       return false;
     }
     if (
       canvas.channelId &&
-      (await this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId))
+      (await this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId, dbClient))
     ) {
       return true;
     }
     return false;
   }
 
-  async checkCanvasAccess(canvasId: string, userId: string): Promise<CanvasAuthResult> {
+  async checkCanvasAccess(
+    canvasId: string,
+    userId: string,
+    dbClient: typeof db = db
+  ): Promise<CanvasAuthResult> {
     try {
-      let canvas = await db.canvas.findUnique({
+      let canvas = await dbClient.canvas.findUnique({
         where: { id: canvasId },
         select: {
           id: true,
@@ -190,7 +200,7 @@ class CanvasAuthService {
       // row. Note: this does NOT reintroduce the capability-URL edit gate —
       // edit privileges still flow through participant checks below.
       if (!canvas) {
-        canvas = await db.canvas.findFirst({
+        canvas = await dbClient.canvas.findFirst({
           where: {
             OR: [{ viewAccessId: canvasId }, { editAccessId: canvasId }],
           },
@@ -217,18 +227,18 @@ class CanvasAuthService {
       }
 
       const isCreator = canvas.createdBy === userId;
-      const currentUserContext = await this.getCurrentUserContext(userId);
+      const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
       const isSdlcBaseline = isBaselineCanvasType(canvas.sdlcArtifact?.artifactType);
       const isSdlcBaselineChannelAdmin = Boolean(
         isSdlcBaseline &&
         canvas.channelId &&
-        (await db.channelParticipant.findFirst({
+        (await dbClient.channelParticipant.findFirst({
           where: { channelId: canvas.channelId, userId, role: ChannelRole.ADMIN },
           select: { id: true },
         }))
       );
 
-      const participant = await db.canvasParticipant.findUnique({
+      const participant = await dbClient.canvasParticipant.findUnique({
         where: {
           canvasId_userId: {
             canvasId: canvas.id,
@@ -239,13 +249,13 @@ class CanvasAuthService {
       });
 
       const groupIds = (
-        await db.userGroupMapping.findMany({
+        await dbClient.userGroupMapping.findMany({
           where: { userId },
           select: { userGroupId: true },
         })
       ).map((mapping) => mapping.userGroupId);
       const groupParticipant = groupIds.length
-        ? await db.canvasParticipant.findFirst({
+        ? await dbClient.canvasParticipant.findFirst({
             where: {
               canvasId: canvas.id,
               userGroupId: { in: groupIds },
@@ -257,13 +267,15 @@ class CanvasAuthService {
       const channelParticipant = await this.getChannelSharedRole(
         canvas.id,
         userId,
-        currentUserContext
+        currentUserContext,
+        dbClient
       );
 
       const hasPublicVisibilityAccess = await this.hasPublicVisibilityAccess(
         canvas,
         userId,
-        currentUserContext
+        currentUserContext,
+        dbClient
       );
 
       const entityRole = this.strongerRole(
@@ -279,7 +291,8 @@ class CanvasAuthService {
       const hasGuestContainerAccess = await this.hasGuestContainerAccess(
         canvas,
         userId,
-        currentUserContext
+        currentUserContext,
+        dbClient
       );
 
       const canEdit = isCreator || hasOwnerRole || hasEditorRole || isSdlcBaselineChannelAdmin;

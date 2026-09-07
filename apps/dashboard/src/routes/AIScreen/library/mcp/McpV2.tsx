@@ -1,5 +1,6 @@
 import { ReactElement, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { searchByNameThenDescription } from '../shared/librarySearch';
 import { McpServerIcon } from '@/components/ClawAgents/McpServerIcon';
 import { useClawMcp } from '@/hooks/useClawMcp';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
@@ -22,12 +23,13 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const connections = useMemo(() => data?.connections ?? [], [data]);
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const searched = useMemo(
     () =>
-      q
-        ? servers.filter(s => `${s.name} ${s.description ?? ''}`.toLowerCase().includes(q))
-        : servers,
+      searchByNameThenDescription(servers, q, server => ({
+        name: server.name,
+        description: server.description,
+      })),
     [servers, q],
   );
 

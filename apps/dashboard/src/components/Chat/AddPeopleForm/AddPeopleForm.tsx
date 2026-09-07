@@ -1,28 +1,35 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
-import { User, ChannelScopeType, MessageType } from '@xyne/shared';
+import {
+  User,
+  ChannelScopeType,
+  type HistoryPreviewEntry,
+  type HistoryScope,
+  type HistoryScopeMode,
+} from '@xyne/shared';
+import { AddPeopleHistoryStep } from './AddPeopleHistoryStep';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { toast } from 'sonner';
-import { Checkbox } from '@juspay/blend-design-system';
 import { mutators } from '../../../zero/mutators';
 import { useChannel } from '../../../hooks/useChannels';
 import { channelService } from '../../../services/Chat/channelService';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
-
-interface AddPeopleFormProps {
-  channelId: string;
-  existingUserIds?: string[];
-  onSuccess?: () => void;
-  onCancel?: () => void;
-  loading?: boolean;
-}
+import { cn } from '../../../utils/classNames';
+import type { AddPeopleFormProps, AddPeopleStep } from './AddPeopleForm.types';
+import {
+  buildHistoryScope,
+  groupByDay,
+  hasChosenCutoff,
+  isScopeValid,
+  previewLowerBound,
+} from './AddPeopleForm.utils';
 
 export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   channelId,
@@ -30,166 +37,251 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   onSuccess,
   onCancel,
   loading = false,
+  embedded = false,
+  onContextChange,
 }) => {
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [includeHistory, setIncludeHistory] = useState(true);
+  const [step, setStep] = useState<AddPeopleStep>('people');
+  const [scopeMode, setScopeMode] = useState<HistoryScopeMode>('today');
+  const [customDate, setCustomDate] = useState<string>('');
+  const [confirmingFullHistory, setConfirmingFullHistory] = useState(false);
   const { isMobile } = usePlatform();
   const zero = useZero();
   const navigate = useNavigate();
   const channel = useChannel(channelId);
   const [participantsData] = useCachedQuery(queries.channelParticipants({ channelId }));
-  const isDM = channel ? isOneToOneDMChannel(channel.scopeType) : false;
+
+  const isDirectConversation = channel
+    ? isOneToOneDMChannel(channel.scopeType) || channel.scopeType === ChannelScopeType.GROUP_DM
+    : false;
 
   const existingUserIds = useMemo(
     () => propExistingUserIds || (participantsData || []).map(p => p.userId),
     [propExistingUserIds, participantsData],
   );
 
-  const createGroupDmFromDmMutation = useMutation({
-    mutationFn: (participantIds: string[]) => channelService.createDm({ participantIds }),
+  const scope: HistoryScope = useMemo(
+    () => buildHistoryScope(scopeMode, customDate),
+    [scopeMode, customDate],
+  );
+
+  const cutoffChosen = hasChosenCutoff(scopeMode, customDate);
+  const previewEnabled = step === 'history' && scopeMode !== 'none' && cutoffChosen;
+
+  const previewSince = previewLowerBound(scope);
+  const { data: previewData } = useQuery({
+    queryKey: ['dm-history-preview', channelId, previewSince],
+    queryFn: () =>
+      channelService.getDmHistoryPreview(channelId, { since: previewSince, limit: 20 }),
+    enabled: previewEnabled,
+    staleTime: 30_000,
+  });
+
+  const previewGroups = useMemo(
+    () => (previewEnabled ? groupByDay<HistoryPreviewEntry>(previewData?.conversations ?? []) : []),
+    [previewEnabled, previewData],
+  );
+
+  const previewOverflowCount = previewEnabled
+    ? Math.max((previewData?.total ?? 0) - (previewData?.conversations.length ?? 0), 0)
+    : 0;
+
+  useEffect(() => {
+    onContextChange?.({ step, isDirectConversation });
+  }, [step, isDirectConversation, onContextChange]);
+
+  const addParticipantsMutation = useMutation({
+    mutationFn: (payload: { userIds: string[]; historyScope: HistoryScope }) =>
+      channelService.addGroupDmParticipants(channelId, payload),
     onSuccess: response => {
       onSuccess?.();
-      void navigate(`/chat/dir/${response.id}`);
+      void navigate(`/chat/dir/${response.channelId}`);
     },
     onError: () => {
-      toast.error('Failed to create group DM', {
-        description: 'Could not create group DM. Please try again.',
+      toast.error('Failed to add people', {
+        description: 'Could not add people to this conversation. Please try again.',
         duration: 3000,
       });
     },
   });
 
-  // Mutation for adding participants to GROUP_DM via backend API
-  const addGroupDmParticipantsMutation = useMutation({
-    mutationFn: ({
-      channelId,
-      userIds,
-      includeHistory,
-    }: {
-      channelId: string;
-      userIds: string[];
-      includeHistory: boolean;
-    }) => channelService.addGroupDmParticipants(channelId, { userIds, includeHistory }),
-    onSuccess: (response, variables) => {
-      // Create system messages using Zero mutator
-      try {
-        // If conversations were migrated, create system messages
-        if (response.conversationsMigrated && response.conversationsMigrated > 0) {
-          const conversationText =
-            response.conversationsMigrated === 1 ? 'conversation' : 'conversations';
+  const goToStep = (next: AddPeopleStep): void => {
+    setConfirmingFullHistory(false);
+    setStep(next);
+  };
 
-          // System message in source channel
-          zero.mutate(
-            mutators.conversations.send({
-              channelId: variables.channelId,
-              content: `${response.conversationsMigrated} ${conversationText} ${response.conversationsMigrated === 1 ? 'was' : 'were'} moved to another channel`,
-              type: MessageType.SYSTEM,
-              conversationId: uuidv4(),
-              messageId: uuidv4(),
-              timestamp: Date.now(),
-            }),
-          );
+  const handleScopeModeChange = (next: HistoryScopeMode): void => {
+    setConfirmingFullHistory(false);
+    setScopeMode(next);
+  };
 
-          // System message in target channel (if different from source)
-          if (response.channelId !== variables.channelId) {
-            zero.mutate(
-              mutators.conversations.send({
-                channelId: response.channelId,
-                content: `${response.conversationsMigrated} ${conversationText} ${response.conversationsMigrated === 1 ? 'was' : 'were'} moved from a previous channel`,
-                type: MessageType.SYSTEM,
-                conversationId: uuidv4(),
-                messageId: uuidv4(),
-                timestamp: Date.now(),
-              }),
-            );
-          }
-        }
-      } catch {
-        // Don't block navigation on system message failure
-      }
-      onSuccess?.();
-      // Navigate to the returned channelId (might be existing or new channel)
-      void navigate(`/chat/dir/${response.channelId}`);
-    },
-    onError: () => {
-      // Keep modal open on error so user can retry
-    },
-  });
+  const handleNext = (): void => {
+    if (selectedUsers.length === 0) return;
+    if (isDirectConversation) {
+      // Still ask about history when the group already exists — the messages get moved into it.
+      goToStep('history');
+      return;
+    }
+    handleSubmit();
+  };
 
   const handleSubmit = (): void => {
     if (selectedUsers.length === 0) return;
 
     const userIds = selectedUsers.map(user => user.id);
 
-    if (isDM) {
-      const allParticipantIds = [...existingUserIds, ...userIds];
-      createGroupDmFromDmMutation.mutate(allParticipantIds);
+    if (isDirectConversation) {
+      if (scopeMode === 'beginning' && !confirmingFullHistory) {
+        setConfirmingFullHistory(true);
+        return;
+      }
+      addParticipantsMutation.mutate({ userIds, historyScope: scope });
       return;
     }
 
-    if (channel?.scopeType === ChannelScopeType.GROUP_DM) {
-      addGroupDmParticipantsMutation.mutate({
-        channelId,
-        userIds,
-        includeHistory,
+    setIsSubmitting(true);
+    try {
+      const participantIds = userIds.reduce(
+        (acc, userId) => {
+          acc[userId] = uuidv4();
+          return acc;
+        },
+        {} as Record<string, string>,
+      );
+
+      const userStatusIds = userIds.reduce(
+        (acc, userId) => {
+          acc[userId] = uuidv4();
+          return acc;
+        },
+        {} as Record<string, string>,
+      );
+
+      void zero.mutate(
+        mutators.channel.addParticipants({
+          channelId,
+          userIds,
+          timestamp: Date.now(),
+          participantIds,
+          userStatusIds,
+        }),
+      );
+      setSelectedUsers([]);
+      onSuccess?.();
+    } catch {
+      toast.error('Failed to add participants', {
+        description: 'Could not add participants. Please try again.',
+        duration: 3000,
       });
-    } else {
-      setIsSubmitting(true);
-      try {
-        const participantIds = userIds.reduce(
-          (acc, userId) => {
-            acc[userId] = uuidv4();
-            return acc;
-          },
-          {} as Record<string, string>,
-        );
-
-        const userStatusIds = userIds.reduce(
-          (acc, userId) => {
-            acc[userId] = uuidv4();
-            return acc;
-          },
-          {} as Record<string, string>,
-        );
-
-        void zero.mutate(
-          mutators.channel.addParticipants({
-            channelId,
-            userIds,
-            timestamp: Date.now(),
-            participantIds,
-            userStatusIds,
-          }),
-        );
-        setSelectedUsers([]);
-        onSuccess?.();
-      } catch {
-        toast.error('Failed to add participants', {
-          description: 'Could not add participants. Please try again.',
-          duration: 3000,
-        });
-      } finally {
-        setIsSubmitting(false);
-      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleCancel = (): void => {
     setSelectedUsers([]);
+    goToStep('people');
     onCancel?.();
   };
 
-  const isLoading =
-    isSubmitting ||
-    loading ||
-    createGroupDmFromDmMutation.isPending ||
-    addGroupDmParticipantsMutation.isPending;
+  const isLoading = isSubmitting || loading || addParticipantsMutation.isPending;
+  const canConfirm = isScopeValid(scopeMode, customDate) && !isLoading;
+
+  const historyFooter = (
+    <div className='flex items-center justify-between gap-3 border-t border-border pt-4'>
+      <p className='text-xs text-muted-foreground'>Once included, it can&apos;t be undone.</p>
+      <div className='flex gap-3'>
+        <Button
+          variant='ghost'
+          size='default'
+          onClick={() => goToStep('people')}
+          disabled={isLoading}
+          data-track-category='ADD_CHAT_PARTICIPANTS'
+          data-track-name='Back_History_Scope'
+        >
+          Back
+        </Button>
+        <Button
+          variant='default'
+          size='default'
+          onClick={() => void handleSubmit()}
+          disabled={!canConfirm}
+          loading={isLoading}
+          data-testid='add-people-confirm'
+          data-track-category='ADD_CHAT_PARTICIPANTS'
+          data-track-name='ADD_PEOPLE_SUBMIT'
+          data-track-metadata={JSON.stringify({ selectedUsers, scopeMode })}
+        >
+          Done
+        </Button>
+      </div>
+    </div>
+  );
+
+  const confirmFooter = (
+    <div className='space-y-3 border-t border-border pt-4'>
+      <div className='space-y-1'>
+        <p className='text-sm font-semibold text-foreground'>Include history from the beginning?</p>
+        <p className='text-sm text-muted-foreground'>
+          This lets everyone see past messages and files once they&apos;re added to the
+          conversation.
+        </p>
+      </div>
+      <div className='flex justify-end gap-3'>
+        <Button
+          variant='ghost'
+          size='default'
+          onClick={() => setConfirmingFullHistory(false)}
+          disabled={isLoading}
+          data-track-category='ADD_CHAT_PARTICIPANTS'
+          data-track-name='Go_Back_Full_History'
+        >
+          Go Back
+        </Button>
+        <Button
+          variant='default'
+          size='default'
+          onClick={() => void handleSubmit()}
+          disabled={isLoading}
+          loading={isLoading}
+          data-testid='add-people-confirm-full-history'
+          data-track-category='ADD_CHAT_PARTICIPANTS'
+          data-track-name='CONFIRM_FULL_HISTORY'
+          data-track-metadata={JSON.stringify({ selectedUsers })}
+        >
+          Confirm
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (step === 'history') {
+    return (
+      <AddPeopleHistoryStep
+        scopeMode={scopeMode}
+        onScopeModeChange={handleScopeModeChange}
+        customDate={customDate}
+        onCustomDateChange={setCustomDate}
+        cutoffChosen={cutoffChosen}
+        dimmed={confirmingFullHistory}
+        previewGroups={previewGroups}
+        previewOverflowCount={previewOverflowCount}
+        hasPreviewItems={previewGroups.length > 0}
+        embedded={embedded}
+        footer={confirmingFullHistory ? confirmFooter : historyFooter}
+      />
+    );
+  }
 
   return (
-    <div className='p-4 space-y-6'>
+    <div className={cn('space-y-6', !embedded && 'p-4')}>
       <div>
-        <h2 className='text-lg font-semibold text-foreground mb-1'>Add Members</h2>
+        {!embedded && (
+          <h2 className='text-lg font-semibold text-foreground mb-1'>
+            {isDirectConversation ? 'Add people to this conversation' : 'Add Members'}
+          </h2>
+        )}
         <p className='text-sm text-muted-foreground'>Search for users to add to this channel</p>
       </div>
 
@@ -205,23 +297,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
         />
       </div>
 
-      {/* Include History Checkbox - Only for GROUP_DM channels */}
-      {channel?.scopeType === ChannelScopeType.GROUP_DM && (
-        <div className='mt-4 p-3 bg-muted rounded-lg border border-border'>
-          <Checkbox
-            defaultChecked={includeHistory}
-            checked={includeHistory}
-            onCheckedChange={(checked: boolean | 'indeterminate') =>
-              setIncludeHistory(checked === true)
-            }
-            subtext='New participants will be able to see all previous messages in this conversation'
-          >
-            Include conversation history for new participants
-          </Checkbox>
-        </div>
-      )}
-
-      <div className='flex justify-end gap-3 pt-4 border-t border-border'>
+      <div className='flex justify-end gap-3 border-t border-border pt-4'>
         {onCancel && (
           <Button
             variant='ghost'
@@ -238,15 +314,15 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
         <Button
           variant='default'
           size='default'
-          onClick={() => void handleSubmit()}
+          onClick={() => void handleNext()}
           disabled={selectedUsers.length === 0 || isLoading}
           loading={isLoading}
           data-testid='add-people-submit'
           data-track-category='ADD_CHAT_PARTICIPANTS'
-          data-track-name='ADD_PEOPLE_SUBMIT'
-          data-track-metadata={JSON.stringify({ selectedUsers: selectedUsers })}
+          data-track-name={isDirectConversation ? 'NEXT_HISTORY_SCOPE' : 'ADD_PEOPLE_SUBMIT'}
+          data-track-metadata={JSON.stringify({ selectedUsers })}
         >
-          Add Selected Users
+          {isDirectConversation ? 'Next' : 'Add Selected Users'}
         </Button>
       </div>
     </div>

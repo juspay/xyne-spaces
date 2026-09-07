@@ -2261,7 +2261,7 @@ const BoardStageConfigScreen = ({
               variant='ghost'
               size='iconSm'
               className='w-[16px] h-[16px] text-foreground hover:opacity-70'
-              data-track-category='BOARD_CONFIG'
+              data-track-category='board_config'
               data-track-name='NAVIGATE_BACK'
             >
               <ChevronLeft size={16} />

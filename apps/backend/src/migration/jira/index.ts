@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
+import { workspaceScopedRoute } from '@/database/tenant/context';
 import { JiraMigrationController } from '@/controllers/jiraMigrationController';
 
 const router = Router();
@@ -16,8 +17,8 @@ router.post('/bulk-execute', authMiddleware.authenticate, jiraMigrationAdminAuth
 router.post('/move-channel-project', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveChannelProject);
 router.post('/move-jira-project-board', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveJiraProjectBoard);
 router.post('/move-jira-project-channel', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.moveJiraProjectChannel);
-router.post('/purge-project-migration', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.purgeProjectMigration);
-router.post('/delete-migrated-stage-eta', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.deleteJiraMigratedStageEta);
+router.post('/purge-project-migration', authMiddleware.authenticate, jiraMigrationAdminAuth, workspaceScopedRoute, controller.purgeProjectMigration);
+router.post('/delete-migrated-stage-eta', authMiddleware.authenticate, jiraMigrationAdminAuth, workspaceScopedRoute, controller.deleteJiraMigratedStageEta);
 router.post('/user-map/lookup', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.userMapLookup);
 router.get('/status/:jobId', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.status);
 router.post('/pause/:jobId', authMiddleware.authenticate, jiraMigrationAdminAuth, controller.pause);

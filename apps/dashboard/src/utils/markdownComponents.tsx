@@ -147,6 +147,7 @@ const CodeBlock = ({
   className,
   children,
   node: _node,
+  messageId,
   ...props
 }: CodeProps & { messageId: string }): React.ReactElement => {
   const match = /language-(\w+)/.exec(String(className ?? ''));
@@ -160,37 +161,25 @@ const CodeBlock = ({
 
   // ── Mermaid ──
   if (language === 'mermaid') {
-    return (
-      <MermaidBlock chart={codeString} messageId={(props as { messageId: string }).messageId} />
-    );
+    return <MermaidBlock chart={codeString} messageId={messageId} />;
   }
 
   if (language === 'filesystem') {
-    return (
-      <FilesystemBlock
-        jsonSource={codeString}
-        messageId={(props as { messageId: string }).messageId}
-      />
-    );
+    return <FilesystemBlock jsonSource={codeString} messageId={messageId} />;
   }
 
   if (language === 'd2') {
     const looksLikeFilesystemJson = codeString.trimStart().startsWith('{');
     return looksLikeFilesystemJson ? (
-      <FilesystemBlock
-        jsonSource={codeString}
-        messageId={(props as { messageId: string }).messageId}
-      />
+      <FilesystemBlock jsonSource={codeString} messageId={messageId} />
     ) : (
-      <D2Block source={codeString} messageId={(props as { messageId: string }).messageId} />
+      <D2Block source={codeString} messageId={messageId} />
     );
   }
 
   // ── Chart (visualize tool output) ──
   if (language === 'chart') {
-    return (
-      <ChartBlock jsonSource={codeString} messageId={(props as { messageId: string }).messageId} />
-    );
+    return <ChartBlock jsonSource={codeString} messageId={messageId} />;
   }
 
   // ── Inline code — no className means no language fence ──

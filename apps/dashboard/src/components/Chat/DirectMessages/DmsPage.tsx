@@ -1,6 +1,14 @@
-import { ReactElement, useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import {
+  ComponentType,
+  ReactElement,
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useMemo,
+} from 'react';
 import { Search, PenBox, X } from 'lucide-react';
-import { QuestionMarkCircle } from '@xyne/icons';
+import { QuestionMarkCircle, EnvelopeDefault, Star, UserTwo, PencilEditBox } from '@xyne/icons';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
 import { useNavigate, Outlet, useParams } from 'react-router-dom';
@@ -38,6 +46,9 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Channel, ChannelScopeType } from '@xyne/shared';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { FilterPills, type FilterPillOption } from '../../ui/FilterPills';
+import * as Tabs from '@radix-ui/react-tabs';
+import { cn } from '../../../utils/classNames';
+import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 // Simple component for DM search results (no message preview)
@@ -104,12 +115,17 @@ const DmUserSearchResultItem = ({
 };
 
 // Hardcoded item heights derived from CSS (avoids DOM measurement via ref)
-// Desktop: py-3 (24px) + size-[48px] avatar + 1px border-bottom = 73px
+// Desktop: py-2 (16px) + 19px title + 1px + 20px preview + 2px border
+//          = 58px row, + 12px pb-3 wrapper gap = 70px
 // Mobile: 47px DmListItem + 16px pt-4 wrapper padding = 63px
-const DESKTOP_ITEM_HEIGHT = 75;
+const DESKTOP_ITEM_HEIGHT = 70;
 const MOBILE_ITEM_HEIGHT = 65;
 
 type DmFilterTab = 'all' | 'unread' | 'groups' | 'favorites';
+
+type DmFilterTabConfig = FilterPillOption<DmFilterTab> & {
+  Icon?: ComponentType<{ className?: string }>;
+};
 
 const getDmFilterEmptyCopy = (activeTab: DmFilterTab): { title: string; description: string } => {
   if (activeTab === 'unread') {
@@ -212,12 +228,12 @@ const DmsPage = (): ReactElement => {
     return directMessages;
   }, [activeTab, directMessages, visibleDmChannels, statusByChannelId, unreadCounts]);
 
-  const dmFilterTabs = useMemo<FilterPillOption<DmFilterTab>[]>(
+  const dmFilterTabs = useMemo<DmFilterTabConfig[]>(
     () => [
       { value: 'all', label: 'All' },
-      { value: 'unread', label: 'Unread', count: unreadDmCount },
-      { value: 'favorites', label: 'Favorites' },
-      { value: 'groups', label: 'Groups' },
+      { value: 'unread', label: 'Unread', count: unreadDmCount, Icon: EnvelopeDefault },
+      { value: 'favorites', label: 'Favourites', Icon: Star },
+      { value: 'groups', label: 'Groups', Icon: UserTwo },
     ],
     [unreadDmCount],
   );
@@ -350,7 +366,7 @@ const DmsPage = (): ReactElement => {
   const renderDmItem = useCallback(
     (_index: number, channel: Channel) => {
       return (
-        <div>
+        <div className='px-3 pb-2'>
           <DmListItem
             key={channel.id}
             channel={channel}
@@ -661,128 +677,200 @@ const DmsPage = (): ReactElement => {
             <div className='w-full h-[52px] shrink-0'>
               <AppNavigator />
             </div>
-            {/* Desktop search/header */}
-            <div className='p-4 border-t border-border'>
-              <div className='flex items-center justify-between mb-3'>
+            <div className='relative flex-1 min-h-0 flex flex-col gap-2 max-w-full overflow-hidden pt-3 border-t border-sidebar-border-muted'>
+              {/* Header: title + actions */}
+              <div className='flex items-center justify-between gap-2 px-3'>
                 <div className='flex items-center gap-2'>
-                  <h2
-                    className='text-base font-semibold leading-normal text-sidebar-accent-foreground'
-                    data-testid='dms-heading'
-                  >
+                  <h2 className='font-bold text-foreground truncate' data-testid='dms-heading'>
                     Direct Messages
                   </h2>
+                </div>
+                <div className='flex items-center gap-1'>
                   <button
                     onClick={() => startWalkthrough(true)}
-                    className='p-1 rounded-full text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors'
+                    className='p-2 flex items-center justify-center rounded-lg border border-transparent transition-colors text-muted-foreground hover:text-foreground hover:bg-accent hover:border-border'
                     aria-label='Replay Tour'
                     title='Replay Tour'
                     data-track-category='DM'
                     data-track-name='REPLAY_TOUR_DESKTOP'
                   >
-                    <QuestionMarkCircle size={18} />
+                    <QuestionMarkCircle size={16} />
                   </button>
-                </div>
-                <button
-                  id='dm-create-btn'
-                  className='size-8 flex items-center justify-center rounded-[10px] text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-item-hover transition-colors'
-                  onClick={handleAddDirectMessage}
-                  aria-label='Create new message'
-                  data-testid='create-new-message-btn'
-                  data-track-category='DM'
-                  data-track-name='CREATE_DM_DESKTOP'
-                >
-                  <PenBox className='size-4' />
-                </button>
-              </div>
-              <div className='relative dm-search-container'>
-                <Search className='absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground' />
-                <input
-                  id='dm-search-input'
-                  ref={dmSearchInputRef}
-                  type='text'
-                  autoFocus
-                  className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring'
-                  placeholder='Search DMs (Cmd+K)'
-                  value={dmSearchQuery}
-                  onChange={e => {
-                    setDmSearchQuery(e.target.value);
-                    setShowDmSearchDropdown(true);
-                  }}
-                  onFocus={() => setShowDmSearchDropdown(true)}
-                  onKeyDown={e =>
-                    handleDmSearchKeyDown(e, id => void handleDmSelect(id), handleUserSelect)
-                  }
-                  data-testid='search-messages-input'
-                  data-track-event='blur'
-                  data-track-category='DM'
-                  data-track-name='SEARCH_DMS_INPUT_DESKTOP'
-                />
-                {dmSearchQuery && (
-                  <Button
-                    className='absolute right-1 top-1/2 -translate-y-1/2 flex items-center'
-                    onClick={() => {
-                      setDmSearchQuery('');
-                      setShowDmSearchDropdown(false);
-                    }}
-                    data-track-category='DM'
-                    data-track-name='CLEAR_DM_SEARCH'
-                    aria-label='Clear search'
-                    variant='link'
-                    size='icon'
+                  <ShortcutTooltip
+                    label='New message'
+                    shortcut='global.composeMessage'
+                    side='bottom'
                   >
-                    <X className='size-4 text-muted-foreground hover:text-foreground' />
-                  </Button>
-                )}
-                {renderSearchDropdown()}
+                    <button
+                      id='dm-create-btn'
+                      className='p-2 flex items-center justify-center rounded-lg border border-transparent transition-colors text-muted-foreground hover:text-foreground hover:bg-accent hover:border-border'
+                      onClick={handleAddDirectMessage}
+                      aria-label='Create new message'
+                      data-testid='create-new-message-btn'
+                      data-track-category='DM'
+                      data-track-name='CREATE_DM_DESKTOP'
+                    >
+                      <PencilEditBox size={16} />
+                    </button>
+                  </ShortcutTooltip>
+                </div>
               </div>
-              <FilterPills
-                tabs={dmFilterTabs}
-                activeTab={activeTab}
-                onTabChange={handleDmFilterChange}
-                ariaLabel='Filter direct messages'
-                className='mt-3'
-                testIdPrefix='dm-filter'
-              />
-            </div>
 
-            <div className='flex-1 w-full overflow-hidden'>
-              {filteredDirectMessages.length === 0 ? (
-                <div className='flex flex-col items-center justify-center h-full px-6'>
-                  {activeTab === 'all' && (
-                    <img
-                      src='/images/empty-chats.svg'
-                      alt='No conversations'
-                      className='w-full max-w-[280px] h-auto mb-6 opacity-90 theme-invert'
+              <div className='px-3'>
+                <div className='relative dm-search-container'>
+                  <Search className='absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground' />
+                  <input
+                    id='dm-search-input'
+                    ref={dmSearchInputRef}
+                    type='text'
+                    autoFocus
+                    className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring'
+                    placeholder='Search DMs (Cmd+K)'
+                    value={dmSearchQuery}
+                    onChange={e => {
+                      setDmSearchQuery(e.target.value);
+                      setShowDmSearchDropdown(true);
+                    }}
+                    onFocus={() => setShowDmSearchDropdown(true)}
+                    onKeyDown={e =>
+                      handleDmSearchKeyDown(e, id => void handleDmSelect(id), handleUserSelect)
+                    }
+                    data-testid='search-messages-input'
+                    data-track-event='blur'
+                    data-track-category='DM'
+                    data-track-name='SEARCH_DMS_INPUT_DESKTOP'
+                  />
+                  {dmSearchQuery && (
+                    <Button
+                      className='absolute right-1 top-1/2 -translate-y-1/2 flex items-center'
+                      onClick={() => {
+                        setDmSearchQuery('');
+                        setShowDmSearchDropdown(false);
+                      }}
+                      data-track-category='DM'
+                      data-track-name='CLEAR_DM_SEARCH'
+                      aria-label='Clear search'
+                      variant='link'
+                      size='icon'
+                    >
+                      <X className='size-4 text-muted-foreground hover:text-foreground' />
+                    </Button>
+                  )}
+                  {renderSearchDropdown()}
+                </div>
+              </div>
+
+              <Tabs.Root
+                value={activeTab}
+                onValueChange={value => handleDmFilterChange(value as DmFilterTab)}
+                className='flex flex-1 min-h-0 flex-col'
+              >
+                <div className='overflow-x-auto no-scrollbar'>
+                  <Tabs.List
+                    className='flex items-center sm:justify-start min-w-max gap-0.5 px-3'
+                    data-testid='dm-tabs-list'
+                  >
+                    {dmFilterTabs.map(tab => {
+                      const IconComponent = tab.Icon;
+                      const isActive = activeTab === tab.value;
+                      const count = tab.count ?? 0;
+
+                      return (
+                        <Tabs.Trigger key={tab.value} value={tab.value} asChild>
+                          <button
+                            aria-label={tab.label}
+                            data-testid={`dm-filter-${tab.value}`}
+                            data-track-category='DM'
+                            data-track-name='TAB_CHANGE'
+                            data-track-metadata={JSON.stringify({ tab: tab.value })}
+                            className={cn(
+                              'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none',
+                              isActive ? 'bg-foreground/[6%]' : 'bg-transparent',
+                            )}
+                          >
+                            {IconComponent && (
+                              <span
+                                className={cn(
+                                  'size-4 flex items-center justify-center shrink-0',
+                                  isActive
+                                    ? 'text-sidebar-accent-foreground'
+                                    : 'text-muted-foreground',
+                                )}
+                              >
+                                <IconComponent className='w-4 h-4' />
+                              </span>
+                            )}
+                            <span
+                              className={cn(
+                                'whitespace-nowrap text-sm font-medium',
+                                isActive
+                                  ? 'text-sidebar-accent-foreground'
+                                  : 'text-muted-foreground',
+                                IconComponent ? 'ml-2' : null,
+                              )}
+                            >
+                              {tab.label}
+                            </span>
+                            {count > 0 && (
+                              <span
+                                className={cn(
+                                  'ml-1.5 shrink-0 text-[0.625rem] px-1 rounded-md font-bold tabular-nums transition-colors',
+                                  isActive
+                                    ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                                    : 'bg-foreground/[6%] text-muted-foreground',
+                                )}
+                              >
+                                {count > 99 ? '99+' : count}
+                              </span>
+                            )}
+                          </button>
+                        </Tabs.Trigger>
+                      );
+                    })}
+                  </Tabs.List>
+                </div>
+
+                <Tabs.Content
+                  value={activeTab}
+                  className='relative flex flex-1 min-h-0 flex-col mt-4 focus-visible:outline-none'
+                >
+                  {filteredDirectMessages.length === 0 ? (
+                    <div className='flex-1 flex flex-col items-center justify-center text-muted-foreground px-4 py-8'>
+                      {activeTab === 'all' && (
+                        <img
+                          src='/images/empty-chats.svg'
+                          alt='No conversations'
+                          className='w-full max-w-[280px] h-auto mb-4 opacity-90 theme-invert'
+                        />
+                      )}
+                      <p className='text-base font-medium'>{filterEmptyCopy.title}</p>
+                      <p className='text-sm mt-1 text-center max-w-[250px]'>
+                        {filterEmptyCopy.description}
+                      </p>
+                    </div>
+                  ) : (
+                    <Virtuoso
+                      key={activeTab}
+                      ref={virtuosoRef}
+                      data={filteredDirectMessages}
+                      firstItemIndex={activeTab === 'all' ? firstItemIndex : 0}
+                      computeItemKey={(_, channel) => channel.id}
+                      overscan={5}
+                      increaseViewportBy={{ top: threshold, bottom: threshold }}
+                      startReached={() => {
+                        if (activeTab === 'all') void jumpToChannel();
+                      }}
+                      endReached={() => {
+                        if (activeTab === 'all') loadMore();
+                      }}
+                      components={{ Footer: () => <div className='h-16' aria-hidden='true' /> }}
+                      itemContent={renderDmItem}
+                      className='h-full no-scrollbar'
+                      data-testid='dm-list'
                     />
                   )}
-                  <h3 className='text-lg font-medium text-foreground mb-2'>
-                    {filterEmptyCopy.title}
-                  </h3>
-                  <p className='text-sm text-muted-foreground text-center max-w-[250px]'>
-                    {filterEmptyCopy.description}
-                  </p>
-                </div>
-              ) : (
-                <Virtuoso
-                  key={activeTab}
-                  ref={virtuosoRef}
-                  data={filteredDirectMessages}
-                  firstItemIndex={activeTab === 'all' ? firstItemIndex : 0}
-                  computeItemKey={(_, channel) => channel.id}
-                  fixedItemHeight={itemHeight}
-                  overscan={5}
-                  increaseViewportBy={{ top: threshold, bottom: threshold }}
-                  startReached={() => {
-                    if (activeTab === 'all') void jumpToChannel();
-                  }}
-                  endReached={() => {
-                    if (activeTab === 'all') loadMore();
-                  }}
-                  itemContent={renderDmItem}
-                  className='h-full no-scrollbar'
-                  data-testid='dm-list'
-                />
-              )}
+                </Tabs.Content>
+              </Tabs.Root>
             </div>
           </div>
         </Panel>

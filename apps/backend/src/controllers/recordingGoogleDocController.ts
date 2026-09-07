@@ -59,7 +59,8 @@ async function getRecordingDocAccessToken(userId: string): Promise<string | null
 
 async function readDetailedSummary(
   canvasId: string | null,
-  workspaceId: string
+  workspaceId: string,
+  userId: string
 ): Promise<string | null> {
   if (!canvasId) return null;
 
@@ -69,7 +70,7 @@ async function readDetailedSummary(
   });
   if (!canvas) return null;
 
-  const ySweetBlocks = await readFromYSweet(canvas.id);
+  const ySweetBlocks = await readFromYSweet(canvas.id, userId);
   const storedBlocks = Array.isArray(canvas.content) ? canvas.content : [];
   const blocks = ySweetBlocks.length > 0 ? ySweetBlocks : storedBlocks;
   return blocks.length > 0 ? convertBlockNoteToMarkdown(blocks) : null;
@@ -146,7 +147,7 @@ export class RecordingGoogleDocController {
         typeof metadata?.detailedSummaryCanvasId === 'string'
           ? metadata.detailedSummaryCanvasId
           : null;
-      const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId).catch(
+      const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId, userId).catch(
         () => null,
       );
       const summary = detailedSummary?.trim() || call.aiSummary?.trim();
@@ -214,7 +215,7 @@ export class RecordingGoogleDocController {
         typeof metadata?.detailedSummaryCanvasId === 'string'
           ? metadata.detailedSummaryCanvasId
           : null;
-      const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId).catch(
+      const detailedSummary = await readDetailedSummary(detailedSummaryCanvasId, workspaceId, userId).catch(
         (error) => {
           logger.warn('[RecordingGoogleDoc] Could not read detailed summary canvas', {
             callId,

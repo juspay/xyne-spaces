@@ -231,9 +231,21 @@ router.post("/regenerate", async (req: Request, res: Response) => {
     if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
+  // Nothing is written between the last tool call and `emit_brief`, so both
+  // downstream legs (Spaces backend ← here, browser ← Spaces backend) go idle
+  // for minutes and an L7 proxy severs them — surfacing as "terminated" even
+  // though the run completes. Same 15s comment frame as run-stream.ts; every
+  // SSE parser on the path ignores comment lines.
+  let keepalive: ReturnType<typeof setInterval> | null = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) {
+      try { res.write(":ka\n\n"); } catch { /* response already torn down */ }
+    }
+  }, 15_000);
+
   // Abort the underlying run if the client disconnects.
   const abort = new AbortController();
   res.on("close", () => {
+    if (keepalive) { clearInterval(keepalive); keepalive = null; }
     if (!res.writableEnded) abort.abort();
   });
 
@@ -263,6 +275,7 @@ router.post("/regenerate", async (req: Request, res: Response) => {
     log.error("[daily-brief] regenerate", err);
     send("error", { message: err instanceof Error ? err.message : "Regeneration failed" });
   } finally {
+    if (keepalive) { clearInterval(keepalive); keepalive = null; }
     if (!res.writableEnded) res.end();
   }
 });

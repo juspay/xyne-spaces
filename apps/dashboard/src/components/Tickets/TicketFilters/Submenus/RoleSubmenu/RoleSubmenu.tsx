@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
-import { Search, Check, ChevronDown } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check, ChevronDown } from '@xyne/icons';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers } from '../../../../../hooks/useUsers';

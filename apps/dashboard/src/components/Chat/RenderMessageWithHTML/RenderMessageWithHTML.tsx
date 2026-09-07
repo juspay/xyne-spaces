@@ -31,6 +31,7 @@ import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
+import { LinkHoverCard } from '../LinkHoverCard/LinkHoverCard';
 import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer } from '../../Charts';
 import type { ToolOutput as GeniusToolOutput } from '../../../types/toolOutput';
@@ -48,7 +49,6 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
-import { callLobbyService } from '../../../services/Call/callLobbyService';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -125,38 +125,16 @@ export const InternalXyneLink = ({
   });
   const [copied, setCopied] = useState(false);
 
-  const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>): void => {
-    onClick?.(event);
-    if (event.defaultPrevented) return;
-    if (parsedLink?.kind !== 'call' || !parsedLink.callId) return;
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-
-    event.preventDefault();
-    void callLobbyService
-      .resolveInternalRoute(parsedLink.callId)
-      .then(resolution => {
-        if (resolution.result === 'internal') {
-          window.location.assign(
-            `/${encodeURIComponent(resolution.workspaceId)}/call/${encodeURIComponent(parsedLink.callId!)}`,
-          );
-          return;
-        }
-
-        // Users without a valid session for the call's workspace enter through
-        // the external lobby in the same Spaces tab.
-        window.location.assign(resolvedHref);
-      })
-      .catch(() => {
-        window.location.assign(resolvedHref);
-      });
-  };
+  // Call links are left to bubble: the document-level handler in App.tsx routes
+  // every anchor in the app, and it turns an invite URL into the dashboard's own
+  // call route. Claiming them here as well would do the same work twice.
 
   if (!resolvedHref || !parsedLink) {
     return (
       <a
         href={href}
         className={className}
-        onClick={handleOpen}
+        onClick={onClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_MESSAGE_LINK'
         {...props}
@@ -197,7 +175,7 @@ export const InternalXyneLink = ({
       <a
         href={href}
         className={className}
-        onClick={handleOpen}
+        onClick={onClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_INTERNAL_LINK'
         data-track-metadata={JSON.stringify({ href: copyHref, kind: parsedLink.kind })}
@@ -223,14 +201,14 @@ export const InternalXyneLink = ({
   return (
     <span className='group/internal-link inline-flex items-center gap-1.5 align-baseline max-w-full'>
       {parsedLink.kind === 'canvas' ? (
-        <CanvasLink href={href} className={linkClassName} onClick={handleOpen} {...props}>
+        <CanvasLink href={href} className={linkClassName} onClick={onClick} {...props}>
           {linkContent}
         </CanvasLink>
       ) : (
         <a
           href={resolvedHref}
           className={linkClassName}
-          onClick={handleOpen}
+          onClick={onClick}
           data-track-category='MESSAGE'
           data-track-name='OPEN_INTERNAL_LINK'
           data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
@@ -1086,15 +1064,16 @@ const parseNode = (
           context: [flowJSON.screenId],
         });
         return (
-          <FlowScreenManager
-            key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`}
-            flow={flowJSON}
-            messageId={messageId ?? ''}
-            conversationId={conversationId ?? ''}
-            {...(slashCommandArtifactContext && {
-              messageContext: slashCommandArtifactContext,
-            })}
-          />
+          <div key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`} className='mt-1.5'>
+            <FlowScreenManager
+              flow={flowJSON}
+              messageId={messageId ?? ''}
+              conversationId={conversationId ?? ''}
+              {...(slashCommandArtifactContext && {
+                messageContext: slashCommandArtifactContext,
+              })}
+            />
+          </div>
         );
       } catch (e) {
         logger.error(Event.FRONTEND_ERROR, {
@@ -1332,6 +1311,16 @@ const parseNode = (
       props['data-track-category'] = 'MESSAGE';
       props['data-track-name'] = isExternal ? 'ClickExternalLink' : 'ClickInternalLink';
       props['data-track-metadata'] = JSON.stringify({ url: href, isExternal });
+
+      const label = (el.textContent ?? '').trim().replace(/\/+$/, '');
+      if (isExternal && label !== href.replace(/\/+$/, '')) {
+        const { key, ...anchorProps } = props;
+        return (
+          <LinkHoverCard key={key as string} href={href}>
+            {React.createElement(tag, anchorProps, ...children)}
+          </LinkHoverCard>
+        );
+      }
     }
   }
 

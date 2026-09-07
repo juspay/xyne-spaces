@@ -1,11 +1,24 @@
 import { apiInstance } from './clients/apiClient';
 
+export type MonthlyMode = 'DAY_OF_MONTH' | 'NTH_WEEKDAY';
+
+// Fields shared by create/update payloads for the recurrence.
+// Monthly is signalled by daysOfWeek === "-"; monthlyValue packs the schedule
+// (DAY_OF_MONTH: 1..28 or -1=last day; NTH_WEEKDAY: ordinal*10 + weekday).
+export interface SchedulePayloadFields {
+  daysOfWeek?: string; // weekly: "0,1,2,3,4,5,6" (0=Sun...6=Sat); "-" = monthly
+  monthlyMode?: MonthlyMode;
+  monthlyValue?: number;
+}
+
 export interface ScheduledMessage {
   id: string;
   title: string;
   messageContent: string;
   channelId: string;
   daysOfWeek: string;
+  monthlyMode: MonthlyMode | null;
+  monthlyValue: number | null;
   scheduledTime: string;
   isActive: boolean;
   createdBy: string;
@@ -14,18 +27,16 @@ export interface ScheduledMessage {
   canEdit: boolean;
 }
 
-export interface CreateScheduledMessagePayload {
+export interface CreateScheduledMessagePayload extends SchedulePayloadFields {
   channelId: string;
   title: string;
   messageContent: string;
-  daysOfWeek: string;
   scheduledTime: string;
 }
 
-export interface UpdateScheduledMessagePayload {
+export interface UpdateScheduledMessagePayload extends Partial<SchedulePayloadFields> {
   title?: string;
   messageContent?: string;
-  daysOfWeek?: string;
   scheduledTime?: string;
   isActive?: boolean;
 }

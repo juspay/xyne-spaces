@@ -3,6 +3,7 @@ import type { Room } from 'livekit-client';
 import { Brush, Eraser, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
+
 import { callService } from '../../../services/Call/callService';
 import { logger, Logger } from '../../../utils/logger';
 import {
@@ -732,6 +733,7 @@ export function CallWhiteboard({
                     onClick={handleDeleteAndSavePage}
                     disabled={!callId || !activePageHasContent || isSavingBeforeDelete}
                     className='rounded-lg border border-gray-900 px-3 py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50'
+                    data-ph-capture-attribute-track-id='whiteboard_delete_page_save_confirm'
                     data-track-category='CALLS'
                     data-track-name='Whiteboard_Delete_Page_Save_Confirm'
                     data-track-metadata={JSON.stringify({ pageId: activePageId })}
@@ -743,6 +745,7 @@ export function CallWhiteboard({
                     onClick={handleDeletePage}
                     disabled={isSavingBeforeDelete}
                     className='rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50'
+                    data-ph-capture-attribute-track-id='whiteboard_delete_page_confirm'
                     data-track-category='CALLS'
                     data-track-name='Whiteboard_Delete_Page_Confirm'
                     data-track-metadata={JSON.stringify({ pageId: activePageId })}

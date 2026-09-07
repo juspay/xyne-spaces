@@ -9,7 +9,11 @@ import { useZero } from '../../../hooks/useZero';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
-import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
+import {
+  ApiError,
+  callService,
+  type ScheduleCallRequest,
+} from '../../../services/Call/callService';
 import DOMPurify from 'dompurify';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -133,6 +137,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   // and whether the exclusion set has been initialized from the channel member list.
   const selectiveEditParticipantIdsRef = useRef<Set<string> | null>(null);
   const selectiveExclusionsInitializedRef = useRef<boolean>(false);
+  // groupId → member user IDs, cached when a group is expanded on select. A picked
+  // group leaves no `user_group:` value behind (it becomes `user:` pills), so this is
+  // the only way to know a group is already represented and hide it from the list.
+  const expandedGroupMembersRef = useRef<Map<string, string[]>>(new Map());
 
   // Fetch recurring call series data via Zero — only when the modal is open and
   // in edit mode for a recurring call, so the query doesn't run when the popup is closed.
@@ -438,15 +446,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       type: 'user_group' as const,
     }));
 
-    // In edit mode, the call's existing channel may be a DM (filtered out of `channels`).
-    // Inject it into options so it remains searchable/selectable.
+    // In edit mode, the call's existing channel may be filtered out of `channels`
+    // (e.g. a Desk channel). Inject it into options so it remains searchable/selectable.
+    // DM/GROUP_DM-backed calls are excluded: they prefill individual participants from
+    // call_participants rather than a channel pill (see useScheduleCallInitialization),
+    // and their `name` is raw user IDs, so injecting one puts a UUID in the picker.
     if (isEditMode && initialCall?.channelId) {
       const alreadyIncluded = channelOptions.some(
         c => c.value === `channel:${initialCall.channelId}`,
       );
       if (!alreadyIncluded) {
         const existingChannel = allVisibleChannels.find(c => c.id === initialCall.channelId);
-        if (existingChannel) {
+        if (
+          existingChannel &&
+          existingChannel.scopeType !== ChannelScopeType.DM &&
+          existingChannel.scopeType !== ChannelScopeType.GROUP_DM
+        ) {
           channelOptions.push({
             ...existingChannel,
             label: existingChannel.name,
@@ -504,10 +519,50 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     fullUserList,
   ]);
 
-  const rankedParticipantOptions = useMemo(
-    () => rankParticipantOptions(inviteUserOrChannelOptions, searchQuery),
-    [inviteUserOrChannelOptions, searchQuery],
+  // Drop groups whose every member is already picked. Re-reading the ref is safe here:
+  // expansion always writes it before updating `participants`, which re-runs this memo.
+  // Removing any one member drops the group back into the list.
+  // A non-organizer participant may only add/remove people (and only on a DM/GROUP_DM
+  // call, which is what gates the entry point). Mirrors the backend rule in
+  // scheduleCallController.updateScheduledCall, which rejects any other field from them.
+  const participantsOnly =
+    isEditMode &&
+    !!initialCall?.organizerUserId &&
+    !!user?.id &&
+    initialCall.organizerUserId !== user.id;
+
+  // Restricted editors may drop the people they invited themselves, so only the organizer
+  // and everyone invited by someone else is pinned. Mirrors the backend's pinned set in
+  // scheduleCallController.authorizeScheduledCallEdit.
+  const lockedParticipantValues = useMemo(
+    () =>
+      participantsOnly && initialCall
+        ? new Set(
+            initialCall.participants
+              .filter(
+                p =>
+                  !p.isExternal &&
+                  p.userId !== user?.id &&
+                  (p.userId === initialCall.organizerUserId || p.invitedBy !== user?.id),
+              )
+              .map(p => `user:${p.userId}`),
+          )
+        : undefined,
+    [participantsOnly, initialCall, user?.id],
   );
+
+  const rankedParticipantOptions = useMemo(() => {
+    const selectedUserIds = new Set(
+      participants.filter(v => v.startsWith('user:')).map(v => v.replace('user:', '')),
+    );
+    const remaining = inviteUserOrChannelOptions.filter(option => {
+      if (!option.value.startsWith('user_group:')) return true;
+      const members = expandedGroupMembersRef.current.get(option.value.replace('user_group:', ''));
+      if (!members?.length) return true;
+      return !members.every(id => selectedUserIds.has(id));
+    });
+    return rankParticipantOptions(remaining, searchQuery);
+  }, [inviteUserOrChannelOptions, searchQuery, participants]);
 
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
@@ -577,21 +632,29 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // ── Time validation ───────────────────────────────────────────────────
       // react-hook-form clears manual setError calls when handleSubmit re-validates,
       // so we re-check the constraint here to prevent saving invalid data.
-      if (isRecurring) {
-        const recurringTimeError = validateRecurringCallTimes(recurringStartTime, recurringEndTime);
-        if (recurringTimeError) {
-          setError('endsAt', { type: 'manual', message: recurringTimeError });
-          return;
-        }
-      } else {
-        const { startsAtError, endsAtError } = validateCallDateTimes(data.startsAt, data.endsAt);
-        if (startsAtError) {
-          setError('startsAt', { type: 'manual', message: startsAtError });
-          return;
-        }
-        if (endsAtError) {
-          setError('endsAt', { type: 'manual', message: endsAtError });
-          return;
+      // A restricted editor sends no times and their inputs are hidden, so an error here
+      // would be an invisible dead end — a call whose start has already passed, or a series
+      // that crosses midnight, would block them forever.
+      if (!participantsOnly) {
+        if (isRecurring) {
+          const recurringTimeError = validateRecurringCallTimes(
+            recurringStartTime,
+            recurringEndTime,
+          );
+          if (recurringTimeError) {
+            setError('endsAt', { type: 'manual', message: recurringTimeError });
+            return;
+          }
+        } else {
+          const { startsAtError, endsAtError } = validateCallDateTimes(data.startsAt, data.endsAt);
+          if (startsAtError) {
+            setError('startsAt', { type: 'manual', message: startsAtError });
+            return;
+          }
+          if (endsAtError) {
+            setError('endsAt', { type: 'manual', message: endsAtError });
+            return;
+          }
         }
       }
 
@@ -659,8 +722,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // ── EDIT MODE ──────────────────────────────────────────────────────────
       if (isEditMode && initialCall) {
         if (editEntireSeries && initialCall.recurringSeriesId) {
-          // Validate weekly requires at least one day
-          if (recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
+          // Validate weekly requires at least one day. A participant editor never sends the
+          // recurrence rule, so the check doesn't apply to them.
+          if (!participantsOnly && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
             toast.error('Select at least one day', {
               description: 'Weekly recurrence requires at least one day.',
               duration: 3000,
@@ -668,37 +732,54 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             return;
           }
           const resolvedChannelId = channelId; // selective calls stay on their channel
-          await callService.updateRecurringSeries(initialCall.recurringSeriesId, {
-            title: data.title,
-            // postCallUpdates mode: send callUpdatesChannel (backend checks membership)
-            // Selective call: send channelId (no callUpdatesChannel),
-            ...(postCallUpdates && updateChannelId ? { callUpdatesChannel: updateChannelId } : {}),
-            ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
-            ...(userIds.length > 0 && { targetUserIds: userIds }),
-            recurrenceRule: buildRrule(),
-            timezone,
-            startTime: recurringStartTime,
-            endTime: recurringEndTime,
-            startsOn: data.startsAt.getTime(),
-            externalInvitees: effExternals,
-            ...(seriesEndsType === 'on' &&
-              seriesEndsOn !== null && { endsOn: seriesEndsOn.getTime() }),
-          });
+          // A participant editor may send nothing but the invite list — the backend rejects
+          // the request outright otherwise.
+          await callService.updateRecurringSeries(
+            initialCall.recurringSeriesId,
+            participantsOnly
+              ? { targetUserIds: userIds }
+              : {
+                  title: data.title,
+                  // postCallUpdates mode: send callUpdatesChannel (backend checks membership)
+                  // Selective call: send channelId (no callUpdatesChannel),
+                  ...(postCallUpdates && updateChannelId
+                    ? { callUpdatesChannel: updateChannelId }
+                    : {}),
+                  ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
+                  ...(userIds.length > 0 && { targetUserIds: userIds }),
+                  recurrenceRule: buildRrule(),
+                  timezone,
+                  startTime: recurringStartTime,
+                  endTime: recurringEndTime,
+                  startsOn: data.startsAt.getTime(),
+                  externalInvitees: effExternals,
+                  ...(seriesEndsType === 'on' &&
+                    seriesEndsOn !== null && { endsOn: seriesEndsOn.getTime() }),
+                },
+          );
           toast.success('Recurring Series Updated', {
             description: `Changes applied to all occurrences of ${data.title}`,
             duration: 3000,
           });
         } else {
-          // Edit single occurrence
-          await callService.updateScheduledCall(initialCall.externalId, {
-            title: data.title,
-            startsAt: new Date(data.startsAt).getTime(),
-            endsAt: new Date(data.endsAt).getTime(),
-            ...(postCallUpdates && updateChannelId ? { callUpdatesChannel: updateChannelId } : {}),
-            ...(channelId ? { channelId } : {}),
-            ...(userIds.length > 0 && { targetUserIds: userIds }),
-            externalInvitees: effExternals,
-          });
+          // Edit single occurrence. A participant editor may send nothing but the
+          // invite list — the backend rejects the request outright otherwise.
+          await callService.updateScheduledCall(
+            initialCall.externalId,
+            participantsOnly
+              ? { targetUserIds: userIds }
+              : {
+                  title: data.title,
+                  startsAt: new Date(data.startsAt).getTime(),
+                  endsAt: new Date(data.endsAt).getTime(),
+                  ...(postCallUpdates && updateChannelId
+                    ? { callUpdatesChannel: updateChannelId }
+                    : {}),
+                  ...(channelId ? { channelId } : {}),
+                  ...(userIds.length > 0 && { targetUserIds: userIds }),
+                  externalInvitees: effExternals,
+                },
+          );
           toast.success('Call Updated', {
             description: 'This occurrence has been updated.',
             duration: 3000,
@@ -786,8 +867,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         recurringSeriesId: initialCall?.recurringSeriesId ?? null,
         error: err instanceof Error ? err.message : String(err),
       });
-      toast.error('Error scheduling call', {
-        description: 'Failed to schedule call',
+      toast.error(isEditMode ? 'Error updating call' : 'Error scheduling call', {
+        // Surface the API's reason (e.g. the participant-edit 403) instead of a generic line.
+        description:
+          err instanceof ApiError && err.message
+            ? err.message
+            : isEditMode
+              ? 'Failed to update call'
+              : 'Failed to schedule call',
         duration: 5000,
       });
     }
@@ -839,6 +926,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           const memberIds = mappings
             .map((m: { userId: string }) => m.userId)
             .filter((id: string) => id !== user?.id);
+          expandedGroupMembersRef.current.set(groupId, memberIds);
           for (const id of memberIds) {
             expanded.add(`user:${id}`);
           }
@@ -869,6 +957,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     setStep('participants');
     setSearchQuery('');
     setNotFoundUsers([]);
+    expandedGroupMembersRef.current.clear();
     resetRecurringState(defaultStart);
     setEditEntireSeries(false);
     resetPostCallUpdates();
@@ -912,16 +1001,23 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Single source of truth for the submit button: drives `disabled`, the
   // hover-tooltip contents, and the label.
+  // A restricted editor submits the invite list and nothing else, and every other field is
+  // hidden or disabled for them — so gating Save on those fields would strand them behind a
+  // requirement they cannot see or fix.
   const missingRequirements: string[] = [];
-  if (!title.trim()) missingRequirements.push('Add a title');
   if (participants.length === 0) missingRequirements.push('Add at least one participant');
-  if (!scheduleStartIsValid || errors.startsAt) missingRequirements.push('Pick a valid start time');
-  if (!scheduleEndIsValid || errors.endsAt) missingRequirements.push('Pick a valid end time');
-  if (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
-    missingRequirements.push('Pick at least one weekday');
-  }
-  if (postCallUpdates && !updateChannelId) {
-    missingRequirements.push('Pick a channel for post-call updates');
+  if (!participantsOnly) {
+    if (!title.trim()) missingRequirements.push('Add a title');
+    if (!scheduleStartIsValid || errors.startsAt) {
+      missingRequirements.push('Pick a valid start time');
+    }
+    if (!scheduleEndIsValid || errors.endsAt) missingRequirements.push('Pick a valid end time');
+    if (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
+      missingRequirements.push('Pick at least one weekday');
+    }
+    if (postCallUpdates && !updateChannelId) {
+      missingRequirements.push('Pick a channel for post-call updates');
+    }
   }
   if (allChannelMembersExcluded) {
     missingRequirements.push('Include at least one channel participant');
@@ -1038,7 +1134,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 type='button'
                 className='size-7 rounded-lg'
                 onClick={handleClose}
-                data-track-category='calls'
+                data-track-category='CALLS'
                 data-track-name='CLOSE_SCHEDULE_CALL_MODAL'
               >
                 <X className='size-4' />
@@ -1056,6 +1152,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       id='call-title'
                       type='text'
                       placeholder='Enter call title'
+                      disabled={participantsOnly}
                       tabIndex={0}
                       className={cn(
                         '!text-[22px] truncate',
@@ -1065,20 +1162,26 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       )}
                     />
                   )}
-                  rules={{
-                    required: 'Title is required',
-                    maxLength: {
-                      value: 80,
-                      message: 'Title must be less than 80 characters',
-                    },
-                    validate: value => value.trim().length > 0 || 'Title cannot be empty',
-                  }}
+                  // No rules for a restricted editor: the field is disabled and the title is
+                  // never sent, so an existing empty or over-long title must not block Save.
+                  rules={
+                    participantsOnly
+                      ? {}
+                      : {
+                          required: 'Title is required',
+                          maxLength: {
+                            value: 80,
+                            message: 'Title must be less than 80 characters',
+                          },
+                          validate: value => value.trim().length > 0 || 'Title cannot be empty',
+                        }
+                  }
                 />
                 {errors.title && (
                   <p className='text-red-500 text-xs mt-1'>{errors.title.message}</p>
                 )}
               </div>
-              <div className='flex flex-col gap-3'>
+              <div className={cn('flex flex-col gap-3', participantsOnly && 'hidden')}>
                 {isRecurring ? (
                   /* ── Recurring mode: date on its own row, times side-by-side below ── */
                   <>
@@ -1338,7 +1441,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                         }}
                       >
                         <DropdownMenuTrigger asChild>
-                          <Button className='py-2 px-3 flex gap-2.5 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'>
+                          <Button
+                            data-track-category='CALLS'
+                            data-track-name='OPEN_RECURRENCE_MENU'
+                            className='py-2 px-3 flex gap-2.5 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'
+                          >
                             <span className='text-sm font-normal leading-6'>{recurrenceLabel}</span>
                             <ChevronDown className='size-4' strokeWidth={2.3} />
                           </Button>
@@ -1374,7 +1481,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                   <DropdownMenuItem
                                     className='text-sm rounded-lg p-2'
                                     onClick={() => setIsRecurring(false)}
-                                    data-track-category='calls'
+                                    data-track-category='CALLS'
                                     data-track-name='SET_NOT_RECURRING'
                                   >
                                     Does Not Repeat
@@ -1386,7 +1493,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       setRecurrenceFrequency('DAY');
                                       setRecurrenceDays([]);
                                     }}
-                                    data-track-category='calls'
+                                    data-track-category='CALLS'
                                     data-track-name='SET_RECURRING_DAILY'
                                   >
                                     Daily
@@ -1398,7 +1505,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       setRecurrenceFrequency('WEEK');
                                       setRecurrenceDays(['MO', 'TU', 'WE', 'TH', 'FR']);
                                     }}
-                                    data-track-category='calls'
+                                    data-track-category='CALLS'
                                     data-track-name='SET_RECURRING_WEEKLY'
                                   >
                                     Every Weekday (Mon – Fri)
@@ -1414,7 +1521,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                           setMonthlyType('monthly_nth_weekday');
                                           setRecurrenceDays([]);
                                         }}
-                                        data-track-category='calls'
+                                        data-track-category='CALLS'
                                         data-track-name='SET_RECURRING_MONTHLY'
                                       >
                                         Monthly on {ordinalWord} {weekday}
@@ -1439,7 +1546,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       setIsRecurring(true);
                                       setShowCustomPanel(true);
                                     }}
-                                    data-track-category='calls'
+                                    data-track-category='CALLS'
                                     data-track-name='OPEN_CUSTOM_RECURRENCE'
                                   >
                                     Custom…
@@ -1490,6 +1597,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                             typeof prev === 'number' ? prev + 1 : 1,
                                           )
                                         }
+                                        data-track-category='CALLS'
+                                        data-track-name='INCREMENT_REPEAT_INTERVAL'
                                         className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
                                         strokeWidth={3}
                                       />
@@ -1499,6 +1608,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                             Math.max(1, typeof prev === 'number' ? prev - 1 : 0),
                                           )
                                         }
+                                        data-track-category='CALLS'
+                                        data-track-name='DECREMENT_REPEAT_INTERVAL'
                                         className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
                                         strokeWidth={3}
                                       />
@@ -1529,7 +1640,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                             setRecurrenceDays([]);
                                           }
                                         }}
-                                        data-track-category='calls'
+                                        data-track-category='CALLS'
                                         data-track-name={`set-recurrence-frequency-${freq.toLowerCase()}`}
                                         className={cn(
                                           'w-full h-7 rounded-full text-[13px] font-medium transition-colors',
@@ -1562,7 +1673,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                               key={key}
                                               type='button'
                                               onClick={() => toggleRecurrenceDay(key)}
-                                              data-track-category='calls'
+                                              data-track-category='CALLS'
                                               data-track-name={`toggle-recurrence-day-${key.toLowerCase()}`}
                                               className={cn(
                                                 'size-[22px] rounded-full text-[12px] transition-colors',
@@ -1605,7 +1716,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                                 getWeekdayOccurrence(startsAt);
                                               return (
                                                 <>
-                                                  <Radio value='monthly_day'>
+                                                  <Radio
+                                                    value='monthly_day'
+                                                    data-track-category='CALLS'
+                                                    data-track-name='MONTHLY_TYPE_DAY_OF_MONTH'
+                                                  >
                                                     Monthly on day {dayOfMonth}
                                                     {dayOfMonth > 28 && (
                                                       <span className='block text-amber-600 text-xs mt-0.5'>
@@ -1613,7 +1728,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                                       </span>
                                                     )}
                                                   </Radio>
-                                                  <Radio value='monthly_nth_weekday'>
+                                                  <Radio
+                                                    value='monthly_nth_weekday'
+                                                    data-track-category='CALLS'
+                                                    data-track-name='MONTHLY_TYPE_DAY_OF_WEEK'
+                                                  >
                                                     Monthly on {ordinalWord} {weekday.toLowerCase()}
                                                     {isLast && occurrence >= 4 && (
                                                       <span className='block text-amber-600 text-xs mt-0.5'>
@@ -1642,9 +1761,21 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         setSeriesEndsType(val as SeriesEndsType)
                                       }
                                     >
-                                      <Radio value='never'>Never</Radio>
+                                      <Radio
+                                        value='never'
+                                        data-track-category='CALLS'
+                                        data-track-name='SERIES_ENDS_NEVER'
+                                      >
+                                        Never
+                                      </Radio>
                                       <div className='flex flex-1 items-center justify-between'>
-                                        <Radio value='on'>On</Radio>
+                                        <Radio
+                                          value='on'
+                                          data-track-category='CALLS'
+                                          data-track-name='SERIES_ENDS_ON_DATE'
+                                        >
+                                          On
+                                        </Radio>
                                         <DatePicker
                                           selectedDate={seriesEndsOn ?? null}
                                           onSelect={date => {
@@ -1668,7 +1799,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         />
                                       </div>
                                       <div className='flex items-center justify-between'>
-                                        <Radio value='after' className='text-[13px] leading-5'>
+                                        <Radio
+                                          value='after'
+                                          data-track-category='CALLS'
+                                          data-track-name='SERIES_ENDS_AFTER_COUNT'
+                                          className='text-[13px] leading-5'
+                                        >
                                           After
                                         </Radio>
                                         <div className='relative overflow-hidden'>
@@ -1727,6 +1863,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                                   Math.min((prev === '' ? 0 : prev) + 1, 365),
                                                 )
                                               }
+                                              data-track-category='CALLS'
+                                              data-track-name='INCREMENT_OCCURRENCE_COUNT'
                                               className={cn(
                                                 'size-3 text-secondary-foreground/40 cursor-pointer',
                                                 seriesEndsType !== 'after' &&
@@ -1741,6 +1879,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                                   Math.max(1, (prev === '' ? 0 : prev) - 1),
                                                 )
                                               }
+                                              data-track-category='CALLS'
+                                              data-track-name='DECREMENT_OCCURRENCE_COUNT'
                                               className={cn(
                                                 'size-3 text-secondary-foreground/40 cursor-pointer',
                                                 seriesEndsType !== 'after' &&
@@ -1775,7 +1915,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                           );
                                         }
                                       }}
-                                      data-track-category='calls'
+                                      data-track-category='CALLS'
                                       data-track-name='CANCEL_CUSTOM_RECURRENCE'
                                       className='rounded-lg text-sm leading-5 bg-transparent h-8 gap-2.5'
                                     >
@@ -1797,7 +1937,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         }
                                         setShowCustomPanel(false);
                                       }}
-                                      data-track-category='calls'
+                                      data-track-category='CALLS'
                                       data-track-name='APPLY_CUSTOM_RECURRENCE'
                                       className='rounded-lg text-sm leading-5 bg-primary h-8 gap-2.5'
                                     >
@@ -1843,6 +1983,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       }
                       {...(channelMembersOptions ? { channelMembersOptions } : {})}
                       excludedChannelMembers={excludedChannelMembers}
+                      {...(lockedParticipantValues
+                        ? { lockedValues: lockedParticipantValues }
+                        : {})}
                       hoistSelectedChannelMembers={isEditMode}
                       toggleExcludedChannelMember={toggleExcludedChannelMember}
                     />
@@ -1858,7 +2001,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 )}
               </div>
 
-              {canUseExternalInvitees && (
+              {canUseExternalInvitees && !participantsOnly && (
                 <div className='space-y-2 -mb-3'>
                   <div className='flex items-baseline justify-between'>
                     <p className='text-muted-foreground text-[13px] leading-5'>External Users</p>
@@ -1881,18 +2024,26 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 </div>
               )}
 
-              {/* Edit entire series checkbox — only for recurring calls in edit mode */}
+              {/* Edit entire series checkbox — only for recurring calls in edit mode. Restricted
+                  editors get it too: without it their invite changes would land on this one
+                  occurrence and silently vanish from the rest of the series. */}
               {isEditMode && initialCall?.recurringSeriesId && (
                 <Checkbox
                   checked={editEntireSeries}
                   onChange={setEditEntireSeries}
-                  label='Apply to all calls in this series'
+                  data-track-category='CALLS'
+                  data-track-name='APPLY_TO_SERIES_TOGGLE'
+                  label={
+                    participantsOnly
+                      ? 'Apply these people to all calls in this series'
+                      : 'Apply to all calls in this series'
+                  }
                 />
               )}
 
               {/* Post call updates to channel — shown whenever participants are added; the broadcast
                   channel is independent of the call's own channel. */}
-              {showPostCallUpdates && (
+              {showPostCallUpdates && !participantsOnly && (
                 <div className='space-y-4'>
                   <div className='flex items-center gap-1.5 w-full'>
                     <Checkbox
@@ -1904,6 +2055,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                           setChannelSearchQuery('');
                         }
                       }}
+                      data-track-category='CALLS'
+                      data-track-name='POST_UPDATES_TO_CHANNEL_TOGGLE'
                       label='Post call updates to channel'
                     />
                     <Tooltip
@@ -1939,7 +2092,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                               }}
                               className='ml-0.5 shrink-0 rounded p-0.5 text-foreground hover:bg-muted'
                               aria-label={`Remove ${selectedChannelItem.label}`}
-                              data-track-category='calls'
+                              data-track-category='CALLS'
                               data-track-name='remove-post-call-channel'
                             >
                               <X className='size-3' />
@@ -2008,6 +2161,8 @@ const SubmitFooter: React.FC<{
         size='sm'
         type='submit'
         disabled={disabled}
+        data-track-category='CALLS'
+        data-track-name='SUBMIT_SCHEDULE_CALL'
         className='rounded-lg text-[13px] px-4 h-9 text-primary-foreground bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
       >
         {label}
@@ -2022,7 +2177,7 @@ const SubmitFooter: React.FC<{
         size='sm'
         className='rounded-lg text-[13px] px-4 h-9'
         onClick={onCancel}
-        data-track-category='calls'
+        data-track-category='CALLS'
         data-track-name='CANCEL_SCHEDULE_CALL'
         disabled={isSubmitting}
         type='button'

@@ -14,6 +14,11 @@ CLAW_AUTH_FRONTEND_IMAGE_NAME ?= xyne-spaces-claw-auth-frontend
 SOURCE_COMMIT := $(or $(SOURCE_COMMIT),$(shell git rev-parse HEAD))
 SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short=10 HEAD))
 
+# PostHog client-side analytics (public key, but injected from CI so it stays out
+# of git). Empty default: local builds ship a bundle with analytics disabled.
+VITE_POSTHOG_KEY ?=
+VITE_POSTHOG_HOST ?=
+
 #temp2
 # Backend targets 3s
 build-backend:
@@ -55,11 +60,11 @@ clean-runner:
 build-dashboard:
 	$(info Building $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --load .
 
 push-dashboard:
 	$(info Pushing to registry: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --push .
 	$(info Successfully pushed: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-dashboard:

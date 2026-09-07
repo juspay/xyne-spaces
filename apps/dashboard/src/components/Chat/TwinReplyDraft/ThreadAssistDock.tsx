@@ -830,6 +830,7 @@ function ReplyCard({
               <button
                 onClick={() => void decline()}
                 disabled={loading}
+                data-ph-capture-attribute-track-id='twin_decline_draft'
                 aria-label='Discard draft'
                 data-track-category='twin-dock'
                 data-track-name='decline'
@@ -855,7 +856,10 @@ function ReplyCard({
           </div>
           <Button
             size='sm'
-            onClick={() => void send()}
+            data-track-category='twin-dock'
+            data-track-name='send-draft'
+            trackId='twin_send_reply'
+            trackAction={send}
             disabled={loading}
             loading={loading}
             className='h-7 gap-1 rounded-lg px-[9px] text-[13px] font-medium'

@@ -570,7 +570,8 @@ async function dispatchRun(input: {
 }
 
 /**
- * Remove create-app from the agent's selected custom tools before dispatch.
+ * Remove create-app and its read-back tool from the agent's selected custom
+ * tools before dispatch.
  *
  * This is the WEAKER half of the recursion guard and cannot stand alone: an
  * agent with no `tools` key gets every tool by default (see parseToolsConfig),
@@ -586,7 +587,7 @@ function stripCreateApp(config: unknown): unknown {
     ...(cfg as object),
     tools: {
       ...(cfg?.tools as object),
-      custom: custom.filter((s) => s !== "create-app" && s !== "schedule-task"),
+      custom: custom.filter((s) => s !== "create-app" && s !== "read-app-file" && s !== "schedule-task"),
     },
   };
 }

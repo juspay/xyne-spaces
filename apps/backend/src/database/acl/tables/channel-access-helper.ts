@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
+import { Prisma, PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
 
 type GuestScope = {
   workspaceId: string
@@ -191,6 +191,29 @@ export async function getAccessibleTicketIds(
   })
 
   return tickets.map((entry) => entry.id)
+}
+
+/**
+ * Read predicate for every ticket-shaped table: same workspace, and the ticket's channel is
+ * PUBLIC or the caller participates. Guests use `getAccessibleTicketIds` instead.
+ *
+ * Keep identical to TicketsACL.canSelect in packages/shared/src/zero/acl/tables/tickets-acl.ts,
+ * which is what the UI reads through — the two share no code and nothing catches drift.
+ * The PUBLIC arm is unconditional, matching ChannelsACL / MessagesACL / EmailsACL.
+ */
+export async function accessibleTicketWhere(
+  _prisma: PrismaClient,
+  ctx: Pick<ACLContext, 'userId' | 'workspaceId'>
+): Promise<Prisma.TicketWhereInput> {
+  return {
+    workspaceId: ctx.workspaceId,
+    channel: {
+      OR: [
+        { visibility: ChannelVisibility.PUBLIC },
+        { participants: { some: { userId: ctx.userId } } },
+      ],
+    },
+  }
 }
 
 export async function getAccessibleWorkflowIds(

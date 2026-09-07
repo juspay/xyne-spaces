@@ -139,7 +139,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     () => (adminParticipations ?? []).some(participant => participant.channelId === channelId),
     [adminParticipations, channelId],
   );
-  const [canvasList] = useCachedQuery(
+  const [canvasList, canvasListDetails] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'channel',
       channelId,
@@ -359,6 +359,12 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     };
   }, []);
 
+  const getCanvasPath = useCallback(
+    (id: string): string =>
+      isMobile ? `/chat/canvas/${id}` : `${baseRoute}/${channelId}?tab=canvas&canvasId=${id}`,
+    [baseRoute, channelId, isMobile],
+  );
+
   const showArchivedChannelCreateError = useCallback((entity: 'canvas' | 'folder'): void => {
     toast.error(`Cannot create ${entity}`, {
       description: 'This channel is archived.',
@@ -373,7 +379,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     sourceCanvas: canvas,
     userId: user?.id,
     navigate,
-    getCanvasRoute: id => (isMobile ? `/chat/canvas/${id}` : `${baseRoute}/canvas/${id}`),
+    getCanvasRoute: getCanvasPath,
     getNavigationState: newCanvas =>
       isMobile ? { canvas: newCanvas, previousPath: location.pathname } : { canvas: newCanvas },
     setCanvas,
@@ -491,11 +497,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       currentCanvasIdRef.current = newCanvasId;
       setSelectedTheme('white');
 
-      // On mobile, always navigate to /chat/canvas/:canvasId (preserves back navigation to channel)
-      // On desktop, use baseRoute-based navigation
-      const canvasPath = isMobile
-        ? `/chat/canvas/${newCanvasId}`
-        : `${baseRoute}/canvas/${newCanvasId}`;
+      const canvasPath = getCanvasPath(newCanvasId);
 
       // Store the original path for back navigation on mobile
       if (isMobile) {
@@ -566,9 +568,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       currentCanvasIdRef.current = newCanvasId;
       setSelectedTheme('white');
 
-      const canvasPath = isMobile
-        ? `/chat/canvas/${newCanvasId}`
-        : `${baseRoute}/canvas/${newCanvasId}`;
+      const canvasPath = getCanvasPath(newCanvasId);
 
       if (isMobile) {
         void navigate(canvasPath, {
@@ -616,11 +616,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     lastSavedContentRef.current = JSON.stringify(selectedCanvas.content || []);
     currentCanvasIdRef.current = selectedCanvas.id;
 
-    // On mobile, always navigate to /chat/canvas/:canvasId (preserves back navigation to channel)
-    // On desktop, use baseRoute-based navigation
-    const canvasPath = isMobile
-      ? `/chat/canvas/${selectedCanvas.id}`
-      : `${baseRoute}/canvas/${selectedCanvas.id}`;
+    const canvasPath = getCanvasPath(selectedCanvas.id);
 
     // Store the original path for back navigation on mobile
     if (isMobile) {
@@ -861,6 +857,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           <div className='flex-1 overflow-hidden'>
             <ChannelCanvasList
               canvases={canvases}
+              loading={canvasListDetails.type !== 'complete' && canvases.length === 0}
               folders={folders}
               onSelect={handleSelectCanvas}
               currentUserId={user?.id}

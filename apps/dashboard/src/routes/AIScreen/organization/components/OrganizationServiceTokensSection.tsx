@@ -189,7 +189,13 @@ export function OrganizationServiceTokensSection({
         ) : tokens.isError ? (
           <div className='flex items-center justify-between gap-3 p-4'>
             <p className='text-sm text-muted-foreground'>Couldn’t load service tokens.</p>
-            <Button variant='ghost' size='sm' onClick={() => void tokens.refetch()}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => void tokens.refetch()}
+              data-track-category='Claw Organization'
+              data-track-name='Organization: retry service tokens'
+            >
               Retry
             </Button>
           </div>
@@ -229,6 +235,8 @@ export function OrganizationServiceTokensSection({
                       size='icon'
                       aria-label={`Revoke ${token.name ?? token.prefix}`}
                       onClick={() => setRevokeTarget(token)}
+                      data-track-category='Claw Organization'
+                      data-track-name='Organization: open revoke service token'
                       className='text-muted-foreground hover:text-destructive'
                     >
                       <Trash2 className='size-4' aria-hidden />
@@ -259,14 +267,28 @@ export function OrganizationServiceTokensSection({
         testId='create-service-token-dialog'
         footer={
           minted ? (
-            <Button onClick={closeCreate}>Done</Button>
+            <Button
+              onClick={closeCreate}
+              data-track-category='Claw Organization'
+              data-track-name='Organization: close minted token dialog'
+            >
+              Done
+            </Button>
           ) : (
             <>
-              <Button variant='outline' onClick={closeCreate} disabled={mintToken.isPending}>
+              <Button
+                variant='outline'
+                onClick={closeCreate}
+                data-track-category='Claw Organization'
+                data-track-name='Organization: cancel create service token'
+                disabled={mintToken.isPending}
+              >
                 Cancel
               </Button>
               <Button
                 onClick={() => void createToken()}
+                data-track-category='Claw Organization'
+                data-track-name='Organization: create service token'
                 loading={mintToken.isPending}
                 disabled={
                   !name.trim() ||
@@ -290,7 +312,13 @@ export function OrganizationServiceTokensSection({
               <code className='min-w-0 flex-1 break-all text-xs text-foreground'>
                 {minted.token}
               </code>
-              <Button variant='outline' size='sm' onClick={() => void copyToken()}>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => void copyToken()}
+                data-track-category='Claw Organization'
+                data-track-name='Organization: copy service token'
+              >
                 {copied ? <Check className='size-4' /> : <Copy className='size-4' />}
                 {copied ? 'Copied' : 'Copy'}
               </Button>

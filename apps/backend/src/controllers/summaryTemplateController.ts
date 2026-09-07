@@ -36,7 +36,7 @@ const SummaryTemplateUpdateSchema = SummaryTemplateCreateSchema.partial().refine
 );
 
 const SummaryTemplatePublicationActionSchema = z.object({
-  action: z.enum(['request', 'publish', 'withdraw', 'approve', 'deny']),
+  action: z.enum(['request', 'publish', 'withdraw', 'approve', 'deny', 'unpublish']),
 });
 
 const SummaryTemplateShareTargetSchema = z.object({

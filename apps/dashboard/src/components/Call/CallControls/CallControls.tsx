@@ -52,6 +52,8 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
+
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
 interface ActiveCallForControls {
@@ -161,8 +163,7 @@ export function CallControls({
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
-  const { isMobile, isMac } = usePlatform();
-  const modKey = isMac ? '⌘' : 'Ctrl';
+  const { isMobile } = usePlatform();
 
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
@@ -187,13 +188,13 @@ export function CallControls({
     return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
   }, [activeCalls, externalId]);
   const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
+  // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
-    if (!isHost) return 0;
     return (
       currentCall?.participants?.filter(p => p.response === InvitationResponse.REQUESTED).length ??
       0
     );
-  }, [currentCall?.participants, isHost]);
+  }, [currentCall?.participants]);
   const audioTurnedOffByHost = !isHost && hostControls.turnOffAudio;
   const cameraTurnedOffByHost = !isHost && hostControls.turnOffCamera;
   const screenShareTurnedOffByHost = !isHost && hostControls.turnOffScreenShare;
@@ -201,13 +202,13 @@ export function CallControls({
   const micTooltip = audioTurnedOffByHost
     ? "The host turned off everyone's audio"
     : isMicEnabled
-      ? `Mute microphone (${modKey}D)`
-      : `Unmute microphone (${modKey}D, or press spacebar to speak)`;
+      ? 'Mute microphone'
+      : 'Unmute microphone (or press spacebar to speak)';
   const cameraTooltip = cameraTurnedOffByHost
     ? "The host turned off everyone's camera"
     : isCameraEnabled
-      ? `Turn off camera (${modKey}E)`
-      : `Turn on camera (${modKey}E)`;
+      ? 'Turn off camera'
+      : 'Turn on camera';
   const screenShareTooltip = screenShareBlockedByWhiteboard
     ? 'Close the shared whiteboard to start screen sharing.'
     : screenShareTurnedOffByHost
@@ -421,7 +422,15 @@ export function CallControls({
         <div className='relative' ref={micMenuRef}>
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <Tooltip
-              content={micTooltip}
+              content={
+                audioTurnedOffByHost ? (
+                  micTooltip
+                ) : (
+                  <span>
+                    {micTooltip} <ShortcutHint shortcut='huddle.toggleMute' />
+                  </span>
+                )
+              }
               side='top'
               sideOffset={8}
               collisionPadding={8}
@@ -478,7 +487,7 @@ export function CallControls({
                 onClick={() => setShowMicMenu(!showMicMenu)}
                 className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select audio devices'
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='Toggle_Mic_Menu'
                 data-track-metadata={JSON.stringify({ showMicMenu: !showMicMenu, callId })}
               >
@@ -532,7 +541,15 @@ export function CallControls({
         <div className='relative' ref={cameraMenuRef}>
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <Tooltip
-              content={cameraTooltip}
+              content={
+                cameraTurnedOffByHost ? (
+                  cameraTooltip
+                ) : (
+                  <span>
+                    {cameraTooltip} <ShortcutHint shortcut='huddle.toggleVideo' />
+                  </span>
+                )
+              }
               side='top'
               sideOffset={8}
               collisionPadding={8}
@@ -589,7 +606,7 @@ export function CallControls({
                 }}
                 className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select camera'
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='Toggle_Camera_Menu'
                 data-track-metadata={JSON.stringify({ showCameraMenu: !showCameraMenu, callId })}
               >
@@ -917,6 +934,7 @@ export function CallControls({
                     }}
                     className='text-2xl p-2 rounded-xl hover:bg-[#202224] transition-colors duration-150 hover:scale-125 transform'
                     title={emoji}
+                    data-ph-capture-attribute-track-id='send_reaction'
                     data-track-category='CALLS'
                     data-track-name='SEND_REACTION'
                     data-track-metadata={JSON.stringify({ emoji, callId })}
@@ -1116,6 +1134,7 @@ export function CallControls({
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Leave call'
           data-testid='end-call-button'
+          data-ph-capture-attribute-track-id='end_call'
           data-track-category='CALLS'
           data-track-name='END_CALL'
           data-track-metadata={JSON.stringify({ callId })}

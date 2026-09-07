@@ -154,7 +154,9 @@ router.post(
       if (endMs - startMs > MAX_REFETCH_RANGE_MS) {
         return res.status(400).json({ success: false, error: 'Range exceeds 365 days' });
       }
-      let source = await new ExternalSourceRepository().findByChannelId(channelId);
+      let source = await new ExternalSourceRepository().findChannelSource(channelId, {
+        sourceTypes: ['google', 'microsoft', 'zoho'],
+      });
       let targetChannelId: string | undefined;
       let dlEmail: string | undefined;
 

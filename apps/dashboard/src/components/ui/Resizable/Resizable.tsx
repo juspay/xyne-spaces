@@ -8,6 +8,7 @@ export {
   useGroupRef,
   type PanelImperativeHandle,
   type GroupImperativeHandle,
+  type PanelSize,
 } from 'react-resizable-panels';
 
 type ResizableGroupProps = Omit<GroupProps, 'defaultLayout' | 'onLayoutChanged'> & {

@@ -5,10 +5,14 @@ import { config } from '../app/config';
 import { getIsQuitting } from '../app/main';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
-import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
+import {
+  registerAppOwnedWindow,
+  setMainWindow as setInterceptorMainWindow,
+} from '../services/request-interceptor';
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
+import { callInvitePath } from '../utils/validation';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -55,6 +59,21 @@ function trackAppWindow(win: BrowserWindow): void {
   win.once('closed', () => appWindows.delete(win));
 }
 
+const namedChildWindows = new Map<string, BrowserWindow>();
+
+const STANDALONE_WINDOW_PREFIX = 'xyne-window:';
+
+function standaloneWindowKey(frameName: string | undefined): string | null {
+  if (!frameName || !frameName.startsWith(STANDALONE_WINDOW_PREFIX)) return null;
+  return frameName.slice(STANDALONE_WINDOW_PREFIX.length).split('#')[0] || null;
+}
+
+function focusWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 function applyWindowPolicy(win: BrowserWindow): void {
   // Mirrors 'open-in-browser-panel' so links sent to the external browser are
   // logged too, not just the ones routed into the panel.
@@ -76,6 +95,14 @@ function applyWindowPolicy(win: BrowserWindow): void {
       
       // Only allow http(s) protocols
       if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+        return { action: 'deny' };
+      }
+
+      // A call the app hosts itself — the router opens it, not a window or a
+      // browser panel showing the guest lobby.
+      const inviteWindowPath = callInvitePath(url);
+      if (inviteWindowPath) {
+        win.webContents.send('navigate-to', inviteWindowPath);
         return { action: 'deny' };
       }
 
@@ -101,6 +128,16 @@ function applyWindowPolicy(win: BrowserWindow): void {
       }
       
       // Internal URLs - allow new window
+      const windowKey = standaloneWindowKey(details.frameName);
+      if (windowKey) {
+        const existing = namedChildWindows.get(windowKey);
+        if (existing && !existing.isDestroyed()) {
+          focusWindow(existing);
+          return { action: 'deny' };
+        }
+        namedChildWindows.delete(windowKey);
+      }
+
       if (isAppWindowUrl(url) && appWindows.size >= MAX_APP_WINDOWS) {
         win.webContents.send('app-window-limit-reached', MAX_APP_WINDOWS);
         log.info(`[WindowManager] app window limit (${MAX_APP_WINDOWS}) reached; denying ${url}`);
@@ -157,6 +194,16 @@ function applyWindowPolicy(win: BrowserWindow): void {
         return;
       }
 
+      // Checked before the same-origin allow below: an invite URL normally lives
+      // on the Spaces origin, so following it would replace the running app with
+      // the guest lobby.
+      const invitePath = callInvitePath(navUrl);
+      if (invitePath) {
+        event.preventDefault();
+        win.webContents.send('navigate-to', invitePath);
+        return;
+      }
+
       const currentAppUrl = new URL(config.FRONTEND_URL);
       const currentUrl = win.webContents.getURL();
       const currentUrlObj = new URL(currentUrl || '');
@@ -193,6 +240,18 @@ function applyWindowPolicy(win: BrowserWindow): void {
     if (isAppWindowUrl(details.url)) {
       trackAppWindow(childWindow);
     }
+    registerAppOwnedWindow(childWindow);
+
+    const windowKey = standaloneWindowKey(details.frameName);
+    if (windowKey) {
+      namedChildWindows.set(windowKey, childWindow);
+      childWindow.on('closed', () => {
+        if (namedChildWindows.get(windowKey) === childWindow) {
+          namedChildWindows.delete(windowKey);
+        }
+      });
+    }
+
     applyWindowPolicy(childWindow);
   });
 

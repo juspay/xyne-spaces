@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
-import { CircleCheck, Loader2, Pencil, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
+import {
+  CheckTickCircle as CircleCheck,
+  Spinner as Loader2,
+  PencilEdit as Pencil,
+} from '@xyne/icons';
 import type { ReenterMode, Ticket } from '@xyne/shared';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import Button from '../../ui/Button';

@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText } from '@xyne/icons';
 
 /**
  * Shared form-submission rendering + matching used by BOTH the Details activity timeline

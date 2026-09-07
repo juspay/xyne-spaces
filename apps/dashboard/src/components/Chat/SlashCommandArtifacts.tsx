@@ -451,6 +451,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               void handleCloseArtifact();
             }}
             disabled={isClosing}
+            data-ph-capture-attribute-track-id='close_slash_command_artifact'
             className='-mr-1 ml-auto flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
             aria-label={`Close this ${definition.bodyNoun}`}
             title={`Close this ${definition.bodyNoun}`}
@@ -488,6 +489,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
                 startNewCall();
               }}
               disabled={isInCall || !canActOnArtifact}
+              data-ph-capture-attribute-track-id='start_new_call_from_artifact'
               className='inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-semibold hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60'
               data-prevent-thread
               data-track-category='SLASH_COMMAND_ARTIFACT'
@@ -538,6 +540,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               startNewCall();
             }}
             disabled={!canActOnArtifact || isInCall}
+            data-ph-capture-attribute-track-id='start_call_from_artifact'
             className='inline-flex h-10 items-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60'
             data-prevent-thread
             data-track-category='SLASH_COMMAND_ARTIFACT'

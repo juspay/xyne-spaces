@@ -1,5 +1,5 @@
 import { ReactElement, useTransition } from 'react';
-import { Check } from 'lucide-react';
+import { CheckTickSingle as Check } from '@xyne/icons';
 import { Button } from '../../../../ui/Button/Button';
 import type { BoardOption } from '../../types';
 

@@ -1,0 +1,1 @@
+export { CanvasFilePanel } from './CanvasFilePanel';

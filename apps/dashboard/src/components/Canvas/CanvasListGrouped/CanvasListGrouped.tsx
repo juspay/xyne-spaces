@@ -6,6 +6,7 @@ import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import Input from '../../ui/Input';
+
 import { Dialog } from '../../ui/Dialog';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { canvasService } from '../../../services/Canvas/canvasService';
@@ -599,6 +600,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
               channelCreateTarget && void handleCreateCanvasInChannel(channelCreateTarget)
             }
             disabled={isCreatingCanvas || !channelCreateTarget || !!channelCreateTarget?.isArchived}
+            data-ph-capture-attribute-track-id='create_canvas_in_channel_root'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_CHANNEL_ROOT'
           >
@@ -616,6 +618,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                     className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-foreground hover:bg-accent disabled:opacity-50'
                     onClick={() => handleCreateCanvasInChannelFolder(folder)}
                     disabled={isCreatingCanvas}
+                    data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
                     data-track-category='CANVAS'
                     data-track-name='CREATE_CANVAS_IN_CHANNEL_FOLDER'
                   >
@@ -648,6 +651,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                 className='inline-flex items-center justify-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50'
                 onClick={handleCreateChannelFolder}
                 disabled={!channelCreateTarget || !!channelCreateTarget?.isArchived}
+                data-ph-capture-attribute-track-id='create_channel_canvas_folder'
                 data-track-category='CANVAS'
                 data-track-name='CREATE_CHANNEL_CANVAS_FOLDER'
               >

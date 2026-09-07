@@ -23,6 +23,7 @@ import PinListV2 from '../PinListV2';
 import { ThreadMessages } from '../ThreadPannel';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import CanvasTab from '../../Canvas/CanvasTab';
+import CanvasScreen from '../../Canvas/CanvasScreen';
 import { Panel, ResizableGroup, Separator } from '../../ui/Resizable/Resizable';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -88,6 +89,8 @@ const ConversationPanelV2 = ({
   showHeader = true,
   hideComposer = false,
   skipMarkAsRead = false,
+  conversationIds,
+  onOpenThread,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -95,6 +98,10 @@ const ConversationPanelV2 = ({
   linkedItemCreatedAtOverride?: number | null;
   onClose?: () => void;
   showHeader?: boolean;
+  /** Restrict the feed to these conversations (e.g. the SDLC panel's DISCUSSION-linked set). */
+  conversationIds?: string[] | undefined;
+  /** Overrides thread-open navigation (e.g. open in-panel instead of routing). */
+  onOpenThread?: ((conversationId: string, e?: React.MouseEvent) => void) | undefined;
   // When true, suppress the message composer / join / archive footer entirely.
   // Used by read-only surfaces such as the Unreads inbox.
   hideComposer?: boolean;
@@ -144,6 +151,7 @@ const ConversationPanelV2 = ({
   const tab = searchParams.get('tab') || getDefaultTab();
   const ticketId = searchParams.get('ticketId');
   const conversationId = searchParams.get('conversationId');
+  const canvasId = searchParams.get('canvasId');
 
   const participationStatus = useGetChannelUserStatus(channelId);
   const [initialMessageById] = useCachedQuery(
@@ -172,10 +180,12 @@ const ConversationPanelV2 = ({
   // has resolved for linked navigation (the loading gate below), so the
   // anchor is available at hydration time. Older/newer pages load through
   // the normal pagination path.
-  const cachedConversations = useMemo(
-    () => getChannelConversationsSnapshot(channelId, urlCreatedAt ?? undefined),
-    [channelId, urlCreatedAt],
-  );
+  const cachedConversations = useMemo(() => {
+    const snapshot = getChannelConversationsSnapshot(channelId, urlCreatedAt ?? undefined);
+    if (!conversationIds) return snapshot;
+    const allowed = new Set(conversationIds);
+    return snapshot.filter(conversation => allowed.has(conversation.conversationId));
+  }, [channelId, urlCreatedAt, conversationIds]);
 
   // Skip mark as read functionality
   const skipMarkAsReadRef = useRef(skipMarkAsRead || false);
@@ -260,6 +270,8 @@ const ConversationPanelV2 = ({
                   projectId={channel?.projectId}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
+                  {...(conversationIds && { conversationIds })}
+                  {...(onOpenThread && { onOpenThread })}
                 ></ChatListV4>
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (
@@ -291,7 +303,8 @@ const ConversationPanelV2 = ({
             ) : (
               <KanbanBoardScreen channelId={channelId} />
             ))}
-          {tab === 'canvas' && <CanvasTab channelId={channelId} />}
+          {tab === 'canvas' &&
+            (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}
           {tab === 'links' && <LinksTab channelId={channelId} />}
         </div>
       </div>

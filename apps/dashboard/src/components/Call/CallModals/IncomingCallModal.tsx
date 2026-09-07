@@ -12,6 +12,8 @@ import { useAllChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useUsers } from '../../../hooks/useUsers';
 import { IncomingCallCard } from '../IncomingCall/IncomingCallCard';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { buildCallNotificationBody } from '../IncomingCall/callNotificationBody';
 import {
   buildIncomingCallViewModel,
   isRingableCall,
@@ -244,12 +246,42 @@ export function IncomingCallModal(): React.ReactElement | null {
     [zero, incomingCallData?.callId],
   );
 
-  // Show native Electron notification when app is in background
+  // Derive the OS-notification body from the same view model the modal renders,
+  // so it says the same thing the in-app card would: scheduled calls name the
+  // place, everything else reads as `<inviter> is inviting you to a call`.
+  // Memoized so the notification effect below only re-runs when the *text*
+  // actually changes -- not on every workspace-wide Zero sync that touches
+  // allActiveCalls / channelMap / usersById while a call is ringing.
+  const notificationBody = useMemo((): string | null => {
+    if (!incomingCallData) {
+      return null;
+    }
+    const latestCallData = allActiveCalls?.find(
+      call => call.externalId === incomingCallData.callId,
+    ) as CallWithRelations | undefined;
+    const vm = buildIncomingCallViewModel({
+      callId: incomingCallData.callId,
+      call: latestCallData as unknown as IncomingCallRow | undefined,
+      caller: incomingCallData.caller,
+      channelMap,
+      usersById,
+      currentUserId: user?.id,
+      isInActiveCall,
+    });
+    return buildCallNotificationBody(vm, incomingCallData.caller.name);
+  }, [incomingCallData, allActiveCalls, channelMap, usersById, user?.id, isInActiveCall]);
+
+  // Show native Electron notification when app is in background. Keyed on the
+  // ring state, the (reference-stable) incoming call, and the derived body, so
+  // the notification fires once per call and re-shows only when the body
+  // actually changes -- instead of being torn down and recreated (replaying the
+  // ring sound / dock bounce) on every unrelated participant/user/channel sync.
   useEffect(() => {
     if (
       !window.electronAPI ||
       !isRinging ||
       !incomingCallData ||
+      notificationBody === null ||
       typeof window.electronAPI.showCallNotification !== 'function'
     ) {
       return;
@@ -260,6 +292,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       callerName: incomingCallData.caller.name,
       callerEmail: incomingCallData.caller.email,
       callType: incomingCallData.callType,
+      body: notificationBody,
       ...(incomingCallData.caller.picture && { callerPicture: incomingCallData.caller.picture }),
     });
 
@@ -268,7 +301,7 @@ export function IncomingCallModal(): React.ReactElement | null {
         window.electronAPI.closeCallNotification(incomingCallData.callId);
       }
     };
-  }, [isRinging, incomingCallData]);
+  }, [isRinging, incomingCallData, notificationBody]);
 
   // Handle Electron notification action callbacks (accept/reject from notification)
   useEffect(() => {
@@ -287,8 +320,10 @@ export function IncomingCallModal(): React.ReactElement | null {
         if (!callInQueue) return;
 
         if (data.action === 'accept') {
+          globalClickTracker.trackManualEvent('CALLS', 'ACCEPT_INCOMING_CALL_NATIVE');
           handleAcceptCall(data.callId);
         } else if (data.action === 'reject') {
+          globalClickTracker.trackManualEvent('CALLS', 'REJECT_INCOMING_CALL_NATIVE');
           handleRejectCall(data.callId);
         }
       },

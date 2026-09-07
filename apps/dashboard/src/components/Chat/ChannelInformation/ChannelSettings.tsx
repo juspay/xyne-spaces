@@ -405,6 +405,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                     <button
                       type='button'
                       onClick={handleMakePublic}
+                      data-ph-capture-attribute-track-id='make_channel_public'
                       className='mt-1 inline-flex items-center self-start rounded-[8px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent'
                       data-track-category='CHANNEL_SETTINGS'
                       data-track-name='MakeChannelPublic'

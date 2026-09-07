@@ -27,6 +27,7 @@ export type ResourceName =
   | 'SUPPORT'
   | 'PRODUCT-INSIGHTS'
   | 'LISTPROJECTS'
+  | 'RELEASE-MANAGER'
   | 'CHANNELS'
   | 'CANVASES'
   | 'WORKSPACE'

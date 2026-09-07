@@ -22,6 +22,7 @@ import { Loader2 } from 'lucide-react';
 import { MicOn } from '@xyne/icons';
 import { toast } from 'sonner';
 import Tooltip from '../Tooltip/Tooltip';
+import { ShortcutHint } from '../ShortcutHint';
 import type { MentionResult } from '@xyne/shared';
 import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
 import type { VoiceStreamSession } from '../../../services/VoiceInput/voiceInputService';
@@ -671,11 +672,14 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
     return (
       <Tooltip
         content={
-          isVoiceTranscribing
-            ? 'Transcribing...'
-            : isVoiceRecording
-              ? 'Stop voice input'
-              : 'Start voice input'
+          isVoiceTranscribing ? (
+            'Transcribing...'
+          ) : (
+            <span className='flex items-center gap-2'>
+              {isVoiceRecording ? 'Stop voice input' : 'Start voice input'}
+              <ShortcutHint shortcut='composer.voiceInput' />
+            </span>
+          )
         }
         side='top'
       >

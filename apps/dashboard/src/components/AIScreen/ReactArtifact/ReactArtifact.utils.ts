@@ -152,7 +152,8 @@ export function toSandpackFiles(
   // Injected AFTER the agent's files, deliberately overwriting — the opposite of
   // the preamble rule above. The bridge endpoint must be ours: a payload saved
   // before this path was reserved could otherwise ship its own /lib/xyne-data.
-  // Always injected, so a stray import can never break the build.
+  // Always injected: the synthesized entry imports it for the root boundary,
+  // and a stray import from agent code can never break the build.
   files[XYNE_DATA_RUNTIME_PATH] = { code: XYNE_DATA_RUNTIME_CODE, hidden: true };
 
   if (!files[SANDPACK_ENTRY]) {
@@ -160,6 +161,7 @@ export function toSandpackFiles(
       code: [
         "import { StrictMode } from 'react';",
         "import { createRoot } from 'react-dom/client';",
+        "import { XyneErrorBoundary } from './lib/xyne-data';",
         `import Root from '${toModuleSpecifier(payload.entry)}';`,
         '',
         '// Install the theme BEFORE Tailwind compiles. A static',
@@ -172,7 +174,17 @@ export function toSandpackFiles(
         '',
         'function mount() {',
         "  const el = document.getElementById('root');",
-        '  if (el) createRoot(el).render(<StrictMode><Root /></StrictMode>);',
+        '  // The boundary reports a throw during render to the host, which is',
+        '  // what turns a blank frame into an error the agent can be asked to fix.',
+        '  if (el) {',
+        '    createRoot(el).render(',
+        '      <StrictMode>',
+        '        <XyneErrorBoundary>',
+        '          <Root />',
+        '        </XyneErrorBoundary>',
+        '      </StrictMode>,',
+        '    );',
+        '  }',
         '}',
         '',
         '// Mount after Tailwind has generated its stylesheet so the first paint is',

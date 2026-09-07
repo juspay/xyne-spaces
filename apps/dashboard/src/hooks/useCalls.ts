@@ -9,7 +9,7 @@ import { htmlToPlainText } from '../utils/sanitizer';
 import { formatElapsedTime } from '../utils/recordingUtils';
 
 // Type for active call with relations
-type ActiveCallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
+export type ActiveCallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
 // Type for call participants
 type CallParticipants = Readonly<QueryResultType<typeof queries.callParticipantsByCallId>>;

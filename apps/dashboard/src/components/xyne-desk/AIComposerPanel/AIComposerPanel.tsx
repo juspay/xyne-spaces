@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { XyneAIStar } from '../../icons/xyne-ai';
+
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
 
 export interface AIQuickRewriteAction {
@@ -156,6 +157,7 @@ export const AIComposerPanel = ({
               type='button'
               onClick={submitInput}
               disabled={disabled || !value.trim()}
+              data-ph-capture-attribute-track-id='submit_ask_ai_instruction'
               className='p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0 mb-0.5'
               aria-label='Submit'
               data-track-category='Support'
@@ -254,6 +256,8 @@ export const AIRefineDropdown = ({
                       onQuickRewrite(action.id);
                       setOpen(false);
                     }}
+                    data-ph-capture-attribute-track-id='ai_quick_rewrite'
+                    data-ph-capture-attribute-action={action.id}
                     className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                     data-track-category='Support'
                     data-track-name='QuickRewrite'
@@ -297,6 +301,7 @@ export const AIRefineDropdown = ({
                   onRerunDraft();
                   setOpen(false);
                 }}
+                data-ph-capture-attribute-track-id='ai_rerun_draft'
                 className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                 title={agentName ? `Rerun draft with ${agentName}` : 'Rerun draft'}
                 data-track-category='Support'

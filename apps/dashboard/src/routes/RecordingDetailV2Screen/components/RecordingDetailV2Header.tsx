@@ -32,6 +32,8 @@ export interface RecordingDetailV2HeaderProps {
   titleState?: RecordingTitleState;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
+  /** Labels the recordings list had loaded, offered in the picker before anything is typed. */
+  labelSuggestions: string[];
   onTicketLinkUpdated: (ticketLink: RecordingTicketLinkState) => void;
   onOpenShare: () => void;
   onMinimize?: () => void;
@@ -105,6 +107,7 @@ export const RecordingDetailV2Header = ({
   titleState,
   onTitleUpdated,
   onLabelsUpdated,
+  labelSuggestions,
   onTicketLinkUpdated,
   onOpenShare,
   onMinimize,
@@ -279,6 +282,7 @@ export const RecordingDetailV2Header = ({
           <RecordingLabelPicker
             labels={recording.labels ?? []}
             canEdit={recording.createdByUserId === currentUser?.id}
+            suggestions={labelSuggestions}
             onChange={labels => void handleLabelsChange(labels)}
           />
           {canShare && (

@@ -1,131 +1,99 @@
-import { MESSAGE_ACTS, NO_ACT, THREAD_TYPES } from '@xyne/shared';
+import type { ThreadTypeEntry } from '@xyne/shared';
 
 /**
- * The classifier prompt is GENERATED from the vocabularies rather than written out by hand,
- * so adding or editing a tag in packages/shared/src/tags/vocabularies.ts updates the prompt
- * automatically. A hand-copied list is the classic way for a prompt to drift out of sync
- * with the values the mutator will actually accept.
+ * The classifier prompt is GENERATED from the workspace's vocabulary rather than written out
+ * by hand. Nothing here names a thread type — a hand-copied list is the classic way for a
+ * prompt to drift out of sync with the values that will actually be accepted.
+ *
+ * Thread types are the only vocabulary; the message-act list that used to sit alongside them
+ * is gone. Instead the model must cite, for each type it returns, the messages that evidence
+ * it. That citation is what lets a chip on a thread be traced back to the message it came
+ * from, and it is what gets stored on those messages.
  *
  * The prompt is a hint, not a guarantee — models return near-misses ("Billing" for
- * "billing", "bug-report" for "bug"). Output is filtered against the seeded catalog before
- * anything is written, and the mutator rejects unknown names as a final backstop.
+ * "billing", "bug-report" for "bug"). Output is coerced onto the same vocabulary this prompt
+ * was built from, and anything unrecognised is dropped rather than stored.
  */
 
-const numbered = (entries: readonly { name: string; description: string }[]): string =>
+const numbered = (entries: readonly ThreadTypeEntry[]): string =>
   entries.map((entry, i) => `${i + 1}. ${entry.name} — ${entry.description}`).join('\n');
 
-const ACT_NAMES = MESSAGE_ACTS.map(entry => entry.name);
-const THREAD_TYPE_CHOICES = THREAD_TYPES;
+const names = (entries: readonly ThreadTypeEntry[]): string =>
+  entries.map(entry => entry.name).join(', ');
 
-export const buildClassifierPrompt = (): string => `You classify workplace chat messages.
+/**
+ * @param threadTypes the workspace's vocabulary, in display order. Both the list and the
+ *        output enum are generated from it, so a workspace that adds a type gets it offered
+ *        to the model without any change here.
+ */
+export const buildClassifierPrompt = (threadTypes: readonly ThreadTypeEntry[]): string => {
+  return `You classify workplace chat threads.
 
 Output STRICT JSON only. No markdown, no commentary, no explanation.
 
 You will receive a JSON object with:
-- thread_messages: [{ id, text, author_display_name, timestamp_iso, existing_acts? }] — the
-  ENTIRE thread in chronological order, starting with the message that opened it.
-  existing_acts, when present, is the tags that message was already given — an empty
-  array means someone deliberately cleared it and it must stay untagged.
+- thread_messages: [{ id, text, author_display_name, timestamp_iso }] — the ENTIRE thread
+  in chronological order, starting with the message that opened it.
 - root_is_bot: boolean — true when a bot or automated system posted the opening message.
+- preceding_messages: optional — [{ text, author_display_name, timestamp_iso }] — earlier
+  messages from the same direct message conversation, in chronological order, ending just
+  before thread_messages begins. Present only for DMs, where people rarely reply in threads
+  and a message therefore arrives with no visible thread around it. Read them to understand
+  what thread_messages is about — "can you check this?" means nothing on its own. They have
+  NO ids and are NOT part of the thread: never cite them, and never classify them. Classify
+  thread_messages, using these only to understand it.
 - ticket: optional — { title, description } when this thread was turned into a ticket.
   Someone wrote these deliberately, so they state the thread's purpose more reliably than
-  the conversation does. Weigh them heavily for threadTypes; they say nothing about what
-  any individual message does. thread_messages may be EMPTY when a thread was opened from a
-  ticket and nobody has replied — classify threadTypes from the ticket alone and return an
-  empty classifications array.
+  the conversation does, so weigh them heavily. thread_messages may be EMPTY when a thread
+  was opened from a ticket and nobody has replied — classify from the ticket alone and
+  return an empty sourceMessageIds for each type.
 
-## Task — classify ONLY the messages that have no existing_acts
+## Task — tag the thread
 
-Messages that already carry existing_acts are settled. They are given to you as context so
-you can judge the new ones — do NOT return entries for them, and do not revise them.
+${numbered(threadTypes)}
 
-Return the tags for each remaining message. A message usually performs ONE act, but it may
-perform several — "I'll patch this by 4pm, but which gateway should I point it at?" is both
-a COMMITMENT and a QUESTION. Return every act a message genuinely performs.
+Add every type that genuinely applies, and nothing else. Most threads take one; some take
+two or three; none take all of them.
 
-Be conservative: most messages do exactly one thing. Only return more than one tag when the
-message clearly performs distinct acts, not when you are unsure which single tag fits.
+Each definition states what it covers and, after "NOT", the near-misses it excludes. Read the
+NOT clauses before tagging — they are where this task goes wrong.
 
-You see the whole thread at once, so use it. A message's act depends on what is already open
-above it — read the earlier messages and their existing_acts before judging a new one.
+Two tests, and a type must pass the one its definition is written in terms of:
 
-Classify each message by WHAT IT CREATES GOING FORWARD:
+- Definitions phrased as "done = …" are about the thread as a piece of WORK. Ask what would
+  have to happen for this thread to be finished.
+- The rest are about the thread as a DOCUMENT. Ask whether someone who was never in this
+  thread could get their question answered by THIS THREAD ALONE. The bar is high and most
+  threads clear none of them. Tag what the thread ANSWERS, not what it discusses — a thread
+  full of debugging that never lands on an answer gets none of these. Not reaching for one is
+  the normal, correct result; do not add one to look thorough.
 
-${numbered(MESSAGE_ACTS)}
+## Evidence — required for every type
 
-When you do return several tags for one message, list them strongest-first using this
-precedence: ${ACT_NAMES.join(' > ')}.
+For each type you return, cite the messages that make it true, by id, in sourceMessageIds.
 
-Critical: ANSWER and RESOLUTION are not intrinsic to the message — they depend on what is
-open earlier in the thread. Only use ANSWER when an earlier message actually asked a
-question. Only use RESOLUTION when an earlier message opened an issue or commitment.
+Cite the message that CAUSED the tag, not every message that mentions the topic. When the
+type describes what the thread is for, that is usually the message that opened it or first
+stated the problem; when the type describes what the thread teaches, it is the message that
+actually contains the answer — the one with the steps, the narrative, the decision and its
+reasoning, the values. One or two ids is normal. Never cite more than three.
 
-Return exactly ["${NO_ACT}"] when the message genuinely performs no act — acknowledgements
-("ok", "thanks", "+1"), greetings, one-word fragments, thinking aloud. Do not stretch a tag
-to fit.
+Only ever cite ids that appear in thread_messages. If the type comes from the ticket rather
+than any message, return an empty list rather than guessing at an id.
 
-${NO_ACT} is not a way to avoid judging. A message that reports the state of work, assigns
-or accepts it, asks something, decides something or raises urgency DOES perform an act —
-including when it is long, list-shaped, or covers many items at once. A list of workstreams
-with owners is a STATUS_UPDATE; an agenda someone commits to is a COMMITMENT. Tag the
-dominant act.
-
-## Second task — the thread as a whole
-
-Also classify the ENTIRE thread, on TWO independent axes.
-
-${numbered(THREAD_TYPE_CHOICES)}
-
-### Axis 1 — outcome (one, rarely two)
-
-Pick ONE of ISSUE, ALERT, QUESTION, REQUEST, FEATURE_REQUEST, DISCUSSION, ANNOUNCEMENT by
-what "done" would mean for the thread. Return a second one only when the thread genuinely
-is two things at once (a bug report that also requests a feature) — never more than two.
-
-Decide by what would have to happen for this thread to be finished:
-- fixed AND verified → ISSUE
-- answered → QUESTION
-- an action performed with existing tools → REQUEST
-- accepted or declined for the roadmap → FEATURE_REQUEST
-- nothing owed by anyone → ANNOUNCEMENT
-- no done state at all → DISCUSSION
-
-REQUEST vs FEATURE_REQUEST: could someone with the right permissions do this TODAY with
-tools that already exist? Yes → REQUEST. Needs something built → FEATURE_REQUEST.
-
-When no other type fits, DISCUSSION.
-
-### Axis 2 — answer types (usually NONE)
-
-Then add any of HOW_TO, WHAT_HAPPENED, WHY_DECISION, WHAT_IS, KNOWN_ISSUE, REFERENCE,
-EXAMPLE, POLICY_LIMIT that apply. These are independent of the outcome — an ISSUE whose
-resolution spells out the fix is both ISSUE and HOW_TO.
-
-The bar is high and most threads clear none of it: add one ONLY if someone who was never in
-this thread could get their question answered by THIS THREAD ALONE. Tag what the thread
-ANSWERS, not what it discusses. A thread full of debugging that never lands on an answer
-gets none of these. Returning no answer types is the normal, correct outcome — do not reach
-for one to look thorough.
-
-Read each definition's "NOT" clauses before tagging: asking how to do something is not
-HOW_TO, mid-incident chatter is not WHAT_HAPPENED, a choice with no reasoning is not
-WHY_DECISION, and a value someone is unsure about is not POLICY_LIMIT.
-
-ANNOUNCEMENT is an outcome, not an answer type — a release note is ANNOUNCEMENT alone.
+If you cannot point at a message that justifies a type, that is a sign the type does not
+apply — drop it rather than citing something loosely related.
 
 ## Output
 
 {
-  "threadTypes": [the outcome type first, then any answer types — from ${THREAD_TYPE_CHOICES.map(e => e.name).join(', ')}],
-  "classifications": [
-    { "id": "<message id from thread_messages>", "messageActs": [one or more of ${ACT_NAMES.join(', ')}, or exactly ["${NO_ACT}"]] }
+  "threadTypes": [
+    { "name": "<one of ${names(threadTypes)}>", "sourceMessageIds": ["<id from thread_messages>"] }
   ]
 }
 
-One classifications entry per message WITHOUT existing_acts, using the exact ids given —
-including the ones that perform no act, as ["${NO_ACT}"]. Messages that already have
-existing_acts must not appear in classifications at all. messageActs must always have at
-least one value. Use the exact strings above — no other spelling, casing or punctuation.
-
-threadTypes covers the whole thread and is always required, even when every message was
-already classified.`;
+Most-important type first. Use the exact strings above — no other spelling, casing or
+punctuation. threadTypes is always required and must never be empty; every entry must have a
+name and a sourceMessageIds array, which may be empty only when the type comes from the
+ticket.`;
+};

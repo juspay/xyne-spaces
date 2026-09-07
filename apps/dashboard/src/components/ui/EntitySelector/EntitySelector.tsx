@@ -24,6 +24,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   placeholder,
   searchPlaceholder,
   showSearch = true,
+  matchTriggerWidth = false,
   isLoading = false,
   width = 'auto',
   onSearchChange,
@@ -420,6 +421,10 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             // Never narrower than the trigger it drops from; a compact trigger
             // still lets the content size the popover as before.
             minWidth: 'var(--radix-popover-trigger-width)',
+            ...(matchTriggerWidth && {
+              width: 'var(--radix-popover-trigger-width)',
+              maxWidth: 'var(--radix-popover-trigger-width)',
+            }),
             // Virtuoso rows are absolutely positioned and can't size the popover;
             // lock it to the plain list's max width so widths stay consistent.
             ...(isVirtualized && { width: 'max(24rem, var(--radix-popover-trigger-width))' }),

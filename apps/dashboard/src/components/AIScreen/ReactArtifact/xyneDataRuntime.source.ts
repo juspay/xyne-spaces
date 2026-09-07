@@ -12,7 +12,15 @@
  * as the current viewer and posts snapshots in over postMessage.
  */
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 
 const PROTOCOL_VERSION = 1;
 
@@ -53,6 +61,61 @@ function post(message: Record<string, unknown>): void {
   window.parent.postMessage({ source: 'xyne-artifact', v: PROTOCOL_VERSION, ...message }, '*');
 }
 
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  // A rejection with a plain `{ message }` — common from fetch wrappers.
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+  return '';
+}
+
+/**
+ * Tells the host the app broke. The bundler reports some of this on its own,
+ * but its report has no component stack and misses anything a boundary
+ * swallows — so the app reports its own failures too, and the host shows
+ * whichever it holds (see ArtifactErrorOverlay).
+ */
+function reportError(error: unknown, componentStack?: string): void {
+  post({
+    type: 'error',
+    message: errorText(error) || 'Unknown error',
+    ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+    ...(componentStack ? { componentStack } : {}),
+  });
+}
+
+window.addEventListener('error', event => reportError(event.error ?? event.message));
+window.addEventListener('unhandledrejection', event => reportError(event.reason));
+
+/**
+ * Wraps the app's root. Placed by the synthesized entry, not by agent code, so
+ * every app has one whether or not the agent thought to add its own. Renders
+ * nothing once it has caught: the host's overlay is the failure UI, and a
+ * second message inside the frame would only compete with it.
+ */
+export class XyneErrorBoundary extends Component<{ children?: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
+    reportError(error, info.componentStack ?? undefined);
+  }
+
+  override render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 window.addEventListener('message', (event: MessageEvent) => {
   // Only the host may deliver data. Artifact iframes share the bundler origin,
   // so without this check a sibling artifact could reach us through
@@ -63,6 +126,7 @@ window.addEventListener('message', (event: MessageEvent) => {
     source?: string;
     v?: number;
     type?: string;
+    directory?: unknown;
     payloads?: Record<string, Entry>;
     requestId?: string;
     ok?: boolean;
@@ -80,6 +144,11 @@ window.addEventListener('message', (event: MessageEvent) => {
     window.clearTimeout(entry.timer);
     if (message.ok) entry.resolve();
     else entry.reject(new Error(message.error || 'The change could not be saved.'));
+    return;
+  }
+
+  if (message.type === 'directory') {
+    applyDirectory((message as unknown as { directory?: Directory }).directory);
     return;
   }
 
@@ -481,4 +550,94 @@ export function useXyneAgent(options?: { key?: string; agent?: string }): XyneAg
     agents: state.agents,
     available: state.available,
   };
+}
+
+// ── Names ─────────────────────────────────────────────────────────────────────
+//
+// Ids are opaque. Turning one into the name a person recognises has two rules
+// that are impossible to guess from the row alone, so the HOST resolves them
+// with the same helpers the rest of Spaces uses and sends finished strings:
+//
+//   • a user's display name is `displayName || name || email` — and displayName
+//     is null for most real people, so reading it alone renders blanks;
+//   • a DM channel's `name` column is not a name at all. It holds the
+//     participant ids, comma-separated ("id1,id2"), so rendering it prints raw
+//     ids. Group DMs collapse to "Alice, Bob + 3 others", and a DM with
+//     yourself reads "You".
+//
+// Never try to reproduce either rule in app code, and never join against a
+// `user` data source just to show a name — this is already loaded, costs no
+// request, and stays correct.
+
+interface Directory {
+  users: Record<string, string>;
+  channels: Record<string, string>;
+}
+
+let directory: Directory = { users: {}, channels: {} };
+let hasDirectory = false;
+const directoryListeners = new Set<() => void>();
+
+function applyDirectory(next: unknown): void {
+  const value = next as Directory | undefined;
+  directory = {
+    users: value?.users ?? {},
+    channels: value?.channels ?? {},
+  };
+  hasDirectory = true;
+  directoryListeners.forEach(listener => listener());
+}
+
+function subscribeDirectory(onChange: () => void): () => void {
+  directoryListeners.add(onChange);
+  return () => {
+    directoryListeners.delete(onChange);
+  };
+}
+
+export interface XyneDirectory {
+  /** Name for a user id. Falls back to the id itself, never to blank. */
+  displayName: (userId: string | null | undefined) => string;
+  /** Name for a channel id, with DMs and group DMs already resolved. */
+  channelName: (channelId: string | null | undefined) => string;
+  /** False until the first delivery, so you can hold off rendering names. */
+  ready: boolean;
+}
+
+/**
+ * Resolve user and channel ids to the names Spaces shows.
+ *
+ *   const { displayName, channelName } = useXyneDirectory();
+ *   <span>{displayName(message.senderId)}</span>
+ *   <h2>{channelName(dm.id)}</h2>
+ *
+ * Both are plain synchronous functions — safe to call while rendering a list.
+ */
+export function useXyneDirectory(): XyneDirectory {
+  const snapshot = useSyncExternalStore(
+    subscribeDirectory,
+    () => directory,
+    () => directory,
+  );
+
+  const displayName = useCallback(
+    (userId: string | null | undefined): string => {
+      if (!userId) return 'Unknown';
+      // Falling back to the raw id keeps a row identifiable rather than blank
+      // when someone is outside the viewer's directory (deactivated, or a
+      // workspace they cannot see).
+      return snapshot.users[userId] ?? userId;
+    },
+    [snapshot],
+  );
+
+  const channelName = useCallback(
+    (channelId: string | null | undefined): string => {
+      if (!channelId) return '';
+      return snapshot.channels[channelId] ?? channelId;
+    },
+    [snapshot],
+  );
+
+  return { displayName, channelName, ready: hasDirectory };
 }

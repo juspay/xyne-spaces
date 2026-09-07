@@ -3,10 +3,14 @@
  *
  * Two distinct sync modes:
  *  1. FULL SYNC — Fetches next 30 days, compares with DB, upserts all, and cancels ones not
- *                 in the 30-day window. User-triggered sync runs this directly; watch setup
- *                 may enqueue it as a background job.
+ *                 in the 30-day window. Enqueued by user-triggered sync and by watch setup.
  *  2. INCREMENTAL SYNC — Triggered by webhook push. Uses syncToken to fetch only changes
  *                        from Google, upserts ONLY changed events, never touches other calls.
+ *
+ * Both run in the worker process only (ENABLE_CALENDAR_SYNC_WORKER); the API is a
+ * pure producer. There is deliberately no in-process "sync now" helper: an API-only
+ * environment that synced locally would write calls rows the owning environment
+ * also writes, which collides on the unique index once data moves between them.
  */
 
 import Bull from 'bull';
@@ -304,7 +308,7 @@ async function deactivateSourceOnPermanentAuthError(sourceId: string, err: unkno
 
 class GoogleCalendarSyncQueue {
   private queue: Bull.Queue | null = null;
-  private workerInitialized = false;
+  private processorRegistered = false;
 
   private async ensureQueue(): Promise<Bull.Queue> {
     if (this.queue) return this.queue;
@@ -325,9 +329,25 @@ class GoogleCalendarSyncQueue {
     return this.queue;
   }
 
+  /**
+   * Producer-side setup: connect to the queue so jobs can be enqueued.
+   * Called in both the API and the worker. Deliberately registers no
+   * processor — draining happens in the worker process only, via
+   * startProcessing() behind ENABLE_CALENDAR_SYNC_WORKER.
+   */
   async initialize(): Promise<void> {
+    await this.ensureQueue();
+    logger.info(`${TAG} Sync queue initialized (producer)`);
+  }
+
+  /**
+   * Register the job processors. Worker process only; call after initialize().
+   * The webhook route (API) enqueues; the work itself — Google API paging,
+   * event upserts, syncToken bookkeeping — runs here, off the request path.
+   */
+  async startProcessing(): Promise<void> {
     const queue = await this.ensureQueue();
-    if (this.workerInitialized) return;
+    if (this.processorRegistered) return;
 
     queue.process('manual-sync', async (job) => {
       const sourceId = await resolveSourceId(job.data as CalendarSyncJobData);
@@ -372,8 +392,8 @@ class GoogleCalendarSyncQueue {
       });
     });
 
-    this.workerInitialized = true;
-    logger.info(`${TAG} Sync queue initialized`);
+    this.processorRegistered = true;
+    logger.info(`${TAG} Sync queue processors registered`);
   }
 
   async enqueueManualSync(sourceId: string): Promise<void> {
@@ -409,15 +429,12 @@ class GoogleCalendarSyncQueue {
     if (this.queue) {
       await this.queue.close();
       this.queue = null;
+      this.processorRegistered = false;
     }
   }
 }
 
 export const googleCalendarSyncQueue = new GoogleCalendarSyncQueue();
-
-export async function syncGoogleCalendarNow(sourceId: string): Promise<void> {
-  await performManualSync(sourceId);
-}
 
 export async function enqueueGoogleCalendarManualSync(sourceId: string): Promise<void> {
   await googleCalendarSyncQueue.enqueueManualSync(sourceId);

@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { TicketReferenceRelation } from '@xyne/shared';
+import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
@@ -18,6 +19,17 @@ import {
 
 const prisma = DatabaseClient.getInstance();
 const DUPLICATE_REFERENCE_LIMIT = 10;
+
+// Cap on the text handed to Vespa, mirroring the agent's MAX_DESCRIPTION_LENGTH.
+const VESPA_QUERY_MAX_LENGTH = 4000;
+
+// Desk tickets carry raw HTML email bodies, so strip markup before it reaches the
+// lexical term and the embedding. Mirrors normalizePromptText in agents/ticket-duplicate.
+const buildDuplicateSearchQuery = (title: string, description: string): string => {
+  const plainTitle = extractPlainTextFromHtml(title).trim() || title.trim();
+  const plainDescription = extractPlainTextFromHtml(description).trim();
+  return `${plainTitle}\n\n${plainDescription}`.trim().slice(0, VESPA_QUERY_MAX_LENGTH);
+};
 
 class TicketDuplicateService {
   async checkDuplicates(params: {
@@ -158,7 +170,7 @@ class TicketDuplicateService {
     parentTicketId?: string;
   }): Promise<TicketDuplicateCandidate[]> {
     const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId } = params;
-    const query = `${title}\n\n${description}`.trim();
+    const query = buildDuplicateSearchQuery(title, description);
 
     if (!query) {
       return [];

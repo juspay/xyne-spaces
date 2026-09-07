@@ -2,7 +2,7 @@ import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
-import { searchService } from '../services/searchService';
+import { searchService, clearVespaSearchCache } from '../services/searchService';
 import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
 import {
   TabType,
@@ -204,6 +204,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // ranked list). Defaults true to preserve the sectioned ALL view.
   const [isGrouped, setIsGrouped] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
+  // Whether a search has been scheduled for the current inputs and hasn't settled yet.
+  // Drives the initial loader. Armed in the debounce effect (whose dep array is the
+  // canonical, lint-enforced list of search inputs) and disarmed when the latest
+  // dispatch's performSearch settles — so it is immune to the synchronous-cache-hit
+  // race that stranded the old render-body `isLoading` latch.
+  const [isSearchPending, setIsSearchPending] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [paginationState, setPaginationState] = useState<
@@ -237,9 +243,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // results — would hand the callback fresh results labelled with its stale query.
   const latestQueryRef = useRef('');
   const sessionFiltersRef = useRef<Set<string>>(new Set());
-  // Guards out-of-order search responses. Each performSearch run claims the next
-  // sequence number; only the latest run is allowed to commit. A slow/stale response
-  // (e.g. a partial `from` query that resolves seconds after the completed `from:`
+  // Guards out-of-order responses. Each dispatch claims the next sequence number at the
+  // call site (alongside the abort below); only the latest run may commit its results, and
+  // the same seq gates the loader disarm — so no separate loader counter is needed. A
+  // slow/stale response (e.g. a partial `from` query resolving after the completed `from:`
   // filter) is discarded instead of overwriting fresh results with an empty payload.
   const searchSeqRef = useRef(0);
   // Cancels the previous in-flight vespaSearch when a newer search is dispatched.
@@ -574,6 +581,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const onOpen = useCallback(
     (trigger: SearchTrigger) => {
+      // A fresh palette open must never reuse a previous session's cached search — only the
+      // in-flight popup → full-screen → back handoff should. Back-navigation restores the
+      // palette without calling onOpen, so its cached result survives.
+      // debugger;
+      clearVespaSearchCache();
       startSession(trigger);
     },
     [startSession],
@@ -685,6 +697,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
+    // Clear the dedup guard's text so reopening the palette and re-entering the same query
+    // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
+    lastSearchedParamsRef.current.text = '';
+    // Re-arm the loader latch: after a clear/close, re-entering a query must show the
+    // spinner again rather than a stale "No results".
+    setIsSearchPending(false);
   }, [resetImpressionTracking]);
 
   /**
@@ -692,6 +710,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const performSearch = useCallback(
     async (
+      seq: number,
+      abortController: AbortController,
       query: string,
       activeTab: TabType,
       selectedMentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
@@ -703,13 +723,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       }>,
       onComplete?: (results: DisplaySearchResult[], query: string) => void,
     ) => {
-      // Claim this run's sequence and abort any previous in-flight request so a slow,
-      // stale response can neither waste the network nor overwrite fresh results.
-      const seq = ++searchSeqRef.current;
+      // Run identity (seq + abortController) is minted by the caller at dispatch time so the
+      // loader disarm can reuse the same seq. A stale response fails isStale() and is dropped.
       const isStale = () => seq !== searchSeqRef.current;
-      searchAbortRef.current?.abort();
-      const abortController = new AbortController();
-      searchAbortRef.current = abortController;
 
       const {
         searchText,
@@ -1039,6 +1055,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                   presentationSummary: 'lean',
                 },
                 abortController.signal,
+                { cache: true },
               );
 
               // A newer search superseded this one — drop this out-of-order response.
@@ -1085,6 +1102,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                   presentationSummary: 'lean',
                 },
                 abortController.signal,
+                { cache: true },
               );
 
               // A newer search superseded this one — drop this out-of-order response.
@@ -1210,9 +1228,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       normalizedText !== ''
     ) {
+      // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
+      // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
+      setIsSearchPending(pendingSearchCountRef.current > 0);
       return;
     }
 
+    // Arm the loader now (before the 300ms debounce) so we never flash "No results"
+    // in the gap before the request fires. Disarmed when the dispatched search settles.
+    setIsSearchPending(true);
     const timer = setTimeout(() => {
       lastSearchedParamsRef.current = {
         text: normalizedText,
@@ -1224,14 +1248,29 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         includeDebugInfo,
         mentionsKey: currentMentionsKey,
       };
+      // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
+      // dispatch time, not on every keystroke; seq and the abort stay atomic together.
+      const seq = ++searchSeqRef.current;
+      searchAbortRef.current?.abort();
+      const abortController = new AbortController();
+      searchAbortRef.current = abortController;
       void performSearch(
+        seq,
+        abortController,
         text,
         activeTab,
         selectedMentions,
         filteredLocalUsers,
         filteredLocalChannels,
         options.onSearchComplete,
-      );
+      ).finally(() => {
+        // Runs on every exit path of performSearch (returns, errors, aborts). Only the
+        // newest dispatch may clear the flag — a superseded run settling (aborted
+        // mid-flight) must not hide the loader while a fresher search is still running.
+        if (seq === searchSeqRef.current) {
+          setIsSearchPending(false);
+        }
+      });
     }, 300);
 
     return () => clearTimeout(timer);
@@ -1588,6 +1627,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     searchResults,
     isGrouped,
     isSearching,
+    isSearchPending,
     searchError,
     isLoadingMore,
     paginationState,

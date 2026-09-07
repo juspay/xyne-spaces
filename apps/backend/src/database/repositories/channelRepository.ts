@@ -1,10 +1,10 @@
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Channel } from '@prisma/client';
 import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { formatDateTimeShort } from '@/utils/dateUtils';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
 export interface CreateChannelInput {
@@ -109,6 +109,23 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
+  /**
+   * Scope of a channel, read under workspace scope so a legitimate non-member caller can
+   * still classify it — same rationale as `getDMChannel`'s existence probe. Callers that
+   * need to tell a direct call from a channel-scoped one can't use `findById`: a large
+   * group call sits in the organizer's self-DM, which no other participant belongs to,
+   * so the per-user channel ACL hides the row and the call looks channel-less.
+   */
+  async getScopeType(channelId: string): Promise<Channel['scopeType'] | null> {
+    return withWorkspaceScope(async () => {
+      const channel = await this.db.channel.findUnique({
+        where: { id: channelId },
+        select: { scopeType: true },
+      });
+      return channel?.scopeType ?? null;
+    });
+  }
+
   async getWorkspaceId(channelId: string): Promise<string> {
     const channel = await this.db.channel.findUnique({
       where: { id: channelId },
@@ -190,8 +207,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async delete(id: string): Promise<Channel> {
-    const attachedSdlcRepository = await this.db.repo.findFirst({
-      where: { channelId: id, projectId: { not: null } },
+    const attachedSdlcRepository = await this.db.sdlcEntityLink.findFirst({
+      where: { channelId: id, relationType: SDLC_MEMBERSHIP_RELATION },
       select: { id: true },
     });
     if (attachedSdlcRepository) {
@@ -344,20 +361,18 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   /**
    * Find or create a DM or GROUP_DM channel based on the number of invited users.
    * If the resulting channel name would exceed 255 characters (>~10 members),
-   * falls back to creating a private DEFAULT channel to avoid the DB constraint.
+   * falls back to the initiator's self-DM to avoid the DB constraint.
    * @param userId - The ID of the user initiating the channel creation
    * @param invitedUserIds - Array of user IDs to include in the channel
    * @param channelParticipants - Channel participants repository for adding users
    * @param workspaceId - The workspace ID to get the DM project from
-   * @param channelName - Optional friendly name override (e.g. scheduled call title)
    * @returns The channel ID (either existing or newly created)
    */
   async findOrCreateDMChannel(
     userId: string,
     invitedUserIds: string[],
     channelParticipants: any, // We'll pass this from the controller to avoid circular dependency
-    workspaceId: string,
-    channelName?: string
+    workspaceId: string
   ): Promise<string> {
     if (invitedUserIds.length === 0) {
       throw new Error('No users to invite');
@@ -413,7 +428,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     const groupDmName = allUserIds.join(',');
 
     // If the name would exceed 255 chars (large groups, ~9+ members),
-    // fall back to a private DEFAULT channel with a friendly name
+    // fall back to the initiator's self-DM
     const isLargeGroup = groupDmName.length > 255;
 
     if (!isLargeGroup) {
@@ -443,31 +458,27 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       return groupDMChannel.id;
     }
 
-    // Large group: create a private DEFAULT channel
-    // Use provided name, or generate a friendly human-readable name from the current time
-    const now = new Date();
-    const friendlyName = channelName
-      ? `Call-${channelName}-${formatDateTimeShort(now)}`.slice(0, 254) // ensure it fits within 255 chars
-      : `Call-${formatDateTimeShort(now)}`.slice(0, 254);
+    // Large group: create nothing — back the group with the initiator's own self-DM
+    // (the "Saved messages" DM, keyed on the bare userId). Calls get their access
+    // from call_participants, so invitees still see and join without a channel.
+    const selfDm = await this.getDMChannel(userId, userId);
+    if (selfDm) {
+      return selfDm.id;
+    }
 
-    // For large groups there won't be an existing channel to reuse (unique name),
-    // so we always create a new one.
-    const privateChannel = await this.create({
-      scopeType: ChannelScopeType.DEFAULT,
-      name: friendlyName,
+    // Self-DM is provisioned at login; create it here only if it is somehow missing.
+    const newSelfDm = await this.create({
+      scopeType: ChannelScopeType.DM,
+      name: userId,
+      description: 'Saved messages',
       visibility: ChannelVisibility.PRIVATE,
       createdBy: userId,
       projectId,
       workspaceId,
     });
+    await channelParticipants.addParticipant(newSelfDm.id, userId, 'ADMIN', false);
 
-    // Add all users as participants
-    await channelParticipants.addParticipant(privateChannel.id, userId, 'ADMIN', false);
-    for (const invitedId of invitedUserIds) {
-      await channelParticipants.addParticipant(privateChannel.id, invitedId, 'MEMBER', false);
-    }
-
-    return privateChannel.id;
+    return newSelfDm.id;
   }
 
 }

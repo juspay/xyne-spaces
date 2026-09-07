@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import Input from '../../../../ui/Input/Input';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 
@@ -59,6 +59,19 @@ export const TicketTypeSubmenu = ({
     onChange(isSelected ? selectedTypes.filter(t => t !== type) : [...selectedTypes, type]);
   };
 
+  const visibleTypeNames = finalResults;
+  const allVisibleSelected =
+    visibleTypeNames.length > 0 && visibleTypeNames.every(t => selectedTypes.includes(t));
+
+  const handleSelectAllToggle = (): void => {
+    if (allVisibleSelected) {
+      onChange(selectedTypes.filter(t => !visibleTypeNames.includes(t)));
+    } else {
+      const merged = new Set([...selectedTypes, ...visibleTypeNames]);
+      onChange([...merged]);
+    }
+  };
+
   return (
     <div
       className={`w-80 border border-border flex flex-col rounded-lg shadow-lg bg-background overflow-hidden ${className}`}
@@ -81,6 +94,24 @@ export const TicketTypeSubmenu = ({
           <div className='p-8 text-center text-sm text-muted-foreground'>No types available</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>
+            <button
+              type='button'
+              onClick={handleSelectAllToggle}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
+                ${allVisibleSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+                focus-visible:ring-2 focus-visible:ring-ring border-b border-border/50
+              `}
+              data-track-category='TICKETS'
+              data-track-name='ToggleSelectAllTypes'
+            >
+              <span className='flex-1 text-left text-sm font-medium text-primary'>
+                {allVisibleSelected ? 'Deselect all' : 'Select all'}
+              </span>
+              {allVisibleSelected && (
+                <Check className='w-4 h-4 text-primary shrink-0' aria-hidden='true' />
+              )}
+            </button>
             {finalResults.map(type => {
               const isSelected = selectedTypes.includes(type);
               return (
@@ -93,7 +124,7 @@ export const TicketTypeSubmenu = ({
                     ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
                     focus-visible:ring-2 focus-visible:ring-ring
                   `}
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='ToggleTicketTypeFilter'
                   data-track-metadata={JSON.stringify({ type, selected: !isSelected })}
                 >

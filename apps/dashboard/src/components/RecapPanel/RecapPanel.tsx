@@ -557,6 +557,9 @@ const RecapPanel = (): ReactElement => {
                   }`}
                   data-track-category='RECAP_PANEL'
                   data-track-name={isRead ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'}
+                  data-ph-capture-attribute-track-id={
+                    isRead ? 'mark_recap_unread' : 'mark_recap_read'
+                  }
                 >
                   {isRead ? (
                     <>
@@ -629,6 +632,7 @@ const RecapPanel = (): ReactElement => {
                     title='Mark all as read'
                     data-track-category='RECAP_PANEL'
                     data-track-name='MARK_ALL_AS_READ'
+                    data-ph-capture-attribute-track-id='mark_all_recap_read'
                   >
                     <CheckCheck size={12} />
                     <span>Mark all as read</span>

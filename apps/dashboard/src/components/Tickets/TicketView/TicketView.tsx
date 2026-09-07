@@ -6,7 +6,7 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../TicketDetails/TicketDetails';
 import ThreadMessages from '../../Chat/ThreadPannel';
-import { ChevronLeft, X } from 'lucide-react';
+import { ChevronLeft, MultipleCrossCancelDefault as X } from '@xyne/icons';
 
 const TicketView = (): ReactElement => {
   const ticketViewContainerRef = useRef<HTMLDivElement>(null);

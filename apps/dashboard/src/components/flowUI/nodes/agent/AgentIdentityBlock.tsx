@@ -381,7 +381,7 @@ export const AgentIdentityHeader: React.FC<{
   </div>
 );
 
-/** "What it does" — the design's labelled description block. */
+/** Labelled description block — "Description", matching the created-agent card. */
 export const AgentDescription: React.FC<{ description?: string | undefined }> = ({
   description,
 }) => {
@@ -391,7 +391,7 @@ export const AgentDescription: React.FC<{ description?: string | undefined }> = 
   return (
     <div className='flex flex-col gap-1'>
       <p className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
-        What it does
+        Description
       </p>
       <p className='text-sm leading-[22px] text-foreground/70'>{description}</p>
     </div>

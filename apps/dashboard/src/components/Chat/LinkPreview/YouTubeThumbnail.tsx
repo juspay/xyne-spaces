@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ExternalLink, Play, X } from 'lucide-react';
+import { ExternalLink, Play, X, Copy } from 'lucide-react';
+import { toast } from 'sonner';
 import { SiYoutube } from 'react-icons/si';
 
 const YOUTUBE_HOME = 'https://www.youtube.com';
@@ -26,28 +27,51 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
   const displayTitle =
     title && title.length > 70 ? title.slice(0, 70) + '...' : title || 'YouTube video';
 
+  const handleCopy = (event: React.MouseEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    navigator.clipboard
+      .writeText(watchUrl)
+      .then(() => toast.success('Link copied to clipboard'))
+      .catch(() => toast.error('Failed to copy link'));
+  };
+
   return (
     <div
       className='relative w-full max-w-[360px] md:max-w-[420px] lg:max-w-[480px] flex flex-col gap-1.5'
       role='article'
       aria-label='YouTube video'
     >
-      {onClose && (
+      <div className='absolute top-0 right-0 z-10 flex items-center gap-1 bg-card/80 backdrop-blur-sm rounded-full p-0.5'>
         <button
           type='button'
-          className='absolute top-0 right-0 z-10 p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-0'
-          onClick={e => {
-            e.stopPropagation();
-            onClose();
-          }}
-          aria-label='Close link preview'
+          className='p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-0'
+          onClick={handleCopy}
+          aria-label='Copy link'
+          title='Copy link'
           data-track-category='LINK_PREVIEW'
-          data-track-name='CloseYouTubeThumbnail'
+          data-track-name='CopyYouTubeLink'
           data-track-metadata={JSON.stringify({ title, watchUrl })}
         >
-          <X size={14} className='text-current' />
+          <Copy size={14} className='text-current' />
         </button>
-      )}
+        {onClose && (
+          <button
+            type='button'
+            className='p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-0'
+            onClick={e => {
+              e.stopPropagation();
+              onClose();
+            }}
+            aria-label='Close link preview'
+            data-track-category='LINK_PREVIEW'
+            data-track-name='CloseYouTubeThumbnail'
+            data-track-metadata={JSON.stringify({ title, watchUrl })}
+          >
+            <X size={14} className='text-current' />
+          </button>
+        )}
+      </div>
       <a
         href={YOUTUBE_HOME}
         target='_blank'
@@ -62,7 +86,7 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
         href={watchUrl}
         target='_blank'
         rel='noopener noreferrer'
-        className='text-sm font-medium text-primary hover:underline truncate block'
+        className='text-sm font-medium text-primary hover:underline truncate block pr-16'
         title={title}
       >
         {displayTitle}

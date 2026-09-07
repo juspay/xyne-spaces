@@ -3,6 +3,7 @@ import { searchService } from '../services/searchService';
 import type { VespaSearchFilters, DisplaySearchResult } from '../types/search';
 import type { Ticket } from '@xyne/shared';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 
 const MAX_VESPA_TICKET_SEARCH_LIMIT = 200;
 const FILTER_ONLY_DYNAMIC_FIELD_CACHE_TTL_MS = 30_000;
@@ -14,12 +15,17 @@ interface UseVespaTicketSearchParams {
   boardId?: string;
   status?: string;
   stage?: string;
+  priority?: string;
+  assignee?: string;
+  tags?: string;
+  createdBy?: string;
   dynamicFieldValues?: string[];
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   enabled?: boolean;
   limit?: number;
   fetchAllDynamicFieldMatches?: boolean;
   maxFetchedResults?: number;
+  searchKey?: string;
 }
 
 interface UseVespaTicketSearchResult {
@@ -46,6 +52,10 @@ const getFilterOnlyDynamicFieldCacheKey = (filters: VespaSearchFilters): string 
     board: filters.board ?? null,
     status: filters.status ?? null,
     stage: filters.stage ?? null,
+    priority: filters.priority ?? null,
+    assignee: filters.assignee ?? null,
+    tags: filters.tags ?? null,
+    from: filters.from ?? null,
     dynamicFieldValues: filters.dynamicFieldValues ?? null,
     dynamicFieldDateRanges: filters.dynamicFieldDateRanges
       ? Object.entries(filters.dynamicFieldDateRanges).sort(([left], [right]) =>
@@ -108,7 +118,7 @@ const fetchAllFilterOnlyDynamicFieldResults = async (
   }
 };
 
-const stripHighlightMarkup = (value: string | undefined): string =>
+export const stripHighlightMarkup = (value: string | undefined): string =>
   value?.replace(/<\/?hi>/gi, '') ?? '';
 
 function toTicket(r: DisplaySearchResult): Ticket {
@@ -172,17 +182,24 @@ export const useVespaTicketSearch = ({
   boardId,
   status,
   stage,
+  priority,
+  assignee,
+  tags,
+  createdBy,
   dynamicFieldValues = EMPTY_DYNAMIC_FIELD_VALUES,
   dynamicFieldDateRanges = {},
   enabled = true,
   limit = MAX_VESPA_TICKET_SEARCH_LIMIT,
   fetchAllDynamicFieldMatches = false,
   maxFetchedResults = 400,
+  searchKey,
 }: UseVespaTicketSearchParams): UseVespaTicketSearchResult => {
   const [searchResults, setSearchResults] = useState<Ticket[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const defaultRankProfileFor = useCmdkDefaultRankProfiles();
+  const rankProfile = defaultRankProfileFor('tickets');
 
   const dynamicFieldValuesKey = dynamicFieldValues.join('\u001f');
   const normalizedDynamicFieldValues = useMemo(
@@ -231,18 +248,29 @@ export const useVespaTicketSearch = ({
       };
 
       vespaFilters.limit = pageLimit;
+      vespaFilters.rankProfile = rankProfile;
 
       if (projectId) vespaFilters.projectId = projectId;
       if (boardId) vespaFilters.board = boardId;
       if (status) vespaFilters.status = status;
       if (stage) vespaFilters.stage = stage;
+      if (priority) vespaFilters.priority = priority;
+      if (assignee) vespaFilters.assignee = assignee;
+      if (tags) vespaFilters.tags = tags;
+      if (createdBy) vespaFilters.from = createdBy;
       if (normalizedDynamicFieldValues.length > 0) {
         vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
-        vespaFilters.filterOnly = isFilterOnlyDynamicSearch;
+        // Only set filterOnly when true - when false, omit it so backend uses default behavior
+        // This ensures dynamic field values are always used as filters, even with search terms
+        if (isFilterOnlyDynamicSearch) {
+          vespaFilters.filterOnly = true;
+        }
       }
       if (Object.keys(normalizedDynamicFieldDateRanges).length > 0) {
         vespaFilters.dynamicFieldDateRanges = normalizedDynamicFieldDateRanges;
-        vespaFilters.filterOnly = isFilterOnlyDynamicSearch;
+        if (isFilterOnlyDynamicSearch) {
+          vespaFilters.filterOnly = true;
+        }
       }
 
       try {
@@ -277,11 +305,16 @@ export const useVespaTicketSearch = ({
       boardId,
       status,
       stage,
+      priority,
+      assignee,
+      tags,
+      createdBy,
       normalizedDynamicFieldValues,
       normalizedDynamicFieldDateRanges,
       safeLimit,
       fetchAllDynamicFieldMatches,
       maxFetchedResults,
+      rankProfile,
     ],
   );
 
@@ -301,12 +334,9 @@ export const useVespaTicketSearch = ({
     }
 
     setIsSearching(true);
-    debounceTimerRef.current = setTimeout(
-      () => {
-        void performSearch(trimmed || '*');
-      },
-      hasDynamicFieldFilters ? 0 : SEARCH_DEBOUNCE_MS,
-    );
+    debounceTimerRef.current = setTimeout(() => {
+      void performSearch(trimmed || '*');
+    }, SEARCH_DEBOUNCE_MS);
 
     return (): void => {
       if (debounceTimerRef.current) {
@@ -319,6 +349,7 @@ export const useVespaTicketSearch = ({
     normalizedDynamicFieldDateRanges,
     enabled,
     performSearch,
+    searchKey,
   ]);
 
   useEffect(() => {

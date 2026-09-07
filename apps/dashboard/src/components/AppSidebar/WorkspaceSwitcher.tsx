@@ -341,10 +341,11 @@ export const WorkspaceSwitcher: React.FC = () => {
                   <button
                     key={ws.id}
                     onClick={() => void handleSwitch(ws.id)}
+                    data-ph-capture-attribute-track-id='switch_workspace'
                     disabled={isSwitching}
                     data-track-category='Workspace_Switcher'
                     data-track-name='Switch_Workspace'
-                    className='w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted transition-colors text-left disabled:opacity-60'
+                    className='h-auto w-full flex items-center justify-start gap-2.5 px-3 py-2 rounded-none hover:bg-muted transition-colors text-left disabled:opacity-60'
                   >
                     {/* Workspace icon with deterministic color */}
                     <div
@@ -421,10 +422,11 @@ export const WorkspaceSwitcher: React.FC = () => {
                         <button
                           key={ws.id}
                           onClick={() => void handleSwitch(ws.id)}
+                          data-ph-capture-attribute-track-id='switch_workspace_signin'
                           disabled={isSwitching}
                           data-track-category='Workspace_Switcher'
                           data-track-name='Switch_Workspace_SignIn'
-                          className='w-full flex items-center gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
+                          className='h-auto w-full flex items-center justify-start gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
                         >
                           <div
                             className='size-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0'
@@ -480,10 +482,11 @@ export const WorkspaceSwitcher: React.FC = () => {
                   <div className='flex gap-2'>
                     <button
                       type='submit'
+                      data-ph-capture-attribute-track-id='create_workspace'
                       disabled={creating || !workspaceName.trim()}
                       data-track-category='Workspace_Switcher'
                       data-track-name='Create_Workspace'
-                      className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
+                      className='h-auto flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:bg-primary hover:opacity-90'
                     >
                       {creating ? 'Creating…' : 'Create'}
                     </button>

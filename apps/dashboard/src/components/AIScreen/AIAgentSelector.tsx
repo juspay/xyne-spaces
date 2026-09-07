@@ -1,4 +1,4 @@
-import { ReactElement, useMemo, useState } from 'react';
+import { ReactElement, useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, Bot, Search } from 'lucide-react';
 import { Popover } from '../ui/Popover';
@@ -16,6 +16,12 @@ export interface AIAgentSelectorProps {
    *  handleSelectAgent: parent uses this to open a fresh chat scoped to that
    *  agent. Skipped when the user re-selects the current agent. */
   onAgentChange?: ((slug: string | null) => void) | undefined;
+  /** Controlled open state. Paired with `hideTrigger` so a narrow composer can
+   *  drive the selector from the "+" menu instead of showing its own pill. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Render only the popover, anchored to a zero-size element in the toolbar. */
+  hideTrigger?: boolean;
 }
 
 const MAX_VISIBLE_AGENTS = 6;
@@ -27,8 +33,20 @@ const MAX_VISIBLE_AGENTS = 6;
 export function AIAgentSelector({
   disabled = false,
   onAgentChange,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
 }: AIAgentSelectorProps): ReactElement {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (isControlled) onOpenChange?.(next);
+      else setUncontrolledOpen(next);
+    },
+    [isControlled, onOpenChange],
+  );
   const [query, setQuery] = useState('');
 
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
@@ -53,7 +71,11 @@ export function AIAgentSelector({
 
   const displayText = selectedAgent?.name ?? 'Ask AI';
 
-  const trigger = (
+  // Zero-size anchor when the pill is hidden — Radix positions the popover
+  // against the trigger, so it still needs an element in the toolbar.
+  const trigger = hideTrigger ? (
+    <span aria-hidden className='block h-0 w-0' />
+  ) : (
     <button
       disabled={disabled}
       className={cn(

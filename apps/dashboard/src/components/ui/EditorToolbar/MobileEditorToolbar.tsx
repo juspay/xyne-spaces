@@ -13,6 +13,7 @@ import {
   TextQuote,
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
+import { Highlighter } from 'lucide-react';
 import type { MobileEditorToolbarProps } from './EditorToolbar.types';
 
 /**
@@ -35,6 +36,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
     bold: false,
     italic: false,
     strike: false,
+    highlight: false,
     code: false,
     codeBlock: false,
     link: false,
@@ -51,6 +53,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         bold: editor.isActive('bold'),
         italic: editor.isActive('italic'),
         strike: editor.isActive('strike'),
+        highlight: editor.isActive('highlight'),
         code: editor.isActive('code'),
         codeBlock: editor.isActive('codeBlock'),
         link: editor.isActive('link'),
@@ -80,6 +83,10 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
 
   const handleStrikethrough = useCallback(() => {
     editor?.chain().focus().toggleStrike().run();
+  }, [editor]);
+
+  const handleHighlight = useCallback(() => {
+    editor?.chain().focus().toggleHighlight().run();
   }, [editor]);
 
   const handleClearFormatting = useCallback(() => {
@@ -147,6 +154,10 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
 
   if (!editor) return null;
 
+  const supportsHighlight = editor.extensionManager.extensions.some(
+    extension => extension.name === 'highlight',
+  );
+
   const buttonClass = (active: boolean): string =>
     `p-1.5 rounded transition-all duration-200 ease-in-out flex-shrink-0 ${
       active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
@@ -210,6 +221,21 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         >
           <StrikeThrough className='h-4 w-4' />
         </button>
+
+        {supportsHighlight && (
+          <button
+            type='button'
+            onClick={handleHighlight}
+            data-track-category='MOBILE_EDITOR_TOOLBAR'
+            data-track-name='FORMAT_HIGHLIGHT'
+            className={buttonClass(isActive.highlight)}
+            aria-label='Highlight'
+            aria-pressed={isActive.highlight}
+            onMouseDown={e => e.preventDefault()}
+          >
+            <Highlighter className='h-4 w-4' />
+          </button>
+        )}
 
         {/* Clear Formatting */}
         <button

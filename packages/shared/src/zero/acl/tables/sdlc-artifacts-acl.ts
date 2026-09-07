@@ -17,8 +17,10 @@ export class SdlcArtifactsACL extends BaseQueryACL<'sdlc_artifacts'> {
 
     return query
       .where('workspaceId', '=', this.ctx.workspaceId)
-      .whereExists('repo', (repo) =>
-        repo.whereExists('channel', (channel) =>
+      // The artifact's own canvas, not its repository: going through the repository
+      // would leak metadata from every other hub that covers it.
+      .whereExists('canvas', (canvas) =>
+        canvas.whereExists('channel', (channel) =>
           channel.whereExists('participants', (participant) =>
             participant.where('userId', '=', this.ctx.userID),
           ),

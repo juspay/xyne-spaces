@@ -186,7 +186,12 @@ export default function IntentPlaygroundScreen(): React.ReactElement {
           />
 
           <div className='flex items-center gap-3'>
-            <Button onClick={() => void run(text)} disabled={running || !text.trim()}>
+            <Button
+              onClick={() => void run(text)}
+              data-track-category='intent-playground'
+              data-track-name='run-classify'
+              disabled={running || !text.trim()}
+            >
               {running ? <Loader2 className='animate-spin' /> : <Play />}
               {running ? 'Classifying…' : 'Classify'}
             </Button>

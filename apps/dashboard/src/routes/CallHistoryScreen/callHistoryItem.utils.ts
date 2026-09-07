@@ -1,7 +1,13 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { formatDuration } from '../../utils/dateUtils';
-import { CallOrigin, CallStatus, InvitationResponse, type User } from '@xyne/shared';
+import {
+  CallOrigin,
+  CallStatus,
+  ChannelScopeType,
+  InvitationResponse,
+  type User,
+} from '@xyne/shared';
 import { hasJoinedExternalParticipant as hasJoinedExternalCallParticipant } from '../../components/Call/callParticipant.utils';
 
 export type RecentCallFilter = 'all' | 'incoming' | 'outgoing' | 'active' | 'missed';
@@ -354,4 +360,28 @@ export function isScheduledCallManageable(call: Call, currentUserId: string | un
 
   const organizerUserId = call.organizerId ?? call.createdByUserId;
   return organizerUserId === currentUserId;
+}
+
+/**
+ * A non-organizer participant may add people to a direct call — one whose channel is a
+ * DM/GROUP_DM, or isn't visible to them at all (a large group call sits in the organizer's
+ * self-DM, which no other participant belongs to). A channel-scoped call is visible only to
+ * its members, so a channel you CAN see that isn't a DM means the invite list is the
+ * channel's — organizer only. The API is what enforces this; this only shows the entry point.
+ */
+export function canEditScheduledCallParticipants(
+  call: Call,
+  currentUserId: string | undefined,
+  visibleChannels: readonly { id: string; scopeType: ChannelScopeType }[],
+): boolean {
+  if (!currentUserId || call.status !== CallStatus.SCHEDULED || !call.channelId) return false;
+  if (isScheduledCallManageable(call, currentUserId)) return false;
+  if (visibleChannels.length === 0) return false;
+
+  const channel = visibleChannels.find(c => c.id === call.channelId);
+  return (
+    !channel ||
+    channel.scopeType === ChannelScopeType.DM ||
+    channel.scopeType === ChannelScopeType.GROUP_DM
+  );
 }

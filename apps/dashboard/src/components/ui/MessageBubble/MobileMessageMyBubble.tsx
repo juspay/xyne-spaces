@@ -180,6 +180,14 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               isMobile ? 'flex-col-reverse gap-1' : 'flex-col',
             )}
             onClick={onClick}
+            {...(onClick
+              ? {
+                  'data-track-category': 'MESSAGE',
+                  'data-track-name': 'OPEN_MY_MESSAGE_BUBBLE_MOBILE',
+                  // Static label: the auto-label would capture message content.
+                  'data-track-label': 'message_bubble',
+                }
+              : {})}
             onKeyDown={
               onClick
                 ? e => {

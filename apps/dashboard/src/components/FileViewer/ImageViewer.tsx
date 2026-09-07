@@ -9,6 +9,8 @@ import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
 import { useScope, useShortcutById } from '../../shortcuts';
+import { ShortcutTooltip } from '../ui/ShortcutTooltip';
+import { Tooltip } from '../ui/Tooltip';
 
 const ImageViewer: React.FC<BaseViewerProps> = ({
   source,
@@ -332,55 +334,82 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
               isHovered ? 'opacity-100' : 'opacity-0'
             }`}
           >
-            <button
-              onClick={handleRotate}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
-              title='Rotate (Ctrl R)'
-              data-track-category='FileViewer'
-              data-track-name='ROTATE_IMAGE'
-              data-track-metadata={JSON.stringify({ source, fileName })}
+            <ShortcutTooltip
+              label='Rotate'
+              shortcut='viewer.image.controls'
+              keys='mod+r'
+              side='top'
             >
-              <RotateCw className='h-5 w-5' />
-            </button>
-            <button
-              onClick={handleZoomOut}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
-              title='Zoom Out (Ctrl -)'
-              data-track-category='FileViewer'
-              data-track-name='ZOOM_OUR_IMAGE'
-              data-track-metadata={JSON.stringify({ source, fileName })}
+              <button
+                onClick={handleRotate}
+                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                aria-label='Rotate'
+                data-track-category='FileViewer'
+                data-track-name='ROTATE_IMAGE'
+                data-track-metadata={JSON.stringify({ source, fileName })}
+              >
+                <RotateCw className='h-5 w-5' />
+              </button>
+            </ShortcutTooltip>
+            <ShortcutTooltip
+              label='Zoom out'
+              shortcut='viewer.image.controls'
+              keys='mod+minus'
+              side='top'
             >
-              <ZoomOut className='h-5 w-5' />
-            </button>
+              <button
+                onClick={handleZoomOut}
+                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                aria-label='Zoom out'
+                data-track-category='FileViewer'
+                data-track-name='ZOOM_OUR_IMAGE'
+                data-track-metadata={JSON.stringify({ source, fileName })}
+              >
+                <ZoomOut className='h-5 w-5' />
+              </button>
+            </ShortcutTooltip>
 
-            <button
-              onClick={handleZoomIn}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
-              title='Zoom In (Ctrl +)'
-              data-track-category='FileViewer'
-              data-track-name='ZOOM_IN_IMAGE'
-              data-track-metadata={JSON.stringify({ source, fileName })}
+            <ShortcutTooltip
+              label='Zoom in'
+              shortcut='viewer.image.controls'
+              keys='mod+shift+equal'
+              side='top'
             >
-              <ZoomIn className='h-5 w-5' />
-            </button>
+              <button
+                onClick={handleZoomIn}
+                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                aria-label='Zoom in'
+                data-track-category='FileViewer'
+                data-track-name='ZOOM_IN_IMAGE'
+                data-track-metadata={JSON.stringify({ source, fileName })}
+              >
+                <ZoomIn className='h-5 w-5' />
+              </button>
+            </ShortcutTooltip>
           </div>
 
-          {/* Fit to Screen & Rotate - Bottom Right */}
+          {/* Fullscreen & Open in New Window - Bottom Right */}
           <div
             className={`absolute bottom-0 right-0 z-20 flex gap-6 p-6 transition-opacity duration-300 ${
               isHovered ? 'opacity-100' : 'opacity-0'
             }`}
           >
-            <button
-              onClick={handleFullscreenToggle}
-              className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
-              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-              data-track-category='FileViewer'
-              data-track-name={isFullscreen ? 'EXIT_IMAGE_FULLSCREEN' : 'ENTER_IMAGE_FULLSCREEN'}
-              data-track-metadata={JSON.stringify({ source, fileName })}
-            >
-              {isFullscreen ? <Minimize2 className='h-5 w-5' /> : <Maximize2 className='h-5 w-5' />}
-            </button>
+            <Tooltip content={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} side='top'>
+              <button
+                onClick={handleFullscreenToggle}
+                className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                data-track-category='FileViewer'
+                data-track-name={isFullscreen ? 'EXIT_IMAGE_FULLSCREEN' : 'ENTER_IMAGE_FULLSCREEN'}
+                data-track-metadata={JSON.stringify({ source, fileName })}
+              >
+                {isFullscreen ? (
+                  <Minimize2 className='h-5 w-5' />
+                ) : (
+                  <Maximize2 className='h-5 w-5' />
+                )}
+              </button>
+            </Tooltip>
 
             <button
               onClick={handleOpenInNewWindow}

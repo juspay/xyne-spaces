@@ -31,6 +31,11 @@ interface ComposerCollectionPickerProps {
   onCollectionsChange: (collections: SelectedCollection[]) => void;
   onFileScopesChange: (fileScopes: FileScope[]) => void;
   onFolderScopesChange: (folderScopes: FolderScope[]) => void;
+  /** Controlled open state. When passed, the picker's own "book" trigger is not
+   *  rendered — the composer opens it from the "+" menu's Collections row and
+   *  the popover anchors to wherever this component sits in the toolbar. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -47,8 +52,19 @@ export function ComposerCollectionPicker({
   onCollectionsChange,
   onFileScopesChange,
   onFolderScopesChange,
+  open: controlledOpen,
+  onOpenChange,
 }: ComposerCollectionPickerProps): ReactElement {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (isControlled) onOpenChange?.(next);
+      else setUncontrolledOpen(next);
+    },
+    [isControlled, onOpenChange],
+  );
   const [search, setSearch] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -124,7 +140,7 @@ export function ComposerCollectionPicker({
     };
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
-  }, [open]);
+  }, [open, setOpen]);
 
   // Disambiguate single-click (select) from double-click (open).
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -197,25 +213,27 @@ export function ComposerCollectionPicker({
 
   return (
     <div ref={containerRef} className='relative'>
-      <button
-        type='button'
-        onClick={() => setOpen(o => !o)}
-        aria-label='Select collections'
-        title='Select collections'
-        className={cn(
-          'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
-          // Accent only while something is actually scoped — idle matches the
-          // neighbouring ToolbarButtons so the row reads as one set. Files count
-          // as a selection too: this picker sets both.
-          collections.length > 0 || fileScopes.length > 0 || folderScopes.length > 0
-            ? 'bg-secondary text-claw-ai-fg'
-            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-        )}
-        data-track-category='XyneAI'
-        data-track-name='OPEN_COLLECTION_SELECTOR'
-      >
-        <BookOpen className='h-4 w-4' aria-hidden />
-      </button>
+      {!isControlled && (
+        <button
+          type='button'
+          onClick={() => setOpen(!open)}
+          aria-label='Select collections'
+          title='Select collections'
+          className={cn(
+            'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
+            // Accent only while something is actually scoped — idle matches the
+            // neighbouring ToolbarButtons so the row reads as one set. Files count
+            // as a selection too: this picker sets both.
+            collections.length > 0 || fileScopes.length > 0 || folderScopes.length > 0
+              ? 'bg-secondary text-claw-ai-fg'
+              : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+          )}
+          data-track-category='XyneAI'
+          data-track-name='OPEN_COLLECTION_SELECTOR'
+        >
+          <BookOpen className='h-4 w-4' aria-hidden />
+        </button>
+      )}
 
       {open && (
         <div className='absolute bottom-full left-0 z-50 mb-2 w-72 overflow-hidden rounded-lg border border-border bg-popover shadow-lg'>

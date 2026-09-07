@@ -237,7 +237,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               tabIndex={-1}
               className='size-7 rounded-lg'
               onClick={handleClose}
-              data-track-category='calls'
+              data-track-category='CALLS'
               data-track-name='CLOSE_INSTANT_CALL_MODAL'
               data-testid='instant-call-modal-close'
             >
@@ -265,7 +265,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 size='sm'
                 className='rounded-lg text-[13px]'
                 onClick={handleClose}
-                data-track-category='calls'
+                data-track-category='CALLS'
                 data-track-name='CANCEL_INSTANT_CALL'
                 data-testid='instant-call-cancel-button'
               >
@@ -275,7 +275,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 size='sm'
                 type='submit'
                 onClick={handleSubmit}
-                data-track-category='calls'
+                data-track-category='CALLS'
                 data-track-name='START_INSTANT_CALL'
                 disabled={selectedParticipants.length === 0}
                 className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'

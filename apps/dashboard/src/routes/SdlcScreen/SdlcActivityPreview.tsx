@@ -99,6 +99,8 @@ export function SdlcActivityPreview({ channelId }: SdlcActivityPreviewProps): Re
                   setCursor({ id: last.id, updatedAt: last.updatedAt });
                 }
               }}
+              data-track-category='SdlcHub'
+              data-track-name='ShowMoreActivity'
             >
               Show more
             </Button>

@@ -48,6 +48,7 @@ import {
   RCAStatus,
   SEVERITY,
   AttachmentEntityType,
+  AttachmentUploadStatus,
   AttributionConfidence,
   BaseTicketType,
   isReleaseTicket,
@@ -70,6 +71,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   WorkspaceRole,
   Status,
   OrgRole,
@@ -81,7 +83,6 @@ import {
   resolveCanvasHierarchy,
   parseFieldOptions,
   serializeFieldOptions,
-  VCSProviderType,
   ReleaseTrackingMode,
   parseRepliesMd,
   addReplyToData,
@@ -94,16 +95,45 @@ import {
   isDeskChannelType,
   deskTypeForChannelType,
   Platform,
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
-  sdlcDiscussionSchema,
+  entityLinkContextSchema,
+  updateSubTicketsMdFromZero,
+  linkSubTicketConversationToParentFromZero,
+  parseBoardEtaManagement,
+  mergeBoardEtaManagement,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+  type EtaRiskAcknowledgedActivityValue,
 } from '@xyne/shared';
-import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import {
+  normalizeThreadTypeName,
+  parseAppliedTags,
+  serializeAppliedTags,
+  type AppliedTag,
+} from '@xyne/shared';
+import {
+  getThreadTypeVocabulary,
+  recordVocabularyCandidate,
+} from '@/services/messageClassification/vocabulary';
 import {
   MessageArtifactStatus,
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
+import {
+  evaluateEta,
+  buildEtaActivityIntents,
+  stageEtaActivityOutbox,
+  isTerminalStatus,
+  canUserModifyTicketControl,
+  msToDate,
+  dateToMs,
+  loadZeroEtaContext,
+} from '@/services/etaManagement';
 import {
   FLOW_STAGE_NAMES,
   FlowPlanSchema,
@@ -113,12 +143,18 @@ import {
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
+  ATTACHMENT_STILL_UPLOADING,
+  isAttachmentUploaded,
+  isAttachmentUploadInFlight,
+} from '@xyne/shared/zero/mutators';
+import {
   validateFieldBranches,
   validateUniqueFieldNames,
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions } from '@/utils/mentionParser';
+import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
@@ -131,7 +167,6 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
-import { resolveSdlcDiscussionOwnerId } from '@/sdlc/sdlcDiscussionOwner';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -976,6 +1011,25 @@ export function createMutators(
   asyncTasks: Array<() => Promise<void>>,
   awaitedPostCommitTasks: Array<() => Promise<void>>,
 ) {
+  // Release-config edits are open to workspace/org ADMIN and OWNER by role, and
+  // to anyone individually granted RELEASE-MANAGER WRITE. Mirrors the HTTP
+  // authorizePrivilegedOrResource middleware.
+  const assertReleaseManageAccess = async (): Promise<void> => {
+    const isPrivileged =
+      authData.role === WorkspaceRole.ADMIN ||
+      authData.role === WorkspaceRole.OWNER ||
+      authData.orgRole === OrgRole.ADMIN ||
+      authData.orgRole === OrgRole.OWNER;
+    if (isPrivileged) return;
+    const resource = await repositories.resources.findByName('RELEASE-MANAGER');
+    if (
+      !resource ||
+      !(await repositories.resourceAccess.hasAccess(authData.sub, resource.id, AccessType.WRITE))
+    ) {
+      throw new Error('This endpoint requires administrator or owner privileges');
+    }
+  };
+
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -2435,7 +2489,7 @@ export function createMutators(
           messageId: z.string(),
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
-          sdlcDiscussion: sdlcDiscussionSchema.optional(),
+          entityLinkContext: entityLinkContextSchema.optional(),
         }),
         async ({
           tx,
@@ -2447,7 +2501,7 @@ export function createMutators(
             messageId,
             timestamp,
             attachmentIds,
-            sdlcDiscussion,
+            entityLinkContext,
           },
         }) => {
           if (content === '') {
@@ -2477,85 +2531,43 @@ export function createMutators(
             throw new Error('You need to be a participant for adding a conversations');
           }
 
-          if (sdlcDiscussion) {
-            const [repo, existingDiscussion] = await Promise.all([
-              tx.run(zql.repos.where('id', sdlcDiscussion.repoId).one()),
-              tx.run(
-                zql.sdlc_entity_links
-                  .where('repoId', sdlcDiscussion.repoId)
-                  .where('targetType', 'CONVERSATION')
-                  .where('targetId', conversationId)
-                  .where('relationType', 'DISCUSSION'),
-              ),
-            ]);
-            if (
-              !repo ||
-              repo.workspaceId !== authData.workspaceId ||
-              repo.channelId !== channelId
-            ) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
+          if (entityLinkContext) {
+            const existingDiscussion = await tx.run(
+              zql.sdlc_entity_links
+                .where('channelId', channelId)
+                .where('targetType', 'CONVERSATION')
+                .where('targetId', conversationId)
+                .where('relationType', 'DISCUSSION'),
+            );
             if (existingDiscussion.length > 0) {
               throw new Error('Conversation already has an SDLC discussion owner');
             }
-            if (sdlcDiscussion.ownerType === 'TRACK') {
-              const track = await tx.run(
-                zql.sdlc_tracks.where('id', sdlcDiscussion.ownerId).one(),
+            if (entityLinkContext.sourceType === 'TRACK') {
+              // A track has no scope column: its CHANNEL -> TRACK edge is the check.
+              const trackEdge = await tx.run(
+                zql.sdlc_entity_links
+                  .where('channelId', channelId)
+                  .where('targetType', 'TRACK')
+                  .where('targetId', entityLinkContext.sourceId)
+                  .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+                  .one(),
               );
-              if (!track || track.repoId !== repo.id) {
+              if (!trackEdge) {
                 throw new Error('Invalid SDLC discussion owner');
               }
             } else {
-            if (!sdlcDiscussion.surfaceType || !sdlcDiscussion.surfaceId) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
-            const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
-              {
-                workspaceId: authData.workspaceId,
-                repoId: repo.id,
-                channelId,
-                surfaceType: sdlcDiscussion.surfaceType,
-                surfaceId: sdlcDiscussion.surfaceId,
-              },
-              {
-                getCanvas: async id => {
-                  const canvas = await tx.run(zql.canvases.where('id', id).one());
-                  if (!canvas) return null;
-                  // Kind lives on the artifact row now; a canvas with no SDLC
-                  // artifact is not a valid discussion owner.
-                  const artifact = await tx.run(
-                    zql.sdlc_artifacts.where('artifactId', id).one(),
-                  );
-                  return { ...canvas, artifactType: artifact?.artifactType ?? '' };
-                },
-                getTicket: async id => {
-                  const ticket = await tx.run(zql.tickets.where('id', id).one());
-                  return ticket?.channelId ? { ...ticket, channelId: ticket.channelId } : null;
-                },
-                getPullRequest: async id =>
-                  (await tx.run(zql.pull_requests.where('id', id).one())) ?? null,
-                findLinkSource: async input => {
-                  const link = await tx.run(
-                    zql.sdlc_entity_links
-                      .where('repoId', input.repoId)
-                      .where('targetType', input.targetType)
-                      .where('targetId', input.targetId)
-                      .where('relationType', input.relationType)
-                      .one(),
-                  );
-                  if (
-                    !link ||
-                    (link.sourceType !== 'CANVAS' && link.sourceType !== 'TICKET')
-                  ) {
-                    return null;
-                  }
-                  return { sourceType: link.sourceType, sourceId: link.sourceId };
-                },
-              },
-            );
-            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerId) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
+              const [canvas, artifact] = await Promise.all([
+                tx.run(zql.canvases.where('id', entityLinkContext.sourceId).one()),
+                tx.run(zql.sdlc_artifacts.where('artifactId', entityLinkContext.sourceId).one()),
+              ]);
+              if (
+                !canvas ||
+                canvas.workspaceId !== authData.workspaceId ||
+                canvas.channelId !== channelId ||
+                !artifact
+              ) {
+                throw new Error('Invalid SDLC discussion owner');
+              }
             }
           }
 
@@ -2572,13 +2584,13 @@ export function createMutators(
             createdAt: now,
           });
 
-          if (sdlcDiscussion) {
+          if (entityLinkContext) {
             await tx.mutate.sdlc_entity_links.insert({
-              id: sdlcDiscussion.linkId,
+              id: entityLinkContext.linkId,
               workspaceId: authData.workspaceId,
-              repoId: sdlcDiscussion.repoId,
-              sourceType: sdlcDiscussion.ownerType,
-              sourceId: sdlcDiscussion.ownerId,
+              channelId,
+              sourceType: entityLinkContext.sourceType,
+              sourceId: entityLinkContext.sourceId,
               targetType: 'CONVERSATION',
               targetId: conversationId,
               relationType: 'DISCUSSION',
@@ -2608,7 +2620,7 @@ export function createMutators(
             // Explicit list from a pending-message-aware caller: transfer only
             // those ids, don't touch the draft row (client's clearContent owns it).
             if (attachmentIds.length > 0) {
-              message.hasAttachment = true;
+              let attachedCount = 0;
               for (const attachmentId of attachmentIds) {
                 const attachment = await tx.run(
                   zql.message_attachments.where('id', attachmentId).one(),
@@ -2618,6 +2630,15 @@ export function createMutators(
                   attachment.entityType === AttachmentEntityType.CHAT &&
                   attachment.entityId === messageId
                 ) {
+                  attachedCount++;
+                  continue;
+                }
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId },
+                    });
+                  }
                   continue;
                 }
                 await tx.mutate.message_attachments.update({
@@ -2626,7 +2647,9 @@ export function createMutators(
                   entityType: AttachmentEntityType.CHAT,
                   conversationId,
                 });
+                attachedCount++;
               }
+              message.hasAttachment = attachedCount > 0;
             }
           } else {
             // Legacy path: scan the current draft and transfer everything.
@@ -2642,18 +2665,28 @@ export function createMutators(
                 .where('entityId', draft.id)
                 .where('entityType', AttachmentEntityType.DRAFT));
 
+              let attachedCount = 0;
               for (const attachment of draftAttachments) {
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId: attachment.id },
+                    });
+                  }
+                  continue;
+                }
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
                   entityType: AttachmentEntityType.CHAT,
                   conversationId: conversationId,
                 });
+                attachedCount++;
               }
 
               await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              message.hasAttachment = draftAttachments.length > 0;
+              message.hasAttachment = attachedCount > 0;
             }
           }
 
@@ -3323,7 +3356,7 @@ export function createMutators(
             // Explicit list from a pending-message-aware caller: transfer only
             // those ids, don't touch the draft row (client's clearContent owns it).
             if (attachmentIds.length > 0) {
-              message.hasAttachment = true;
+              let attachedCount = 0;
               for (const attachmentId of attachmentIds) {
                 const attachment = await tx.run(
                   zql.message_attachments.where('id', attachmentId).one(),
@@ -3333,6 +3366,15 @@ export function createMutators(
                   attachment.entityType === AttachmentEntityType.CHAT &&
                   attachment.entityId === messageId
                 ) {
+                  attachedCount++;
+                  continue;
+                }
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId },
+                    });
+                  }
                   continue;
                 }
                 await tx.mutate.message_attachments.update({
@@ -3341,7 +3383,9 @@ export function createMutators(
                   entityType: AttachmentEntityType.CHAT,
                   conversationId,
                 });
+                attachedCount++;
               }
+              message.hasAttachment = attachedCount > 0;
             }
           } else {
             const draft = channelDrafts.find(d => d.conversationId === conversationId);
@@ -3351,18 +3395,28 @@ export function createMutators(
                 .where('entityId', draft.id)
                 .where('entityType', AttachmentEntityType.DRAFT));
 
+              let attachedCount = 0;
               for (const attachment of draftAttachments) {
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId: attachment.id },
+                    });
+                  }
+                  continue;
+                }
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
                   entityType: AttachmentEntityType.CHAT,
                   conversationId: conversationId,
                 });
+                attachedCount++;
               }
 
               await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              message.hasAttachment = draftAttachments.length > 0;
+              message.hasAttachment = attachedCount > 0;
             }
           }
 
@@ -4691,11 +4745,15 @@ export function createMutators(
                 },
               });
             } else {
-              // Just update status, keep existing metadata
+              // Just update status, keep existing metadata.
+              // Preserve startedAt across sessions of the same scheduled call: `endedAt` is only
+              // written when a prior session ended, so its presence means this is a rejoin and
+              // startedAt must keep the original first-join time. (startedAt itself is NOT NULL
+              // with a DB default of creation time, so it can't be used to detect "never joined".)
               await tx.mutate.calls.update({
                 id: call.id,
                 status: CallStatus.ACTIVE,
-                startedAt: now,
+                startedAt: call.endedAt ? call.startedAt : now,
                 lastActivityAt: now,
                 updatedAt: now,
               });
@@ -4999,9 +5057,6 @@ export function createMutators(
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
-          if (call.createdByUserId !== authData.sub) {
-            throw new Error('Only the call creator can admit participants');
-          }
           await tx.mutate.call_participants.update({
             id: participantId,
             response: InvitationResponse.ACCEPTED,
@@ -5014,9 +5069,6 @@ export function createMutators(
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
-          if (call.createdByUserId !== authData.sub) {
-            throw new Error('Only the call creator can decline participants');
-          }
           await tx.mutate.call_participants.update({
             id: participantId,
             response: InvitationResponse.DECLINED,
@@ -5781,6 +5833,7 @@ export function createMutators(
           isArchived: z.boolean().optional(),
           kanbanPosition: z.string().nullable().optional(),
           updatedAt: z.number(),
+          // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
         }),
         async ({ tx, args: params }) => {
           const ticket = await tx.run(zql.tickets.where('id', params.id).one());
@@ -5852,56 +5905,74 @@ export function createMutators(
             }
           }
 
-          // ACL Business Logic: Check ticket transfer permission for assignedTo, userGroupId,
+          // ACL Business Logic: Check ticket transfer permission for assignedTo,
           // eta, stageName (which triggers stage ETA recalculation), or boardId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
-          const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
+          const isStageChanging = params.stageName !== undefined && params.stageName !== ticket.stageName;
+          const isEnteringTerminal =
+            params.statusV2 !== undefined &&
+            params.statusV2 !== ticket.statusV2 &&
+            (params.statusV2 === TicketStatusV2.COMPLETED || params.statusV2 === TicketStatusV2.CANCELLED);
+          const isLeavingTerminal =
+            params.statusV2 !== undefined &&
+            params.statusV2 !== ticket.statusV2 &&
+            (ticket.statusV2 === TicketStatusV2.COMPLETED || ticket.statusV2 === TicketStatusV2.CANCELLED);
+          const isResumingFromPause =
+            params.statusV2 !== undefined &&
+            ticket.statusV2 === TicketStatusV2.PAUSED &&
+            params.statusV2 !== TicketStatusV2.PAUSED;
+          // Board/etaManagement context, fetched once and reused by both the permission gate
+          // below and the ETA domain-service evaluation further down - only when one of the
+          // triggers that actually needs it is present, so an unrelated field edit (title,
+          // description, ...) never pays for this lookup.
+          const needsBoardEtaContext =
+            isAssigneeChanging ||
+            isEtaChanging ||
+            isBoardChanging ||
+            isStageChanging ||
+            isEnteringTerminal ||
+            isLeavingTerminal ||
+            isResumingFromPause;
+          const etaBoard = needsBoardEtaContext
+            ? await tx.run(zql.boards.where('id', ticket.boardId).one())
+            : null;
+          const boardEtaManagement = parseBoardEtaManagement(etaBoard?.metadata ?? null, etaBoard?.boardType ?? BoardType.DEFAULT);
 
-          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
-            // Get board to check if transfer is restricted
-            const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
+          // Stage-only moves are gated because a move can trigger auto-recompute, so an
+          // ungated one is an indirect way to change the due date. The assignee is exempt:
+          // they are the one doing the work, and requiring a configured role just to progress
+          // their own ticket would break the normal workflow. Any other controlled change in
+          // the same call (eta/assignee/board) still gates them normally via the flags below.
+          const isActorAssignee = ticket.assignedTo === authData.sub;
+          const isStageChangingGated =
+            isStageChanging && boardEtaManagement.autoRecomputeEnabled && !isActorAssignee;
 
-            if (board?.metadata && typeof board.metadata === 'object') {
-              const metadata = board.metadata as BoardMetadata;
-
-              const controlRoleIds = Array.isArray(metadata.ticketControlRoleIds)
-                ? metadata.ticketControlRoleIds
-                : [];
-              // Restriction fires when the board has ticketControlRoleIds set
-              // (role-driven path) OR the legacy isAllowedToTransfer toggle is on
-              // (enum fallback). Boards with neither are unrestricted.
-              if (controlRoleIds.length > 0 || metadata.isAllowedToTransfer === true) {
-                // User must be part of the current user group with proper responsibility
-                const userGroupMapping = await tx.run(
-                  zql.user_group_mappings
-                    .where("userId", authData.sub)
-                    .where("userGroupId", ticket.userGroupId)
-                    .one()
-                );
-
-                if (!userGroupMapping) {
-                  throw new Error('You must be a member of the current user group to modify this ticket');
-                }
-
-                if (controlRoleIds.length > 0) {
-                  // Role-driven: raw roleId membership. Works for custom roles.
-                  if (!userGroupMapping.roleId || !controlRoleIds.includes(userGroupMapping.roleId)) {
-                    throw new Error('Only users with a configured role can modify Assignee, ETA, Stage, or Board on this board');
-                  }
-                } else {
-                  // Legacy enum fallback (only fires when isAllowedToTransfer===true).
-                  const responsibility = userGroupMapping.responsibility;
-                  if (responsibility !== UserResponsibility.MANAGER && responsibility !== UserResponsibility.TEAM_LEAD) {
-                    throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can modify Assignee, ETA, Stage, or Board on this board');
-                  }
-                }
-              }
+          if ((isAssigneeChanging || isEtaChanging || isBoardChanging || isStageChangingGated) && ticket.userGroupId) {
+            const permission = await canUserModifyTicketControl(
+              authData.sub,
+              ticket.userGroupId,
+              ticket.boardId,
+              {
+                getBoardMetadata: async () => etaBoard?.metadata ?? null,
+                getUserGroupMapping: async (userId, userGroupId) => {
+                  const mapping = await tx.run(
+                    zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                  );
+                  return mapping
+                    ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                    : null;
+                },
+              },
+            );
+            if (!permission.allowed) {
+              throw new Error(permission.reason ?? 'Not authorized to modify this ticket');
             }
           }
 
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
+          let latestTicketMetadata: unknown = ticket.metadata;
           const activities: any[] = [];
           const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition', 'ticketType'] as const;
           const oldAssignedTo = ticket.assignedTo;
@@ -5936,13 +6007,10 @@ export function createMutators(
 
             const firstStage = newBoardStages[0];
 
-            // 2. Calculate total ETA from new board's stages (same logic as ticket creation)
-            const totalEtaHours = newBoardStages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
-            const newTicketEta = totalEtaHours > 0
-              ? calculateETADeadline(new Date(now), totalEtaHours).getTime()
-              : null;
-
-            // 3. Update ticket with first stage and new ETA
+            // 2. Update ticket with first stage. `eta` is deliberately left untouched here -
+            // an automatic due date is only ever set/changed by the domain-service
+            // evaluation below, and only when the target board has opted into automatic ETA
+            // management.
             const existingTicketsInFirstStage = await tx.run(
               zql.tickets
                 .where('boardId', params.boardId)
@@ -5964,7 +6032,6 @@ export function createMutators(
               ...(firstStage.defaultTicketStatusV2 && {
                 statusV2: firstStage.defaultTicketStatusV2
               }),
-              ...(newTicketEta && { eta: newTicketEta }),
               kanbanPosition: newKanbanPosition,
               updatedAt: now,
               updatedBy: authData.sub
@@ -5997,6 +6064,59 @@ export function createMutators(
                 updatedBy: authData.sub
               });
             }
+            // Forecast from the new board's first stage onward, extend-only against the
+            // ticket's pre-transfer due date. Boards without automation keep their date.
+            const targetBoardEtaManagement = parseBoardEtaManagement(targetBoard?.metadata ?? null, targetBoard?.boardType ?? BoardType.DEFAULT);
+            if (targetBoardEtaManagement.autoRecomputeEnabled) {
+              const effectiveStatusV2 = firstStage.defaultTicketStatusV2 ?? ticket.statusV2;
+              const etaCtx = await loadZeroEtaContext(tx, {
+                ticketId: params.id,
+                boardId: params.boardId,
+                ticketMetadata: ticket.metadata,
+                stage: firstStage,
+                stages: newBoardStages,
+              });
+              const { currentTicketEtaManagement } = etaCtx;
+
+              const etaResult = evaluateEta({
+                ticketId: params.id,
+                ticketStatus: effectiveStatusV2,
+                isTerminal: isTerminalStatus(effectiveStatusV2),
+                currentTicketEta: msToDate(ticket.eta),
+                currentTicketEtaManagement,
+                boardType: targetBoard?.boardType ?? '',
+                boardEtaManagement: targetBoardEtaManagement,
+                currentStageId: firstStage.id,
+                stages: etaCtx.stages,
+                transitions: etaCtx.transitions,
+                activeVisit: etaCtx.activeVisit,
+                trigger: 'STAGE_TRANSITION',
+                now: new Date(now),
+              });
+
+              const boardTransferActivityIntents = buildEtaActivityIntents(etaResult, {
+                currentStageId: firstStage.id,
+                oldEta: ticket.eta ?? null,
+                trigger: 'STAGE_TRANSITION',
+                systemReason: `Automatic recalculation after moving ticket to board "${targetBoard?.name ?? params.boardId}"`,
+                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+              });
+              const mergedMetadata = mergeTicketEtaManagement(latestTicketMetadata, {
+                ...etaResult.ticketEtaManagementPatch,
+                pendingActivities: stageEtaActivityOutbox(boardTransferActivityIntents, now),
+              });
+              latestTicketMetadata = mergedMetadata;
+              await tx.mutate.tickets.update({
+                id: params.id,
+                ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+                  ? { eta: etaResult.etaDecision.newEta.getTime() }
+                  : {}),
+                metadata: mergedMetadata as ReadonlyJSONValue,
+                updatedAt: now,
+              });
+
+            }
+
             if (ticket.userGroupId) {
               // Fire and forget - retrigger autoassignment for the new board
               asyncTasks.push(async () => {
@@ -6334,6 +6454,99 @@ export function createMutators(
             }
           }
 
+          // Every trigger this mutator can produce that needs ETA re-evaluation. NON_LINEAR
+          // direct stage changes already threw above.
+          let etaActivityIntentsForTicketUpdate: ReturnType<typeof buildEtaActivityIntents> = [];
+          // Skipped when isBoardChanging: this block resolves the stage from the
+          // pre-transfer ticket.boardId, so running it here would clobber the transfer
+          // branch's already-correct evaluation with one against the deleted old visit.
+          const needsEtaEvaluation =
+            !isBoardChanging &&
+            (isStageChanging || isEtaChanging || isEnteringTerminal || isLeavingTerminal || isResumingFromPause);
+
+          if (needsEtaEvaluation) {
+            const effectiveStageName = (updateData.stageName as string | undefined) ?? ticket.stageName;
+            const effectiveStatusV2 = (updateData.statusV2 as string | undefined) ?? ticket.statusV2;
+            const effectiveStage = effectiveStageName
+              ? await tx.run(zql.stages.where('boardId', ticket.boardId).where('name', effectiveStageName).one())
+              : null;
+
+            if (effectiveStage) {
+              const etaCtx = await loadZeroEtaContext(tx, {
+                ticketId: params.id,
+                boardId: ticket.boardId,
+                ticketMetadata: ticket.metadata,
+                stage: effectiveStage,
+              });
+              const { currentTicketEtaManagement } = etaCtx;
+
+              // A manual due-date change or terminal-only transition must not let an automatic
+              // forecast override the value just set. Detection still runs either way.
+              const evalBoardEtaManagement =
+                isStageChanging || isResumingFromPause
+                  ? boardEtaManagement
+                  : { ...boardEtaManagement, autoRecomputeEnabled: false };
+
+              const baselineEtaMs = (updateData.eta as number | undefined) ?? ticket.eta ?? null;
+              const trigger = isStageChanging
+                ? 'STAGE_TRANSITION'
+                : isResumingFromPause
+                  ? 'RESUME'
+                  : isEnteringTerminal
+                    ? 'TERMINAL_ENTRY'
+                    : isLeavingTerminal
+                      ? 'TERMINAL_EXIT'
+                      : 'MANUAL_DUE_DATE';
+
+              const etaResult = evaluateEta({
+                ticketId: params.id,
+                ticketStatus: effectiveStatusV2,
+                isTerminal: isTerminalStatus(effectiveStatusV2),
+                currentTicketEta: msToDate(baselineEtaMs),
+                currentTicketEtaManagement,
+                boardType: etaBoard?.boardType ?? '',
+                boardEtaManagement: evalBoardEtaManagement,
+                currentStageId: effectiveStage.id,
+                stages: etaCtx.stages,
+                transitions: etaCtx.transitions,
+                activeVisit: etaCtx.activeVisit,
+                trigger,
+                now: new Date(params.updatedAt),
+              });
+
+              if (etaResult.etaDecision.changed && etaResult.etaDecision.newEta) {
+                updateData.eta = etaResult.etaDecision.newEta.getTime();
+              }
+              updateData.metadata = mergeTicketEtaManagement(
+                updateData.metadata ?? latestTicketMetadata,
+                etaResult.ticketEtaManagementPatch,
+              );
+
+              etaActivityIntentsForTicketUpdate = buildEtaActivityIntents(etaResult, {
+                currentStageId: effectiveStage.id,
+                oldEta: ticket.eta ?? null,
+                trigger,
+                systemReason: isStageChanging
+                  ? `Automatic recalculation after moving to stage "${params.stageName}"`
+                  : isResumingFromPause
+                    ? 'Automatic recalculation after resuming from pause'
+                    : isEnteringTerminal || isLeavingTerminal
+                      ? 'Planning risk resolved on terminal status change'
+                      : 'Planning risk re-evaluated after manual due-date change',
+                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+              });
+            }
+          }
+
+          if (etaActivityIntentsForTicketUpdate.length > 0) {
+            updateData.metadata = mergeTicketEtaManagement(updateData.metadata ?? latestTicketMetadata, {
+              pendingActivities: stageEtaActivityOutbox(
+                etaActivityIntentsForTicketUpdate,
+                params.updatedAt,
+              ),
+            });
+          }
+
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
 
           if (
@@ -6610,6 +6823,98 @@ export function createMutators(
           }
         },
       ),
+      /**
+       * Acknowledge the ticket's CURRENT planning-risk fingerprint: records that an
+       * authorized user reviewed this exact risk condition and intentionally kept the
+       * current values. Hides the actionable banner but never changes either ETA. Requires
+       * `expectedFingerprint` to match the persisted fingerprint at write time (optimistic
+       * concurrency - a stale client must refetch and retry rather than silently
+       * acknowledging a condition that has since changed).
+       */
+      acknowledgeEtaRisk: defineMutator(
+        z.object({
+          ticketId: z.string(),
+          expectedFingerprint: z.string(),
+          reason: z.string().min(1),
+          clientTimestamp: z.number(),
+        }),
+        async ({ tx, args: { ticketId, expectedFingerprint, reason, clientTimestamp } }) => {
+          const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+          if (!ticket) throw new Error('Ticket not found');
+
+          const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+          const currentRisk = currentTicketEtaManagement.planningRisk;
+
+          if (currentRisk.state !== 'ACTIVE' || currentRisk.fingerprint !== expectedFingerprint) {
+            throw new ApplicationError(
+              'This planning risk has changed since you loaded this ticket. Refresh and try again.',
+              {
+                details: {
+                  code: 'STALE_FINGERPRINT',
+                  currentState: currentRisk.state,
+                  currentFingerprint: currentRisk.fingerprint,
+                },
+              },
+            );
+          }
+
+          const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          const permission = await canUserModifyTicketControl(
+            authData.sub,
+            ticket.userGroupId ?? null,
+            ticket.boardId,
+            {
+              getBoardMetadata: async () => board?.metadata ?? null,
+              getUserGroupMapping: async (userId, userGroupId) => {
+                const mapping = await tx.run(
+                  zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                );
+                return mapping
+                  ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                  : null;
+              },
+            },
+          );
+          if (!permission.allowed) {
+            throw new Error(permission.reason ?? 'Not authorized to acknowledge this planning risk');
+          }
+
+          const now = Date.now();
+          // Record + system message only - no additional notification. The record is staged
+          // for TicketsSideEffectHandler like every other ETA row, and is user-attributed.
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, {
+            planningRisk: {
+              state: 'ACKNOWLEDGED',
+              acknowledgedAt: now,
+              acknowledgedBy: authData.sub,
+              acknowledgmentReason: reason,
+            },
+            pendingActivities: stageEtaActivityOutbox(
+              [
+                {
+                  activityType: ActivityType.ETA_RISK_ACKNOWLEDGED,
+                  value: {
+                    fingerprint: expectedFingerprint,
+                    reason,
+                    acknowledgedBy: authData.sub,
+                    acknowledgedAt: now,
+                  } satisfies EtaRiskAcknowledgedActivityValue,
+                  actorId: authData.sub,
+                },
+              ],
+              now,
+            ),
+          });
+
+          await tx.mutate.tickets.update({
+            id: ticketId,
+            metadata: mergedMetadata as ReadonlyJSONValue,
+            updatedAt: now,
+          });
+
+          void clientTimestamp; // display-consistency hint only; server timestamp (`now`) is authoritative for persistence.
+        },
+      ),
       archiveDeskTicket: defineMutator(
         z.object({
           id: z.string(),
@@ -6759,21 +7064,6 @@ export function createMutators(
             return;
           }
 
-          // 2. Upsert the current stage ETA entry (will create if not exists, update if exists)
-          await tx.mutate.ticket_stage_eta.upsert({
-            workspaceId: authData.workspaceId,
-            id,
-            ticketId: oldTicketStageEtaEntry?.ticketId ?? ticketId!,
-            stageId: oldTicketStageEtaEntry?.stageId ?? stageId!,
-            version: 1,
-            stageEnteredAt: oldTicketStageEtaEntry?.stageEnteredAt ?? now,
-            stageLeftAt: null,
-            stageEta,
-            createdAt: oldTicketStageEtaEntry?.createdAt ?? now,
-            updatedAt,
-            updatedBy: authData.sub,
-          });
-
           // 3. Use the old entry for other data
           const ticketStageEtaEntry = oldTicketStageEtaEntry ?? {
             id,
@@ -6795,54 +7085,122 @@ export function createMutators(
 
           if (!currentStage) return;
 
-          // 5. Fetch ALL stages for this board
-          const allBoardStages = await tx.run(
-            zql.stages.where('boardId', ticket.boardId)
-          );
+          const board = await tx.run(zql.boards.where('id', ticket.boardId).one());
+          const boardEtaManagement = parseBoardEtaManagement(board?.metadata ?? null, board?.boardType ?? BoardType.DEFAULT);
 
-          // 6. Filter to get FUTURE stages (after current stage)
-          const futureStages = allBoardStages
-            .filter(stage => stage.sequenceNumber > currentStage.sequenceNumber)
-            .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-
-          // 7. Calculate total hours needed for future stages (only stages with ETA)
-          const futureStagesHours = futureStages.reduce(
-            (totalHours, stage) => totalHours + (stage.eta || 0),
-            0
-          );
-
-          // 8. Get the NEW current stage deadline (what user just set)
-          const currentStageDeadline = new Date(stageEta);
-
-          // 9. Calculate overall ticket ETA only if there are future stages with ETA
-          if (futureStagesHours > 0) {
-            // Calculate overall ticket ETA using working hours logic
-            // Starting from: current stage deadline
-            // Adding: working hours for all future stages
-            const overallTicketEta = calculateETADeadline(
-              currentStageDeadline,  // Start from user's new deadline for current stage
-              futureStagesHours      // Add working hours for future stages
+          // This mutator changes Ticket.eta the same way ticket.update's eta-changing path
+          // does, but has never been gated by ticketControlRoleIds. Close that gap. No
+          // assignee exemption here, unlike the two stage-move gates: editing a stage
+          // deadline IS an ETA change, which is exactly what the role gate exists to restrict.
+          if (boardEtaManagement.autoRecomputeEnabled && ticket.userGroupId) {
+            const permission = await canUserModifyTicketControl(
+              authData.sub,
+              ticket.userGroupId,
+              ticket.boardId,
+              {
+                getBoardMetadata: async () => board?.metadata ?? null,
+                getUserGroupMapping: async (userId, userGroupId) => {
+                  const mapping = await tx.run(
+                    zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                  );
+                  return mapping
+                    ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                    : null;
+                },
+              },
             );
+            if (!permission.allowed) {
+              throw new Error(permission.reason ?? 'Not authorized to modify this ticket');
+            }
+          }
 
-            // 10. Update the ticket's overall ETA
-            await tx.mutate.tickets.update({
-              id: ticket.id,
-              eta: overallTicketEta.getTime(),
-              updatedAt: Date.now(),
-            });
+          // 2. Upsert the current stage ETA entry (will create if not exists, update if exists)
+          await tx.mutate.ticket_stage_eta.upsert({
+            workspaceId: authData.workspaceId,
+            id,
+            ticketId: oldTicketStageEtaEntry?.ticketId ?? ticketId!,
+            stageId: oldTicketStageEtaEntry?.stageId ?? stageId!,
+            version: 1,
+            stageEnteredAt: oldTicketStageEtaEntry?.stageEnteredAt ?? now,
+            stageLeftAt: null,
+            stageEta,
+            createdAt: oldTicketStageEtaEntry?.createdAt ?? now,
+            updatedAt,
+            updatedBy: authData.sub,
+          });
 
+          const etaCtx = await loadZeroEtaContext(tx, {
+            ticketId: ticketStageEtaEntry.ticketId,
+            boardId: ticket.boardId,
+            ticketMetadata: ticket.metadata,
+            stage: currentStage,
+          });
+          const { currentTicketEtaManagement } = etaCtx;
+
+          const etaResult = evaluateEta({
+            ticketId: ticketStageEtaEntry.ticketId,
+            ticketStatus: ticket.statusV2,
+            isTerminal: isTerminalStatus(ticket.statusV2),
+            currentTicketEta: msToDate(ticket.eta),
+            currentTicketEtaManagement,
+            boardType: board?.boardType ?? '',
+            boardEtaManagement,
+            currentStageId: ticketStageEtaEntry.stageId,
+            stages: etaCtx.stages,
+            transitions: etaCtx.transitions,
+            // The value the user just set is the authoritative deadline for this visit,
+            // overriding whatever the persisted row said.
+            activeVisit: {
+              ...etaCtx.activeVisit,
+              stageVisitId: id,
+              deadline: new Date(stageEta),
+              deadlineTracked: true,
+              estimateSource: 'MANUAL',
+              estimateHours: null,
+            },
+            trigger: 'MANUAL_STAGE_DEADLINE',
+            now: new Date(now),
+          });
+
+          const currentStageDeadline = new Date(stageEta);
+          let finalEtaMs: number | null | undefined;
+
+          // Without automation, a stage-deadline edit never touches the ticket's due date.
+          if (boardEtaManagement.autoRecomputeEnabled) {
+            finalEtaMs = etaResult.etaDecision.changed ? dateToMs(etaResult.etaDecision.newEta) : undefined;
+          }
+
+          // ETA evaluation audit trail (auto-recompute/risk detected/reopened/resolved),
+          // staged for TicketsSideEffectHandler to write post-commit.
+          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
+            currentStageId: ticketStageEtaEntry.stageId,
+            oldEta: ticket.eta ?? null,
+            trigger: 'MANUAL_STAGE_DEADLINE',
+            systemReason: `Manual stage deadline update for "${currentStage.name}"`,
+            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+          });
+
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, {
+            ...etaResult.ticketEtaManagementPatch,
+            pendingActivities: stageEtaActivityOutbox(etaActivityIntents, now),
+          });
+          await tx.mutate.tickets.update({
+            id: ticket.id,
+            updatedAt: now,
+            ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
+            metadata: mergedMetadata as ReadonlyJSONValue,
+          });
+
+          if (finalEtaMs !== undefined && finalEtaMs !== null) {
             logger.info('[MUTATOR] Updated ticket ETA', {
               ticketId: ticket.id,
               currentStageDeadline: currentStageDeadline.toISOString(),
-              futureStagesHours,
-              newOverallEta: overallTicketEta.toISOString(),
+              newOverallEta: new Date(finalEtaMs).toISOString(),
             });
           } else {
-            logger.info('[MUTATOR] No future stages with ETA, ticket ETA not updated', {
-              ticketId: ticket.id,
-              futureStagesHours,
-            });
+            logger.info('[MUTATOR] Ticket ETA not updated', { ticketId: ticket.id });
           }
+
 
           // 11. Create ticket activity for stage ETA change
           const newStageEta = stageEta;
@@ -6898,6 +7256,9 @@ export function createMutators(
               },
             });
           }
+
+          // ETA notifications are dispatched post-commit by TicketsSideEffectHandler,
+          // which fires off the `tx.mutate.tickets.update` above.
         }
       ),
     },
@@ -7012,6 +7373,23 @@ export function createMutators(
             updatedBy: authData.sub,
             updatedAt: timestamp,
           });
+
+          if (mappedTicketId !== undefined) {
+            const mappings = (await tx.run(
+              zql.ticket_sub_ticket_mappings.where('subTicketId', subTicketId),
+            )) as Array<{ ticketId: string }>;
+            for (const mapping of mappings) {
+              await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
+            }
+            if (mappedTicketId && mappings[0]) {
+              await linkSubTicketConversationToParentFromZero(
+                tx,
+                zql,
+                mappedTicketId,
+                mappings[0].ticketId,
+              );
+            }
+          }
         },
       ),
     },
@@ -7052,8 +7430,14 @@ export function createMutators(
             throw new Error('Project not found');
           }
 
+          // Only repositories that are in a hub block deletion: one registered
+          // and never added to a hub has nothing to detach.
           const attachedSdlcRepository = await tx.run(
-            zql.repos.where('projectId', projectId).where('channelId', 'IS NOT', null).one(),
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_MEMBERSHIP_RELATION)
+              .where('targetType', 'REPOSITORY')
+              .whereExists('channel', channel => channel.where('projectId', projectId))
+              .one(),
           );
           if (attachedSdlcRepository) {
             throw new Error('Detach SDLC repositories before deleting their project');
@@ -7072,7 +7456,6 @@ export function createMutators(
           projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
-          vcsProvider: z.nativeEnum(VCSProviderType),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
           applications: z.array(
@@ -7095,12 +7478,13 @@ export function createMutators(
             projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
-            vcsProvider,
             releaseTrackingMode,
             channelId,
             applications: rawApplications,
           },
         }) => {
+          await assertReleaseManageAccess();
+
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
@@ -7176,6 +7560,13 @@ export function createMutators(
           );
           if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
             throw new Error('All applications in a release group must use the same repository URL');
+          }
+
+          const vcsProvider = detectVcsProvider([...normalizedRepoUrls][0]);
+          if (!vcsProvider) {
+            throw new Error(
+              'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
+            );
           }
 
           if (!mainBoardName.trim()) {
@@ -7362,7 +7753,9 @@ export function createMutators(
             await tx.mutate.boards.update({
               id: existingMainBoard.id,
               name: mainBoardName.trim(),
-              vcsProvider,
+              // Keep the provider set at creation; re-inferring on edit would flip
+              // a GitHub-Enterprise-hosted board to BITBUCKET_SERVER.
+              vcsProvider: existingMainBoard.vcsProvider,
               releaseTrackingMode,
               updatedBy: authData.sub,
               updatedAt: Date.now(),
@@ -7845,6 +8238,14 @@ export function createMutators(
           projectId: z.string().optional(),
           boardType: z.nativeEnum(BoardType).optional(),
           metadata: z.any().optional(),
+          // Automatic ETA management. Merged into `metadata.etaManagement` below rather
+          // than going through the raw `metadata` arg above, which is a whole-column
+          // overwrite and would drop sibling keys.
+          autoRecomputeEnabled: z.boolean().optional(),
+          // Standard Path (NON_LINEAR only). Omitted = leave the existing path untouched;
+          // [] explicitly clears it (disables Standard Path forecasting without changing
+          // allowed transitions).
+          standardPathStageIds: z.array(z.string()).optional(),
           stages: z
             .array(
               z.object({
@@ -7881,6 +8282,8 @@ export function createMutators(
             projectId,
             boardType,
             metadata,
+            autoRecomputeEnabled,
+            standardPathStageIds,
             stages,
             timestamp,
             stageIds = {},
@@ -7894,6 +8297,8 @@ export function createMutators(
           }
 
           if (board.boardType === BoardType.RELEASE) {
+            // Gate release-board edits like board.delete and the config-save mutator.
+            await assertReleaseManageAccess();
             if (projectId !== undefined && projectId !== board.projectId) {
               throw new Error('Release boards cannot be moved to another project');
             }
@@ -7927,6 +8332,102 @@ export function createMutators(
             }
           }
 
+          // A same-call boardType change wins, so a board converted to NON_LINEAR can take
+          // a Standard Path in one shot.
+          const effectiveBoardType = boardType ?? board.boardType;
+
+          if (standardPathStageIds !== undefined && standardPathStageIds.length > 0) {
+            if (effectiveBoardType !== BoardType.NON_LINEAR) {
+              throw new Error('A Standard Path can only be configured on a non-linear board');
+            }
+
+            const uniqueIds = new Set(standardPathStageIds);
+            if (uniqueIds.size !== standardPathStageIds.length) {
+              throw new Error('Standard Path stages must be unique');
+            }
+
+            const [boardStages, boardTransitions] = await Promise.all([
+              tx.run(zql.stages.where('boardId', boardId)),
+              tx.run(zql.stage_transitions.where('boardId', boardId)),
+            ]);
+            const stagesById = new Map(boardStages.map(s => [s.id, s]));
+
+            for (const stageId of standardPathStageIds) {
+              if (!stagesById.has(stageId)) {
+                throw new Error(`Standard Path references a stage that does not belong to this board: ${stageId}`);
+              }
+            }
+
+            const firstStage = stagesById.get(standardPathStageIds[0]!)!;
+            const lastStage = stagesById.get(standardPathStageIds[standardPathStageIds.length - 1]!)!;
+            if (
+              firstStage.defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
+              firstStage.defaultTicketStatusV2 === TicketStatusV2.CANCELLED
+            ) {
+              throw new Error('Standard Path must start with a non-terminal stage');
+            }
+            if (lastStage.defaultTicketStatusV2 !== TicketStatusV2.COMPLETED) {
+              throw new Error('Standard Path must end in a Completed stage');
+            }
+            const hasEachRequiredStatus = [
+              TicketStatusV2.TODO,
+              TicketStatusV2.STARTED,
+              TicketStatusV2.COMPLETED,
+            ].every(status => standardPathStageIds.some(id => stagesById.get(id)?.defaultTicketStatusV2 === status));
+            if (!hasEachRequiredStatus) {
+              throw new Error('Standard Path must include at least one To Do, one Started, and one Completed stage');
+            }
+
+            const boardHasTransitions = boardTransitions.length > 0;
+            for (let i = 0; i < standardPathStageIds.length - 1; i++) {
+              const fromId = standardPathStageIds[i]!;
+              const toId = standardPathStageIds[i + 1]!;
+              const transition =
+                boardTransitions.find(t => t.fromStageId === fromId && t.toStageId === toId) ??
+                boardTransitions.find(t => t.fromStageId == null && t.toStageId === toId) ??
+                null;
+
+              const outgoingFromThisStage = boardTransitions.some(t => t.fromStageId === fromId);
+              // Traversable: an explicit edge, an applicable global edge, or the
+              // board's unrestricted-transition behavior (this stage has zero outgoing edges
+              // configured anywhere, mirroring nonLinear.transition's own edge-gating).
+              if (!transition && boardHasTransitions && outgoingFromThisStage) {
+                throw new Error(
+                  `Standard Path step "${stagesById.get(fromId)?.name ?? fromId}" -> "${stagesById.get(toId)?.name ?? toId}" is not a traversable transition`,
+                );
+              }
+
+              // Config error - checked against the raw transition config, stricter
+              // than the live path's resolveStepEstimate (which falls back to the stage
+              // default for a misconfigured FIXED_HOURS edge to avoid regressing existing
+              // traffic). Standard Path activation is opt-in, so it can afford to be strict.
+              // ("No matching transition on a graphed board" is already a hard traversal
+              // error above - not a separate case to check here.)
+              if (transition && transition.visitSlaMode === VisitSlaMode.FIXED_HOURS) {
+                if (!transition.fixedEtaHours || transition.fixedEtaHours <= 0) {
+                  throw new Error(
+                    `Standard Path step "${stagesById.get(fromId)?.name ?? fromId}" -> "${stagesById.get(toId)?.name ?? toId}" has fixed-hours SLA selected with no value set`,
+                  );
+                }
+              }
+            }
+          }
+
+          // ETA settings merge into the etaManagement subtree instead of replacing the whole
+          // column. Base is the caller's `metadata` when it sent one (so both survive),
+          // otherwise the board's current metadata.
+          const nextMetadata =
+            autoRecomputeEnabled !== undefined || standardPathStageIds !== undefined
+              ? mergeBoardEtaManagement(
+                  metadata !== undefined ? metadata : board.metadata,
+                  effectiveBoardType,
+                  {
+                    ...(autoRecomputeEnabled !== undefined && { autoRecomputeEnabled }),
+                    ...(standardPathStageIds !== undefined && { standardPathStageIds }),
+                  },
+                )
+              : metadata;
+
           // Update board
           await tx.mutate.boards.update({
             id: boardId,
@@ -7934,7 +8435,7 @@ export function createMutators(
             ...(description !== undefined && { description }),
             ...(projectId !== undefined && { projectId }),
             ...(boardType !== undefined && { boardType }),
-            ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
+            ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
             updatedBy: authData.sub,
             updatedAt: timestamp,
           });
@@ -8239,6 +8740,10 @@ export function createMutators(
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          if (board.boardType === BoardType.RELEASE) {
+            await assertReleaseManageAccess();
           }
 
           const [ownedApplication, applicationBoardOwner] = await Promise.all([
@@ -9667,6 +10172,7 @@ export function createMutators(
 
           await tx.mutate.canvas_comment_threads.insert({
             id: threadId,
+            workspaceId: authData.workspaceId,
             canvasId,
             blockId,
             anchorText: anchorText || null,
@@ -9681,6 +10187,7 @@ export function createMutators(
 
           await tx.mutate.canvas_comments.insert({
             id: commentId,
+            workspaceId: authData.workspaceId,
             threadId,
             canvasId,
             body,
@@ -9712,6 +10219,7 @@ export function createMutators(
 
           await tx.mutate.canvas_comments.insert({
             id: commentId,
+            workspaceId: authData.workspaceId,
             threadId,
             canvasId,
             body,
@@ -9749,7 +10257,9 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
-          const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+          const comment = await tx.run(
+            zql.canvas_comments.where('id', commentId).one(),
+          );
           if (!comment) {
             throw new Error('Comment not found');
           }
@@ -9774,7 +10284,9 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args: { commentId, timestamp } }) => {
-          const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+          const comment = await tx.run(
+            zql.canvas_comments.where('id', commentId).one(),
+          );
           if (!comment) {
             throw new Error('Comment not found');
           }
@@ -9941,7 +10453,7 @@ export function createMutators(
           if (canvas.isCollaborative) {
             asyncTasks.push(async () => {
               try {
-                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[]);
+                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[], authData.sub);
               } catch (error) {
                 logger.error('[MUTATOR-CANVAS-VERSION-RESTORE] Failed to sync Y-Sweet:', error);
               }
@@ -10915,49 +11427,44 @@ export function createMutators(
       createLink: defineMutator(
         createSdlcLinkSchema.extend({
           id: z.string(),
-          repoId: z.string(),
+          channelId: z.string(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+          // Links belong to the hub. createSdlcLinkSchema already excludes the
+          // membership relation, so this cannot forge a CHANNEL -> REPOSITORY edge.
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', args.channelId)
               .where('userId', authData.sub)
-              .one()
+              .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           const sourceExists =
             args.sourceType === 'CANVAS'
               ? Boolean(
                   await tx.run(
-                    zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one()
-                  )
+                    zql.canvases.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                  ),
                 )
               : args.sourceType === 'TICKET'
                 ? Boolean(
                     await tx.run(
-                      zql.tickets
-                        .where('id', args.sourceId)
-                        .where('channelId', repo.channelId)
-                        .one()
-                    )
+                      zql.tickets.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                    ),
                   )
                 : args.sourceType === 'CHANNEL'
-                  ? args.sourceId === repo.channelId
+                  ? args.sourceId === args.channelId
                   : false;
           if (!sourceExists) {
-            throw new Error('Relationship source does not belong to this SDLC repository');
+            throw new Error('Relationship source does not belong to this SDLC hub');
           }
           await tx.mutate.sdlc_entity_links.insert({
             id: args.id,
             workspaceId: authData.workspaceId,
-            repoId: args.repoId,
+            channelId: args.channelId,
             sourceType: args.sourceType,
             sourceId: args.sourceId,
             targetType: args.targetType,
@@ -10966,66 +11473,77 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
-        }
+        },
       ),
       deleteLink: defineMutator(
-        z.object({ repoId: z.string(), linkId: z.string() }),
-        async ({ tx, args: { repoId, linkId } }) => {
-          const repo = await tx.run(zql.repos.where('id', repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+        z.object({ channelId: z.string(), linkId: z.string() }),
+        async ({ tx, args: { channelId, linkId } }) => {
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', channelId)
               .where('userId', authData.sub)
-              .one()
+              .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           const link = await tx.run(
-            zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one()
+            zql.sdlc_entity_links.where('id', linkId).where('channelId', channelId).one(),
           );
           if (!link) {
             throw new Error('SDLC relationship not found');
           }
+          // Structural edges are not content: repository membership is detached through
+          // the hub API, track membership only with the track. The mutation ACL agrees.
+          if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(link.relationType)) {
+            throw new Error('Structural SDLC edges are not deleted through the link API');
+          }
           await tx.mutate.sdlc_entity_links.delete({ id: linkId });
-        }
+        },
       ),
 
       createTrack: defineMutator(
         z.object({
           id: z.string(),
-          repoId: z.string(),
+          linkId: z.string(),
+          channelId: z.string(),
           name: z.string().trim().min(1).max(120),
           description: z.string().trim().max(2000).optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+          // Tracks belong to the hub, never to one repository in it.
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', args.channelId)
               .where('userId', authData.sub)
               .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           await tx.mutate.sdlc_tracks.insert({
             id: args.id,
             workspaceId: authData.workspaceId,
-            repoId: args.repoId,
             name: args.name,
             description: args.description,
             status: 'ACTIVE',
             createdBy: authData.sub,
             createdAt: args.timestamp,
             updatedAt: args.timestamp,
+          });
+          // The track carries no scope column; this edge is what places it in the hub.
+          await tx.mutate.sdlc_entity_links.insert({
+            id: args.linkId,
+            workspaceId: authData.workspaceId,
+            channelId: args.channelId,
+            sourceType: 'CHANNEL',
+            sourceId: args.channelId,
+            targetType: 'TRACK',
+            targetId: args.id,
+            relationType: SDLC_TRACK_MEMBERSHIP_RELATION,
+            createdBy: authData.sub,
+            createdAt: args.timestamp,
           });
         },
       ),
@@ -11042,13 +11560,20 @@ export function createMutators(
           if (!track) {
             throw new Error('SDLC track not found');
           }
-          const repo = await tx.run(zql.repos.where('id', track.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
+          const membership = await tx.run(
+            zql.sdlc_entity_links
+              .where('targetType', 'TRACK')
+              .where('targetId', args.trackId)
+              .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+              .one(),
+          );
+          if (!membership?.channelId) {
+            throw new Error('SDLC channel not found');
           }
+          const channelId = membership.channelId;
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', channelId)
               .where('userId', authData.sub)
               .one(),
           );
@@ -12241,33 +12766,92 @@ export function createMutators(
       setTypes: defineMutator(
         z.object({
           conversationId: z.string(),
-          // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
-          // add their own. Length-capped so a tag stays a label rather than a paragraph.
+          // Free-form, not z.enum: the workspace vocabulary is a starting point, and people
+          // type their own. Length-capped so a tag stays a label rather than a paragraph.
           types: z.array(z.string().trim().min(1).max(40)),
+          /**
+           * What a newly invented tag means. Stored as the vocabulary candidate's
+           * description, not on the thread — see the candidate write below.
+           */
+          note: z.string().trim().max(280).optional(),
+          timestamp: z.number(),
         }),
-        async ({ tx, ctx, args: { conversationId, types } }) => {
+        async ({ tx, ctx, args: { conversationId, types, note, timestamp } }) => {
           const conversation = await tx.run(
             zql.conversations.where('conversationId', conversationId).one(),
           );
           if (!conversation) throw new Error('Conversation not found');
 
-          // Built-in types first in vocabulary order, then custom ones alphabetically, so
-          // chips render in a stable order regardless of the order they were picked.
-          const rank = (name: string): number => {
-            const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
-            return i === -1 ? THREAD_TYPE_NAMES.length : i;
-          };
-          const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
-            (a, b) => rank(a) - rank(b) || a.localeCompare(b),
-          );
+          const existing = parseAppliedTags(conversation.threadType);
+          const byName = new Map(existing.map(tag => [tag.name, tag]));
 
+          // Normalise the names being ADDED, and only those. A name already on this thread is
+          // passed through untouched: the caller resends the full set on every edit, so
+          // normalising indiscriminately would silently rewrite tags applied long ago, on an
+          // edit that had nothing to do with them, leaving the same tag spelled two ways
+          // across the workspace.
+          const desired = [
+            ...new Set(
+              types
+                .map(raw => {
+                  const trimmed = raw.trim();
+                  return byName.has(trimmed) ? trimmed : normalizeThreadTypeName(trimmed);
+                })
+                .filter(Boolean),
+            ),
+          ];
 
-          // '[]' rather than null when cleared: null means "never classified" and the
-          // classifier would re-derive it on its next pass.
+          // A merge, never a replace. The caller sends the full desired set, but each tag
+          // already there keeps its own provenance — who applied it and when. Rewriting them all
+          // as freshly hand-applied would erase exactly the trail the tooltip exists to show.
+          const next: AppliedTag[] = [];
+          // Names THIS call applied fresh. Not the same as "every human tag on the thread":
+          // a tag someone else added survives the merge with their `by` intact, and sweeping
+          // those up would file a candidate crediting the wrong person every time anyone
+          // touched the thread's tags.
+          const addedNames: string[] = [];
+          for (const name of desired) {
+            const prior = byName.get(name);
+            if (prior && !prior.removed) {
+              next.push(prior);
+              continue;
+            }
+            next.push({ name, at: timestamp, by: ctx.userID });
+            addedNames.push(name);
+          }
+
+          // Dropped tags are tombstoned, not deleted: removal has to stay auditable, and a
+          // deleted tag would look unclassified to the classifier and come straight back.
+          const kept = new Set(desired);
+          for (const tag of existing) {
+            if (kept.has(tag.name)) continue;
+            next.push(
+              tag.removed ? tag : { ...tag, removed: true, at: timestamp, by: ctx.userID },
+            );
+          }
+
           await tx.mutate.conversations.update({
             conversationId,
-            threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+            threadType: serializeAppliedTags(next),
           });
+
+          // Backend copy only, like the refeed below: a free-form tag someone invented is
+          // recorded as a vocabulary candidate for an admin to promote or drop. The tag is
+          // already on the thread — this only governs whether the NAME becomes something the
+          // picker offers and the classifier may assign.
+          const workspaceIdForVocab = conversation.workspaceId;
+          if (workspaceIdForVocab && addedNames.length > 0) {
+            asyncTasks.push(async () => {
+              const vocabulary = await getThreadTypeVocabulary(workspaceIdForVocab);
+              const known = new Set(vocabulary.map(entry => entry.name));
+              for (const name of addedNames) {
+                if (known.has(name)) continue;
+                // The note describes the tag, so it lands on the candidate as its
+                // description — not copied onto every thread that carries the name.
+                await recordVocabularyCandidate(workspaceIdForVocab, name, ctx.userID, note);
+              }
+            });
+          }
 
           // Backend copy only. Zero collects no side-effect job for conversation updates
           // (SIDE_EFFECT_OPERATION_CONFIG lists insert/delete), and a thread's tags live on
@@ -12645,6 +13229,7 @@ export function createMutators(
                   position: index,
                   createdBy: authData.sub,
                   url: '', // Will be populated after upload completes
+                  uploadStatus: AttachmentUploadStatus.PENDING,
                   metadata: null,
                   conversationId: conversationId || null,
                   isDeleted: false,
@@ -14485,6 +15070,45 @@ export function createMutators(
           }
 
           await tx.mutate.saved_user_configurations.delete({ id: configId });
+        },
+      ),
+    },
+    viewAccess: {
+      grant: defineMutator(
+        z.object({
+          id: z.string(),
+          viewId: z.string(),
+          entityType: z.nativeEnum(ViewAccessEntityType),
+          entityId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, viewId, entityType, entityId, timestamp } }) => {
+          const existing = await tx.run(
+            zql.view_access
+              .where('viewId', viewId)
+              .where('entityType', entityType)
+              .where('entityId', entityId)
+              .one(),
+          );
+          if (existing) return;
+
+          await tx.mutate.view_access.insert({
+            workspaceId: authData.workspaceId,
+            id,
+            viewId,
+            entityType,
+            entityId,
+            sharedBy: authData.sub,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      revoke: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          await tx.mutate.view_access.delete({ id });
         },
       ),
     },
@@ -16890,6 +17514,38 @@ export function createMutators(
           if (board?.boardType !== BoardType.NON_LINEAR) {
             throw new Error('nonLinear.transition is only valid for NON_LINEAR boards');
           }
+          const boardEtaManagement = parseBoardEtaManagement(board.metadata, board.boardType);
+
+          // Stage moves can trigger automatic ETA extension, so gate them the same way
+          // ticket.update gates assignee/eta/board changes - a user who can't otherwise touch
+          // ETA shouldn't be able to do it indirectly by moving the ticket. The assignee is
+          // exempt for the same reason as in ticket.update: progressing their own ticket is
+          // the normal workflow, not a way around the ETA restriction.
+          if (
+            boardEtaManagement.autoRecomputeEnabled &&
+            ticket.userGroupId &&
+            ticket.assignedTo !== authData.sub
+          ) {
+            const permission = await canUserModifyTicketControl(
+              authData.sub,
+              ticket.userGroupId,
+              ticket.boardId,
+              {
+                getBoardMetadata: async () => board.metadata,
+                getUserGroupMapping: async (userId, userGroupId) => {
+                  const mapping = await tx.run(
+                    zql.user_group_mappings.where('userId', userId).where('userGroupId', userGroupId).one(),
+                  );
+                  return mapping
+                    ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
+                    : null;
+                },
+              },
+            );
+            if (!permission.allowed) {
+              throw new Error(permission.reason ?? 'Not authorized to modify this ticket');
+            }
+          }
 
           const targetStage = await tx.run(
             zql.stages.where('boardId', ticket.boardId).where('name', toStageName).one(),
@@ -17057,9 +17713,20 @@ export function createMutators(
             targetStage.eta,
           );
 
+          // Track the FINAL persisted deadline/entered-at regardless of which branch below
+          // fires - a CONTINUE-reopen leaves the row's stageEta/stageEnteredAt untouched (not
+          // `stageEtaDeadline` as just computed), and this is the one value the ETA domain
+          // service evaluation further below must use as "the actual deadline now in effect".
+          let finalStageEtaMs: number;
+          let finalStageEnteredAtMs: number;
+          let finalStageVisitId: string;
+
           if (existingEtaId) {
+            const existingRow = targetETAs.find(e => e.id === existingEtaId);
             // REUSE (form unchanged): rebaseEta (RESET) restarts the clock; CONTINUE keeps it.
             if (rebaseEta) {
+              finalStageEtaMs = stageEtaDeadline;
+              finalStageEnteredAtMs = now;
               await tx.mutate.ticket_stage_eta.update({
                 id: existingEtaId,
                 stageEnteredAt: now,
@@ -17070,6 +17737,8 @@ export function createMutators(
               });
             } else {
               // CONTINUE: only clear stageLeftAt (do NOT touch stageEnteredAt/stageEta).
+              finalStageEtaMs = existingRow?.stageEta ?? stageEtaDeadline;
+              finalStageEnteredAtMs = existingRow?.stageEnteredAt ?? now;
               await tx.mutate.ticket_stage_eta.update({
                 id: existingEtaId,
                 stageLeftAt: null,
@@ -17077,12 +17746,16 @@ export function createMutators(
                 updatedBy: authData.sub,
               });
             }
+            finalStageVisitId = existingEtaId;
           } else {
             // NEW visit version (first visit, or form changed): insert a fresh ETA row at
             // newVisitIndex with a clock started from now.
+            finalStageEtaMs = stageEtaDeadline;
+            finalStageEnteredAtMs = now;
+            finalStageVisitId = uuidv4();
             await tx.mutate.ticket_stage_eta.insert({
               workspaceId: authData.workspaceId,
-              id: uuidv4(),
+              id: finalStageVisitId,
               ticketId,
               stageId: targetStage.id,
               version: newVisitIndex,
@@ -17094,6 +17767,53 @@ export function createMutators(
             });
           }
 
+          const etaCtx = await loadZeroEtaContext(tx, {
+            ticketId,
+            boardId: ticket.boardId,
+            ticketMetadata: ticket.metadata,
+            stage: targetStage,
+            transition,
+          });
+          const { currentTicketEtaManagement } = etaCtx;
+
+          const etaResult = evaluateEta({
+            ticketId,
+            ticketStatus: ticket.statusV2,
+            isTerminal: isTerminalStatus(ticket.statusV2),
+            currentTicketEta: msToDate(ticket.eta),
+            currentTicketEtaManagement,
+            boardType: board.boardType,
+            boardEtaManagement,
+            currentStageId: targetStage.id,
+            stages: etaCtx.stages,
+            transitions: etaCtx.transitions,
+            // The visit row was written above in this same transaction; use the deadline
+            // this transition just resolved rather than re-reading it.
+            activeVisit: {
+              ...etaCtx.activeVisit,
+              stageVisitId: finalStageVisitId,
+              deadline: msToDate(finalStageEtaMs),
+              deadlineTracked: finalStageEtaMs !== finalStageEnteredAtMs,
+            },
+            trigger: 'STAGE_TRANSITION',
+            now: new Date(now),
+          });
+          // Audit trail for the ETA evaluation, staged into the same write as the state it
+          // describes; TicketsSideEffectHandler drains it post-commit (system-actor
+          // resolution needs an async lookup that doesn't belong on the mutation path).
+          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
+            currentStageId: targetStage.id,
+            oldEta: ticket.eta ?? null,
+            trigger: 'STAGE_TRANSITION',
+            systemReason: `Automatic recalculation after moving to stage "${toStageName}"`,
+            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+          });
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, {
+            ...etaResult.ticketEtaManagementPatch,
+            pendingActivities: stageEtaActivityOutbox(etaActivityIntents, now),
+          });
+          const finalEtaMs = etaResult.etaDecision.changed ? dateToMs(etaResult.etaDecision.newEta) : undefined;
+
           await tx.mutate.tickets.update({
             id: ticketId,
             stageName: toStageName,
@@ -17101,7 +17821,10 @@ export function createMutators(
               statusV2: targetStage.defaultTicketStatusV2,
             }),
             updatedAt: now,
+            ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
+            metadata: mergedMetadata as ReadonlyJSONValue,
           });
+
 
           // Defer the non-transactional side-effects (post-commit, via asyncTasks). All three
           // are safe here: the ETA close only touches stageLeftAt (the ticket_stage_eta handler
@@ -17180,6 +17903,10 @@ export function createMutators(
                 },
               });
             }
+
+            // ETA activity rows and notifications are both written post-commit by
+            // TicketsSideEffectHandler, off the `tx.mutate.tickets.update` this mutator
+            // performed - the rows from the outbox staged into that update's metadata.
             } catch (error) {
               logger.error('stage_transition_side_effects_failed', { ticketId, targetStageId, error });
             }

@@ -11,20 +11,25 @@ import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
+import { useAllChannels } from '../../hooks/useChannels';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { useSelector } from '@xstate/react';
-import { CallType } from '@xyne/shared';
+import { CallType, ChannelType } from '@xyne/shared';
+import { buildSdlcPath } from '@xyne/shared/sdlc';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import {
+  getRecordingStatus,
   sendRecordingEvent,
   stopRecordingForNavigation,
   stopRecordingForTeardown,
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
@@ -73,6 +78,7 @@ interface NotificationData {
       commentThreadId?: string;
       conversation?: Conversation;
       notificationType?: string;
+      ticketId?: string;
     };
     metadata?: {
       notificationType?: string;
@@ -128,8 +134,22 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
+  // Read inside the socket callback, which is registered once.
+  const allChannels = useAllChannels();
+  const sdlcChannelIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    sdlcChannelIdsRef.current = new Set(
+      allChannels.filter(channel => channel.type === ChannelType.SDLC).map(channel => channel.id),
+    );
+  }, [allChannels]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
+
+  const goToRecordings = useCallback((): void => {
+    const workspaceId = activeWorkspaceIdRef.current;
+    if (!workspaceId) return;
+    void navigate(withWorkspacePrefix('/recordings', workspaceId));
+  }, [navigate]);
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
     reactNativeBridge.isAvailable(),
   );
@@ -227,10 +247,33 @@ export const NotificationHandler: React.FC = () => {
             ),
           });
         }
+        // Socket delivery spreads metadata into `data`; the REST row keeps `metadata`.
+        const ids = { ...data.notification.metadata, ...data.notification.data };
+        // No builder knows the SDLC routes, so the hub's own paths are built here
+        // from the ids they all send, against channels the client already holds.
+        const sdlcActionUrl =
+          ids.channelId && sdlcChannelIdsRef.current.has(ids.channelId)
+            ? buildSdlcPath({
+                channelId: ids.channelId,
+                canvasId: ids.canvasId,
+                ticketId: ids.ticketId,
+                conversationId: ids.conversationId,
+                messageId: ids.messageId,
+                blockId: ids.blockId,
+                commentThreadId: ids.commentThreadId,
+              })
+            : undefined;
         const resolvedRawActionUrl =
-          data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
+          sdlcActionUrl ||
+          data.notification.actionUrl ||
+          canvasRedirectUrl ||
+          fallbackChatActionUrl;
         const resolvedActionUrl = resolvedRawActionUrl
-          ? withWorkspacePrefix(resolvedRawActionUrl, notificationWorkspaceId)
+          ? withWorkspacePrefix(
+              resolvedRawActionUrl,
+              // Unprefixed SDLC paths bind :workspaceId to "sdlc" — never ship one.
+              notificationWorkspaceId ?? activeWorkspaceIdRef.current,
+            )
           : undefined;
 
         // Always show workspace at the top when available, matching Slack.
@@ -322,6 +365,10 @@ export const NotificationHandler: React.FC = () => {
             action: {
               label: 'View',
               onClick: (): void => {
+                globalClickTracker.trackManualEvent(
+                  'NOTIFICATIONS',
+                  'CLICK_NOTIFICATION_TOAST_VIEW',
+                );
                 void handleNotificationClick(resolvedActionUrl, notificationWorkspaceId);
               },
             },
@@ -579,6 +626,12 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (isElectron && window.electronAPI && typeof window.electronAPI.onNavigateTo === 'function') {
       const handleNavigate = (url: string, workspaceId?: string): void => {
+        // The navigate-to IPC fires for notifications, deep links, tray and
+        // overlay navigations alike — the renderer cannot tell them apart, so
+        // this is recorded as a generic externally-triggered navigation.
+        globalClickTracker.trackManualEvent('NAVIGATION', 'ELECTRON_NAVIGATE', undefined, {
+          to: url,
+        });
         void handleNotificationClick(url, workspaceId);
       };
 
@@ -594,20 +647,28 @@ export const NotificationHandler: React.FC = () => {
     // Sync stored preference to main process on startup
     meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
     const cleanup = meetingDetector.onStartRecordingFromMeeting(() => {
-      sendRecordingEvent({ type: 'requestAutoStart' });
+      goToRecordings();
+      const status = getRecordingStatus();
+      if (status === 'idle' || status === 'error') {
+        sendRecordingEvent({ type: 'clearTranscripts' });
+        sendRecordingEvent({ type: 'startRecording', defaultLayout: getRecordingDefaultLayout() });
+      } else {
+        sendRecordingEvent({ type: 'requestAutoStart' });
+      }
     });
     window.electronAPI?.ipcSend?.('recording:renderer-ready');
     return cleanup;
-  }, [isElectron]);
+  }, [isElectron, goToRecordings]);
 
   // Handle stop signal from the floating recording pill's Stop button
   useEffect(() => {
     const meetingDetector = window.electronAPI?.meetingDetector;
     if (!isElectron || !meetingDetector) return;
     return meetingDetector.onStopRecordingFromMeeting(() => {
+      goToRecordings();
       sendRecordingEvent({ type: 'requestStop' });
     });
-  }, [isElectron]);
+  }, [isElectron, goToRecordings]);
 
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;

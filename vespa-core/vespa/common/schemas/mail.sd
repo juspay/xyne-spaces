@@ -38,6 +38,19 @@ schema mail {
       attribute: fast-search
     }
 
+    # Human-readable id of the ticket this mail belongs to (e.g. PLAT-0065),
+    # denormalised from the ticket so Desk results can match and display it.
+    field xyneId type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
+    # Project shortcode of the linked ticket, the "<code>" half of its xyneId "<code>-<number>".
+    field projectCode type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
     field channelRef type reference<chat_container> {
       indexing: attribute
     }
@@ -139,6 +152,36 @@ schema mail {
       attribute: fast-search
     }
 
+    # Custom form fields of the owning ticket, denormalised onto the mail.
+    # Mirrors ticket.sd's form_field / formFields.
+    struct form_field {
+      field fieldId type string {}
+      field fieldValue type string {}
+      field fieldValueLong type long {}
+    }
+
+    field ticketFormFields type array<form_field> {
+      indexing: summary
+      struct-field fieldId {
+        indexing: attribute | summary
+        attribute: fast-search
+      }
+      struct-field fieldValue {
+        indexing: attribute | summary
+        attribute: fast-search
+      }
+      struct-field fieldValueLong {
+        indexing: attribute | summary
+        attribute: fast-search
+      }
+    }
+
+    # Flattened copy of ticketFormFields.fieldValue, indexed for Desk/All lexical search.
+    field ticketFormFieldValues type array<string> {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
     field entityPeople type array<string> {
       indexing: attribute | summary | index
       attribute: fast-search
@@ -160,6 +203,7 @@ schema mail {
 
   import field channelRef.docId as channelId {}
   import field channelRef.permissions as permissions {}
+  import field channelRef.channelName as channelName {}
 
   # Subject-line embedding. mail previously embedded ONLY `chunks`, so a query whose
   # meaning lives in the subject had nothing to match semantically -- the same gap
@@ -208,7 +252,7 @@ schema mail {
   }
 
   fieldset default {
-    fields: subject, app, entity, chunks, attachmentFilenames, from, to, cc, bcc, labels, entityPeople, entityProducts, entityMerchants
+    fields: subject, app, entity, chunks, attachmentFilenames, from, to, cc, bcc, labels, entityPeople, entityProducts, entityMerchants, xyneId, ticketFormFieldValues
   }
 
   fieldset autocomplete {
@@ -279,6 +323,8 @@ schema mail {
     summary chunks {
       bolding: on
     }
+    summary channelName {}
+    summary channelId {}
   }
 
   document-summary lean {
@@ -294,6 +340,8 @@ schema mail {
     summary entity {}
     summary permissions {}
     summary mailId {}
+    summary channelName {}
+    summary channelId {}
   }
 
 

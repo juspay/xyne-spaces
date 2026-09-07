@@ -46,7 +46,7 @@ export function CalendarTimeSlotCell({
           ? e => onDragCreatePointerDown(e, date)
           : undefined
       }
-      data-track-category='Calls'
+      data-track-category='CALLS'
       data-track-name={trackName}
       className={cn('flex-1 relative', onCreateCallAtSlot && 'cursor-pointer', className)}
     >

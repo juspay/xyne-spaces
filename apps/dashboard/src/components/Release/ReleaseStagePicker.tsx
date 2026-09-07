@@ -144,6 +144,7 @@ export function ReleaseStagePicker({
               )}
               data-track-category='Release'
               data-track-name='SelectRowStage'
+              data-ph-capture-attribute-track-id='select_release_stage'
             >
               <span
                 className='inline-block w-1.5 h-1.5 rounded-full'

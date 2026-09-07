@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, UserPlus, X } from 'lucide-react';
+import { SearchDefault as Search, UserPlus, MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Popover } from '../../ui/Popover/Popover';
 import UserAvatar from '../../UserAvatar/UserAvatar';
@@ -143,6 +143,7 @@ export function AssigneePicker({
         <div className='overflow-y-auto flex-1'>
           <button
             type='button'
+            data-ph-capture-attribute-track-id='ticket_unassign_row'
             onClick={e => {
               e.stopPropagation();
               assign(null);
@@ -163,6 +164,7 @@ export function AssigneePicker({
             <button
               key={user.id}
               type='button'
+              data-ph-capture-attribute-track-id='ticket_assign_row'
               onClick={e => {
                 e.stopPropagation();
                 handleSelectUser(user);

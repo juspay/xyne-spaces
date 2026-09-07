@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Dialog } from '../ui/Dialog';
+
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
@@ -156,6 +157,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 onToggleStar?.(canvas);
               }}
               title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
+              data-ph-capture-attribute-track-id='toggle_canvas_star'
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_STAR'
             >
