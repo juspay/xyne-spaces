@@ -23,3 +23,17 @@ export class PauseStep extends Error {
     return err instanceof PauseStep || (err instanceof Error && err.name === 'PauseStep');
   }
 }
+
+export class TerminateRun extends Error {
+  readonly reason: string | undefined;
+
+  constructor(reason?: string) {
+    super(reason ? `Run terminated: ${reason}` : 'Run terminated');
+    this.name = 'TerminateRun';
+    this.reason = reason;
+  }
+
+  static is(err: unknown): err is TerminateRun {
+    return err instanceof TerminateRun || (err instanceof Error && err.name === 'TerminateRun');
+  }
+}

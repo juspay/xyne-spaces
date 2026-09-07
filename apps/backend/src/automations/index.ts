@@ -15,6 +15,7 @@ import { tagGeneratedTrigger } from './triggers/tag-generated.trigger';
 import { conditionalStep } from './steps/conditional.step';
 import { switchStep } from './steps/switch.step';
 import { delayStep } from './steps/delay.step';
+import { terminateStep } from './steps/terminate.step';
 
 import { sendMessageStep } from './steps/send-message.step';
 import { notifyUserStep } from './steps/notify-user.step';
@@ -62,6 +63,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(conditionalStep);
   stepRegistry.register(switchStep);
   stepRegistry.register(delayStep);
+  stepRegistry.register(terminateStep);
 
   stepRegistry.register(sendMessageStep);
   stepRegistry.register(notifyUserStep);

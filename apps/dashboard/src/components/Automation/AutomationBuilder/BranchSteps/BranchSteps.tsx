@@ -1,5 +1,10 @@
 import { cn } from '../../../../utils/classNames';
-import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, makeStepId } from '../../Automation.types';
+import {
+  CONDITIONAL_STEP_TYPE,
+  SWITCH_STEP_TYPE,
+  PAUSING_STEP_TYPES,
+  makeStepId,
+} from '../../Automation.types';
 import {
   buildOutputSchemaFromRunAgentConfig,
   buildOutputSchemaFromWebhookConfig,
@@ -268,7 +273,13 @@ export function BranchSteps({
             );
           })
         )}
-        <AddStepRow catalog={catalog} onPick={handleAdd} variant='compact' />
+        <AddStepRow
+          catalog={catalog}
+          onPick={handleAdd}
+          variant='compact'
+          disabledTypes={PAUSING_STEP_TYPES}
+          disabledHint='Cannot run inside a branch — add it after the conditional / switch. To stop the run early here, use Terminate run.'
+        />
       </div>
     </div>
   );

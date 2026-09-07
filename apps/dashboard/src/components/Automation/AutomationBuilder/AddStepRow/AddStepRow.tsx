@@ -3,6 +3,7 @@ import * as LucideIcons from 'lucide-react';
 import { Plus, Search, Zap, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { Popover } from '../../../ui/Popover/Popover';
+import { Tooltip } from '../../../ui/Tooltip';
 import type { StepCatalogItem } from '../../Automation.types';
 import type { AddStepRowProps } from './AddStepRow.types';
 
@@ -10,6 +11,8 @@ export function AddStepRow({
   catalog,
   onPick,
   variant = 'full',
+  disabledTypes,
+  disabledHint,
 }: AddStepRowProps): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -98,40 +101,58 @@ export function AddStepRow({
                 <div className='px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
                   {group.category}
                 </div>
-                {group.items.map(item => (
-                  <button
-                    key={item.type}
-                    type='button'
-                    data-track-category='automation-builder'
-                    data-track-name={`add-step-pick-${item.type}`}
-                    onClick={() => {
-                      onPick(item.type);
-                      setOpen(false);
-                      setQuery('');
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors',
-                      'hover:bg-accent/40',
-                    )}
-                  >
-                    <span
+                {group.items.map(item => {
+                  const disabled = disabledTypes?.includes(item.type) ?? false;
+                  const row = (
+                    <button
+                      key={item.type}
+                      type='button'
+                      aria-disabled={disabled}
+                      data-track-category='automation-builder'
+                      data-track-name={`add-step-pick-${item.type}`}
+                      onClick={() => {
+                        if (disabled) return;
+                        onPick(item.type);
+                        setOpen(false);
+                        setQuery('');
+                      }}
                       className={cn(
-                        'flex size-6 flex-shrink-0 items-center justify-center rounded-md',
-                        'bg-accent/40 text-foreground',
+                        'flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors',
+                        disabled ? 'cursor-not-allowed opacity-45' : 'hover:bg-accent/40',
                       )}
                     >
-                      <ResolveIcon name={item.icon} className='size-3' />
-                    </span>
-                    <span className='flex flex-1 flex-col min-w-0'>
-                      <span className='truncate text-sm text-foreground'>{item.name}</span>
-                      {item.description && (
-                        <span className='line-clamp-1 text-[11px] text-muted-foreground'>
-                          {item.description}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                ))}
+                      <span
+                        className={cn(
+                          'flex size-6 flex-shrink-0 items-center justify-center rounded-md',
+                          'bg-accent/40 text-foreground',
+                        )}
+                      >
+                        <ResolveIcon name={item.icon} className='size-3' />
+                      </span>
+                      <span className='flex flex-1 flex-col min-w-0'>
+                        <span className='truncate text-sm text-foreground'>{item.name}</span>
+                        {item.description && (
+                          <span className='line-clamp-1 text-[11px] text-muted-foreground'>
+                            {item.description}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                  return disabled && disabledHint ? (
+                    <Tooltip
+                      key={item.type}
+                      content={disabledHint}
+                      side='right'
+                      collisionPadding={8}
+                      className='max-w-[220px]'
+                    >
+                      {row}
+                    </Tooltip>
+                  ) : (
+                    row
+                  );
+                })}
               </div>
             ))
           )}
