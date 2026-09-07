@@ -120,6 +120,7 @@ import { ReposACL } from '../tables/repos-acl';
 import { SdlcEntityLinksACL } from '../tables/sdlc-entity-links-acl';
 import { SdlcTracksACL } from '../tables/sdlc-tracks-acl';
 import { StageApproversACL } from '../tables/stage-approvers-acl';
+import { CommitsACL } from '../tables/commits-acl';
 import { StageTransitionsACL } from '../tables/stage-transitions-acl';
 import { SurfaceNudgeCountsACL } from '../tables/surface-nudge-counts-acl';
 import { TicketStageRequestsACL } from '../tables/ticket-stage-requests-acl';
@@ -419,8 +420,7 @@ export class ACLFactory {
       case 'sdlc_entity_links':
         return new SdlcEntityLinksACL(ctx);
       case 'commits':
-        // Server-written table: no client mutations (BaseACL denies all).
-        return new BaseACL<any>(ctx);
+        return new CommitsACL(ctx);
       case 'sdlc_artifacts':
         // Server-written provenance table: no client mutations (BaseACL denies all).
         return new BaseACL<any>(ctx);

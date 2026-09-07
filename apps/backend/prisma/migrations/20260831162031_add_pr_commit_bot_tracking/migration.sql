@@ -1,32 +1,19 @@
 -- CreateTable: Commit table for bot attribution tracking
 CREATE TABLE "public"."commits" (
-    "workspaceId" TEXT NOT NULL,
     "id" TEXT NOT NULL,
     "commitSha" TEXT NOT NULL,
     "pullRequestId" TEXT NOT NULL,
-    "repositoryUrl" TEXT NOT NULL,
     "agentSlug" TEXT,
     "authorName" TEXT NOT NULL,
     "authorEmail" TEXT NOT NULL,
-    "messageHeadline" TEXT NOT NULL,
-    "messageBody" TEXT,
     "committedAt" TIMESTAMP(3) NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "commits_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
 CREATE UNIQUE INDEX "commits_pullRequestId_commitSha_key" ON "public"."commits"("pullRequestId", "commitSha");
-
--- CreateIndex
-CREATE INDEX "commits_pullRequestId_idx" ON "public"."commits"("pullRequestId");
-
--- CreateIndex
-CREATE INDEX "commits_workspaceId_idx" ON "public"."commits"("workspaceId");
-
--- CreateIndex
-CREATE INDEX "commits_workspaceId_repositoryUrl_committedAt_idx" ON "public"."commits"("workspaceId", "repositoryUrl", "committedAt" DESC);
 
 -- AddForeignKey
 ALTER TABLE "public"."commits" ADD CONSTRAINT "commits_pullRequestId_fkey" FOREIGN KEY ("pullRequestId") REFERENCES "public"."pull_requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;

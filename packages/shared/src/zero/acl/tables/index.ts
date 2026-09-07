@@ -40,6 +40,7 @@ export { OrgMembersACL } from './org-members-acl';
 export { OrganizationsACL } from './organizations-acl';
 export { ProjectsACL } from './projects-acl';
 export { PullRequestsACL } from './pull-requests-acl';
+export { CommitsACL } from './commits-acl';
 export { ReactionCountsACL } from './reaction-counts-acl';
 export { ReactionsACL } from './reactions-acl';
 export { ReposACL } from './repos-acl';

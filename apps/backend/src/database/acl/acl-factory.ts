@@ -111,6 +111,7 @@ import {
   ChannelDailyRecapsACL,
   ChannelRecapsACL,
   ChannelSectionsACL,
+  CommitsACL,
   CollectionsACL,
   CollectionItemsACL,
   CollectionPermissionsACL,
@@ -172,9 +173,10 @@ export class ACLFactory {
     case 'canvasCommentThread':
       return new CanvasCommentThreadsACL(ctx, prisma)
     case 'commit':
-      return new BaseQueryACL(ctx, prisma)
-    // Both carry workspaceId, so the base clause ({ workspaceId }) is the whole rule.
+      return new CommitsACL(ctx, prisma)
+    // Scoped via pullRequest.workspaceId relationship
     case 'entityAccess':
+      // Carries workspaceId, so the base clause ({ workspaceId }) is the whole rule.
       return new BaseQueryACL(ctx, prisma)
     case 'summaryTemplate':
       return new BaseQueryACL(ctx, prisma)

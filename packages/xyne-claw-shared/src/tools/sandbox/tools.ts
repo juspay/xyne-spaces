@@ -17,6 +17,14 @@ import { classifyWikiCommitRelevance, parseWikiNameStatus } from "./sdlc-wiki-po
 
 const sandboxLog = createLogger("sandbox-tools");
 
+/**
+ * Git trailer for bot commit attribution.
+ * Appended to commit messages for PR analytics tracking.
+ * Format: "xyne-bot-author: <agent-slug>"
+ * Example: "xyne-bot-author: claw"
+ */
+const BOT_AUTHOR_TRAILER = "xyne-bot-author";
+
 // Build a redacted `Error: ...` string from a caught error. Several tool
 // catch blocks interpolate err.message straight into tool output, which can
 // echo secrets surfaced by the failing command. Route them through this.
@@ -1406,7 +1414,7 @@ async function configureGitIdentity(
   // → final commit has the human user as author and Xyne Spaces as committer.
   //
   // Bot attribution: if botId is present (e.g. "claw", "sdlc-agent"), append
-  // "xyne-bot-author: <botId>" trailer to the commit message for PR analytics.
+  // bot author trailer to the commit message for PR analytics.
   const postCommitHook = [
     "#!/bin/sh",
     "# Xyne session-local post-commit identity rewrite.",
@@ -1427,12 +1435,12 @@ async function configureGitIdentity(
     "export XYNE_POST_COMMIT_AMEND_GUARD=1",
     "",
     botId ? [
-      "# Bot attribution: append xyne-bot-author trailer for PR analytics",
+      `# Bot attribution: append ${BOT_AUTHOR_TRAILER} trailer for PR analytics`,
       `BOT_ID="${botId.replace(/["\\$`]/g, "")}"`,
       'COMMIT_MSG=$(git log -1 --format=%B)',
       'NEW_MSG="${COMMIT_MSG}',
       '',
-      'xyne-bot-author: ${BOT_ID}"',
+      `${BOT_AUTHOR_TRAILER}: \${BOT_ID}"`,
       `git commit --amend --no-verify --allow-empty --author="${safeName} <${safeEmail}>" -m "$NEW_MSG" 2>/dev/null || true`,
     ].join("\n") : [
       "# --author forces the human user as author (NOT --reset-author, which",

@@ -10,6 +10,7 @@ import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhook
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { xyneCommentService } from '@/services/xyneCommentService';
+import { CommitAnalysisStatus } from '@/types/vcs';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
@@ -436,7 +437,7 @@ export class BitbucketWebhookService {
       sourceBranchName: context.sourceBranch,
       destinationBranchName: context.destinationBranch,
       numberOfComments: context.numberOfComments,
-      commitAnalysisStatus: 'PENDING', // Mark for async analysis
+      commitAnalysisStatus: CommitAnalysisStatus.PENDING, // Mark for async analysis
     });
 
     // Enqueue commit analysis job (async, non-blocking)

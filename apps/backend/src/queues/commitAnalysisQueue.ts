@@ -7,6 +7,7 @@ import { BitbucketService } from '@/services/bitbucketService';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { CommitAnalysisStatus } from '@/types/vcs';
 
 export type VcsProvider = 'github' | 'bitbucket';
 
@@ -126,7 +127,7 @@ class CommitAnalysisQueue {
         await db.pullRequests.update({
           where: { id: prInternalId },
           data: {
-            commitAnalysisStatus: 'FAILED',
+            commitAnalysisStatus: CommitAnalysisStatus.FAILED,
             commitAnalysisError: errorMsg,
             commitAnalyzedAt: new Date(),
           },
