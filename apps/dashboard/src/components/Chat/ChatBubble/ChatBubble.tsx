@@ -1162,7 +1162,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       data-hover-key={hoverToolbarKey}
       className={cn(
         isMobile && 'no-select-mobile',
-        'group/bubble relative transition-all duration-200 ease-in-out',
+        'group/bubble relative transition-colors duration-200 ease-in-out',
         // Row highlight driven by the shared MessageHoverToolbar, which stamps
         // `data-hovered` on the [data-message-id] root. Applied at the root so
         // every sub-layout (message, link/canvas previews, reply layout) is

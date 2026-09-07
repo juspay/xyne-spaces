@@ -1158,7 +1158,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           }
                         }
                   }
-                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-colors duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
                 >
                   {searchItemView || context === 'thread'
                     ? formatThreadTimestamp(message.createdAt)
@@ -1801,7 +1801,7 @@ export const ReactionView = ({
               <button
                 type='button'
                 data-testid='message-reaction-chip'
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-colors duration-150 ${
                   reaction.userHasReacted
                     ? 'bg-accent border border-action-primary hover:bg-accent/80'
                     : 'bg-muted hover:bg-accent'
@@ -1874,7 +1874,7 @@ export const ReactionView = ({
             <Popover.Trigger asChild>
               <button
                 type='button'
-                className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
+                className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-colors duration-150'
                 onClick={e => e.stopPropagation()}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_EMOJI_PICKER'
