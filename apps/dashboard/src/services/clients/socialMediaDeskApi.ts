@@ -8,11 +8,11 @@ export async function startInstagramOAuth(input: {
   visibility: 'PUBLIC' | 'PRIVATE';
   platform: 'web' | 'electron';
 }): Promise<string> {
-  const response = await apiInstance.post<{ authUrl: string }>(
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
     '/integrations/social-media/instagram/oauth/start',
     input,
   );
-  return response.data.authUrl;
+  return response.data.authorizationUrl;
 }
 
 export async function startGooglePlayOAuth(input: {
@@ -148,7 +148,7 @@ export async function startInstagramOAuth(input: {
     '/integrations/social-media/instagram/oauth/start',
     { name: input.channelName, ...input },
   );
-  return response.data.authUrl;
+  return response.data.authorizationUrl;
 }
 
 /** Apple keys are rotated by pasting a new .p8, not by re-running a consent redirect. */

@@ -1,14 +1,21 @@
 export interface InstagramCredentials {
   accessToken: string;
+  // igUserId: real Instagram user ID — returned as `user_id` from GET /me.
+  //   Matches webhook entry.id. Used for the B2 filter and as the source name suffix.
   igUserId: string;
-  username?: string; // e.g. "xyne.spaces" — stored for display and debugging
+  // igsid: app-scoped Instagram-Scoped User ID — returned as `id` from GET /me.
+  //   Required for all Meta Graph API calls (/{igsid}/messages, /{igsid}/subscribed_apps).
+  //   Always differs from igUserId. Optional only for backward compat with credentials
+  //   created before this field was added; all new credentials will have it.
+  igsid?: string;
+  username?: string; // IG @handle — stored for display and debugging
   expiresAt: number; // epoch ms — long-lived tokens expire after 60 days
 }
 
 export interface InstagramWebhookMessaging {
   sender: { id: string; username?: string };
   recipient: { id: string };
-  timestamp: number;
+  timestamp: number; // Unix ms — Meta sends 13-digit millisecond timestamps
   message: {
     mid: string;
     text?: string;

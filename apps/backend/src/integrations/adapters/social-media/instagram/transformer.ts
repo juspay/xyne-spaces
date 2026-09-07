@@ -38,8 +38,9 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
         author: { name: senderName, externalId: igsid },
         content: text,
         emailData: {
-          subject: `Instagram DM from ${senderName}`,
-          from: senderName,
+          // Omit subject and from: updateExternalInteraction falls back to existingEmail values
+          // via `?? existingEmail.field`. Setting them here would overwrite the stored @username
+          // with a raw IGSID string (no username is fetched for edit events).
           to: [],
           type: EmailType.DEFAULT,
           skipBlockingCheck: true,
@@ -47,7 +48,7 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
         },
         metadata: {
           eventType: SOCIAL_MEDIA_INTERACTION_TYPES.DM,
-          timestamp: new Date(messaging.timestamp * 1000),
+          timestamp: new Date(messaging.timestamp),
           source: 'social-media',
         },
       };
@@ -59,7 +60,8 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     // DM as the start of a new conversation so a new ticket is created.
     const latest = await this.externalMessageRepo.findLatestForIgsid(source.id, igsid);
     const latestTime = latest?.createdAt;
-    const newMessageTime = new Date(messaging.timestamp * 1000).getTime();
+    // messaging.timestamp is Unix ms (Meta sends 13-digit ms timestamps, not seconds)
+    const newMessageTime = messaging.timestamp;
     const windowExpired = !latestTime || newMessageTime - latestTime.getTime() > INSTAGRAM_REPLY_WINDOW_MS;
 
     // A unique suffix creates a new thread (new ticket); the bare IGSID
@@ -69,7 +71,7 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     // duplicates when Meta delivers multiple events in rapid succession).
     // Anchor to the message's own timestamp so two messages sent in the same
     // 24h window always hash to the same thread ID, regardless of server time.
-    const windowStart = Math.floor(new Date(messaging.timestamp * 1000).getTime() / INSTAGRAM_REPLY_WINDOW_MS) * INSTAGRAM_REPLY_WINDOW_MS;
+    const windowStart = Math.floor(messaging.timestamp / INSTAGRAM_REPLY_WINDOW_MS) * INSTAGRAM_REPLY_WINDOW_MS;
     const externalThreadId = latest && !windowExpired
       ? latest.externalThreadId
       : `${igsid}:${windowStart}`;
@@ -91,7 +93,7 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
       },
       metadata: {
         eventType: SOCIAL_MEDIA_INTERACTION_TYPES.DM,
-        timestamp: new Date(messaging.timestamp * 1000),
+        timestamp: new Date(messaging.timestamp),
         source: 'social-media',
         windowExpired: windowExpired.toString(),
       },

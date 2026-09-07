@@ -14,7 +14,7 @@ export class InstagramPostprocessor extends BasePostprocessor {
     // Uses the same shared helper as Google Play so field definitions are never
     // missing due to manual admin setup.
     try {
-      await syncSocialMediaTicketCustomFields(context);    
+      await syncSocialMediaTicketCustomFields(context);
     } catch (error) {
       logger.error(`${TAG} Failed to sync ticket custom fields`, {
         sourceId: context.sourceId,

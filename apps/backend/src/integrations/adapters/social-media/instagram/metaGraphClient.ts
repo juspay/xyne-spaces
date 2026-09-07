@@ -4,6 +4,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 const IG_API_VERSION = 'v25.0';
+const IG_REQUEST_TIMEOUT_MS = 10_000;
 const IG_BASE_URL = `https://graph.instagram.com/${IG_API_VERSION}`;
 const IG_TOKEN_URL = 'https://api.instagram.com/oauth/access_token';
 const IG_LONG_LIVED_URL = 'https://graph.instagram.com/access_token';
@@ -23,7 +24,7 @@ export interface RefreshTokenResult {
 export interface IgUserProfile {
   name: string;
   username?: string;
-  profile_picture_url?: string;
+  profile_pic?: string; // valid field for customer IGSID nodes; profile_picture_url is not
   id: string;
 }
 
@@ -49,7 +50,7 @@ export const metaGraphClient = {
         message: { text },
         messaging_type: 'RESPONSE',
       },
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: IG_REQUEST_TIMEOUT_MS },
     );
     return response.data;
   },
@@ -61,6 +62,7 @@ export const metaGraphClient = {
         grant_type: 'ig_refresh_token',
         access_token: accessToken,
       },
+      timeout: IG_REQUEST_TIMEOUT_MS,
     });
     return response.data;
   },
@@ -82,7 +84,7 @@ export const metaGraphClient = {
     const response = await axios.post<ExchangeTokenResult>(
       IG_TOKEN_URL,
       new URLSearchParams(params).toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: IG_REQUEST_TIMEOUT_MS },
     );
     return response.data;
   },
@@ -95,25 +97,33 @@ export const metaGraphClient = {
         client_secret: config.META_IG_APP_SECRET || config.META_APP_SECRET,
         access_token: shortLivedToken,
       },
+      timeout: IG_REQUEST_TIMEOUT_MS,
     });
     return response.data;
   },
 
   // Fetch identity for the authenticated IG user.
-  // Returns the real user_id (matches webhook entry[0].id), the app-scoped id, and username.
-  async getMe(accessToken: string): Promise<{ igUserId: string; username: string }> {
+  // Returns igUserId (real user ID, matches webhook entry.id), igsid (app-scoped, for API calls), username.
+  async getMe(accessToken: string): Promise<{ igUserId: string; igsid: string; username: string }> {
     const response = await axios.get<{ id: string; user_id?: string; username?: string }>(
       `${IG_BASE_URL}/me`,
       {
         params: { fields: 'id,user_id,username' },
         headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: IG_REQUEST_TIMEOUT_MS,
       },
     );
-    // user_id is the real Instagram user ID (matches entry[0].id in webhooks).
-    // id is app-scoped. We prefer user_id so source name matches the webhook.
-    const igUserId = response.data.user_id || response.data.id;
-    const username = response.data.username ?? '';
-    return { igUserId, username };
+    // id      = IGSID (app-scoped) — required for all Meta Graph API calls (/{igsid}/messages etc.)
+    // user_id = real Instagram user ID — matches webhook entry.id; only present when `user_id` is in fields
+    const { id, user_id, username } = response.data;
+    if (!user_id) {
+      // Should not happen when user_id is in the fields param, but fall back defensively.
+      logger.warn('[metaGraphClient] getMe: user_id absent — igUserId will equal igsid; webhook entry.id matching may fail', { id });
+    }
+    const igsid = id;                  // always app-scoped; use for API calls
+    const igUserId = user_id || id;    // real user ID when present; defensive fallback to igsid
+    logger.info('[metaGraphClient] getMe result', { igsid, igUserId, username });
+    return { igUserId, igsid, username: username ?? '' };
   },
 
   // Fetch a message by mid — needed when webhook only delivers message_edit (num_edit=0).
@@ -129,6 +139,7 @@ export const metaGraphClient = {
         {
           params: { fields: 'id,message,from,to' },
           headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: IG_REQUEST_TIMEOUT_MS,
         },
       );
       return response.data;
@@ -142,8 +153,9 @@ export const metaGraphClient = {
     const response = await axios.get<IgUserProfile>(
       `${IG_BASE_URL}/${igUserId}`,
       {
-        params: { fields: 'name,username,profile_picture_url' },
+        params: { fields: 'name,username,profile_pic' },
         headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: IG_REQUEST_TIMEOUT_MS,
       },
     );
     return response.data;
@@ -183,9 +195,19 @@ export const metaGraphClient = {
       `${IG_BASE_URL}/${igUserId}/subscribed_apps`,
       null,
       {
-        params: { subscribed_fields: 'messages' },
+        params: { subscribed_fields: 'messages,message_edits' },
         headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: IG_REQUEST_TIMEOUT_MS,
       },
+    );
+  },
+
+  // Remove the app's webhook subscription for the IG account.
+  // Call on disconnect so Meta stops delivering events for this account.
+  async unsubscribeFromWebhook(accessToken: string, igsid: string): Promise<void> {
+    await axios.delete(
+      `${IG_BASE_URL}/${igsid}/subscribed_apps`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: IG_REQUEST_TIMEOUT_MS },
     );
   },
 
@@ -194,7 +216,7 @@ export const metaGraphClient = {
   async getSubscribedApps(accessToken: string, igUserId: string): Promise<unknown> {
     const response = await axios.get(
       `${IG_BASE_URL}/${igUserId}/subscribed_apps`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: IG_REQUEST_TIMEOUT_MS },
     );
     return response.data;
   },

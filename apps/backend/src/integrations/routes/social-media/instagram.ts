@@ -10,7 +10,7 @@ import {
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { encrypt } from '@/services/encryptionService';
+import { decrypt, encrypt } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -136,7 +136,7 @@ router.post(
         code_challenge_method: 'S256',
       });
 
-      res.json({ authUrl: `${IG_AUTH_BASE}/oauth/authorize?${params.toString()}` });
+      res.json({ authorizationUrl: `${IG_AUTH_BASE}/oauth/authorize?${params.toString()}` });
     } catch (error) {
       logger.error(`${TAG} Failed to start Instagram OAuth`, { error });
       res.status(500).json({ error: 'Failed to start Instagram authorization' });
@@ -161,7 +161,7 @@ router.post(
 
       const [channel, pref, existingSource] = await Promise.all([
         db.channel.findFirst({
-          where: { id: channelId, workspaceId },
+          where: { id: channelId, workspaceId, type: ChannelType.SOCIAL_MEDIA },
           select: { id: true, name: true, projectId: true, visibility: true },
         }),
         db.emailChannelPreference.findUnique({
@@ -174,7 +174,7 @@ router.post(
         }),
       ]);
 
-      if (!channel || !channel.projectId || !pref?.boardId) {
+      if (!channel || !channel.projectId || !pref?.boardId || !existingSource) {
         res.status(404).json({ error: 'Instagram desk configuration not found' });
         return;
       }
@@ -191,7 +191,7 @@ router.post(
         visibility: channel.visibility === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC',
         platform,
         // Lock reconnect to the originally-connected IG account, same pattern as
-        // Google's expectedEmail — prevents thug_life_pendem silently overwriting xyne.spaces.
+        // Google's expectedEmail — prevents a different account silently overwriting credentials.
         expectedIgUserId: existingSource?.externalIdentifier ?? undefined,
       });
 
@@ -206,7 +206,7 @@ router.post(
         code_challenge_method: 'S256',
       });
 
-      res.json({ authUrl: `${IG_AUTH_BASE}/oauth/authorize?${params.toString()}` });
+      res.json({ authorizationUrl: `${IG_AUTH_BASE}/oauth/authorize?${params.toString()}` });
     } catch (error) {
       logger.error(`${TAG} Failed to start Instagram reconnect`, { error });
       res.status(500).json({ error: 'Failed to start Instagram reconnect' });
@@ -225,7 +225,8 @@ router.get(
 
     const state = await instagramOAuthStateService.consume(stateKey);
     if (!state) {
-      res.status(400).send('Invalid or expired OAuth state');
+      // Redirect with error instead of a blank 400 page so the UI can show a proper message.
+      redirectToDesk(req, res, { error: 'instagram_invalid_state' });
       return;
     }
 
@@ -262,13 +263,14 @@ router.get(
       const longLived = await metaGraphClient.getLongLivedToken(shortLived.access_token);
       const expiresAt = Date.now() + longLived.expires_in * 1000;
 
-      // Fetch the real IG user ID + username so we know exactly which account connected.
-      const { igUserId, username: igUsername } = await metaGraphClient.getMe(longLived.access_token);
-      logger.debug(`${TAG} OAuth callback: connected Instagram account @${igUsername} (igUserId=${igUserId})`);
+      // Fetch the real IG user ID + IGSID + username so we know exactly which account connected.
+      const { igUserId, igsid, username: igUsername } = await metaGraphClient.getMe(longLived.access_token);
+      logger.debug(`${TAG} OAuth callback: connected Instagram account @${igUsername} (igUserId=${igUserId}, igsid=${igsid})`);
 
       const credentials: InstagramCredentials = {
         accessToken: longLived.access_token,
-        igUserId,
+        igUserId,  // real user ID — matches webhook entry.id; used for source name & B2 filter
+        igsid,     // app-scoped IGSID — used for all Meta Graph API calls (sendDM, subscribed_apps)
         username: igUsername,
         expiresAt,
       };
@@ -292,32 +294,16 @@ router.get(
         return;
       }
 
-      // Subscribe to webhooks. Without this, DMs will not create tickets.
-      // Non-fatal — we still complete OAuth — but log at error so failures are visible.
-      try {
-        await metaGraphClient.subscribeToWebhook(longLived.access_token, igUserId);
-        const subscribedApps = await metaGraphClient.getSubscribedApps(longLived.access_token, igUserId);
-        logger.info(`${TAG} Webhook subscription verified`, { igUserId, subscribedApps });
-      } catch (webhookErr) {
-        logger.error(
-          `${TAG} Webhook subscription FAILED for igUserId=${igUserId} — DMs will not create tickets until re-connected`,
-          { error: webhookErr },
-        );
-      }
-
-      // ── Reconnect: update credentials on the existing source ──────────────
+      // ── Reconnect: validate account match BEFORE any side effects ───────────
+      // Check mismatch here so subscribeToWebhook is never called for a wrong account.
       if (state.mode === 'reconnect' && state.channelId) {
-        // Guard: reject if the reconnecting account doesn't match the originally-connected one.
-        // Mirrors Google's expectedEmail check — prevents thug_life_pendem silently
-        // overwriting xyne.spaces credentials when the browser has the wrong account active.
         if (state.expectedIgUserId && state.expectedIgUserId !== igUserId) {
           logger.warn(`${TAG} Reconnect rejected: account mismatch. Expected igUserId=${state.expectedIgUserId}, got ${igUserId}`);
-          // Fetch the stored username so the error message can tell the user exactly which account to use.
-          const existingSource = await db.externalSource.findFirst({
+          const storedSource = await db.externalSource.findFirst({
             where: { channelId: state.channelId, workspaceId: state.workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM },
             select: { displayName: true },
           });
-          const expectedHandle = existingSource?.displayName ? `@${existingSource.displayName}` : 'the original account';
+          const expectedHandle = storedSource?.displayName ? `@${storedSource.displayName}` : 'the original account';
           redirectToDesk(req, res, {
             workspaceId: state.workspaceId,
             channelId: state.channelId,
@@ -326,7 +312,24 @@ router.get(
           });
           return;
         }
+      }
 
+      // Subscribe to webhooks. Without this, DMs will not create tickets.
+      // Non-fatal — we still complete OAuth — but log at error so failures are visible.
+      // Must use igsid (app-scoped) — the real igUserId is rejected by subscribed_apps endpoint.
+      try {
+        await metaGraphClient.subscribeToWebhook(longLived.access_token, igsid);
+        const subscribedApps = await metaGraphClient.getSubscribedApps(longLived.access_token, igsid);
+        logger.info(`${TAG} Webhook subscription verified`, { igsid, igUserId, subscribedApps });
+      } catch (webhookErr) {
+        logger.error(
+          `${TAG} Webhook subscription FAILED for igsid=${igsid} — DMs will not create tickets until re-connected`,
+          { error: webhookErr },
+        );
+      }
+
+      // ── Reconnect: update credentials on the existing source ──────────────
+      if (state.mode === 'reconnect' && state.channelId) {
         await db.externalSource.updateMany({
           where: {
             channelId: state.channelId,
@@ -480,6 +483,12 @@ router.post(
         return;
       }
 
+      // Read credentials BEFORE clearing them so we can tell Meta to stop delivering events.
+      const existingForDisconnect = await db.externalSource.findFirst({
+        where: { channelId: req.params.channelId, workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM },
+        select: { credentials: true },
+      });
+
       const result = await db.externalSource.updateMany({
         where: {
           channelId: req.params.channelId,
@@ -492,6 +501,20 @@ router.post(
         res.status(404).json({ error: 'Instagram source not found' });
         return;
       }
+
+      // Best-effort: remove the app's Meta-side webhook subscription so Meta stops
+      // delivering events for this account. Non-fatal — local disconnect already complete.
+      if (existingForDisconnect?.credentials) {
+        try {
+          const creds = JSON.parse(decrypt(existingForDisconnect.credentials)) as InstagramCredentials;
+          const igsidForUnsub = creds.igsid ?? creds.igUserId;
+          await metaGraphClient.unsubscribeFromWebhook(creds.accessToken, igsidForUnsub);
+          logger.info(`${TAG} Removed Meta webhook subscription for igsid=${igsidForUnsub}`);
+        } catch (unsubErr) {
+          logger.warn(`${TAG} Failed to remove Meta webhook subscription (non-fatal)`, { error: unsubErr });
+        }
+      }
+
       res.json({ message: 'Instagram account disconnected' });
     } catch (error) {
       logger.error(`${TAG} Failed to disconnect Instagram`, {

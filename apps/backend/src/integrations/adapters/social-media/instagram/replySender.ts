@@ -16,15 +16,21 @@ export class InstagramReplySender extends BaseInteractionReplySender {
   async sendReply(context: InteractionReplyContext): Promise<NormalizedData> {
     const { source, externalThreadId, subject, body, userId, authorName } = context;
 
-    if (body.length > INSTAGRAM_MAX_REPLY_LENGTH) {
-      throw new InteractionReplyValidationError(`Reply exceeds Instagram ${INSTAGRAM_MAX_REPLY_LENGTH}-character limit`);
+    // Meta enforces a 1000 UTF-8 byte limit (not character count); multi-byte chars count more.
+    if (Buffer.byteLength(body, 'utf8') > INSTAGRAM_MAX_REPLY_LENGTH) {
+      throw new InteractionReplyValidationError(`Reply exceeds Instagram ${INSTAGRAM_MAX_REPLY_LENGTH}-byte limit`);
+    }
+
+    if (!source.channelId) {
+      throw new InteractionReplyValidationError('Instagram source is not bound to a channel');
     }
 
     // Enforce 24h reply window — Meta hard rule for DMs
     const lastInbound = await db.email.findFirst({
       where: {
         externalThreadId,
-        channelId: source.channelId ?? undefined,
+        channelId: source.channelId,
+        workspaceId: source.workspaceId ?? undefined,
         type: EmailType.DEFAULT,
       },
       orderBy: { createdAt: 'desc' },
@@ -40,10 +46,21 @@ export class InstagramReplySender extends BaseInteractionReplySender {
       );
     }
 
-    const credentials = JSON.parse(decrypt(source.credentials)) as InstagramCredentials;
+    if (!source.credentials) {
+      throw new InteractionReplyValidationError('Instagram account is disconnected — please reconnect');
+    }
+    let credentials: InstagramCredentials;
+    try {
+      credentials = JSON.parse(decrypt(source.credentials)) as InstagramCredentials;
+    } catch {
+      throw new InteractionReplyValidationError('Instagram account credentials are invalid — please reconnect');
+    }
     // externalThreadId is stored as "igsid" or "igsid:timestamp"; Meta's API needs just the IGSID
-    const igsid = externalThreadId.split(':')[0];
-    const result = await metaGraphClient.sendDM(credentials.accessToken, credentials.igUserId, igsid, body);
+    const recipientIgsid = externalThreadId.split(':')[0];
+    // Use credentials.igsid (app-scoped) for the sender path — the real igUserId is rejected by the API.
+    // Fall back to igUserId for older credentials that predate the igsid field.
+    const senderIgsid = credentials.igsid ?? credentials.igUserId;
+    const result = await metaGraphClient.sendDM(credentials.accessToken, senderIgsid, recipientIgsid, body);
 
     return {
       externalId: `${source.id}:${result.message_id}`,
