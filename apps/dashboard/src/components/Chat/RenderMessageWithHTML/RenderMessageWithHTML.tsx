@@ -548,6 +548,31 @@ function CollapsibleConversationHistory({
 const CODE_BLOCK_LINE_HEIGHT_PX = 20;
 const CODE_BLOCK_PREVIEW_PADDING_PX = 16;
 
+const BLOCK_LEVEL_TAGS_FOR_CODE_EXTRACTION = new Set([
+  'div',
+  'p',
+  'li',
+  'tr',
+  'section',
+  'article',
+]);
+
+const extractCodeText = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'br') return '\n';
+  let text = '';
+  el.childNodes.forEach(child => {
+    text += extractCodeText(child);
+  });
+  if (BLOCK_LEVEL_TAGS_FOR_CODE_EXTRACTION.has(tag) && !text.endsWith('\n')) {
+    text += '\n';
+  }
+  return text;
+};
+
 export interface CodeBlockRenderOptions {
   collapseThreshold: number;
   previewLines: number;
@@ -580,7 +605,8 @@ function MessageCodeBlock({
     [],
   );
 
-  const handleCopy = (): void => {
+  const handleCopy = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    e.stopPropagation();
     void copyTextToClipboard(codeText)
       .then(() => {
         setCopied(true);
@@ -627,7 +653,10 @@ function MessageCodeBlock({
           >
             <button
               type='button'
-              onClick={() => setIsExpanded(prev => !prev)}
+              onClick={e => {
+                e.stopPropagation();
+                setIsExpanded(prev => !prev);
+              }}
               className='expand-toggle-pill pointer-events-auto flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-[13px] font-medium leading-none text-foreground shadow-sm transition-all hover:bg-muted hover:shadow active:scale-95 cursor-pointer'
               data-track-category='MESSAGE'
               data-track-name='TOGGLE_CODE_BLOCK'
@@ -1342,7 +1371,7 @@ const parseNode = (
   }
 
   if (tag === 'pre') {
-    const codeText = el.textContent ?? '';
+    const codeText = extractCodeText(el);
     return (
       <MessageCodeBlock key={`${keyPrefix}-code-block-${idx}`} codeText={codeText}>
         {React.createElement(tag, props, ...children)}
