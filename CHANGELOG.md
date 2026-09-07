@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.16](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.15...v1.251.0-release-20260901.16) (2026-09-07)
+
+
+### Bug Fixes
+
+* domain conflict for native and electron ([#1617](https://github.com/juspay/xyne-spaces/issues/1617)) ([3ba1df2](https://github.com/juspay/xyne-spaces/commit/3ba1df2a577993b9633e60cdcfed5a287cbcf8f8))
+
 ## [1.251.0-release-20260901.15](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.14...v1.251.0-release-20260901.15) (2026-09-07)
 
 
