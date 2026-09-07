@@ -1,3 +1,13 @@
+## [1.285.0](https://github.com/juspay/xyne-spaces/compare/v1.284.1...v1.285.0) (2026-09-07)
+
+
+### Features
+
+* Call Feature - Post to channel  ([#1480](https://github.com/juspay/xyne-spaces/issues/1480)) ([ac12f41](https://github.com/juspay/xyne-spaces/commit/ac12f4123c145b51d436f453d82e01157194a52c))
+* call tiles design update ([#1592](https://github.com/juspay/xyne-spaces/issues/1592)) ([638718d](https://github.com/juspay/xyne-spaces/commit/638718ddb0db7bdc0c44e128bb7e37495e155cd2))
+* google calendar event push ([#1590](https://github.com/juspay/xyne-spaces/issues/1590)) ([e73b0e3](https://github.com/juspay/xyne-spaces/commit/e73b0e36c3bde36baab47b255be978d3d884a508))
+* upgraded search performance calls ([#1603](https://github.com/juspay/xyne-spaces/issues/1603)) ([ade0a21](https://github.com/juspay/xyne-spaces/commit/ade0a218ff989d80f105e0107c955de9b7721b09))
+
 ## [1.284.1](https://github.com/juspay/xyne-spaces/compare/v1.284.0...v1.284.1) (2026-09-07)
 
 
