@@ -4,7 +4,7 @@ import { logger } from '@/utils/logger';
 import { encodeSecProtocols, PROTOCOL_VERSION } from './protocol';
 import { PackDemux } from './packDemux';
 import type { RowPatchOp } from './streamState';
-import type { RedisStreamStore } from './redisStore';
+import type { RedisStreamStore, FenceGuard } from './redisStore';
 import type { ClientSchema } from './clientSchema';
 import type { QueryMeta } from './queryMeta';
 import { mintSecProtocolToken, buildCookieHeader, SYNC_SERVICE_SUB } from './serviceIdentity';
@@ -22,6 +22,14 @@ export interface PackConnectionOptions {
   pkFields: Record<string, readonly string[]>;
   ttlMs: number;
   store: RedisStreamStore;
+  /**
+   * Multi-pod fencing token for this group's Redis writes. When present, every store write
+   * is gated on the group's fence so a zombie ex-owner can't corrupt the shared snapshot;
+   * a STALE return means we lost ownership → `onFenceLost` fires and the tap demotes. Absent
+   * (single-replica) → writes run unfenced, exactly as before, and STALE can never occur.
+   */
+  guard?: FenceGuard;
+  onFenceLost?: () => void;
 }
 
 interface DesiredEntry {
@@ -68,6 +76,7 @@ export class PackConnection {
   #connected = false;
   #closed = false;
   #stopped = false;
+  #fenceLost = false;
   #pendingReset = false;
   #pendingBackoff: { minMs: number; maxMs: number } | undefined;
   #attempt = 0;
@@ -156,6 +165,26 @@ export class PackConnection {
     this.#ws = null;
   }
 
+  /**
+   * A fenced store write returned STALE — this pod lost the group lease (a newer owner INCR'd
+   * the fence). Demote fully: stop reconnecting, drop the socket, and notify the manager, which
+   * removes the group so a reconcile can re-acquire (or another pod already has). Idempotent;
+   * only reachable when a `guard` is set — unfenced single-replica writes never go stale.
+   */
+  #demoteFenceLost(): void {
+    if (this.#fenceLost) return;
+    this.#fenceLost = true;
+    this.#stopped = true;
+    logger.error('sync_pack_fence_lost', { clientGroupID: this.#opts.clientGroupID });
+    if (this.#reconnectTimer) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = null;
+    }
+    this.#ws?.close();
+    this.#ws = null;
+    this.#opts.onFenceLost?.();
+  }
+
   #putPatch(instanceKey: string): Record<string, unknown> {
     const entry = this.#desired.get(instanceKey)!;
     return { op: 'put', hash: entry.hash, name: this.#opts.queryName, args: entry.args, ttl: this.#opts.ttlMs };
@@ -221,7 +250,12 @@ export class PackConnection {
       this.#seeded.clear();
       this.#baseCookie = '';
       try {
-        await this.#opts.store.reset(this.#zeroClientGroupID, this.#demux.instanceKeys());
+        const outcome = await this.#opts.store.reset(
+          this.#zeroClientGroupID,
+          this.#demux.instanceKeys(),
+          this.#opts.guard,
+        );
+        if (outcome === 'stale') return this.#demoteFenceLost();
       } catch (error) {
         logger.error('sync_pack_reset_failed', { clientGroupID: this.#opts.clientGroupID, error });
       }
@@ -346,9 +380,13 @@ export class PackConnection {
     this.#baseCookie = cookie;
     try {
       // Persist row diffs FIRST so an instance's snapshot HSET reflects its data before it
-      // is marked hydrated (a deferred fan-out client snapshots on the hydrated marker).
+      // is marked hydrated (a deferred fan-out client snapshots on the hydrated marker). A
+      // STALE fenced write means we lost the lease mid-poke → stop immediately and demote;
+      // the remaining writes (and saveCookie) would each be rejected anyway.
       for (const [instanceKey, diff] of diffs) {
-        await this.#opts.store.applyDiff(instanceKey, cookie, diff);
+        if ((await this.#opts.store.applyDiff(instanceKey, cookie, diff, this.#opts.guard)) === 'stale') {
+          return this.#demoteFenceLost();
+        }
         if (diff.upserts.length || diff.deletes.length) {
           obsEmit('tap-poke', {
             instanceKey,
@@ -363,11 +401,15 @@ export class PackConnection {
       for (const { op, hash } of gotOps) {
         if (op === 'put' && this.#desired.has(hash) && !this.#got.has(hash)) {
           this.#got.add(hash);
-          await this.#opts.store.markHydrated(hash, cookie);
+          if ((await this.#opts.store.markHydrated(hash, cookie, this.#opts.guard)) === 'stale') {
+            return this.#demoteFenceLost();
+          }
           obsEmit('tap', { action: 'hydrated', instanceKey: hash, clientGroupID: this.#opts.clientGroupID });
         }
       }
-      await this.#opts.store.saveCookie(this.#zeroClientGroupID, cookie);
+      if ((await this.#opts.store.saveCookie(this.#zeroClientGroupID, cookie, this.#opts.guard)) === 'stale') {
+        return this.#demoteFenceLost();
+      }
     } catch (error) {
       logger.error('sync_pack_persist_failed', { clientGroupID: this.#opts.clientGroupID, error });
     }
