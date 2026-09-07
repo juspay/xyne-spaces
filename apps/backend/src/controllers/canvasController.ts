@@ -34,7 +34,7 @@ export class CanvasController {
   constructor(messageAttachmentRepository: MessageAttachmentRepository) {
     this.messageAttachmentRepository = messageAttachmentRepository;
   }
-
+  //ensuring the mentioned group or channel has access to the canvas before creating a comment mention notification
   private async ensureCommentMentionTargetAccess({
     canvasId,
     mentionType,
