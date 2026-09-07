@@ -11,6 +11,7 @@ import { ImageDescriptionStrategy } from "./strategies/ImageStrategy"
 import { SpreadsheetStrategy } from "./strategies/SpreadsheetStrategy"
 import { PdfFallbackProcessor } from "./PdfFallbackProcessor"
 import { DoclingService } from "./DoclingService"
+import { convertToPdf } from "@/services/officeConversionService"
 
 /**
  * Supported MIME types for file processing.
@@ -166,6 +167,28 @@ export class FileProcessor {
             )
         }
 
+        // PPTX/PPT: convert to PDF first (the same LibreOffice conversion
+        // officeConversionService already does for the viewer) and route
+        // through the SAME dedicated PDF OCR ladder (LightOnOCR → Docling →
+        // PdfJs) that PDFs get. The dedicated LightOnOCR model is only
+        // deployed for PDFs (see DOCLING_ROUTE_PDFS_TO_SCHEDULER) — going
+        // through tryDocling() below like every other non-PDF type would
+        // only ever reach the plain generic Docling endpoint, never
+        // LightOnOCR. Falls back to native slide-XML parsing (PptxStrategy)
+        // if the conversion or the whole PDF ladder fails outright.
+        if (FileProcessor.isPptx(filename, mimeType)) {
+            try {
+                const pdfBuffer = await convertToPdf(buffer, filename)
+                return await PdfFallbackProcessor.processWithFallback(pdfBuffer, filename, vespaDocId)
+            } catch (err) {
+                logger.warn(`[FileProcessor] PPTX-to-PDF OCR route failed for ${vespaDocId}, falling back to native slide parser`, {
+                    error: err instanceof Error ? err.message : String(err),
+                })
+                const processor = new FileProcessor(new PptxStrategy(config))
+                return processor.processBuffer(buffer, vespaDocId)
+            }
+        }
+
         // Prefer deterministic, coordinate-aware parsing over Docling for Excel.
         if (FileProcessor.isSpreadsheet(filename, mimeType)) {
             const processor = new FileProcessor(new SpreadsheetStrategy(config))
@@ -185,8 +208,14 @@ export class FileProcessor {
             return doclingResult
         }
 
-        // Fall back to local strategy
-        const strategy = FileProcessor.detectStrategyFromMimeType(mimeType, config)
+        // Fall back to local strategy, by extension rather than MIME type.
+        // mimeType is client-supplied and often generic (e.g.
+        // application/octet-stream) even for a real .pptx/.docx/etc, which
+        // silently routed those straight to TextStrategy instead of the
+        // matching format strategy — same reasoning fromGcs already applies
+        // below, and the same extension-primary approach
+        // officeConversionFileFilter uses in middleware/upload.ts.
+        const strategy = FileProcessor.detectStrategy(filename, config)
         const processor = new FileProcessor(strategy)
         return processor.processBuffer(buffer, vespaDocId)
     }
@@ -309,6 +338,16 @@ export class FileProcessor {
             extension === "xlsx" ||
             mimeType === "application/vnd.ms-excel" ||
             mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    }
+
+    private static isPptx(filename: string, mimeType?: string): boolean {
+        const extension = filename.split(".").pop()?.toLowerCase()
+        return (
+            extension === "ppt" ||
+            extension === "pptx" ||
+            mimeType === "application/vnd.ms-powerpoint" ||
+            mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )
     }
 }

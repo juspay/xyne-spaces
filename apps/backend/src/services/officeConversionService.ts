@@ -1,6 +1,6 @@
 import { spawn } from "child_process"
-import { createHash, randomBytes } from "crypto"
-import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "fs/promises"
+import { createHash } from "crypto"
+import { mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import path from "path"
 import pLimit from "p-limit"
@@ -35,18 +35,10 @@ const CONVERSION_TIMEOUT_MS = 60_000
 const SOFFICE_MAX_CONCURRENCY = Number(process.env.SOFFICE_MAX_CONCURRENCY) || 3
 const conversionLimit = pLimit(SOFFICE_MAX_CONCURRENCY)
 
-// Two-tier cache, both keyed on the content hash (this endpoint is
-// stateless — no file/collection id, just bytes, so content is the only key
-// available):
-//   1. Local disk — near-zero latency, but wiped on pod restart and not
-//      shared across replicas.
-//   2. GCS (the same bucket every other upload in this app already uses) —
-//      survives restarts and is shared across every backend replica, at the
-//      cost of a network round trip instead of a local read.
-// A hit on tier 2 backfills tier 1, so a given pod only pays the GCS latency
-// once per content hash.
-const CACHE_DIR = path.join(tmpdir(), "office-conversion-cache")
-const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
+// Cached in GCS (the same bucket every other upload in this app already
+// uses), keyed on the content hash — this endpoint is stateless (no
+// file/collection id, just bytes), so content is the only key available.
+// Content-addressed and immutable, so entries never need to expire.
 const GCS_CACHE_PREFIX = "office-conversion-cache"
 
 export class OfficeConversionError extends Error {
@@ -57,42 +49,6 @@ export class OfficeConversionError extends Error {
         super(message)
         this.name = "OfficeConversionError"
     }
-}
-
-async function readLocalCache(cachePath: string): Promise<Buffer | null> {
-    // Stat and read via the same open file handle (not by path) so the
-    // freshness check and the read see the same inode — a path-based
-    // stat-then-readFile has a window where the file can be replaced or
-    // deleted in between the two calls.
-    let handle
-    try {
-        handle = await open(cachePath, "r")
-        const stats = await handle.stat()
-        if (Date.now() - stats.mtimeMs > CACHE_MAX_AGE_MS) return null
-        return await handle.readFile()
-    } catch {
-        return null
-    } finally {
-        await handle?.close().catch(() => {})
-    }
-}
-
-async function writeLocalCache(cachePath: string, buffer: Buffer, contentHash: string): Promise<void> {
-    // Write to a randomly-named file (exclusive create, so we never write
-    // through a pre-existing file/symlink an attacker planted at a
-    // predictable path) and rename it into place atomically, rather than
-    // writing straight to the guessable content-addressed cachePath.
-    const tmpPath = `${cachePath}.${randomBytes(8).toString("hex")}.tmp`
-    await mkdir(CACHE_DIR, { recursive: true })
-        .then(() => writeFile(tmpPath, buffer, { flag: "wx" }))
-        .then(() => rename(tmpPath, cachePath))
-        .catch(err => {
-            logger.warn("[OfficeConversion] Failed to write local cache entry", {
-                contentHash,
-                error: err instanceof Error ? err.message : String(err),
-            })
-            return rm(tmpPath, { force: true }).catch(() => {})
-        })
 }
 
 async function readGcsCache(gcsPath: string): Promise<Buffer | null> {
@@ -126,21 +82,23 @@ async function writeGcsCache(gcsPath: string, buffer: Buffer, contentHash: strin
     }
 }
 
+// Pure function of the content — callers that need to know where a
+// buffer's converted PDF lives in GCS (e.g. to point the async OCR
+// scheduler's page-splitter at it directly) can compute this without
+// re-running the conversion, since it's the exact path convertToPdf
+// itself reads from/writes to below.
+export function getConvertedPdfGcsPath(buffer: Buffer): string {
+    const contentHash = createHash("sha256").update(buffer).digest("hex")
+    return `${GCS_CACHE_PREFIX}/${contentHash}.pdf`
+}
+
 export async function convertToPdf(buffer: Buffer, originalFilename: string): Promise<Buffer> {
     const contentHash = createHash("sha256").update(buffer).digest("hex")
-    const cachePath = path.join(CACHE_DIR, `${contentHash}.pdf`)
-    const gcsPath = `${GCS_CACHE_PREFIX}/${contentHash}.pdf`
-
-    const localHit = await readLocalCache(cachePath)
-    if (localHit) {
-        logger.info("[OfficeConversion] Local cache hit", { contentHash })
-        return localHit
-    }
+    const gcsPath = getConvertedPdfGcsPath(buffer)
 
     const gcsHit = await readGcsCache(gcsPath)
     if (gcsHit) {
         logger.info("[OfficeConversion] GCS cache hit", { contentHash })
-        await writeLocalCache(cachePath, gcsHit, contentHash)
         return gcsHit
     }
 
@@ -219,10 +177,7 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
 
         const result = await readFile(outputPath)
 
-        await Promise.all([
-            writeLocalCache(cachePath, result, contentHash),
-            writeGcsCache(gcsPath, result, contentHash),
-        ])
+        await writeGcsCache(gcsPath, result, contentHash)
 
         return result
     } finally {
@@ -234,4 +189,3 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
         })
     }
 }
-
