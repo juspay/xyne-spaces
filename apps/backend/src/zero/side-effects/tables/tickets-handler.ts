@@ -278,6 +278,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
             notificationRecipients,
             args.stageName as string,
             actorId,
+            ticket.xyneId || ticketId,
           );
           logger.info(`[TicketsSideEffectHandler] Sent status change notification for ticket ${ticketId} to users: ${notificationRecipients.join(', ')}`);
         }
