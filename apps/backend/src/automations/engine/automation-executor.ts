@@ -16,7 +16,7 @@ import type { StepRegistry } from '../steps/step-registry';
 import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
 import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
 import { automationContextStorage } from './automation-context-storage';
-import { PauseStep, type PauseBranchSegment } from './pause-step';
+import { PauseStep, TerminateRun, type PauseBranchSegment } from './pause-step';
 import {
   isExecutableAutomationWorkflowType,
   mayDrainInFlight,
@@ -407,6 +407,18 @@ export class AutomationExecutor {
       logger.info(`AutomationExecutor: run ${runId} COMPLETED for automation ${automationId}`);
       return completed;
     } catch (err) {
+      if (TerminateRun.is(err)) {
+        const cancelled = await this.prisma.workflowExecution.update({
+          where: { id: runId },
+          data: { status: AutomationRunStatus.CANCELLED },
+        });
+        context.__meta = { error: null, chain };
+        await persistAutomationState(runId, { context: JSON.stringify(context) });
+        logger.info(
+          `AutomationExecutor: run ${runId} CANCELLED by TERMINATE for automation ${automationId} (reason=${err.reason ?? '∅'})`,
+        );
+        return cancelled;
+      }
       const errMessage = err instanceof Error ? err.message : String(err);
       await this.prisma.workflowExecution.update({
         where: { id: runId },
@@ -453,6 +465,10 @@ export class AutomationExecutor {
         const stepCtxEntry = context.steps[step.id];
         await this.markStepCompleted(runId, stepName, stepCtxEntry);
       } catch (err) {
+        if (TerminateRun.is(err)) {
+          await this.markStepCompleted(runId, stepName, context.steps[step.id]);
+          throw err;
+        }
         if (PauseStep.is(err)) {
           if (err.branchPath.length === 0) {
             await this.markStepWaiting(runId, stepName, context.steps[step.id], err.statePatch);
@@ -712,7 +728,11 @@ export class AutomationExecutor {
         `[automations] step OK    id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0}`,
       );
     } catch (err) {
-      if (PauseStep.is(err)) {
+      if (TerminateRun.is(err)) {
+        logger.info(
+          `[automations] step TERMINATE id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0} reason=${err.reason ?? '∅'}`,
+        );
+      } else if (PauseStep.is(err)) {
         logger.info(
           `[automations] step PAUSED id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0} reason=${err.message}`,
         );

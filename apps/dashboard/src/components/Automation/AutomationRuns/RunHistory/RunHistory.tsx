@@ -232,7 +232,7 @@ function RunRow({
           <MultipleCrossCancelCircle className='size-4 text-red-600' />
         ) : run.status === 'EXTERNAL_WAIT' ? (
           <Hourglass className='size-4 text-purple-600' />
-        ) : run.status === 'SKIPPED' ? (
+        ) : run.status === 'SKIPPED' || run.status === 'CANCELLED' ? (
           <MinusCircle className='size-4 text-muted-foreground' />
         ) : run.status === 'PENDING' ? (
           <ClockDefault className='size-4 text-muted-foreground' />

@@ -45,6 +45,9 @@ export { WorkflowEventType } from '@xyne/shared';
 export const CONDITIONAL_STEP_TYPE = 'CONDITIONAL';
 export const SWITCH_STEP_TYPE = 'SWITCH';
 
+/** Steps that pause the run — the engine only supports pausing at the top level. */
+export const PAUSING_STEP_TYPES: readonly string[] = ['DELAY', 'RUN_AGENT'];
+
 export {
   VARIABLE_REF_REGEX,
   VARIABLE_REF_DESCRIPTION_PREFIX,
