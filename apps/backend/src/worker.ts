@@ -40,6 +40,7 @@ import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
+import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
@@ -309,6 +310,9 @@ class WorkerService {
 
         logger.info('Starting Microsoft Calendar sync worker...');
         await microsoftCalendarSyncQueue.startProcessing();
+
+        logger.info('Starting call calendar push worker...');
+        await callCalendarPushQueue.startProcessing();
       } else {
         logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
       }
@@ -542,6 +546,7 @@ class WorkerService {
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();
         await microsoftCalendarSyncQueue.close();
+        await callCalendarPushQueue.close();
       }
 
       if (appConfig.enableTeamIntelligenceWorker) {
