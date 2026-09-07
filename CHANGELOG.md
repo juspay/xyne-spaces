@@ -1,3 +1,17 @@
+## [1.280.0](https://github.com/juspay/xyne-spaces/compare/v1.279.2...v1.280.0) (2026-09-07)
+
+
+### Features
+
+* integrated workflow-sdk ([#1291](https://github.com/juspay/xyne-spaces/issues/1291)) ([edfbf10](https://github.com/juspay/xyne-spaces/commit/edfbf10307edcd270661d8f0dcdf3f7c6a38bfbb))
+* link hover card and composer link popover ([#1494](https://github.com/juspay/xyne-spaces/issues/1494)) ([2c015c7](https://github.com/juspay/xyne-spaces/commit/2c015c79ca34d7eb0d900b509725602372f801f0))
+
+
+### Bug Fixes
+
+* permission fix for play store app ([#1588](https://github.com/juspay/xyne-spaces/issues/1588)) ([48f6227](https://github.com/juspay/xyne-spaces/commit/48f6227c362796769069af0a31af4e4b5671cfd1))
+* remember last opened tab when reopening the tickets module ([#1572](https://github.com/juspay/xyne-spaces/issues/1572)) ([c253dc5](https://github.com/juspay/xyne-spaces/commit/c253dc5c2a6f800f45eda5303b9431d851cce75c))
+
 ## [1.279.2](https://github.com/juspay/xyne-spaces/compare/v1.279.1...v1.279.2) (2026-09-07)
 
 
