@@ -108,3 +108,32 @@ test('redisStore: fenced writes apply with a matching token, STALE otherwise', {
     await cleanup();
   }
 });
+
+test('redisStore: fenced applyDiff chunks past the Lua unpack limit', { skip }, async () => {
+  const store = new RedisStreamStore!();
+  const own = ownership!;
+  const client = redisService!.getClient();
+  const rnd = Math.floor(Math.random() * 1e9);
+  const G = `testgrp-big-${rnd}`;
+  const I = `testinst-big-${rnd}`;
+  const N = 5000; // > LUAI_MAXCSTACK/2 → a single unpack would throw; chunking must not
+  try {
+    const token = (await own.acquireGroup(G)) as number;
+    const guard = { groupKey: G, token };
+    const upserts = Array.from({ length: N }, (_, k) => ({
+      key: `tbl:${k}`,
+      tableName: 'tbl',
+      row: { id: String(k) },
+    }));
+    assert.equal(await store.applyDiff(I, 'v1', { upserts, deletes: [] }, guard), 'applied');
+    assert.equal(await client.hlen(`sync:snap:${I}`), N, 'all rows HSET across chunks');
+
+    // delete more than one HDEL chunk worth
+    const deletes = Array.from({ length: N }, (_, k) => `tbl:${k}`);
+    assert.equal(await store.applyDiff(I, 'v2', { upserts: [], deletes }, guard), 'applied');
+    assert.equal(await client.hlen(`sync:snap:${I}`), 0, 'all rows HDEL across chunks');
+  } finally {
+    await own.releaseGroup(G);
+    await client.del(`sync:snap:${I}`, `sync:stream:${I}`, `sync:owner:${G}`, fenceKey!(G));
+  }
+});

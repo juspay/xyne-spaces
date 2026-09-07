@@ -25,6 +25,11 @@ const EMPTY_DIFF = JSON.stringify({ upserts: [], deletes: [] });
  * The token is CARRIED (never re-read via `fenceOf`, which is racy) — the value from the
  * acquisition IS the authority. No guard → the write runs unfenced (single-replica path,
  * unchanged and backward-compatible).
+ *
+ * NOTE: the fenced scripts (e.g. RESET) touch per-instance snap/stream keys passed via ARGV
+ * rather than declared in KEYS — legal on standalone Redis (the sync keyspace is single-Redis
+ * by design, one clock). A future Redis Cluster move would require hash-tagging the fence and
+ * data keys into one slot and reworking fencing accordingly, not just re-declaring KEYS.
  */
 export type FenceGuard = { groupKey: string; token: number };
 
@@ -42,14 +47,22 @@ const FENCE_GATE = `if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 'STALE'
  * applyDiff, fenced. Upserts arrive as a cjson-encoded FLAT array of already-stringified
  * [field, value, field, value, …] pairs — Lua does NOT re-encode the values, so the bytes
  * HSET stores are identical to the unfenced `JSON.stringify` path. deletes = cjson array.
+ * HSET/HDEL are CHUNKED because a single `unpack` is bounded by Lua's LUAI_MAXCSTACK (~8000
+ * args) — a large hydration diff (a getUsersV2-class instance) would otherwise throw and fail
+ * the whole fenced write; chunk sizes stay well under the limit (batch stride is even so each
+ * HSET chunk lands on whole field/value pairs).
  * KEYS=[fence, snap, stream]  ARGV=[token, cleared('1'|'0'), upsertPairs, deletes, maxlen, version, diff]
  */
 const APPLY_DIFF = `${FENCE_GATE}
 if ARGV[2] == '1' then redis.call('DEL', KEYS[2]) end
 local ups = cjson.decode(ARGV[3])
-if #ups > 0 then redis.call('HSET', KEYS[2], unpack(ups)) end
+for i = 1, #ups, 2000 do
+  redis.call('HSET', KEYS[2], unpack(ups, i, math.min(i + 1999, #ups)))
+end
 local dels = cjson.decode(ARGV[4])
-if #dels > 0 then redis.call('HDEL', KEYS[2], unpack(dels)) end
+for i = 1, #dels, 4000 do
+  redis.call('HDEL', KEYS[2], unpack(dels, i, math.min(i + 3999, #dels)))
+end
 redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[5], '*', 'v', ARGV[6], 'diff', ARGV[7])
 return 'OK'`;
 
