@@ -62,6 +62,15 @@ export class ExternalSourceRepository {
     });
   }
 
+  // Find an active Instagram source by its externalIdentifier (the stored igUserId).
+  // Used as a fallback when the webhook entry.id matches externalIdentifier but not the
+  // source name (e.g. after a manual DB fix or in production where user_id is returned).
+  async findInstagramByExternalIdentifier(externalIdentifier: string) {
+    return await this.db.externalSource.findFirst({
+      where: { sourceType: 'instagram', externalIdentifier, isActive: true },
+    });
+  }
+
   /**
    * Find every migration source for a Slack channel.
    *

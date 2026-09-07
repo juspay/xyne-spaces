@@ -5,6 +5,7 @@
 
 import {
   ExternalSourceAdapter,
+  ExternalSourcePlatform,
   NormalizedData,
   IngestionResult,
   type IngestionOptions,
@@ -373,7 +374,7 @@ export class ExternalSourceCore {
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
         // Override createdAt with the real event time for Instagram only (24h window check).
         // Other adapters keep @default(now()) to avoid reordering historical imports.
-        ...(source.sourceType === 'instagram' && { createdAt: normalizedData.metadata.timestamp }),
+        ...(source.sourceType === ExternalSourcePlatform.INSTAGRAM && { createdAt: normalizedData.metadata.timestamp }),
       });
     }
 

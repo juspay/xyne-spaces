@@ -1528,7 +1528,7 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     } else if (socialMediaError && socialMediaProvider === 'instagram') {
-      // mismatch error carries the expected handle: "instagram_account_mismatch:@xyne.spaces"
+      // mismatch error format: "instagram_account_mismatch:@handle"
       const [errorCode, errorPayload] = socialMediaError.split(':');
       const mismatchMessage = errorPayload
         ? `This channel is connected to ${errorPayload}. Please log into that account on instagram.com and try reconnecting.`

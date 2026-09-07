@@ -8,11 +8,11 @@ export async function startInstagramOAuth(input: {
   visibility: 'PUBLIC' | 'PRIVATE';
   platform: 'web' | 'electron';
 }): Promise<string> {
-  const response = await apiInstance.post<{ authUrl: string }>(
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
     '/integrations/social-media/instagram/oauth/start',
     input,
   );
-  return response.data.authUrl;
+  return response.data.authorizationUrl;
 }
 
 export async function startGooglePlayOAuth(input: {
@@ -96,9 +96,9 @@ export async function reconnectInstagramDesk(
   channelId: string,
   platform: 'web' | 'electron',
 ): Promise<string> {
-  const response = await apiInstance.post<{ authUrl: string }>(
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
     `/integrations/social-media/${channelId}/instagram/reconnect`,
     { platform },
   );
-  return response.data.authUrl;
+  return response.data.authorizationUrl;
 }
