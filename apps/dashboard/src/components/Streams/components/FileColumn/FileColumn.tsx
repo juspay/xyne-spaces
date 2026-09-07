@@ -87,7 +87,7 @@ const FileColumn = ({
       data-track-name='DownloadFileColumn'
     >
       <DownloadDown className='size-3.5' />
-      DownloadDown
+      Download
       {fileSize !== undefined && (
         <span className='text-muted-foreground'>{formatFileSize(fileSize)}</span>
       )}
