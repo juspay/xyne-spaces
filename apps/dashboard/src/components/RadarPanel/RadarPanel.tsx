@@ -43,6 +43,7 @@ import {
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
+import { usePersistedRadarFilters } from '../../hooks/usePersistedRadarFilters';
 import { useUsersById } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
 import { cn } from '../../utils/classNames';
@@ -110,21 +111,33 @@ const RadarPanel = (): ReactElement => {
     notFound?: boolean;
   } | null>(null);
   const [debugLookup, setDebugLookup] = useState('');
-  const [filterChannels, setFilterChannels] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterCategory, setFilterCategory] = useState<'pending' | 'channels' | 'time'>('pending');
   // "Pending on" replaces the old tabs: me maps to the pending feed, others to
-  // the waiting feed, both to all.
-  const [pendingMe, setPendingMe] = useState(true);
-  const [pendingOthers, setPendingOthers] = useState(true);
-  const [pendingUsers, setPendingUsers] = useState<Set<string>>(new Set());
-  const [requestedByUsers, setRequestedByUsers] = useState<Set<string>>(new Set());
+  // the waiting feed, both to all. The selection is kept per user across
+  // reloads, so returning to Radar does not mean picking the filters again.
+  const {
+    pendingMe,
+    setPendingMe,
+    pendingOthers,
+    setPendingOthers,
+    pendingUsers,
+    setPendingUsers,
+    requestedByUsers,
+    setRequestedByUsers,
+    filterChannels,
+    setFilterChannels,
+    timeRange,
+    setTimeRange,
+    customFrom,
+    setCustomFrom,
+    customTo,
+    setCustomTo,
+    clearAllFilters,
+  } = usePersistedRadarFilters(user?.id);
   const [requesterSearch, setRequesterSearch] = useState('');
   const [holderSearch, setHolderSearch] = useState('');
   const [channelSearch, setChannelSearch] = useState('');
-  const [timeRange, setTimeRange] = useState<'any' | 'today' | '7d' | '30d' | 'custom'>('any');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
   const [calMonth, setCalMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -935,17 +948,6 @@ const RadarPanel = (): ReactElement => {
         ]
       : []),
   ];
-
-  const clearAllFilters = () => {
-    setPendingMe(false);
-    setPendingOthers(false);
-    setPendingUsers(new Set());
-    setRequestedByUsers(new Set());
-    setFilterChannels(new Set());
-    setTimeRange('any');
-    setCustomFrom('');
-    setCustomTo('');
-  };
 
   // DMs belong here — they are channels, and most Radar threads live in one.
   // What is dropped is the unnamed fallback: a DM whose participants cannot be
