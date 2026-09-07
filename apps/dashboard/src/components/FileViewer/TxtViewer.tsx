@@ -255,7 +255,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source, searchable }) => {
                 </span>
                 <span className='flex-1 whitespace-pre-wrap break-words'>
                   {/* Non-breaking space keeps empty lines from collapsing */}
-                  <HighlightedText text={line} ranges={matchesByRow.get(index)} fallback='\u00A0' />
+                  <HighlightedText text={line} ranges={matchesByRow.get(index)} fallback={'\u00A0'} />
                 </span>
               </div>
             ))}
