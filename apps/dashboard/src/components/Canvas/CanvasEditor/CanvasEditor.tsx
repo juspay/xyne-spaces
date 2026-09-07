@@ -37,7 +37,7 @@ import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-lay
 import { asBlockNoteEditorForView } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
-import { withHeadingsTogether } from '../canvasSlashMenu';
+import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
 import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
 import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import {
@@ -84,6 +84,7 @@ import { AnimatePresence } from 'framer-motion';
 
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
 const canvasDictionary = {
@@ -234,7 +235,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const allSlashItems = useMemo(() => {
       if (!editor) return [];
       const defaultItems = getDefaultReactSlashMenuItems(asBlockNoteEditorForView(editor));
-      return withBlockShortcutBadges(withHeadingsTogether([...defaultItems, ...customSlashItems]));
+      return withBlockShortcutBadges(
+        withHeadingsTogether([...withUnifiedUpload(defaultItems), ...customSlashItems]),
+      );
     }, [editor, customSlashItems]);
 
     const getSlashMenuItems = useCallback(
@@ -403,6 +406,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       openCommentsForCurrentBlock,
       focusCommentBlock,
       clearActiveCommentAnchor,
+      finishInlineCommentDraft,
       closeInlineCommentThread,
       applyCommentAnchorStyle,
       removeCommentAnchorStyle,
@@ -584,6 +588,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       >
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'>
+            <CanvasWidthHandles surfaceRef={containerRef} />
             <CanvasMentionContext.Provider value={mentionContextValue}>
               <BlockNoteView
                 editor={asBlockNoteEditorForView(editor)}
@@ -640,7 +645,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
               editable={editable}
               onClose={closeInlineCommentThread}
               onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
+              onCreateThreadCreated={finishInlineCommentDraft}
               onCreateThreadFailed={removeCommentAnchorStyle}
             />
           )}

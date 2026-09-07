@@ -3,7 +3,7 @@
  *
  * For every eligible event organized by a connected, allowlisted user:
  * creates/recovers a hosted Xyne Call, clears the existing (non-Xyne)
- * conference entry when every participant is internal (@juspay.in), and
+ * conference entry when every participant shares the organizer's domain, and
  * always upserts the managed description link. Ineligible/ambiguous events
  * pass through untouched. One event failing must never abort the batch
  * (PRD §9).
@@ -20,10 +20,12 @@
  *  2. The event's organizer email must equal the connected user's email —
  *     never patch an event where the user is only an attendee (FR-3).
  *  3. The organizer must be eligible per the Superposition-backed CAC config —
- *     either their email domain OR their UserProfile team is allowlisted (FR-2).
- * Internal-only vs external-participant classification (FR-4) is a
- * separate, hardcoded check against @juspay.in — distinct from the
- * allowlist above, which only gates whether Xyne acts on the event at all.
+ *     BOTH their email domain AND their UserProfile team must be allowlisted
+ *     (FR-2).
+ * Internal-only vs external-participant classification (FR-4) is a separate
+ * check — every attendee must share the organizer's own email domain —
+ * distinct from the allowlist above, which only gates whether Xyne acts on
+ * the event at all.
  */
 
 import { type GCalEvent } from '@/services/googleCalendarCallStore';
@@ -40,7 +42,6 @@ import { logger } from '@/utils/logger';
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][XYNE_CALL_INJECTOR]';
 
-const INTERNAL_PARTICIPANT_DOMAIN = 'juspay.in';
 const SKIPPED_EVENT_TYPES = new Set(['outOfOffice', 'focusTime', 'workingLocation', 'fromGmail']);
 
 type SkipReason =
@@ -76,10 +77,17 @@ function isEligibleShape(event: GCalEvent): SkipReason | null {
   return null;
 }
 
-/** Every organizer + attendee email must resolve to the internal domain. */
+/**
+ * Every attendee must share the organizer's own email domain. The organizer
+ * defines what "internal" means for their event, so a Xyne-eligible organizer
+ * at any domain gets the same treatment without a hardcoded company domain.
+ * An organizer whose email has no resolvable domain is treated as not
+ * internal-only, so their existing conference entry is left untouched.
+ */
 export function isInternalOnly(event: GCalEvent): boolean {
-  const emails = [event.organizer?.email, ...(event.attendees ?? []).map((a) => a.email)];
-  return emails.every((email) => emailDomain(email) === INTERNAL_PARTICIPANT_DOMAIN);
+  const organizerDomain = emailDomain(event.organizer?.email);
+  if (!organizerDomain) return false;
+  return (event.attendees ?? []).every((a) => emailDomain(a.email) === organizerDomain);
 }
 
 /** FR-7: is this event already correctly reconciled, so no patch is needed? */
