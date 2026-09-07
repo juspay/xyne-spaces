@@ -1,3 +1,16 @@
+## [1.284.0](https://github.com/juspay/xyne-spaces/compare/v1.283.1...v1.284.0) (2026-09-07)
+
+
+### Features
+
+* add s2s encrypted-fields config endpoint ([#865](https://github.com/juspay/xyne-spaces/issues/865)) ([2bd11f2](https://github.com/juspay/xyne-spaces/commit/2bd11f2950b790a121a9be875b2e5d29be46d62b))
+* central search filter registry shared by cmd+K and f… ([#1258](https://github.com/juspay/xyne-spaces/issues/1258)) ([1cbb6d4](https://github.com/juspay/xyne-spaces/commit/1cbb6d4c562486e65c7a8573e89d2c325caa753c))
+
+
+### Bug Fixes
+
+* tighten radar cards and default both feeds on ([#1606](https://github.com/juspay/xyne-spaces/issues/1606)) ([544c704](https://github.com/juspay/xyne-spaces/commit/544c7042744e5508b416e199dc3240e38efa63e2))
+
 ## [1.283.1](https://github.com/juspay/xyne-spaces/compare/v1.283.0...v1.283.1) (2026-09-07)
 
 
