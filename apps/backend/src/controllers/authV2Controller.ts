@@ -932,6 +932,34 @@ export class AuthV2Controller {
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
+      // Domain-conflict detection, mirroring handleCallback. Without it the Electron renderer
+      // receives workspaces: [] for a user whose email domain already maps to an enterprise org
+      // and offers "create an organization" instead of the request-to-join UI.
+      let domainConflict = null;
+      let domainConflictError = null;
+      let publicEmailError = null;
+
+      if (workspaces.length === 0 && !userExistsButRemoved) {
+        if (stateData.enterpriseLogin) {
+          try {
+            await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
+          } catch (error) {
+            if (error instanceof PublicEmailDomainError) {
+              publicEmailError = error;
+            } else if (error instanceof OrganizationDomainConflictError) {
+              domainConflictError = error;
+            }
+          }
+        }
+
+        if (!domainConflictError && !publicEmailError) {
+          domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
+          domainConflictError = domainConflict
+            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+            : null;
+        }
+      }
+
       const isProduction = process.env.NODE_ENV === 'production';
 
       // If an invitation is pending: set google_access_token so the Electron renderer can later
@@ -1059,6 +1087,10 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         workspaces,
         userExistsButRemoved,
+        ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
+        ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
+        ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
+        ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
       });
     } catch (error) {
       logger.error(`${tag()} Google OAuth login failed (platform=electron):`, error);
@@ -1144,6 +1176,9 @@ export class AuthV2Controller {
 
       // Native does PKCE inside the Google SDK, so only the web branch verifies it server-side.
       let codeVerifier: string | undefined;
+      // Only the web branch carries OAuth state, so enterpriseLogin is captured there and stays
+      // undefined for native (same effect as an absent flag on the web callback).
+      let enterpriseLogin: boolean | undefined;
       if (!isMobileNative) {
         const state = (req.query.state || req.body?.state) as string | undefined;
         if (!state) {
@@ -1159,6 +1194,7 @@ export class AuthV2Controller {
         }
         // Web-mobile carries state — adopt the flowId minted in initiateLogin for the trace.
         flowId = stateData.flowId ?? 'mobile-login';
+        enterpriseLogin = stateData.enterpriseLogin;
         logger.info(`${tag()} Google OAuth state validated (platform=${stateData.platform})`);
         await oauthStateServiceV2.deleteState(state);
         codeVerifier = (await pkceServiceV2.getAndDeleteVerifier(state)) ?? undefined;
@@ -1243,6 +1279,34 @@ export class AuthV2Controller {
       const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
+
+      // Domain-conflict detection, mirroring handleCallback. Without it the mobile client
+      // receives workspaces: [] for a user whose email domain already maps to an enterprise org
+      // and offers "create an organization" instead of the request-to-join UI.
+      let domainConflict = null;
+      let domainConflictError = null;
+      let publicEmailError = null;
+
+      if (workspaces.length === 0 && !userExistsButRemoved) {
+        if (enterpriseLogin) {
+          try {
+            await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
+          } catch (error) {
+            if (error instanceof PublicEmailDomainError) {
+              publicEmailError = error;
+            } else if (error instanceof OrganizationDomainConflictError) {
+              domainConflictError = error;
+            }
+          }
+        }
+
+        if (!domainConflictError && !publicEmailError) {
+          domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
+          domainConflictError = domainConflict
+            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+            : null;
+        }
+      }
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieOptions = {
@@ -1341,6 +1405,10 @@ export class AuthV2Controller {
           picture: googleUserData.picture,
           workspaces,
           userExistsButRemoved,
+          ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
+          ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
+          ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
+          ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
         });
         return;
       }
@@ -1355,6 +1423,14 @@ export class AuthV2Controller {
         picture: googleUserData.picture || '',
         workspaces: JSON.stringify(workspaces),
       });
+      if (domainConflictError && domainConflict) {
+        params.set('domainConflictError', domainConflictError.message);
+        params.set('enterpriseJoinOrgName', domainConflict.name);
+        params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
+      }
+      if (publicEmailError) {
+        params.set('publicEmailDomainError', publicEmailError.message);
+      }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);
       return;
