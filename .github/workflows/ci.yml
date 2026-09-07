@@ -35,6 +35,7 @@ jobs:
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Backend typecheck + build
     runs-on:  github-builds-runners
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
@@ -75,6 +76,7 @@ jobs:
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Dashboard ${{ matrix.task }}
     runs-on: github-builds-runners
     strategy:
@@ -129,6 +131,7 @@ jobs:
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Framework lint
     runs-on: ubuntu-latest
     steps:
@@ -153,6 +156,7 @@ jobs:
   # whole chain in, replacing the old three-step sequential npm ci.
   # ---------------------------------------------------------------------------
   xyne-claw:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: xyne-claw typecheck
     runs-on: ubuntu-latest
     steps:
@@ -181,6 +185,7 @@ jobs:
   # history), so a shallow checkout is fine.
   # ---------------------------------------------------------------------------
   gitleaks:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     env:
@@ -225,6 +230,7 @@ jobs:
   # --severity CRITICAL`). Pinned to the same TRIVY_VERSION Jenkins uses.
   # ---------------------------------------------------------------------------
   trivy:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Vulnerability scan (Trivy)
     runs-on: ubuntu-latest
     env:
