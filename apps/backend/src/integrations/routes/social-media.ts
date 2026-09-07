@@ -6,18 +6,21 @@ import { config as appConfig } from '@/config/env';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
 import { ExternalSourcePlatform } from '../core/types';
+import { SOCIAL_MEDIA_PLATFORMS } from '../social-media/constants';
 import { socialMediaService } from '../social-media/socialMediaService';
 import {
   authorizeSocialMediaManager,
   canAccessSocialMediaChannel,
 } from './social-media/access';
 import googlePlayRoutes from './social-media/google-play';
+import appStoreRoutes from './social-media/app-store';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
 
 router.use(express.json());
 router.use(googlePlayRoutes);
+router.use(appStoreRoutes);
 
 router.post(
   '/:conversationId/reply',
@@ -84,7 +87,7 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+          sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] },
           isActive: true,
         },
         select: { id: true },
@@ -146,7 +149,7 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+          sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] },
         },
         data: { isActive: false },
       });
@@ -154,6 +157,18 @@ router.post(
         res.status(404).json({ error: 'Social media source not found' });
         return;
       }
+
+      // An App Store .p8 is a team-wide key with no programmatic revocation, so disconnecting a
+      // desk must actually destroy our copy. Play's refresh token is scoped and user-revocable,
+      // and its reconnect path re-consents, so it is left alone here.
+      await db.externalSource.updateMany({
+        where: {
+          channelId: req.params.channelId,
+          workspaceId,
+          sourceType: ExternalSourcePlatform.APP_STORE,
+        },
+        data: { credentials: '' },
+      });
 
       res.json({
         message: 'Social media desk disconnected',

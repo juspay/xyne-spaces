@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
+  SOCIAL_MEDIA_PLATFORMS,
+  isSocialMediaPlatform,
+} from '@/integrations/social-media/constants';
+import {
   buildSlackDeskSourceName,
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
@@ -1539,9 +1543,10 @@ export class ChannelController {
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
-      let googlePlayApps: Array<{
+      let deskApps: Array<{
         id: string;
         displayName: string;
+        externalIdentifier: string | null;
         packageName: string | null;
         isActive: boolean;
       }> = [];
@@ -1557,9 +1562,9 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType)) {
         const reviewSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
+          where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
             id: true,
             displayName: true,
@@ -1570,15 +1575,16 @@ export class ChannelController {
         });
         const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
         isConnected = activeReviewSources.length > 0;
-        googlePlayApps = reviewSources.map(reviewSource => ({
+        deskApps = reviewSources.map(reviewSource => ({
           id: reviewSource.id,
           displayName: reviewSource.displayName,
+          externalIdentifier: reviewSource.externalIdentifier,
           packageName: reviewSource.externalIdentifier,
           isActive: reviewSource.isActive,
         }));
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
-          .join(', ') || 'No active Google Play apps';
+          .join(', ') || 'No active apps';
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1586,7 +1592,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
         return;
       }
 
@@ -1603,12 +1609,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, deskApps, googlePlayApps: deskApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });

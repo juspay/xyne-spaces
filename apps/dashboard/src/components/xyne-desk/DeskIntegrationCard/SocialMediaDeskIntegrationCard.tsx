@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
+import { ANDROID_PACKAGE_NAME_PATTERN, SOCIAL_MEDIA_SOURCE_TYPE } from '@xyne/shared';
 import { Plug, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -44,10 +44,11 @@ export const SocialMediaDeskIntegrationCard = ({
   const [isAdding, setIsAdding] = useState(false);
   const [isReauthorizing, setIsReauthorizing] = useState(false);
   const [appAction, setAppAction] = useState<string | null>(null);
-  const { isConnected, hasSource, sourceType, connectedLabel, googlePlayApps } =
+  const { isConnected, hasSource, sourceType, connectedLabel, deskApps } =
     useChannelIntegrationInfo(channelId);
 
-  if (sourceType !== 'google-play-reviews' || !hasSource) {
+  // Play-only by design: every action below is a Play OAuth/package flow. App Store needs its own card.
+  if (sourceType !== SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY || !hasSource) {
     return null;
   }
   if (!canManage) return null;
@@ -176,7 +177,7 @@ export const SocialMediaDeskIntegrationCard = ({
       />
 
       <div className='flex flex-col gap-2'>
-        {googlePlayApps.map(app => {
+        {deskApps.map(app => {
           const connectionAction = `${app.isActive ? 'disconnect' : 'reconnect'}:${app.id}`;
           return (
             <div
@@ -186,7 +187,7 @@ export const SocialMediaDeskIntegrationCard = ({
               <div className='min-w-0'>
                 <p className='truncate text-sm font-medium text-foreground'>{app.displayName}</p>
                 <p className='truncate text-xs text-muted-foreground'>
-                  {app.packageName ?? 'Package name unavailable'} ·{' '}
+                  {app.externalIdentifier ?? 'Package name unavailable'} ·{' '}
                   {app.isActive ? 'Connected' : 'Disconnected'}
                 </p>
               </div>
