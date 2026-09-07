@@ -201,6 +201,12 @@ import { valuesToFilters } from '../../utils/savedViewSerialization';
 import { readViewDraft, writeViewDraft, clearViewDraft } from './viewDraft';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../utils/apiError';
+import {
+  hasExactSearchQuotes,
+  matchesTicketSearch,
+  unwrapExactSearchQuery,
+  wrapExactSearchQuery,
+} from '../../utils/exactSearch';
 
 type SavedConfigValue = {
   id: string;
@@ -748,7 +754,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [expandedGroupsStorageKey, groupByKey, groupBy]);
 
-  const searchTerm = searchParams.get('search') ?? '';
+  // Exact mode *is* the query being quoted — the quotes are ordinary characters in the
+  // search text, the same ones the user can type by hand and the same ones the backend
+  // reads exactness off. So there is no separate flag and nothing to keep in sync: delete
+  // a quote and the mode goes with it.
+  const searchInputValue = searchParams.get('search') ?? '';
+  // `hasExactSearchQuotes`, not `isExactSearchQuery`: the pill reports whether the quotes are
+  // there, and a bare `""` is exact mode with the phrase still to be typed.
+  const isExactSearch = hasExactSearchQuotes(searchInputValue);
+  // A bare `""` carries no query, so it counts as an empty box — no request goes out and the
+  // local filter stops narrowing, rather than searching for nothing.
+  const searchTerm = unwrapExactSearchQuery(searchInputValue).trim() ? searchInputValue.trim() : '';
   const [isBoardDropdownOpen, setIsBoardDropdownOpen] = useState(false);
   const [isSourceChannelsOpen, setIsSourceChannelsOpen] = useState(false);
   const [isFiltersDropdownOpen, setIsFiltersDropdownOpen] = useState(false);
@@ -812,6 +828,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       },
       { replace: true },
     );
+  };
+
+  // The pill edits the query rather than a flag beside it. An empty box still gets a pair,
+  // so exact mode can be armed before typing — `wrapExactSearchQuery` returns '' for empty
+  // input, which would have made the click a no-op.
+  const setIsExactSearch = (value: boolean): void => {
+    if (!value) {
+      setSearchTerm(unwrapExactSearchQuery(searchInputValue));
+      return;
+    }
+    setSearchTerm(wrapExactSearchQuery(searchInputValue) || '""');
   };
 
   // Initialize machine on mount or when dependencies change
@@ -2071,9 +2098,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       user?.id,
     );
 
-    // Apply search filter
+    // Apply search filter. A quoted query ("payment failed") is an exact-phrase search:
+    // the string must appear verbatim, same words, same order. Unquoted stays loose —
+    // every word must appear, in any order. Mirrors what Vespa does on the kanban path.
     if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase().trim();
       tickets = tickets.filter(ticket => {
         const searchableText = [
           ticket.title || '',
@@ -2082,11 +2110,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ticket.merchantId || '',
           ticket.statusV2 || '',
           ticket.priority || '',
-        ]
-          .join(' ')
-          .toLowerCase();
+        ].join(' ');
 
-        return searchableText.includes(searchLower);
+        return matchesTicketSearch(searchableText, searchTerm);
       });
     }
 
@@ -3720,8 +3746,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : []
               }
               selectedBoardName={selectedBoardDetail?.name ?? undefined}
-              searchValue={searchTerm}
+              searchValue={searchInputValue}
               onSearchChange={setSearchTerm}
+              isExactSearch={isExactSearch}
+              onExactSearchChange={setIsExactSearch}
               {...(channelId ? { channelId } : {})}
               groupBy={typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy}
               hasActiveView={!!selectedViewId}
