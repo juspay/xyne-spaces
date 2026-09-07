@@ -1,14 +1,14 @@
 import React, { useMemo, useCallback, useState, useRef } from 'react';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
-import { ChannelScopeType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
+import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useQuery } from '@tanstack/react-query';
 import { channelService } from '../../../services/Chat/channelService';
-import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
+import { useSelf, useActiveUsers, useUsersById } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
-import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
-import { useUserGroupSearch } from '@xyne/shared/hooks';
+import type { VisibleChannel } from '@xyne/shared/hooks';
+import { useParticipantCandidates } from '../../../hooks/useParticipantCandidates';
 import {
   ApiError,
   callService,
@@ -25,14 +25,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { ChevronDown, ChevronUp, Hash, Info, Lock, Users, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Info, X } from 'lucide-react';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
-import { rankParticipantOptions } from '../../../utils/participantSearch';
-import Avatar from '../../ui/Avatar/Avatar';
-import { ParticipantOptionContent } from '../ParticipantOptionContent';
+import {
+  buildChannelParticipantOption,
+  buildUserGroupParticipantOption,
+  buildUserParticipantOption,
+} from '../participantOptions';
 import { Controller, useForm } from 'react-hook-form';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
@@ -92,8 +94,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 }) => {
   const user = useSelf();
   const zero = useZero();
+  // Full roster — read only by the bulk-paste matcher (`handleBulkUserEntry`), which
+  // runs on Enter, not per keystroke. Nothing maps over it.
   const allUsers = useActiveUsers();
-  const fullUserList = useUsers();
+  const usersById = useUsersById();
   const allVisibleChannels = useAllVisibleChannels();
 
   // When opened from a thread, fetch channel participants to restrict the picker
@@ -245,7 +249,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Search query state (not in form)
   const [searchQuery, setSearchQuery] = React.useState('');
-  const userGroups = useUserGroupSearch(searchQuery, 10);
   const [notFoundUsers, setNotFoundUsers] = React.useState<string[]>([]);
 
   const {
@@ -336,45 +339,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     validateTimes,
   });
 
-  const buildUserOption = (
-    u: Pick<(typeof allUsers)[number], 'id' | 'name'> &
-      Partial<Pick<(typeof allUsers)[number], 'email' | 'displayName' | 'status'>>,
-  ) => ({
-    ...u,
-    label: getUserDisplayName(u),
-    subtitle: u.name,
-    value: `user:${u.id}`,
-    icon: (
-      <Avatar
-        userId={u.id}
-        size={'sm'}
-        showActiveStatus={false}
-        className='rounded-md size-[18px] flex items-center justify-center bg-background'
-      />
-    ),
-    children: (
-      <ParticipantOptionContent
-        icon={
-          <Avatar
-            userId={u.id}
-            size='sm'
-            showActiveStatus={false}
-            className='rounded-md size-[18px] flex items-center justify-center bg-background'
-          />
-        }
-        label={getUserDisplayName(u)}
-        subtitle={u.email}
-        isDeactivated={isUserDeactivated(u)}
-      />
-    ),
-    type: 'user' as const,
-  });
-
   // Build ParticipantOptions for the unfurled channel-member checkbox list.
   // Members come from the API as { id, name }, so no allUsers cross-reference is needed.
+  // Bounded by the channel's own membership, not the workspace.
   const channelMembersOptions = useMemo(() => {
     if (!selectedChannelId || !selectedChannelParticipants) return null;
-    return selectedChannelParticipants.filter(m => m.id !== user?.id).map(buildUserOption);
+    return selectedChannelParticipants
+      .filter(m => m.id !== user?.id)
+      .map(buildUserParticipantOption);
   }, [selectedChannelId, selectedChannelParticipants, user?.id]);
 
   const {
@@ -391,137 +363,80 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     selectiveExclusionsInitializedRef,
   });
 
-  // Build participant options
-  const inviteUserOrChannelOptions = useMemo(() => {
-    // When opened from a thread, only show channel members (no channels)
-    if (channelParticipantUserIds) {
-      const channelUserOptions = allUsers
-        .filter(u => u.id !== user?.id && channelParticipantUserIds.has(u.id))
-        .map(buildUserOption);
-
-      // In edit mode, inject pre-filled participants from the call in case they're missing
-      if (isEditMode && initialCall?.participants) {
-        initialCall.participants
-          .filter(p => !p.isExternal && p.userId !== user?.id)
-          .forEach(p => {
-            const alreadyIncluded = channelUserOptions.some(u => u.value === `user:${p.userId}`);
-            if (!alreadyIncluded) {
-              const fullUser = allUsers.find(u => u.id === p.userId);
-              if (fullUser) channelUserOptions.push(buildUserOption(fullUser));
-            }
-          });
-      }
-
-      return channelUserOptions.sort((a, b) => a.label.localeCompare(b.label));
-    }
-
-    const userOptions = allUsers.filter(u => u.id !== user?.id).map(buildUserOption);
-
-    const channelOptions = channels.map(channel => ({
-      ...channel,
-      label: channel.name,
-      value: `channel:${channel.id}`,
-      icon:
-        channel.visibility === ChannelVisibility.PRIVATE ? (
-          <Lock className='size-3.5 text-gray-600 mx-0.5' strokeWidth={2.3} />
-        ) : (
-          <Hash className='size-3.5 text-gray-600 mx-0.5' strokeWidth={2.3} />
-        ),
-      type: 'channel' as const,
-    }));
-
-    const userGroupOptions = userGroups.map(group => ({
-      ...group,
-      label: group.name,
-      value: `user_group:${group.id}`,
-      icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
-      subtitle: group.alias || group.description,
-      children: (
-        <ParticipantOptionContent
-          icon={<Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />}
-          label={group.name}
-          subtitle={group.alias || group.description}
-        />
-      ),
-      type: 'user_group' as const,
-    }));
-
-    // In edit mode, the call's existing channel may be filtered out of `channels`
-    // (e.g. a Desk channel). Inject it into options so it remains searchable/selectable.
-    // DM/GROUP_DM-backed calls are excluded: they prefill individual participants from
-    // call_participants rather than a channel pill (see useScheduleCallInitialization),
-    // and their `name` is raw user IDs, so injecting one puts a UUID in the picker.
-    if (isEditMode && initialCall?.channelId) {
-      const alreadyIncluded = channelOptions.some(
-        c => c.value === `channel:${initialCall.channelId}`,
-      );
-      if (!alreadyIncluded) {
-        const existingChannel = allVisibleChannels.find(c => c.id === initialCall.channelId);
-        if (
-          existingChannel &&
-          existingChannel.scopeType !== ChannelScopeType.DM &&
-          existingChannel.scopeType !== ChannelScopeType.GROUP_DM
-        ) {
-          channelOptions.push({
-            ...existingChannel,
-            label: existingChannel.name,
-            value: `channel:${existingChannel.id}`,
-            icon:
-              existingChannel.visibility === ChannelVisibility.PRIVATE ? (
-                <Lock className='size-3.5 text-gray-600 mx-0.5' strokeWidth={2.3} />
-              ) : (
-                <Hash className='size-3.5 text-gray-600 mx-0.5' strokeWidth={2.3} />
-              ),
-            type: 'channel' as const,
-          });
-        }
-      }
-    }
-
-    // Pre-filled participants may not appear in the current search results
-    // (useUserSearch is limited). Inject them so their pills always render.
-    if (isEditMode && initialCall?.participants) {
-      initialCall.participants
-        .filter(p => !p.isExternal && p.userId !== user?.id)
-        .forEach(p => {
-          const alreadyIncluded = userOptions.some(u => u.value === `user:${p.userId}`);
-          if (!alreadyIncluded) {
-            const fullUser = allUsers.find(u => u.id === p.userId);
-            if (fullUser) userOptions.push(buildUserOption(fullUser));
-          }
-        });
-    }
-
-    // Inject initialParticipants (create mode pre-fill from "Meet With" panel)
-    if (!isEditMode && initialParticipants) {
-      initialParticipants.forEach(id => {
-        const alreadyIncluded = userOptions.some(u => u.value === `user:${id}`);
-        if (!alreadyIncluded) {
-          const fullUser = allUsers.find(u => u.id === id);
-          if (fullUser) userOptions.push(buildUserOption(fullUser));
-        }
-      });
-    }
-
-    return [...userOptions, ...channelOptions, ...userGroupOptions].sort((a, b) =>
-      a.label.localeCompare(b.label),
+  // Groups whose every expanded member is already selected — they add nothing, so
+  // drop them from the list. Re-reading the ref is safe: expansion always writes it
+  // before updating `participants`, which re-runs this memo. Removing any one member
+  // puts the group back.
+  const fullyRepresentedGroupIds = useMemo(() => {
+    const selectedUserIds = new Set(
+      participants.filter(v => v.startsWith('user:')).map(v => v.replace('user:', '')),
     );
-  }, [
-    allUsers,
-    channels,
-    user?.id,
-    isEditMode,
-    initialCall,
-    initialParticipants,
-    allVisibleChannels,
-    channelParticipantUserIds,
-    userGroups,
-    fullUserList,
-  ]);
+    const represented = new Set<string>();
+    for (const [groupId, memberIds] of expandedGroupMembersRef.current) {
+      if (memberIds.length > 0 && memberIds.every(id => selectedUserIds.has(id))) {
+        represented.add(groupId);
+      }
+    }
+    return represented;
+  }, [participants]);
 
-  // Drop groups whose every member is already picked. Re-reading the ref is safe here:
-  // expansion always writes it before updating `participants`, which re-runs this memo.
-  // Removing any one member drops the group back into the list.
+  const excludedUserIds = useMemo(
+    () => (user?.id ? new Set([user.id]) : new Set<string>()),
+    [user?.id],
+  );
+
+  // DEFAULT-scope, non-Desk channels only.
+  const channelFilter = useCallback(
+    (channel: VisibleChannel) =>
+      channel.scopeType === ChannelScopeType.DEFAULT && !isDeskChannelType(channel.type),
+    [],
+  );
+
+  // Bounded + ranked candidates. Only these get decorated into rows, so a keystroke
+  // builds ~40 options instead of one per workspace user. Opened from a thread the
+  // picker is people-only, restricted to that channel's members.
+  const {
+    users: candidateUsers,
+    userGroups: candidateUserGroups,
+    channels: candidateChannels,
+  } = useParticipantCandidates({
+    query: searchQuery,
+    excludeUserIds: excludedUserIds,
+    restrictToUserIds: channelParticipantUserIds,
+    excludeUserGroupIds: fullyRepresentedGroupIds,
+    includeChannels: !channelParticipantUserIds,
+    includeUserGroups: !channelParticipantUserIds,
+    channelFilter,
+  });
+
+  const rankedParticipantOptions = useMemo(
+    () => [
+      ...candidateUsers.map(buildUserParticipantOption),
+      ...candidateChannels.map(buildChannelParticipantOption),
+      ...candidateUserGroups.map(buildUserGroupParticipantOption),
+    ],
+    [candidateUsers, candidateChannels, candidateUserGroups],
+  );
+
+  // Pills for the current selection. `rankedParticipantOptions` is a query-ranked
+  // slice, so a prefilled participant (edit mode, "Meet With", bulk paste) is usually
+  // absent from it — without a resolvable option here their pill would vanish while
+  // they stayed selected. Bounded by the selection, not the workspace.
+  const selectedParticipantOptions = useMemo(() => {
+    const channelsById = new Map(allVisibleChannels.map(c => [c.id, c]));
+    return participants.flatMap(value => {
+      if (value.startsWith('user:')) {
+        const found = usersById.get(value.replace('user:', ''));
+        return found ? [buildUserParticipantOption(found)] : [];
+      }
+      if (value.startsWith('channel:')) {
+        const found = channelsById.get(value.replace('channel:', ''));
+        return found ? [buildChannelParticipantOption(found)] : [];
+      }
+      return [];
+    });
+  }, [participants, usersById, allVisibleChannels]);
+
   // A non-organizer participant may only add/remove people (and only on a DM/GROUP_DM
   // call, which is what gates the entry point). Mirrors the backend rule in
   // scheduleCallController.updateScheduledCall, which rejects any other field from them.
@@ -550,19 +465,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         : undefined,
     [participantsOnly, initialCall, user?.id],
   );
-
-  const rankedParticipantOptions = useMemo(() => {
-    const selectedUserIds = new Set(
-      participants.filter(v => v.startsWith('user:')).map(v => v.replace('user:', '')),
-    );
-    const remaining = inviteUserOrChannelOptions.filter(option => {
-      if (!option.value.startsWith('user_group:')) return true;
-      const members = expandedGroupMembersRef.current.get(option.value.replace('user_group:', ''));
-      if (!members?.length) return true;
-      return !members.every(id => selectedUserIds.has(id));
-    });
-    return rankParticipantOptions(remaining, searchQuery);
-  }, [inviteUserOrChannelOptions, searchQuery, participants]);
 
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
@@ -1964,6 +1866,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   render={({ field }) => (
                     <SearchParticipants
                       options={rankedParticipantOptions}
+                      prefilledOptions={selectedParticipantOptions}
                       disableClientFiltering
                       selectedValues={field.value}
                       onMultiSelect={async (values: string[]) => {
