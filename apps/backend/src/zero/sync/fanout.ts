@@ -135,6 +135,11 @@ export class Fanout {
    * structural rather than resting on a fragile shared-FIFO-read invariant.)
    */
   async #regate(client: ClientSub, cache?: Map<string, Record<string, unknown>[]>): Promise<void> {
+    // A regate is always a queued job holding a direct client reference; the client may
+    // have unsubscribed (removeClient dropped it from the set) before the job runs. Never
+    // re-gate or hydrate a client no longer subscribed — else the subscribe-time regate
+    // could flip `admitted` and emit a stray snapshot for a released instance.
+    if (!this.#dataSubs.get(client.dataInstanceKey)?.has(client)) return;
     const grantRows = new Map<string, Record<string, unknown>[]>();
     for (const [table, grantKey] of client.grantByTable) {
       let rows = cache?.get(grantKey);
