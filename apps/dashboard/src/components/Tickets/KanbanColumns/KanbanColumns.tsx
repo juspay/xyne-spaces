@@ -4,7 +4,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { Ticket, TicketTagMapping } from '@xyne/shared';
+import type { Ticket, TicketTagMapping, FormEntityValues } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 
 type TicketWithTags = Ticket & { tagMappings?: TicketTagMapping[] };
@@ -247,13 +247,49 @@ const PaginatedStageList: React.FC<{
 }) => {
   const columnValue = columnType === 'status' ? stage.id : stage.name;
   const columnStatus = stage.defaultTicketStatusV2;
-  const { tickets, hasMore, isLoadingMore, loadMore } = useKanbanTicketsPage({
-    ...paginationArgs,
-    columnType,
-    stageName: columnValue,
-  });
+  const { groupBy } = paginationArgs;
+  const { tickets, hasMore, isLoadingMore, loadMore, isUsingDirectVespaRows } =
+    useKanbanTicketsPage({
+      ...paginationArgs,
+      columnType,
+      stageName: columnValue,
+    });
   const renderedTickets = React.useMemo(() => {
-    if (allKnownTickets.length === 0) return tickets;
+    const isGroupByActive = groupBy && groupBy !== 'none';
+
+    // When using direct Vespa rows, trust the results - they're already filtered
+    // by group-specific Vespa filters (dynamic field tokens, assignee, priority, etc.)
+    if (isUsingDirectVespaRows) {
+      // Merge with cached tickets for optimistic updates if available
+      if (allKnownTickets.length > 0) {
+        const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
+        return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+      }
+      return tickets;
+    }
+
+    // In normal view (no grouping), trust server-side filtering
+    if (!isGroupByActive) {
+      if (allKnownTickets.length === 0) {
+        return tickets;
+      }
+      // Merge with cached tickets for optimistic updates
+      const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
+      return tickets.map(ticket => {
+        const known = knownTicketsById.get(ticket.id);
+        if (known && ticketBelongsToColumn(known, columnType, columnValue, columnStatus)) {
+          return known;
+        }
+        return ticket;
+      });
+    }
+
+    // In group by mode without direct Vespa rows, use allKnownTickets as source of truth.
+    // This path is used when Zero query provides the tickets.
+    if (allKnownTickets.length === 0) {
+      // Grouping not ready yet - return empty to prevent showing wrong tickets
+      return [];
+    }
 
     const knownTicketsById = new Map(allKnownTickets.map(ticket => [ticket.id, ticket]));
     const renderedTicketsById = new Map<string, Ticket>();
@@ -261,16 +297,32 @@ const PaginatedStageList: React.FC<{
     for (const ticket of tickets) {
       const knownTicket = knownTicketsById.get(ticket.id);
       if (knownTicket) {
-        if (!ticketBelongsToColumn(knownTicket, columnType, columnValue, columnStatus)) continue;
-        renderedTicketsById.set(ticket.id, knownTicket);
-        continue;
+        // Ticket exists in client-side grouped data - use cached version
+        // but validate it still belongs to this column
+        const belongsToColumn = ticketBelongsToColumn(
+          knownTicket,
+          columnType,
+          columnValue,
+          columnStatus,
+        );
+        if (belongsToColumn) {
+          renderedTicketsById.set(ticket.id, knownTicket);
+        }
       }
-
-      renderedTicketsById.set(ticket.id, ticket);
+      // If ticket is not in knownTicketsById, it doesn't belong to this group
+      // according to client-side grouping - skip it
     }
 
     return [...renderedTicketsById.values()];
-  }, [allKnownTickets, columnStatus, columnType, columnValue, tickets]);
+  }, [
+    allKnownTickets,
+    columnStatus,
+    columnType,
+    columnValue,
+    groupBy,
+    isUsingDirectVespaRows,
+    tickets,
+  ]);
 
   const fetchedTicketSnapshotSignature = React.useMemo(
     () => tickets.map(ticket => ticketBoardSnapshotSignature(ticket)).join(','),
@@ -309,9 +361,6 @@ const PaginatedStageList: React.FC<{
   );
 };
 
-const isTerminalStageStatus = (status?: TicketStatusV2): boolean =>
-  status === TicketStatusV2.COMPLETED || status === TicketStatusV2.CANCELLED;
-
 const ticketBelongsToColumn = (
   ticket: Ticket,
   columnType: 'stage' | 'status',
@@ -338,6 +387,13 @@ interface KanbanColumnsProps {
     columnType: 'stage' | 'status';
     baseArgs: KanbanTicketsPageBaseArgs;
   };
+  /**
+   * A search is active. Server counts are not refetched for the search term, so
+   * they are either stale or absent — and a collapsed column unmounts its query,
+   * so it can never report a match again. Both count display and auto-collapse
+   * have to stop trusting `stageCounts` while this is true.
+   */
+  searchActive?: boolean;
   allKnownTickets?: Ticket[];
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   onAddTicketInColumn?: (column: {
@@ -355,6 +411,10 @@ interface KanbanColumnsProps {
    * stage-based SLA (no policy fetch needed in that case).
    */
   slaPolicies?: BoardSlaPolicy[];
+  /** Form field values by ticket ID - used for validating group membership when groupBy is a form field */
+  formValuesByTicketId?: Map<string, FormEntityValues[]>;
+  /** User names by ID - used for resolving user IDs to names in form field group validation */
+  userNamesById?: Map<string, string>;
 }
 
 export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
@@ -381,44 +441,81 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   showEmailReads,
   slaPolicies,
   paginatedColumnConfig,
+  searchActive,
   allKnownTickets,
   onTicketsChange,
   onAddTicketInColumn,
+  formValuesByTicketId,
+  userNamesById,
 }) => {
   const columnType = paginatedColumnConfig?.columnType ?? 'stage';
-  const knownTicketsForOptimisticMerge = React.useMemo(
-    () => allKnownTickets ?? Object.values(ticketsByStage).flat(),
-    [allKnownTickets, ticketsByStage],
-  );
+  const isGroupByActive =
+    paginatedColumnConfig?.baseArgs?.groupBy && paginatedColumnConfig.baseArgs.groupBy !== 'none';
+  const knownTicketsForOptimisticMerge = React.useMemo(() => {
+    // In group by mode, ticketsByStage contains only this group's tickets
+    // Use it as source of truth to prevent tickets from appearing in wrong groups
+    if (isGroupByActive) {
+      return Object.values(ticketsByStage).flat();
+    }
+    // In normal mode, use allKnownTickets for optimistic updates
+    return allKnownTickets ?? Object.values(ticketsByStage).flat();
+  }, [allKnownTickets, isGroupByActive, ticketsByStage]);
+  // Only the paginated board can starve a collapsed column of its count; the
+  // non-paginated board always has every ticket in `ticketsByStage`.
+  const countsAreReliable = !(paginatedColumnConfig && searchActive);
+  const stageCountById = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+
+    for (const stage of stages) {
+      const loaded = ticketsByStage[stage.id]?.length ?? 0;
+      counts[stage.id] = countsAreReliable
+        ? (stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded)
+        : loaded;
+    }
+
+    return counts;
+  }, [stages, stageCounts, ticketsByStage, countsAreReliable]);
   const stageCollapseSignature = React.useMemo(
-    () => stages.map(stage => `${stage.id}:${stage.defaultTicketStatusV2 ?? ''}`).join('|'),
-    [stages],
+    () => stages.map(stage => `${stage.id}:${stageCountById[stage.id] ?? 0}`).join('|'),
+    [stages, stageCountById],
   );
   const userToggledCollapsedStageIdsRef = React.useRef<Set<string>>(new Set());
-  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>(() =>
-    stages
-      .filter(stage => isTerminalStageStatus(stage.defaultTicketStatusV2))
-      .map(stage => stage.id),
-  );
+  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>([]);
 
   React.useEffect(() => {
+    // While counts cannot be trusted, release everything the user did not collapse
+    // by hand. Collapsing here would unmount the column's query and hide matches
+    // that can then never be fetched back.
+    if (!countsAreReliable) {
+      setCollapsedStageIds(prev => {
+        const next = prev.filter(id => userToggledCollapsedStageIdsRef.current.has(id));
+        return next.length === prev.length ? prev : next;
+      });
+      return;
+    }
+
+    if (!stages.some(stage => (stageCountById[stage.id] ?? 0) > 0)) {
+      return;
+    }
+
     setCollapsedStageIds(prev => {
       const next = new Set(prev);
 
       for (const stage of stages) {
-        if (
-          !isTerminalStageStatus(stage.defaultTicketStatusV2) ||
-          userToggledCollapsedStageIdsRef.current.has(stage.id)
-        ) {
+        if (userToggledCollapsedStageIdsRef.current.has(stage.id)) {
           continue;
         }
 
-        next.add(stage.id);
+        if ((stageCountById[stage.id] ?? 0) > 0) {
+          next.delete(stage.id);
+        } else {
+          next.add(stage.id);
+        }
       }
 
-      return [...next];
+      return next.size === prev.length && prev.every(id => next.has(id)) ? prev : [...next];
     });
-  }, [stageCollapseSignature, stages]);
+  }, [stageCollapseSignature, stages, stageCountById, countsAreReliable]);
 
   const toggleCollapse = (stageId: string) => {
     userToggledCollapsedStageIdsRef.current.add(stageId);
@@ -437,9 +534,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
       {stages.map(stage => {
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
-        const countByStageId = stageCounts?.[stage.id];
-        const countByStageName = stageCounts?.[stage.name];
-        const stageCount = countByStageId ?? countByStageName ?? stageTickets.length;
+        const stageCount = stageCountById[stage.id] ?? stageTickets.length;
         const isCollapsed = collapsedStageIds.includes(stage.id);
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
@@ -557,6 +652,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                 <div className='flex-1 min-h-0'>
                   {paginatedColumnConfig ? (
                     <PaginatedStageList
+                      key={columnKey}
                       stage={stage}
                       columnKey={columnKey}
                       paginationArgs={paginatedColumnConfig.baseArgs}
@@ -570,6 +666,8 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       onTicketClick={onTicketClick}
                       {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                       {...(slaPolicies !== undefined && { slaPolicies })}
+                      {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
+                      {...(userNamesById !== undefined && { userNamesById })}
                     />
                   ) : (
                     <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>

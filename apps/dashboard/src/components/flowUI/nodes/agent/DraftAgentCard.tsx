@@ -8,7 +8,6 @@ import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
 import { ChatWithAgentButton } from './ChatWithAgentButton';
-import { Button } from '../../../ui/Button/Button';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
@@ -154,19 +153,18 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   // expanded preview footer (submit() closes the preview on a decision).
   const actionControls = (
     <div className='flex w-full items-center justify-between gap-3'>
-      <Button
+      <button
         type='button'
-        variant='ghost'
         onClick={() => void submit('agent-draft-decline')}
         disabled={locked}
         className={cn(ghostButton, 'px-2.5')}
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CLICK_DECLINE'
-        trackId='agent_draft_decline'
+        data-ph-capture-attribute-track-id='agent_draft_decline'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {pending === 'reject' ? 'Declining…' : 'Decline'}
-      </Button>
+      </button>
 
       <div className='flex shrink-0 items-center gap-2'>
         {agentRunning && (
@@ -188,21 +186,20 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         >
           Edit
         </button>
-        <Button
+        <button
           type='button'
-          variant='ghost'
           onClick={() => void submit('agent-draft-approve')}
           disabled={locked || agentRunning}
           className={cn(primaryButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_APPROVE'
-          trackId='agent_draft_approve'
+          data-ph-capture-attribute-track-id='agent_draft_approve'
         >
           {(pending === 'approve' || agentRunning) && (
             <Spinner size={14} className='animate-spin' />
           )}
           {approveLabel}
-        </Button>
+        </button>
       </div>
     </div>
   );
