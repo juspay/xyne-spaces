@@ -320,3 +320,41 @@ export function formatRecordingTimestamp(startedAt: number): string {
   }
   return format(startedDate, 'EEE, MMM d');
 }
+
+/**
+ * A recording's quick `aiSummary` is generated asynchronously by the AI pipeline
+ * after the call ends (see `call.trigger.ts`: "aiSummary and transcript are
+ * generated asynchronously after the call ends"). While it is in flight the row
+ * shows a small loader instead of blank space.
+ *
+ * The window is bounded so recordings that predate summaries — or whose
+ * generation silently failed — don't strand the loader forever: past the window
+ * with no summary, the row simply shows nothing.
+ */
+export const SUMMARY_GENERATING_WINDOW_MS = 15 * 60 * 1000;
+
+export function isRecordingSummaryGenerating(
+  recording: Pick<OatsRecordingEntry, 'status' | 'endedAt' | 'aiSummary'>,
+): boolean {
+  if (recording.aiSummary?.trim()) return false;
+  if (recording.status !== CallStatus.ENDED) return false;
+  if (!recording.endedAt) return false;
+  return Date.now() - recording.endedAt < SUMMARY_GENERATING_WINDOW_MS;
+}
+
+/**
+ * Flattens the stored `aiSummary` (markdown or HTML) into a single plain-text
+ * line for the list preview. The row clamps it to two lines with CSS, so this
+ * only needs to strip markup and collapse whitespace, not truncate.
+ */
+export function toRecordingSummaryPreview(summary: string | null | undefined): string {
+  if (!summary) return '';
+  return summary
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // md images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // md links -> link text
+    .replace(/<[^>]+>/g, ' ') // html tags
+    .replace(/[#>*_`~]+/g, ' ') // md emphasis / heading / quote markers
+    .replace(/^\s*[-+]\s+/gm, ' ') // list bullets
+    .replace(/\s+/g, ' ')
+    .trim();
+}
