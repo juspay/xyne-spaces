@@ -24,4 +24,15 @@ set -e
 # deploy, and drain-handoff checkpoints never got to run. setpriv exec()s the
 # command directly: node becomes PID 1, receives SIGTERM itself, and the full
 # grace period governs.
+#
+# Hardened-cluster tolerance (2026-09-07): some clusters enforce a non-root
+# securityContext (runAsUser/runAsNonRoot), so PID 1 starts UNPRIVILEGED and
+# setpriv can no longer init groups — it dies with
+# "setpriv: initgroups failed: Operation not permitted" before node ever
+# starts. In that case there is nothing to drop: exec the command directly and
+# just make sure HOME points at the writable claw home, not root's.
+if [ "$(id -u)" -ne 0 ]; then
+  exec env HOME="${HOME:-/home/claw}" "$@"
+fi
+
 exec setpriv --reuid=claw --regid=nodejs --init-groups env HOME=/home/claw "$@"
