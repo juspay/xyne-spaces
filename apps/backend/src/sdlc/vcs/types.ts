@@ -30,6 +30,9 @@ export interface ParsedRepository {
 
 export interface ValidatedCredential {
   identityLogin: string;
+}
+
+export interface RepositoryReach {
   repositoryOwner: string | null;
   repositoryCount: number | null;
 }
@@ -95,6 +98,7 @@ export interface VcsProviderAdapter {
   readonly provider: VcsProvider;
   parseRepositoryUrl(url: string): ParsedRepository;
   validateCredential(token: string): Promise<ValidatedCredential>;
+  repositoryReach(token: string): Promise<RepositoryReach>;
   inspectRepository(input: {
     repository: ParsedRepository;
     baseBranch?: string;
