@@ -233,6 +233,13 @@ export class Fanout {
   }
 
   #emit(client: ClientSub, event: string, payload: unknown): void {
+    // Single funnel for every emission. An unsubscribe can land during any await window in
+    // #regate/#hydrate; suppress here if the client is no longer subscribed to this
+    // instance. No path legitimately emits to a client outside its instance's live set
+    // (delta pulls from the set; hydrate/resume clients were in it at entry; a revoke for a
+    // removed client is a no-op), so this closes the stray-emission race family in one
+    // place — the callers' membership checks are then just cheap early-outs.
+    if (!this.#dataSubs.get(client.dataInstanceKey)?.has(client)) return;
     if (client.socket.connected) {
       client.socket.emit(event, payload);
       obsEmit('fanout', { event, socketId: client.id, userId: client.userId, ...summarize(payload) });
