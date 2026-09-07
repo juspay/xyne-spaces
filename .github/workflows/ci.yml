@@ -31,6 +31,23 @@ jobs:
         run: echo "hello"
 
   # ---------------------------------------------------------------------------
+  # Temporary: verifies every image `pnpm run test` needs (via
+  # docker-compose.dev.yml + docker-compose.test.yml) is actually reachable
+  # from inside the DinD sidecar under ci-pool's locked-down egress — i.e.
+  # that Squid's allowlist covers every registry these images live in. Only
+  # pulls images, does not run docker compose or any actual test. Remove once
+  # a real docker-compose.test.yml run is confirmed working end-to-end.
+  # ---------------------------------------------------------------------------
+  verify-docker-images-fetchable:
+    name: Verify Docker images fetchable (ci-cluster)
+    runs-on: ci-cluster-github-runners
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify every required image is pullable
+        run: ./scripts/verify-docker-images-fetchable.sh
+
+  # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
