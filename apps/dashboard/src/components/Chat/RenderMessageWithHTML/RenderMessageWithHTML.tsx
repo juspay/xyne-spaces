@@ -895,7 +895,7 @@ const parseNode = (
         parts.push(
           <span
             key={`${keyPrefix}-url-${offset}`}
-            className={cn('text-primary', breakLongLinks && 'break-all')}
+            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
           >
             {url}
           </span>,
@@ -1267,7 +1267,7 @@ const parseNode = (
 
   if (tag === 'a' && disableLinks) {
     return (
-      <span key={`${keyPrefix}-nolink-${idx}`} className='text-primary'>
+      <span key={`${keyPrefix}-nolink-${idx}`} className='text-primary hover:underline'>
         {children}
       </span>
     );
