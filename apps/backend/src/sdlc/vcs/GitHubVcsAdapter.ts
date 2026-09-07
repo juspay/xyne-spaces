@@ -120,7 +120,7 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
     };
   }
 
-  async validateCredential(token: string, resourceOwner: string): Promise<ValidatedCredential> {
+  async validateCredential(token: string): Promise<ValidatedCredential> {
     const identity = await this.request<{ login?: string }>('/user', token);
     if (!identity.login) {
       throw new VcsProviderError(
@@ -129,8 +129,27 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
         502
       );
     }
-    await this.request(`/users/${encodeURIComponent(resourceOwner)}`, token);
-    return { identityLogin: identity.login, resourceOwner };
+    return { identityLogin: identity.login, ...(await this.reach(token)) };
+  }
+
+  // Display only, never a gate. With per_page=1 the Link header's last page is the total.
+  private async reach(
+    token: string
+  ): Promise<{ repositoryOwner: string | null; repositoryCount: number | null }> {
+    try {
+      const { data, response } = await this.send<GitHubRepositoryResponse[]>(
+        '/user/repos?per_page=1',
+        token
+      );
+      const lastPage = /[?&]page=(\d+)>; rel="last"/.exec(response.headers.get('link') || '');
+      return {
+        repositoryOwner: data[0]?.owner?.login?.toLowerCase() ?? null,
+        repositoryCount: lastPage ? Number(lastPage[1]) : data.length,
+      };
+    } catch {
+      // Display data must not block saving a valid key.
+      return { repositoryOwner: null, repositoryCount: null };
+    }
   }
 
   async inspectRepository(input: {
@@ -487,6 +506,14 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
     token?: string,
     init: RequestInit = {}
   ): Promise<T> {
+    return (await this.send<T>(path, token, init)).data;
+  }
+
+  private async send<T = unknown>(
+    path: string,
+    token?: string,
+    init: RequestInit = {}
+  ): Promise<{ data: T; response: Response }> {
     let response: Response;
     try {
       response = await fetch(`${API_URL}${path}`, {
@@ -509,7 +536,7 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
       );
     }
     if (!response.ok) throw this.responseError(response);
-    return (await response.json()) as T;
+    return { data: (await response.json()) as T, response };
   }
 
   private responseError(response: Response): VcsProviderError {
