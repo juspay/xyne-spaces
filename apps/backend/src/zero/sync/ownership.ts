@@ -49,9 +49,19 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then
 end
 return 0`;
 
-/** Prune expired podIds from the interest hash, return the live count. */
+/** Register/refresh a pod's interest with an expiry stamped from the SERVER clock (Redis
+ *  `TIME`), so a skewed pod clock can't set a too-early expiry that another pod prunes. */
+const ADD_INTEREST = `
+local t = redis.call('TIME')
+local nowMs = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+redis.call('HSET', KEYS[1], ARGV[1], nowMs + tonumber(ARGV[2]))
+return 1`;
+
+/** Prune expired podIds against the SERVER clock, return the live count. Single clock (Redis
+ *  TIME) for both stamp and prune → no cross-pod skew that could evict live interest. */
 const INTEREST_LIVE = `
-local now = tonumber(ARGV[1])
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local f = redis.call('HGETALL', KEYS[1])
 local live = 0
 for idx = 1, #f, 2 do
@@ -99,9 +109,9 @@ class Ownership {
     return Number((await redisService.getClient().get(fenceKey(g))) ?? 0);
   }
 
-  /** Register/refresh this pod's interest in instance I. */
+  /** Register/refresh this pod's interest in instance I (expiry stamped from the server clock). */
   async addInterest(i: string): Promise<void> {
-    await redisService.getClient().hset(interestKey(i), POD_ID, Date.now() + INTEREST_TTL_MS);
+    await this.#eval(ADD_INTEREST, 1, interestKey(i), POD_ID, INTEREST_TTL_MS);
   }
 
   /** Drop this pod's interest in instance I. */
@@ -109,9 +119,9 @@ class Ownership {
     await redisService.getClient().hdel(interestKey(i), POD_ID);
   }
 
-  /** Live interest count for I across the fleet (prunes expired pods first). */
+  /** Live interest count for I across the fleet (prunes expired pods against the server clock). */
   async liveInterest(i: string): Promise<number> {
-    return Number(await this.#eval(INTEREST_LIVE, 1, interestKey(i), Date.now()));
+    return Number(await this.#eval(INTEREST_LIVE, 1, interestKey(i)));
   }
 }
 

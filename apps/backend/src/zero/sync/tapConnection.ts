@@ -214,6 +214,11 @@ export class PackConnection {
       this.#pendingReset = false;
       this.#attempt = 0;
       this.#demux.resetAll();
+      // The fresh materialize re-sends gotQueriesPatch and rebuilds the demux, so let both
+      // re-fire: clear #got (else an empty instance never re-marks hydrated post-reset →
+      // deferred clients stuck) and #seeded (re-seed from the now-wiped snapshot; a no-op).
+      this.#got.clear();
+      this.#seeded.clear();
       this.#baseCookie = '';
       try {
         await this.#opts.store.reset(this.#zeroClientGroupID, this.#demux.instanceKeys());
