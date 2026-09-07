@@ -9,7 +9,7 @@ import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withAclExtension } from './tenant/acl-extension';
 import { withWorkspaceStamp } from './tenant/stamp';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
-import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
+import { ticketCreatedActivityExtension } from './extensions/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
 
@@ -69,7 +69,6 @@ export class DatabaseClient {
       setupEnumTextValidation(DatabaseClient.instance);
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
-      setupTicketCreatedActivity(DatabaseClient.instance);
       setupUserVespaSync(DatabaseClient.instance);
 
       // Registered last on purpose — see installPrismaRetryMiddleware.
@@ -88,7 +87,11 @@ export class DatabaseClient {
       });
 
       // Apply zero field encryption extension (no-op when encryptedFieldsConfig is empty)
-      DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
+      // ticketCreatedActivity is applied last so it runs first: it injects the nested
+      // activity row before encryption sees the payload.
+      DatabaseClient.instance = DatabaseClient.instance
+        .$extends(encryptionExtension)
+        .$extends(ticketCreatedActivityExtension) as unknown as PrismaClient;
       DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 
