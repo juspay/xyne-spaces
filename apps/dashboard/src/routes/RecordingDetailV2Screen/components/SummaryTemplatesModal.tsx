@@ -841,7 +841,10 @@ export function SummaryTemplatesModal({
   const canOpenShare = Boolean(
     draft?.id &&
     !isAdminPublicationReview &&
-    (draft.canEdit || (isScribeAdmin && draft.visibility === 'WAITING_FOR_APPROVAL')),
+    (draft.canEdit ||
+      (isScribeAdmin && draft.visibility === 'WAITING_FOR_APPROVAL') ||
+      // A Scribe admin can reverse a publish on any public template, not just their own.
+      (isScribeAdmin && draft.visibility === 'PUBLIC')),
   );
 
   const shareTrigger =

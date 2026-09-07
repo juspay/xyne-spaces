@@ -41,11 +41,14 @@ export interface MigrationJobView {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+  ingestStartedAt?: number;
+  ingestDurationMs?: number; // how long ingestion took (completedAt − ingestStartedAt)
   error?: string;
   issues?: {
     conversationId: string;
     kind: 'skipped' | 'truncated' | 'ingest-error';
     reason: string;
+    label?: string; // human-readable conversation identifier (e.g. "DM with Jane Doe" / "#general")
   }[];
 }
 

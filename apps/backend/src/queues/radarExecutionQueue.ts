@@ -7,9 +7,9 @@ export interface RadarExecutionJobData {
   conversationId: string;
 }
 
-/** Per-thread quiet period before a window is parsed. A product decision
- *  (how fast Radar reacts), not an ops lever. */
-const DEBOUNCE_MS = 5_000;
+/** Per-thread quiet period before a window is parsed: how fast Radar reacts,
+ *  and how many messages one parse covers. */
+const DEBOUNCE_MS = config.radar.debounceMs;
 
 export function isRadarExecutionEnabled(): boolean {
   return config.radar.enabled;

@@ -10,6 +10,7 @@ import {
   runS2SClawAgent,
 } from '@/services/clawAgentService';
 import { logger } from '@/utils/logger';
+import { resolveSdlcChannelId } from '../sdlcChannelMembership';
 import { SdlcBaselineReconciliationService } from '../SdlcBaselineReconciliationService';
 import { sdlcAgentContext, type SdlcWikiAgentRole } from '../SdlcAgentContextService';
 import {
@@ -95,7 +96,11 @@ export class SdlcWikiExecutionService {
         select: { id: true, name: true, email: true },
       }),
     ]);
-    if (!repo?.channelId || !repo.workspaceId || !user?.email) {
+    // The run names its hub; the repository's oldest is the wrong one when it is
+    // in several.
+    const channelId =
+      context.channelId ?? (repo && (await resolveSdlcChannelId(this.prisma, repo.id)));
+    if (!repo || !channelId || !repo.workspaceId || !user?.email) {
       throw new Error('Wiki repository or owner is unavailable');
     }
 
@@ -365,7 +370,7 @@ export class SdlcWikiExecutionService {
             }
           : {}),
       }),
-      `Reuse the existing repository sandbox and never destroy it. If the Wiki Git tool reports that the sandbox session is missing, call sandbox-repo-setup for ${repo.name} on ${context.baseBranch}, then retry. Trusted tool binding: executionId=${execution.id}, sessionId=${sessionId}, repoId=${repo.id}. Pass these exact values to every Spaces Wiki tool.`,
+      `Reuse the existing repository sandbox and never destroy it. If the Wiki Git tool reports that the sandbox session is missing, call sandbox-repo-setup for ${repo.name} on ${context.baseBranch}, then retry. Trusted tool binding: executionId=${execution.id}, sessionId=${sessionId}, repoId=${repo.id}. Pass these exact values to every Hubs Wiki tool.`,
     ].join('\n\n');
     await runS2SClawAgent({
       sessionId,
@@ -377,7 +382,7 @@ export class SdlcWikiExecutionService {
       callbackUrl: this.callbackUrl(execution.id, role),
       callbackSecret: config.xyneClaw.s2sKey,
       conversationId,
-      channelId: repo.channelId,
+      channelId,
       workspaceId: repo.workspaceId,
       executionProfile: 'sdlc',
       sdlcOperation: 'wiki',

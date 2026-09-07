@@ -11,6 +11,7 @@ import { Outlet, useLocation, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
 import { ActivityItem } from '../ActivityItem';
+import { isCanvasActivity } from '../isCanvasActivity';
 import { NofocusRefProvider } from '../ActivityItemCard';
 import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -20,11 +21,6 @@ import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, UserUser02 } from '@xyne/icons';
 import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
 import { useShortcut } from '../../../shortcuts';
@@ -185,7 +181,7 @@ const TABS: TabConfig[] = [
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
       activity.actorAction === 'canvas_access_revoked' ||
-      (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
+      (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity)),
   },
   {
     value: 'calls',
@@ -293,20 +289,12 @@ const ActivityListView = (): ReactElement => {
 
   const handleTabChange = useCallback(
     (value: string): void => {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_TAB_CHANGED,
-        tab: value as ActivityTab,
-        showUnreadOnly: showUnreadOnly,
-      });
       setActiveTab(value as ActivityTab);
     },
     [showUnreadOnly],
   );
 
   const handleUnreadToggle = useCallback((checked: boolean): void => {
-    mixpanelService.track(EVENTS.INITIATE_ACTION, {
-      type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_UNREAD_TOGGLED,
-    });
     setShowUnreadOnly(checked);
     window.localStorage.setItem('activity_unread_toggle', String(checked));
     activityVirtuosoRef.current?.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
@@ -363,6 +351,11 @@ const ActivityListView = (): ReactElement => {
           'ticket_pr_declined',
           'ticket_pr_reviewer_assigned',
           'ticket_qa_assigned',
+          'ticket_release_started',
+          'ticket_release_completed',
+          'ticket_release_cancelled',
+          'ticket_release_paused',
+          'ticket_release_planning',
           'ticket_priority',
           'ticket_user_group',
           'ticket_title',
@@ -785,7 +778,7 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'canvas_shared' ||
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
-        (activity.actorAction === 'mentioned_user' && activity.canvasId)
+        (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity))
       ) {
         counts.canvas++;
       }
@@ -1010,11 +1003,13 @@ const ActivityListView = (): ReactElement => {
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                   {/* Mark as Read */}
                   <button
+                    data-ph-capture-attribute-track-id='mark_tab_as_read'
+                    data-ph-capture-attribute-tab={activeTab}
                     onClick={() => {
                       markActiveTabUnread();
                       setShowMobileMenu(false);
                     }}
-                    className='w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
+                    className='w-full px-4 py-2 flex items-center justify-start gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors h-auto'
                     data-track-category='ACTIVITY'
                     data-track-name={`MARK_TAB_READ`}
                     data-track-metadata={JSON.stringify({

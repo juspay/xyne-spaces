@@ -210,6 +210,7 @@ export const ThreadTags = ({
                 <button
                   type='button'
                   aria-label={`Remove ${entry?.label ?? tag.name}`}
+                  data-ph-capture-attribute-track-id='remove_thread_tag'
                   // Width reserved, only opacity changes, so the chip does not resize under
                   // the cursor. stopPropagation because the row opens the thread on click.
                   onClick={event => {

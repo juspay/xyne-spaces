@@ -579,6 +579,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           onClick={() => {
             void handleSave();
           }}
+          trackId='save_user_status'
           data-track-category='STATUS'
           data-track-name='SAVE_STATUS'
           disabled={!selectedEmoji && !statusText.trim()}

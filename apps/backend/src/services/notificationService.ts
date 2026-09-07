@@ -14,6 +14,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
+import { resolveSdlcNavTarget } from '@/sdlc/sdlcNavTarget';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
@@ -22,7 +23,7 @@ import { serializeInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification } from '@xyne/shared';
+  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 
 const prisma = DatabaseClient.getInstance();
@@ -155,6 +156,25 @@ export interface NotificationData {
    */
   workspaceId?: string;
 }
+
+const buildReleaseStatusPushMessage = (
+  status: TicketStatusV2,
+  releaseXyneId: string,
+  devXyneId: string,
+): string => {
+  switch (status) {
+    case TicketStatusV2.STARTED:
+      return `\u{1F4E6} ${devXyneId} picked up in release ${releaseXyneId} — deployment is in progress.`;
+    case TicketStatusV2.COMPLETED:
+      return `\u{1F680} ${devXyneId} released in ${releaseXyneId} — now live in the app.`;
+    case TicketStatusV2.CANCELLED:
+      return `\u{1F6AB} Release ${releaseXyneId} carrying ${devXyneId} was cancelled.`;
+    case TicketStatusV2.PAUSED:
+      return `\u23F8\uFE0F Release ${releaseXyneId} carrying ${devXyneId} is on hold.`;
+    case TicketStatusV2.TODO:
+      return `\u21A9\uFE0F Release ${releaseXyneId} carrying ${devXyneId} moved to planning.`;
+  }
+};
 
 interface NotificationOptions {
   page?: number;
@@ -842,6 +862,33 @@ class NotificationService {
    * disconnect between send and check, or WebSocket "send" only confirms server push, not client
    * receipt. This is acceptable for reducing duplicate notifications but is not deterministic.
    */
+  /** No builder knows the SDLC routes, so the target is resolved once in the funnel they share. */
+  private async withSdlcTarget(data: NotificationData): Promise<NotificationData> {
+    // Builders put objects in metadata too, so every id is read as one or dropped.
+    const meta: Record<string, unknown> =
+      data.metadata && typeof data.metadata === 'object' ? data.metadata : {};
+    const id = (key: string): string | undefined =>
+      typeof meta[key] === 'string' ? (meta[key] as string) : undefined;
+    try {
+      const target = await resolveSdlcNavTarget({
+        channelId: id('channelId'),
+        canvasId: id('canvasId'),
+        ticketId: id('ticketId'),
+        conversationId: id('conversationId'),
+        messageId: id('messageId'),
+        blockId: id('blockId'),
+        commentThreadId: id('commentThreadId'),
+      });
+      if (!target) return data;
+      // actionUrl is left alone: mobile and web push have no SDLC routes, so they keep
+      // the builder's chat path. Clients that can render a hub read sdlcTarget instead.
+      return { ...data, metadata: { ...meta, sdlcTarget: target } };
+    } catch (error) {
+      logger.error('[NOTIFICATION-SERVICE] SDLC routing failed', { error });
+      return data;
+    }
+  }
+
   async createNotification(
     userId: string,
     data: NotificationData,
@@ -850,6 +897,7 @@ class NotificationService {
     let deliveredViaApp = false;
 
     try {
+      data = await this.withSdlcTarget(data);
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
         notificationType: data.type,
@@ -1338,6 +1386,8 @@ class NotificationService {
         senderId,
         ...(!isCommentMention ? { senderName } : {}),
         workspaceId,
+        // Every other builder sends it; the client routes on the channel's type.
+        ...(channelId ? { channelId } : {}),
         mentionContext,
         ...(blockId ? { blockId } : {}),
         ...(commentThreadId ? { commentThreadId } : {}),
@@ -2492,11 +2542,94 @@ class NotificationService {
     }
   }
 
-  async sendTicketStatusChangeNotification(
+  /**
+   * Planning-risk detected/reopened : the current stage deadline is later than
+   * the ticket due date, not yet overdue. Sent only to "action recipients" (awareness
+   * recipients who also satisfy the board's ETA-update permission policy) - unlike every
+   * other ticket notification here, which goes to the full awareness set - since a
+   * planning-risk alert is only actionable for someone who can actually change the due
+   * date or stage deadline. Caller is responsible for the "once per fingerprint" dedup
+   * (comparing the previous vs. new fingerprint before calling).
+   */
+  async sendPlanningRiskDetectedNotification(
+    ticketId: string,
+    actionRecipients: string[],
+    details: { stageDeadline: number; ticketDue: number },
+  ): Promise<void> {
+    if (actionRecipients.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          xyneId: true,
+          title: true,
+          channelId: true,
+          conversationId: true,
+          workspaceId: true,
+          channel: { select: { type: true } },
+        },
+      });
+      if (!ticket) {
+        logger.warn('[NotificationService] Ticket not found', { ticketId });
+        return;
+      }
+
+      const actionUrl = buildTicketActionUrl(ticket, ticketId);
+      const ticketDisplayId = ticket.xyneId || ticket.id;
+      const title = 'Planning Risk';
+      const message = `Ticket '${ticketDisplayId}' has a stage deadline later than its due date`;
+
+      await Promise.allSettled(
+        actionRecipients.map(async (userId) => {
+          const { desktopUsers, mobileUsers } = ticket.channelId
+            ? await notificationFilterService.filterUsers([userId], ticket.channelId, false, 'mention', {
+                notificationType: NotificationType.TICKET_ETA_PLANNING_RISK,
+              })
+            : await notificationFilterService.filterGlobalUsers([userId], NotificationType.TICKET_ETA_PLANNING_RISK, 'mention');
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.TICKET_ETA_PLANNING_RISK,
+            relatedEntityType: 'ticket',
+            relatedEntityId: ticketId,
+            actionUrl,
+            metadata: {
+              ticketId,
+              channelId: ticket.channelId,
+              conversationId: ticket.conversationId,
+              stageDeadline: details.stageDeadline,
+              ticketDue: details.ticketDue,
+            },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send planning risk notification:', error);
+    }
+  }
+
+  /**
+   * Shared pipeline for status-like ticket events - same TICKET_STATUS_CHANGE
+   * preferences and delivery for every flavour. Callers own the finished copy;
+   * the fetch below is only for routing (channel, conversation, actionUrl).
+   */
+  private async sendStatusChangeNotification(
     ticketId: string,
     recipients: string[],
-    newStatus: string,
     actorId: string,
+    content: {
+      title: string;
+      message: string;
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<void> {
     if (recipients.length === 0) return;
 
@@ -2520,9 +2653,7 @@ class NotificationService {
 
       const actionUrl = buildTicketActionUrl(ticket, ticketId);
 
-      const ticketDisplayId = ticket.xyneId || ticket.id;
-      const title = 'Status Changed';
-      const message = `Ticket '${ticketDisplayId}' status changed to ${newStatus}`;
+      const { title, message } = content;
 
       await Promise.allSettled(
         recipients.map(async (userId) => {
@@ -2551,7 +2682,7 @@ class NotificationService {
               actorId,
               channelId: ticket.channelId,
               conversationId: ticket.conversationId,
-              newStatus,
+              ...(content.metadata ?? {}),
             },
           }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
         }),
@@ -2559,6 +2690,45 @@ class NotificationService {
     } catch (error) {
       logger.error('[NotificationService] Failed to send ticket status change notification:', error);
     }
+  }
+
+  /** A ticket moved stage/status. `ticketDisplayId` is the xyneId the caller already holds. */
+  async sendTicketStatusChangeNotification(
+    ticketId: string,
+    recipients: string[],
+    newStatus: string,
+    actorId: string,
+    ticketDisplayId: string,
+  ): Promise<void> {
+    await this.sendStatusChangeNotification(ticketId, recipients, actorId, {
+      title: 'Status Changed',
+      message: `Ticket '${ticketDisplayId}' status changed to ${newStatus}`,
+      metadata: { newStatus },
+    });
+  }
+
+  /**
+   * A release carrying the dev ticket changed status. Push copy names both
+   * sides - the dev ticket the reader owns and the release carrying it -
+   * because a push arrives outside any thread.
+   */
+  async sendTicketReleaseStatusChangeNotification(
+    ticketId: string,
+    ticketXyneId: string,
+    recipients: string[],
+    actorId: string,
+    release: { id: string; xyneId: string },
+    releaseStatus: TicketStatusV2,
+  ): Promise<void> {
+    await this.sendStatusChangeNotification(ticketId, recipients, actorId, {
+      title: `Release update: ${release.xyneId}`,
+      message: buildReleaseStatusPushMessage(releaseStatus, release.xyneId, ticketXyneId),
+      metadata: {
+        isReleaseUpdate: true,
+        releaseStatus,
+        releaseTicketId: release.id,
+      },
+    });
   }
 
   async sendTicketPriorityChangeNotification(

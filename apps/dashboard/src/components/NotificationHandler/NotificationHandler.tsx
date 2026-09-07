@@ -15,15 +15,18 @@ import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { useSelector } from '@xstate/react';
 import { CallType } from '@xyne/shared';
+import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import {
+  getRecordingStatus,
   sendRecordingEvent,
   stopRecordingForNavigation,
   stopRecordingForTeardown,
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
@@ -74,6 +77,8 @@ interface NotificationData {
       commentThreadId?: string;
       conversation?: Conversation;
       notificationType?: string;
+      ticketId?: string;
+      sdlcTarget?: unknown;
     };
     metadata?: {
       notificationType?: string;
@@ -131,6 +136,12 @@ export const NotificationHandler: React.FC = () => {
   }, [activeWorkspaceId]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
+
+  const goToRecordings = useCallback((): void => {
+    const workspaceId = activeWorkspaceIdRef.current;
+    if (!workspaceId) return;
+    void navigate(withWorkspacePrefix('/recordings', workspaceId));
+  }, [navigate]);
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
     reactNativeBridge.isAvailable(),
   );
@@ -228,10 +239,23 @@ export const NotificationHandler: React.FC = () => {
             ),
           });
         }
+        // Socket delivery spreads metadata into `data`; the REST row keeps `metadata`.
+        const ids = { ...data.notification.metadata, ...data.notification.data };
+        // The server leaves actionUrl chat-shaped for push, which has no SDLC routes,
+        // so a hub path is rebuilt here from the target it resolved at send time.
+        const sdlcTarget = parseSdlcNavTarget(ids.sdlcTarget);
+        const sdlcActionUrl = sdlcTarget ? buildSdlcPath(sdlcTarget) : undefined;
         const resolvedRawActionUrl =
-          data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
+          sdlcActionUrl ||
+          data.notification.actionUrl ||
+          canvasRedirectUrl ||
+          fallbackChatActionUrl;
         const resolvedActionUrl = resolvedRawActionUrl
-          ? withWorkspacePrefix(resolvedRawActionUrl, notificationWorkspaceId)
+          ? withWorkspacePrefix(
+              resolvedRawActionUrl,
+              // Unprefixed SDLC paths bind :workspaceId to "sdlc" — never ship one.
+              notificationWorkspaceId ?? activeWorkspaceIdRef.current,
+            )
           : undefined;
 
         // Always show workspace at the top when available, matching Slack.
@@ -605,20 +629,28 @@ export const NotificationHandler: React.FC = () => {
     // Sync stored preference to main process on startup
     meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
     const cleanup = meetingDetector.onStartRecordingFromMeeting(() => {
-      sendRecordingEvent({ type: 'requestAutoStart' });
+      goToRecordings();
+      const status = getRecordingStatus();
+      if (status === 'idle' || status === 'error') {
+        sendRecordingEvent({ type: 'clearTranscripts' });
+        sendRecordingEvent({ type: 'startRecording', defaultLayout: getRecordingDefaultLayout() });
+      } else {
+        sendRecordingEvent({ type: 'requestAutoStart' });
+      }
     });
     window.electronAPI?.ipcSend?.('recording:renderer-ready');
     return cleanup;
-  }, [isElectron]);
+  }, [isElectron, goToRecordings]);
 
   // Handle stop signal from the floating recording pill's Stop button
   useEffect(() => {
     const meetingDetector = window.electronAPI?.meetingDetector;
     if (!isElectron || !meetingDetector) return;
     return meetingDetector.onStopRecordingFromMeeting(() => {
+      goToRecordings();
       sendRecordingEvent({ type: 'requestStop' });
     });
-  }, [isElectron]);
+  }, [isElectron, goToRecordings]);
 
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;

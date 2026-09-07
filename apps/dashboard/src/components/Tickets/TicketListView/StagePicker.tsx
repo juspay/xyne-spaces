@@ -665,6 +665,7 @@ export function StagePicker({
             <button
               key={stage}
               type='button'
+              data-ph-capture-attribute-track-id='ticket_set_stage_row'
               onClick={e => {
                 e.stopPropagation();
                 setStage(stage);

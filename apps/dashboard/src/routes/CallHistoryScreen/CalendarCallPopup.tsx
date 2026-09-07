@@ -32,11 +32,13 @@ import {
   isMicrosoftCalendarCall,
   canJoinCall,
   isScheduledCallManageable,
+  canEditScheduledCallParticipants,
 } from './callHistoryItem.utils';
 import Button from '../../components/ui/Button';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import { useUser } from '../../hooks/useUsers';
+import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { callService } from '../../services/Call/callService';
 import { toast } from 'sonner';
@@ -212,6 +214,7 @@ const CalendarCallPopup = ({
   const [localRsvp, setLocalRsvp] = useState<MeetingStatus | null>(null);
   const [isGuestsExpanded, setIsGuestsExpanded] = useState(false);
 
+  const allVisibleChannels = useAllVisibleChannels();
   const currentParticipant = call.participants?.find(p => p.userId === currentUserId);
   const isCurrentUserInCall = isRoomActive && currentCallExternalId === call.externalId;
   const previewParticipantUserIds = useMemo(
@@ -593,7 +596,11 @@ const CalendarCallPopup = ({
   const shouldUsePrimaryJoinStyle = isLive;
   const isManageableScheduledCall = isScheduledCallManageable(call, currentUserId);
 
-  const canEdit = isManageableScheduledCall && !!onEditClick;
+  // A non-organizer participant can still open the modal, restricted to adding people.
+  const canEdit =
+    (isManageableScheduledCall ||
+      canEditScheduledCallParticipants(call, currentUserId, allVisibleChannels)) &&
+    !!onEditClick;
   const canDelete = isManageableScheduledCall && !!onDeleteClick;
   const canHide =
     !isEnded && currentUserId !== organizerUserId && !!hydratedCurrentParticipant && !!onHideClick;

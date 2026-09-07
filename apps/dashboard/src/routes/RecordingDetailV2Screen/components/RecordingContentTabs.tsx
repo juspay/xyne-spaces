@@ -26,6 +26,7 @@ import {
   getSummaryTemplateLabel,
   truncateTemplateName,
 } from '../../../components/SummaryTemplateMenu/SummaryTemplateMenu.utils';
+import { Tooltip } from '../../../components/ui/Tooltip';
 
 export type RecordingContentTab = 'notes' | 'transcript' | 'summary';
 
@@ -39,8 +40,10 @@ interface RecordingContentTabsProps {
   hasSummary: boolean;
   /** The template selected for this recording; labels the segment. */
   selectedTemplate?: RecordingSummaryTemplate;
-  /** Swaps the segment's icon for a spinner and locks the menu while regenerating. */
+  /** Adds a small busy indicator while a summary is regenerating. */
   isRegenerating?: boolean;
+  /** Template currently being regenerated, which may differ from the rendered summary. */
+  regeneratingTemplateId?: string;
   templates?: RecordingSummaryTemplate[];
   templatesLoading?: boolean;
   onTemplateMenuOpen?: () => void;
@@ -59,6 +62,7 @@ export const RecordingContentTabs = ({
   hasSummary,
   selectedTemplate,
   isRegenerating = false,
+  regeneratingTemplateId,
   templates = [],
   templatesLoading = false,
   onTemplateMenuOpen,
@@ -71,8 +75,8 @@ export const RecordingContentTabs = ({
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (visibleTab !== 'summary' || isRegenerating) setIsTemplateMenuOpen(false);
-  }, [isRegenerating, visibleTab]);
+    if (visibleTab !== 'summary') setIsTemplateMenuOpen(false);
+  }, [visibleTab]);
 
   const renderTab = (
     tab: RecordingContentTab,
@@ -120,6 +124,15 @@ export const RecordingContentTabs = ({
     const isActive = visibleTab === 'summary';
     const fullLabel = hasSummary ? getSummaryTemplateLabel(selectedTemplate) : 'Summary';
     const label = truncateTemplateName(fullLabel);
+    const regeneratingTemplate =
+      templates.find(template => template.id === regeneratingTemplateId) ??
+      (selectedTemplate?.id === regeneratingTemplateId ? selectedTemplate : undefined);
+    const regeneratingTemplateLabel = regeneratingTemplate
+      ? getSummaryTemplateLabel(regeneratingTemplate)
+      : regeneratingTemplateId === 'default' || !regeneratingTemplateId
+        ? getSummaryTemplateLabel(undefined)
+        : 'selected template';
+    const regeneratingTooltipContent = `Generating ${regeneratingTemplateLabel} summary`;
 
     const indicator = isActive ? (
       <motion.span
@@ -152,7 +165,7 @@ export const RecordingContentTabs = ({
             onSelect('summary');
           }
         }}
-        title={fullLabel}
+        title={isRegenerating ? regeneratingTooltipContent : fullLabel}
         data-track-category='RecordingDetailV2'
         data-track-name='open_summary_templates'
         className={cn(
@@ -174,6 +187,26 @@ export const RecordingContentTabs = ({
             >
               {label}
             </motion.span>
+          </AnimatePresence>
+          <AnimatePresence initial={false}>
+            {isRegenerating && hasSummary && (
+              <motion.span
+                initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+                className='flex shrink-0 items-center justify-center'
+              >
+                <Tooltip content={regeneratingTooltipContent} side='top'>
+                  <span
+                    className='flex size-3 items-center justify-center'
+                    aria-label={regeneratingTooltipContent}
+                  >
+                    <Spinner size={12} className='animate-spin text-muted-foreground' />
+                  </span>
+                </Tooltip>
+              </motion.span>
+            )}
           </AnimatePresence>
           <AnimatePresence initial={false}>
             {isActive && onOpenTemplates && hasSummary && (
@@ -200,7 +233,7 @@ export const RecordingContentTabs = ({
         trigger={trigger}
         open={isActive && isTemplateMenuOpen}
         onOpenChange={open => {
-          if (isActive && !isRegenerating) {
+          if (isActive) {
             if (open) onTemplateMenuOpen?.();
             setIsTemplateMenuOpen(open);
           }
@@ -215,6 +248,7 @@ export const RecordingContentTabs = ({
           templates={templates}
           isLoading={templatesLoading}
           isRegenerating={isRegenerating}
+          regeneratingTemplateId={regeneratingTemplateId}
           canRegenerate={Boolean(selectedTemplate?.id)}
           onSelectTemplate={templateId => onTemplateSelect?.(templateId)}
           onRegenerate={() => onRegenerate?.()}

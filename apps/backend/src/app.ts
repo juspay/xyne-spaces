@@ -18,6 +18,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
+import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
@@ -46,6 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
+import { workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -111,7 +113,7 @@ import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
-import ysweetRoutes from '@/routes/ysweet';
+import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
@@ -137,6 +139,7 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -194,10 +197,14 @@ import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
+import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
+import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
+import { encryptedFieldsConfig } from '@xyne/shared';
 
 
 export class App {
@@ -224,6 +231,7 @@ export class App {
           url.startsWith(`${apiPathPrefix}?`);
         if (isPrefixed) {
           req.url = `/api${url.slice(apiPathPrefix.length)}`;
+          req.originalUrl = req.url;
         }
         next();
       });
@@ -349,7 +357,23 @@ export class App {
     this.app.use(decryptRequestBodyMiddleware);
     this.app.use(encryptResponseBodyMiddleware);
 
+    // Public SDK API. Uses the same cookie-based auth as the dashboard via
+    // authMiddleware.authenticate. When disabled, nothing is mounted here
+    // and a request falls through to the app's own `notFoundHandler` further down.
+    //
+    // Two routers at the same prefix: the public one (version/health) is
+    // tried first and falls through on no match, then authMiddleware runs for
+    // everything else. The trailing `sdkErrorHandler` gives auth failures the
+    // SDK's own error envelope.
+    if (config.sdk.enabled) {
+      this.app.use('/api/sdk', createSdkPublicRouter());
+      this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
+      logger.info('Public SDK API mounted at /api/sdk');
+    }
+
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
+
+    // this.app.use('/api/workflows-v2', webhookLimiter, workflowsPublicRouter);
 
     // Claw MCP route (user + app auth) — must be before /api/query
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
@@ -421,6 +445,8 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
+    // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -462,6 +488,7 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
+    this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
       '/api/agent-tools-mappings',
@@ -587,7 +614,27 @@ export class App {
       validateS2SKey,
       handleSdlcClawCallback,
     );
+    // Claw's completion callback for a parked RUN_AGENT step. The session — not
+    // the node path — identifies which attempt reported back; the handler
+    // resolves the gate from it.
+    this.app.post(
+      '/api/internal/workflows-v2/claw-callback/:executionId',
+      validateS2SKey,
+      handleWorkflowClawCallback,
+    );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+
+    // Encrypted-fields config (S2S-only). Backend is the source of truth; the
+    // encryption service fetches this and caches it instead of importing @xyne/shared.
+    this.app.get('/api/internal/encryption/fields-config', validateS2SKey, (_req: Request, res: Response) => {
+      const encryptedFields = Object.fromEntries(
+        Object.entries(encryptedFieldsConfig).map(([table, tableConfig]) => [
+          table,
+          { fields: [...tableConfig.fields], enforceClientEncryption: tableConfig.enforceClientEncryption },
+        ]),
+      );
+      res.json({ encryptedFields });
+    });
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -607,6 +654,9 @@ export class App {
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
 
+    // No user session here — the caller is the y-sweet server itself, gated
+    // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
+    this.app.use('/api/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
@@ -641,9 +691,6 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes. Auth already runs for every /api request via
-    // the /api attachment mounts above; applying it here again cost two more DB
-    // round-trips per canvas open.
     this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
@@ -692,6 +739,10 @@ export class App {
 
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
+
+    // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
+    // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.
+    this.app.use('/api/office-conversion', authMiddleware.authenticate, officeConversionRoutes);
 
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);
@@ -949,11 +1000,14 @@ export class App {
       );
     }
 
-    // Initialize calendar sync queues
-    logger.info('Initializing Microsoft Calendar sync queue...');
+    // Initialize calendar sync queues as PRODUCERS only. The calendar webhook
+    // routes live here and must stay here (they are the publicly reachable
+    // endpoints Google/Microsoft push to), but the sync work they enqueue is
+    // drained by the worker process — see ENABLE_CALENDAR_SYNC_WORKER.
+    logger.info('Initializing Microsoft Calendar sync queue (producer)...');
     await microsoftCalendarSyncQueue.initialize();
 
-    logger.info('Initializing Google Calendar sync queue...');
+    logger.info('Initializing Google Calendar sync queue (producer)...');
     await googleCalendarSyncQueue.initialize();
 
     // Initialize unified watch renewal queue (replaces Gmail + Calendar renewal queues)
@@ -971,6 +1025,18 @@ export class App {
     } catch (error) {
       logger.error('Failed to initialize Superposition client:', error);
       logger.warn('Continuing startup without Superposition client...');
+    }
+
+    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate (requireYSweetServerToken
+    // fails closed with 401 if it's empty). A missing token here is silent at
+    // request time — every canvas connect and every 10s revalidation poll
+    // just 401s — so surface it loudly at boot instead. Warn, don't crash:
+    // an empty value is expected in local dev where nothing calls this route.
+    if (!config.ysweet.serverToken) {
+      logger.warn(
+        'Y_SWEET_SERVER_TOKEN is not set.' +
+          'if y-sweet auth validation is enabled in this environment, canvas collaboration will be down.'
+      );
     }
 
     try {
@@ -1008,6 +1074,9 @@ export class App {
     await vespaQueue.initialize();
     // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
     await vespaBackfillQueue.initialize();
+
+    const { initWorkflows } = await import('@/workflowsV2/runtime');
+    await initWorkflows();
 
     // Sync bots for all existing workspaces
     const dbClient = DatabaseClient.getInstance();

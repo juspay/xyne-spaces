@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { activitySkipMarkAsReadThreadRef } from '../Activity/activitySkipMarkAsRead';
 import {
   useParams,
@@ -59,12 +60,16 @@ import { useShowThreadTags } from '../../hooks/useShowThreadTags';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
-import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
+import {
+  MessageType,
+  ChannelScopeType,
+  ChannelType,
+  BaseTicketType,
+  parseTicketMd,
+} from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
 import { ShortcutTooltip } from '../ui/ShortcutTooltip';
-import { mixpanelService } from '../../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
 import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
@@ -132,6 +137,9 @@ interface ThreadMessagesProps {
   onAskAI?: (threadInfo?: ThreadInfo) => void;
   /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
   onUserClick?: ((userId: string) => void) | undefined;
+  /** Forces the initial active tab, overriding the ?selectedTab URL param. Used by modal hosts to avoid inheriting the outer page's tab state. */
+  defaultTab?: TabType;
+  headerActionsContainer?: HTMLElement | null;
 }
 
 export const ThreadMessages = ({
@@ -154,6 +162,8 @@ export const ThreadMessages = ({
   skipInputAutoFocus: propSkipInputAutoFocus = false,
   onAskAI,
   onUserClick,
+  defaultTab,
+  headerActionsContainer,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -192,12 +202,12 @@ export const ThreadMessages = ({
   const [derivedConversationId, setDerivedConversationId] = useState(conversationId || '');
   const [derivedChannelId, setDerivedChannelId] = useState(channelId || '');
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
   const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
-  const selectedTab: TabType = validTabs.includes(selectedTabParam as TabType)
-    ? (selectedTabParam as TabType)
-    : 'thread';
+  const selectedTab: TabType =
+    defaultTab ??
+    (validTabs.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
 
   const isFocusedThread = searchParams.get('focusThread') === '1';
   const skipInputAutoFocus = propSkipInputAutoFocus || searchParams.get('nofocus') === '1';
@@ -262,6 +272,19 @@ export const ThreadMessages = ({
     enabled: !!derivedTicketId,
   });
   const isFlowStep = !!threadTicket?.rootId;
+
+  const [threadSubTicketMappings] = useCachedQuery(
+    queries.subTicketsForTicket({ ticketId: derivedTicketId }),
+    { enabled: !!derivedTicketId },
+  );
+  const spawnedTicketMessageIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const mapping of threadSubTicketMappings ?? []) {
+      const sourceMessageId = mapping.subTicket?.mappedTicket?.messageId;
+      if (sourceMessageId) ids.add(sourceMessageId);
+    }
+    return ids;
+  }, [threadSubTicketMappings]);
 
   // Update derived values when props/params change OR when conversation loads
   useEffect(() => {
@@ -539,34 +562,12 @@ export const ThreadMessages = ({
     return () => cancelAnimationFrame(rafId);
   }, [derivedConversationId, isMobile, previewCardMode]);
 
-  const trackMessageLoadedPerformance = (startTime: number, messageType: string) => {
-    const scopeType =
-      channel?.scopeType && channel.scopeType !== ChannelScopeType.DEFAULT
-        ? channel.scopeType
-        : 'Channel';
-
-    const timeTakenMs = Date.now() - startTime;
-
-    mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-      type: messageType,
-      timeTakenMs,
-      channelLength: messages?.length || 0,
-      scopeType,
-      isInThread: true,
-    });
-  };
-
   // Track thread message loading performance
   useEffect(() => {
     if (messagesDetails.type === 'unknown') {
       messageLoadStartTimeRef.current = Date.now();
     } else if (messagesDetails.type === 'complete') {
       if (messageLoadStartTimeRef.current !== null) {
-        trackMessageLoadedPerformance(
-          messageLoadStartTimeRef.current,
-          EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.MESSAGES_LOADED,
-        );
-
         const duration = Date.now() - messageLoadStartTimeRef.current;
         logger.info(Event.THREAD_MESSAGES_LOADED, {
           source: 'ThreadPannel',
@@ -587,11 +588,6 @@ export const ThreadMessages = ({
       }
     } else if (messagesDetails.type === 'error') {
       if (messageLoadStartTimeRef.current !== null) {
-        trackMessageLoadedPerformance(
-          messageLoadStartTimeRef.current,
-          EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.MESSAGES_LOAD_FAILED,
-        );
-
         const duration = Date.now() - messageLoadStartTimeRef.current;
         logger.info(Event.THREAD_MESSAGES_LOADED, {
           source: 'ThreadPannel',
@@ -940,6 +936,14 @@ export const ThreadMessages = ({
   const openTicketDetailsExpandedView = (): void => {
     if (!ticket?.channelId || !ticket.conversationId) return;
 
+    // An SDLC ticket has its own page under the hub, not a panel over the chat channel.
+    if (channel?.type === ChannelType.SDLC) {
+      standaloneNavigate(navigate, `/sdlc/${ticket.channelId}/tickets/${ticket.id}`, {
+        state: { activeTab },
+      });
+      return;
+    }
+
     standaloneNavigate(
       navigate,
       buildChannelRoute(ticket.channelId, {
@@ -1169,6 +1173,196 @@ export const ThreadMessages = ({
     );
   }
 
+  const simpleViewHeaderActions = (
+    <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
+      {/* Ask AI */}
+      {!isStandaloneWindow() && (
+        <Tooltip content='Ask AI Conversation'>
+          <Button
+            size='sm'
+            variant='ghost'
+            onClick={() => {
+              if (onAskAI) {
+                onAskAI(threadInfo ?? undefined);
+                return;
+              }
+              xyneAIActor.send({
+                type: 'OPEN',
+                channelId: derivedChannelId,
+                threadInfo,
+              });
+            }}
+            data-track-category='THREAD_PANEL'
+            data-track-name='OPEN_XYNE_AI_FROM_THREAD'
+            className='h-7 w-7 rounded-lg'
+          >
+            <XyneAIStar />
+          </Button>
+        </Tooltip>
+      )}
+
+      {/* Initiate Call Button */}
+      {derivedConversationId && !channel?.isArchived && (
+        <ThreadCallButton
+          onStartCall={handleInitiateCall}
+          onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+          hasActiveCall={hasActiveCallForConversation}
+          trackCategory='THREAD_PANEL'
+          trackName='INITIATE_CALL_FROM_THREAD'
+          trackMetadata={{
+            channelId: channel?.id,
+            conversationId: derivedConversationId,
+          }}
+        />
+      )}
+
+      {/* Start Recording (Take Notes) Button */}
+      {derivedConversationId && !channel?.isArchived && (
+        <ThreadRecordingButton
+          onStartRecording={handleStartRecordingFromThread}
+          hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
+          trackCategory='THREAD_PANEL'
+          trackName='START_RECORDING_FROM_THREAD'
+          trackMetadata={{
+            channelId: channel?.id,
+            conversationId: derivedConversationId,
+          }}
+        />
+      )}
+
+      {/* Overflow menu */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className={cn(
+              'flex items-center justify-center rounded-lg size-7 hover:bg-accent transition-colors shrink-0',
+              actionIconClass,
+            )}
+            title='More'
+            data-testid='thread-more-options-button'
+          >
+            <ThreeDotsMenuVertical size={16} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align='end'
+          onCloseAutoFocus={e => e.preventDefault()}
+          className='min-w-[180px]'
+        >
+          {/* A `thread` column, not a channel scrolled to a message — the same
+              distinction Streams.types draws. Only offered once both ids are known,
+              since a thread column is meaningless without the conversation it is a
+              thread of. */}
+          {derivedChannelId && derivedConversationId && (
+            <AddToStreamMenuItem
+              source={{
+                kind: 'thread',
+                channelId: derivedChannelId,
+                conversationId: derivedConversationId,
+              }}
+            />
+          )}
+          {derivedConversationId && (
+            <DropdownMenuItem className='p-0' onSelect={e => e.preventDefault()}>
+              <ConversationSubscription
+                conversationId={derivedConversationId}
+                {...(conversation && { conversation })}
+                variant='dropdown'
+                menuOpen
+                className='px-2 py-1.5'
+              />
+            </DropdownMenuItem>
+          )}
+          {showThreadTags && !channel?.isArchived && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger
+                className='gap-2'
+                data-track-category='THREAD_PANEL'
+                data-track-name='OPEN_THREAD_TAG_MENU'
+              >
+                <TagIcon size={16} className='shrink-0' />
+                <span className='flex-1'>Thread tags</span>
+                <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className='min-w-[220px]'>
+                <ThreadTagMenuItems
+                  applied={parseThreadTypes(conversation?.threadType)}
+                  onToggle={name => {
+                    const applied = parseThreadTypes(conversation?.threadType);
+                    void setThreadTypes(
+                      applied.includes(name)
+                        ? applied.filter(value => value !== name)
+                        : [...applied, name],
+                    );
+                  }}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )}
+          {!isMobile && !channel?.isArchived && (
+            <DropdownMenuItem
+              className='gap-2'
+              onClick={handleAddContextClick}
+              data-track-category='THREAD_PANEL'
+              data-track-name='OPEN_CONTEXT_MENU'
+              data-track-metadata={JSON.stringify({
+                conversationId: derivedConversationId,
+              })}
+            >
+              <LinkHorizontal size={16} className='shrink-0' />
+              <span className='flex-1'>Add context to thread</span>
+            </DropdownMenuItem>
+          )}
+          {isElectronApp() && !isStandaloneWindow() && (
+            <DropdownMenuItem
+              className='gap-2'
+              onClick={openInNewWindow}
+              data-track-category='THREAD_PANEL'
+              data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
+            >
+              <ExternalLinkSquare size={16} className='shrink-0' />
+              <span className='flex-1'>Open in new window</span>
+            </DropdownMenuItem>
+          )}
+          {channel?.projectId && !hasTicketInMessages && !channel?.isArchived && (
+            <DropdownMenuItem
+              className='gap-2'
+              onClick={handleCreateTicket}
+              data-testid='thread-create-ticket-button'
+              data-track-category='THREAD_PANEL'
+              data-track-name='CREATE_TICKET_FROM_THREAD'
+              data-track-metadata={JSON.stringify({
+                channelId: channel?.id,
+                projectId: channel?.projectId,
+              })}
+            >
+              <TicketToken size={16} className='shrink-0' />
+              <span className='flex-1'>Create ticket</span>
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Close Button */}
+      {(!simpleView || resolvedOnClose) && !headerActionsContainer && (
+        <ShortcutTooltip label='Close' shortcut='global.toggleRightSidebar'>
+          <Button
+            variant='ghost'
+            size='sm'
+            className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+            onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
+            aria-label='Close thread panel'
+            data-track-category='THREAD_PANEL'
+            data-track-name='CLOSE_THREAD_PANEL'
+            data-track-metadata={JSON.stringify({ conversationId })}
+          >
+            <MultipleCrossCancelDefault size={16} />
+          </Button>
+        </ShortcutTooltip>
+      )}
+    </div>
+  );
+
   return (
     <ConversationTabContext.Provider value={conversationTabContextValue}>
       <div
@@ -1206,7 +1400,7 @@ export const ThreadMessages = ({
           </div>
         )}
         {/* pt-3 only — the tabs header below supplies the 12px gap. See note above. */}
-        {derivedTicketId && ticket && !simpleView && (
+        {derivedTicketId && ticket && !simpleView && !headerActionsContainer && (
           <div className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'>
             <div className='flex gap-2 items-center min-w-0 flex-1'>
               <Tooltip content='Copy ticket ID'>
@@ -1412,9 +1606,19 @@ export const ThreadMessages = ({
           /* Ticket Thread: Header with Tabs */
           <Tabs.Root
             value={activeTab}
-            onValueChange={value => setActiveTab(value as TabType)}
+            onValueChange={value => {
+              setActiveTab(value as TabType);
+              // Mirror it back, or re-opening the same tab from outside is a no-op.
+              if (!searchParams.has('selectedTab')) return;
+              const next = new URLSearchParams(searchParams);
+              next.set('selectedTab', value);
+              setSearchParams(next, { replace: true });
+            }}
             className='flex-1 flex flex-col h-full overflow-hidden'
           >
+            {headerActionsContainer
+              ? createPortal(simpleViewHeaderActions, headerActionsContainer)
+              : null}
             {/* Header with title, close button, and tabs */}
             <div className='w-full pl-2 pr-3 py-3'>
               <div className='relative flex justify-between w-full'>
@@ -1449,6 +1653,7 @@ export const ThreadMessages = ({
                 <div className='flex items-center justify-end gap-1'>
                   {/* Close Button */}
                   {!isThreadsRoute &&
+                    !headerActionsContainer &&
                     isTicketThread &&
                     (resolvedOnClose ? (
                       <Button
@@ -1498,6 +1703,7 @@ export const ThreadMessages = ({
                     messagesWithSeparators={messagesWithSeparators}
                     initialScrollOffset={0}
                     isTicketThread={true}
+                    spawnedTicketMessageIds={spawnedTicketMessageIds}
                     isFlowStep={isFlowStep}
                     channelScopeType={channel?.scopeType}
                     conversation={conversation}
@@ -1631,191 +1837,12 @@ export const ThreadMessages = ({
                 </div>
 
                 {/* Actions */}
-                <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
-                  {/* Ask AI */}
-                  {!isStandaloneWindow() && (
-                    <Tooltip content='Ask AI Conversation'>
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        onClick={() => {
-                          if (onAskAI) {
-                            onAskAI(threadInfo ?? undefined);
-                            return;
-                          }
-                          xyneAIActor.send({
-                            type: 'OPEN',
-                            channelId: derivedChannelId,
-                            threadInfo,
-                          });
-                        }}
-                        data-track-category='THREAD_PANEL'
-                        data-track-name='OPEN_XYNE_AI_FROM_THREAD'
-                        className='h-7 w-7 rounded-lg'
-                      >
-                        <XyneAIStar />
-                      </Button>
-                    </Tooltip>
-                  )}
-
-                  {/* Initiate Call Button */}
-                  {derivedConversationId && !channel?.isArchived && (
-                    <ThreadCallButton
-                      onStartCall={handleInitiateCall}
-                      onScheduleCall={() => setIsScheduleCallModalOpen(true)}
-                      hasActiveCall={hasActiveCallForConversation}
-                      trackCategory='THREAD_PANEL'
-                      trackName='INITIATE_CALL_FROM_THREAD'
-                      trackMetadata={{
-                        channelId: channel?.id,
-                        conversationId: derivedConversationId,
-                      }}
-                    />
-                  )}
-
-                  {/* Start Recording (Take Notes) Button */}
-                  {derivedConversationId && !channel?.isArchived && (
-                    <ThreadRecordingButton
-                      onStartRecording={handleStartRecordingFromThread}
-                      hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
-                      trackCategory='THREAD_PANEL'
-                      trackName='START_RECORDING_FROM_THREAD'
-                      trackMetadata={{
-                        channelId: channel?.id,
-                        conversationId: derivedConversationId,
-                      }}
-                    />
-                  )}
-
-                  {/* Overflow menu */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        className={cn(
-                          'flex items-center justify-center rounded-lg size-7 hover:bg-accent transition-colors shrink-0',
-                          actionIconClass,
-                        )}
-                        title='More'
-                        data-testid='thread-more-options-button'
-                      >
-                        <ThreeDotsMenuVertical size={16} />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align='end'
-                      onCloseAutoFocus={e => e.preventDefault()}
-                      className='min-w-[180px]'
-                    >
-                      {derivedChannelId && derivedConversationId && (
-                        <AddToStreamMenuItem
-                          source={{
-                            kind: 'thread',
-                            channelId: derivedChannelId,
-                            conversationId: derivedConversationId,
-                          }}
-                        />
-                      )}
-                      {derivedConversationId && (
-                        <DropdownMenuItem className='p-0' onSelect={e => e.preventDefault()}>
-                          <ConversationSubscription
-                            conversationId={derivedConversationId}
-                            {...(conversation && { conversation })}
-                            variant='dropdown'
-                            menuOpen
-                            className='px-2 py-1.5'
-                          />
-                        </DropdownMenuItem>
-                      )}
-                      {showThreadTags && !channel?.isArchived && (
-                        <DropdownMenuSub>
-                          <DropdownMenuSubTrigger
-                            className='gap-2'
-                            data-track-category='THREAD_PANEL'
-                            data-track-name='OPEN_THREAD_TAG_MENU'
-                          >
-                            <TagIcon size={16} className='shrink-0' />
-                            <span className='flex-1'>Thread tags</span>
-                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                          </DropdownMenuSubTrigger>
-                          <DropdownMenuSubContent className='min-w-[220px]'>
-                            <ThreadTagMenuItems
-                              applied={parseThreadTypes(conversation?.threadType)}
-                              onToggle={name => {
-                                const applied = parseThreadTypes(conversation?.threadType);
-                                void setThreadTypes(
-                                  applied.includes(name)
-                                    ? applied.filter(value => value !== name)
-                                    : [...applied, name],
-                                );
-                              }}
-                            />
-                          </DropdownMenuSubContent>
-                        </DropdownMenuSub>
-                      )}
-                      {!isMobile && !channel?.isArchived && (
-                        <DropdownMenuItem
-                          className='gap-2'
-                          onClick={handleAddContextClick}
-                          data-track-category='THREAD_PANEL'
-                          data-track-name='OPEN_CONTEXT_MENU'
-                          data-track-metadata={JSON.stringify({
-                            conversationId: derivedConversationId,
-                          })}
-                        >
-                          <LinkHorizontal size={16} className='shrink-0' />
-                          <span className='flex-1'>Add context to thread</span>
-                        </DropdownMenuItem>
-                      )}
-                      {isElectronApp() && !isStandaloneWindow() && (
-                        <DropdownMenuItem
-                          className='gap-2'
-                          onClick={openInNewWindow}
-                          data-track-category='THREAD_PANEL'
-                          data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
-                        >
-                          <ExternalLinkSquare size={16} className='shrink-0' />
-                          <span className='flex-1'>Open in new window</span>
-                        </DropdownMenuItem>
-                      )}
-                      {channel?.projectId && !hasTicketInMessages && !channel?.isArchived && (
-                        <DropdownMenuItem
-                          className='gap-2'
-                          onClick={handleCreateTicket}
-                          data-testid='thread-create-ticket-button'
-                          data-track-category='THREAD_PANEL'
-                          data-track-name='CREATE_TICKET_FROM_THREAD'
-                          data-track-metadata={JSON.stringify({
-                            channelId: channel?.id,
-                            projectId: channel?.projectId,
-                          })}
-                        >
-                          <TicketToken size={16} className='shrink-0' />
-                          <span className='flex-1'>Create ticket</span>
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  {/* Close Button */}
-                  {(!simpleView || resolvedOnClose) && (
-                    <ShortcutTooltip label='Close' shortcut='global.toggleRightSidebar'>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        className={cn('h-7 w-7 rounded-lg', actionIconClass)}
-                        onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
-                        aria-label='Close thread panel'
-                        data-track-category='THREAD_PANEL'
-                        data-track-name='CLOSE_THREAD_PANEL'
-                        data-track-metadata={JSON.stringify({ conversationId })}
-                      >
-                        <MultipleCrossCancelDefault size={16} />
-                      </Button>
-                    </ShortcutTooltip>
-                  )}
-                </div>
+                {!headerActionsContainer && simpleViewHeaderActions}
               </div>
             )}
+            {headerActionsContainer
+              ? createPortal(simpleViewHeaderActions, headerActionsContainer)
+              : null}
             {isMessagesLoaded && !conversation && !!derivedConversationId ? (
               <div className='flex flex-col items-center justify-center flex-1 text-muted-foreground'>
                 <ChatDefault size={48} className='mb-2 opacity-40' />

@@ -14,8 +14,13 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
-import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
+import { initializeYSweetDoc, readFromYSweetStrict, syncToYSweet } from '../utils/ysweetUtils.js';
+import {
+  convertMarkdownToBlockNote,
+  convertBlockNoteToMarkdown,
+  getCanvasUrl,
+  getCanvasById,
+} from '../services/canvasService.js';
 
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -79,7 +84,7 @@ export class CanvasController {
         }),
       ]);
 
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, blocks);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, blocks, creatorId);
       if (!ysweetInitialized) {
         res.status(500).json({ error: 'Failed to initialize canvas content' });
         return;
@@ -438,7 +443,7 @@ export class CanvasController {
 
       // Read content from Y-Sweet
       const { readFromYSweet } = await import('../utils/ysweetUtils.js');
-      const blocks = await readFromYSweet(canvas.id);
+      const blocks = await readFromYSweet(canvas.id, userId);
       const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
 
       res.status(200).json({
@@ -489,10 +494,25 @@ export class CanvasController {
         return;
       }
 
-      const blocks = await convertMarkdownToBlockNote(markdown);
+      // The markdown cannot carry a whiteboard's drawing, only its id, so the
+      // current document is what the write restores it from. A read that fails
+      // must stop the write: taken as an empty canvas it would restore nothing,
+      // and the drawing would be gone for good behind a warning in a log.
+      let existingBlocks;
+      try {
+        existingBlocks = await readFromYSweetStrict(canvas.id, userId);
+      } catch (error) {
+        logger.error(
+          `[CANVAS-UPDATE] Could not read canvas ${canvas.id} before writing to it`,
+          error
+        );
+        res.status(503).json({ error: 'Could not read the canvas to update it. Please try again.' });
+        return;
+      }
+      const blocks = await convertMarkdownToBlockNote(markdown, existingBlocks);
 
       // Sync content to Y-Sweet for collaborative editing
-      const ysweetSynced = await syncToYSweet(canvas.id, blocks);
+      const ysweetSynced = await syncToYSweet(canvas.id, blocks, userId);
       if (!ysweetSynced) {
         logger.warn(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
       }

@@ -94,6 +94,7 @@ export function AgentProgressIndicator({
           onClick={() => void handleAbortAgent()}
           className='p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors shrink-0'
           aria-label='Stop agent'
+          data-ph-capture-attribute-track-id='stop_agent'
           data-track-category='CHAT_INPUT'
           data-track-name='STOP_AGENT'
         >

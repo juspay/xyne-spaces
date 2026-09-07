@@ -144,6 +144,7 @@ function PendingActionItem({
       <div className='flex items-center gap-2'>
         <button
           onClick={() => void handleApprove()}
+          data-ph-capture-attribute-track-id='approve_pending_action'
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50'
           type='button'
@@ -159,6 +160,7 @@ function PendingActionItem({
         </button>
         <button
           onClick={() => void handleDecline()}
+          data-ph-capture-attribute-track-id='decline_pending_action'
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-secondary px-2.5 py-1 text-[10px] text-secondary-foreground transition hover:bg-secondary/80 disabled:opacity-50'
           type='button'

@@ -122,7 +122,8 @@ export type SummaryTemplatePublicationAction =
   | 'publish'
   | 'withdraw'
   | 'approve'
-  | 'deny';
+  | 'deny'
+  | 'unpublish';
 
 export interface RecordingSharingResult {
   action: 'grant' | 'revoke' | 'link_ticket' | 'unlink_ticket' | 'set_visibility';

@@ -68,8 +68,8 @@
       transition:
         width 0.24s var(--ease-out),
         border-radius 0.24s var(--ease-out),
-        opacity 0.2s ease,
-        transform 0.2s ease;
+        opacity 0.12s ease,
+        transform 0.12s ease;
     }
 
     .card.dragging { cursor: grabbing; }
@@ -142,6 +142,26 @@
     #rowResume { display: none; }
     .card.paused #rowTimer { display: none; }
     .card.paused #rowResume { display: flex; }
+
+    #rowStarting { display: none; }
+    .card.starting #rowTimer,
+    .card.starting #rowResume { display: none; }
+    .card.starting #rowStarting { display: flex; }
+
+    .spinner {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid var(--card-border);
+      border-top-color: var(--green);
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .starting-label {
+      color: var(--green);
+      font-weight: 600;
+    }
 
     .resume-label {
       color: var(--amber);
@@ -238,6 +258,11 @@
       <span class="label timer" id="timer">0s</span>
     </div>
 
+    <div class="row" id="rowStarting">
+      <span class="icon-slot"><span class="spinner"></span></span>
+      <span class="label starting-label">Starting</span>
+    </div>
+
     <button class="row" id="rowResume" title="Resume recording">
       <span class="icon-slot"><span class="resume-icon"></span></span>
       <span class="label resume-label">Resume</span>
@@ -261,7 +286,7 @@
   <script>
     const card = document.getElementById('card');
     const timerEl = document.getElementById('timer');
-    let state = { startTime: null, paused: false, pauseStartedAt: null, accumulatedPausedMs: 0 };
+    let state = { starting: false, startTime: null, paused: false, pauseStartedAt: null, accumulatedPausedMs: 0 };
     let timerInterval = null;
     let collapseTimer = null;
 
@@ -283,22 +308,27 @@
     }
 
     function applyState(next) {
+      const starting = !!(next && next.starting);
       state = {
-        startTime: (next && next.startTime) || Date.now(),
+        starting,
+        startTime: (next && next.startTime) || (starting ? null : Date.now()),
         paused: !!(next && next.paused),
         pauseStartedAt: (next && next.pauseStartedAt) || null,
         accumulatedPausedMs: (next && next.accumulatedPausedMs) || 0,
       };
-      card.classList.toggle('paused', state.paused);
-      renderTimer();
+      card.classList.toggle('starting', starting);
+      card.classList.toggle('paused', state.paused && !starting);
       if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+      if (starting) return;
+      renderTimer();
       if (!state.paused) timerInterval = setInterval(renderTimer, 1000);
     }
 
     function stopTimer() {
       if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-      state = { startTime: null, paused: false, pauseStartedAt: null, accumulatedPausedMs: 0 };
+      state = { starting: false, startTime: null, paused: false, pauseStartedAt: null, accumulatedPausedMs: 0 };
       card.classList.remove('paused');
+      card.classList.remove('starting');
     }
 
     const DRAG_THRESHOLD = 4;

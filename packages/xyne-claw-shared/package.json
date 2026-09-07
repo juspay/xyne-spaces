@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
+    "@xyne/icons": "workspace:*",
     "@xyne/kata-sdk": "workspace:*",
     "marked": "^18.0.4",
     "mermaid": "^11.4.0",
@@ -38,6 +39,6 @@
     "@types/pdfkit": "^0.13.9",
     "@types/sanitize-html": "^2.16.1",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6"
   }
 }

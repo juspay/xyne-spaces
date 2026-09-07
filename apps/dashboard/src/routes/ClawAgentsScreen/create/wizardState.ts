@@ -1,5 +1,5 @@
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
-import type { ToolboxSelection } from '@/services/claw/clawToolsTypes';
+import type { AgentToolboxSelection } from '@/services/claw/clawToolsTypes';
 
 // Wizard step order + copy. Names track the agent detail screen's tabs
 // (Persona / Toolbox / Knowledge) so the two surfaces read consistently.
@@ -55,7 +55,7 @@ export interface WizardState {
   aiIntent: string;
 
   // Toolbox
-  tools: Required<ToolboxSelection>;
+  tools: AgentToolboxSelection;
   researchAgentProductId: string;
   researchAgentRepositoryId: string;
 
@@ -74,7 +74,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
   slugManual: false,
   systemPrompt: '',
   aiIntent: '',
-  tools: { subagents: [], direct: [], custom: [], gateway: [] },
+  tools: { subagents: [], direct: [], custom: [], gateway: [], callableAgents: [] },
   researchAgentProductId: '',
   researchAgentRepositoryId: '',
   selectedSkillIds: [],

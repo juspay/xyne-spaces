@@ -14,21 +14,26 @@ interface ProjectCardProps {
   // specific tab. Used by the Release Manager view to jump straight into
   // the release tab instead of the default boards tab.
   initialDetailTab?: 'boards' | 'release';
+  onConfigureRelease?: (project: Project) => void;
 }
 
 export const ProjectCard = ({
   project,
   onEdit,
   initialDetailTab,
+  onConfigureRelease,
 }: ProjectCardProps): ReactElement => {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
 
   const handleCardClick = (): void => {
-    void navigate(
-      `/listProjects/${project.id}`,
-      initialDetailTab ? { state: { tab: initialDetailTab } } : undefined,
-    );
+    const state =
+      initialDetailTab === 'release'
+        ? { tab: initialDetailTab, from: 'releaseManager' }
+        : initialDetailTab
+          ? { tab: initialDetailTab }
+          : undefined;
+    void navigate(`/listProjects/${project.id}`, state ? { state } : undefined);
   };
 
   const handleEditClick = (e?: React.MouseEvent<HTMLButtonElement>): void => {
@@ -103,20 +108,33 @@ export const ProjectCard = ({
           </div>
         </div>
 
-        {onEdit && (
+        {(onEdit || onConfigureRelease) && (
           <div className='flex gap-2'>
-            <Button
-              variant='secondary'
-              onClick={handleEditClick}
-              data-track-category='Projects'
-              data-track-name='EditProject'
-              data-track-metadata={JSON.stringify({
-                projectId: project.id,
-                projectName: project.name,
-              })}
-            >
-              Edit
-            </Button>
+            {onEdit && (
+              <Button
+                variant='secondary'
+                onClick={handleEditClick}
+                data-track-category='Projects'
+                data-track-name='EditProject'
+                data-track-metadata={JSON.stringify({
+                  projectId: project.id,
+                  projectName: project.name,
+                })}
+              >
+                Edit
+              </Button>
+            )}
+            {onConfigureRelease && (
+              <Button
+                variant='secondary'
+                onClick={e => {
+                  e.stopPropagation();
+                  onConfigureRelease(project);
+                }}
+              >
+                Configure repositories
+              </Button>
+            )}
           </div>
         )}
       </div>

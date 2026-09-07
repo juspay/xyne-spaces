@@ -14,10 +14,16 @@ import {
   defaultInlineContentSpecs,
   defaultStyleSpecs,
 } from '@blocknote/core';
-import { mentionServerSpec } from 'blocknote-layout-server-utils';
+import { mentionServerSpec, whiteboardServerSpec } from 'blocknote-layout-server-utils';
 import { config } from '@/config/env.js';
 import { logger } from '@/utils/logger.js';
 import { citationServerSpec } from '@/utils/canvasCitationSpec.js';
+import {
+  diagramServerSpec,
+  embedServerSpec,
+  mathBlockServerSpec,
+  mathInlineServerSpec,
+} from '@/utils/canvasCustomBlockServerSpecs.js';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes.js';
 
 const canvasCommentThreadStyleSpec = createStyleSpec(
@@ -43,19 +49,63 @@ const canvasCommentThreadStyleSpec = createStyleSpec(
   },
 );
 
+const canvasTicketStyleSpec = createStyleSpec(
+  {
+    type: 'canvasTicket',
+    propSchema: 'string',
+  },
+  {
+    render: () => {
+      const doc = (globalThis as unknown as {
+        document?: { createElement: (tagName: string) => unknown };
+      }).document;
+      const span = doc?.createElement('span') ?? {};
+      return {
+        dom: span,
+        contentDOM: span,
+      } as never;
+    },
+    parse: element =>
+      (element as unknown as { getAttribute?: (name: string) => string | null }).getAttribute?.(
+        'data-canvas-ticket-id',
+      ) ?? undefined,
+    runsBefore: [
+      'bold',
+      'italic',
+      'underline',
+      'strike',
+      'code',
+      'textColor',
+      'backgroundColor',
+      'canvasCommentThread',
+    ],
+  },
+);
+
 function createServerSchema() {
   return BlockNoteSchema.create({
-    blockSpecs: defaultBlockSpecs,
+    // The canvas schema's own blocks, for the same reason as the inline specs
+    // below: a type missing here is dropped coming out of Y-Sweet and throws
+    // going in, so one diagram would cost the whole document.
+    blockSpecs: {
+      ...defaultBlockSpecs,
+      whiteboard: whiteboardServerSpec,
+      diagram: diagramServerSpec,
+      mathBlock: mathBlockServerSpec,
+      embed: embedServerSpec,
+    },
     inlineContentSpecs: {
       ...defaultInlineContentSpecs,
       mention: mentionServerSpec,
       // Register "citation" so blocksToYDoc/blocksToYXmlFragment preserve the
       // call-summary citation chips into Y-Sweet instead of silently dropping them.
       citation: citationServerSpec,
+      math: mathInlineServerSpec,
     },
     styleSpecs: {
       ...defaultStyleSpecs,
       canvasCommentThread: canvasCommentThreadStyleSpec,
+      canvasTicket: canvasTicketStyleSpec,
     },
   });
 }
@@ -115,6 +165,7 @@ export class YSweetHttpError extends Error {
 
 export interface YSweetAuthRequest {
   authorization: 'full' | 'read-only';
+  userId: string;
   validForSeconds?: number;
 }
 
@@ -130,10 +181,14 @@ async function ysweetRequest(url: string, path: string, init: RequestInit): Prom
   return res;
 }
 
+function serverTokenHeaders(): Record<string, string> {
+  return config.ysweet.serverToken ? { Authorization: `Bearer ${config.ysweet.serverToken}` } : {};
+}
+
 async function ysweetJson<T>(base: string, path: string, docId: string, body: unknown): Promise<T> {
   const res = await ysweetRequest(withDocId(base, path, docId), path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...serverTokenHeaders() },
     body: JSON.stringify(body),
   });
   return (await res.json()) as T;
@@ -191,11 +246,13 @@ export async function ysweetUpdateDoc(clientToken: ClientToken, update: Uint8Arr
  *
  * @param canvasId - The document ID (canvas ID)
  * @param blocks - BlockNote blocks to initialize the document with
+ * @param userId - The actual user/bot performing this write
  * @returns true if initialization was successful, false otherwise
  */
 export async function initializeYSweetDoc(
   canvasId: string,
-  blocks: BlockNoteBlock[]
+  blocks: BlockNoteBlock[],
+  userId: string
 ): Promise<boolean> {
   try {
     const ysweetUrl = config.ysweet.url;
@@ -207,6 +264,7 @@ export async function initializeYSweetDoc(
     // Step 1: Make sure the document exists and get a write token for it
     const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
+      userId,
     });
     logger.debug(`[YSweetUtils] Created/retrieved Y-Sweet document for canvas ${canvasId}`);
 
@@ -245,9 +303,10 @@ export async function initializeYSweetDoc(
  *
  * @param canvasId - The document ID (canvas ID)
  * @param blocks - BlockNote blocks to sync to the document
+ * @param userId - The actual user/bot performing this write
  * @returns true if sync was successful, false otherwise
  */
-export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): Promise<boolean> {
+export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[], userId: string): Promise<boolean> {
   try {
     const ysweetUrl = config.ysweet.url;
     if (!ysweetUrl) {
@@ -258,6 +317,7 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
     // Get a client token with full authorization for write operations
     const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
+      userId,
     });
 
     // Override URLs before both read and write so backend uses the internal Y-Sweet service.
@@ -313,41 +373,62 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
  * This retrieves the content stored in Y-Sweet for collaborative editing.
  *
  * @param canvasId - The document ID (canvas ID)
+ * @param userId - The actual user/bot performing this read
  * @returns Array of BlockNote blocks, or empty array if unable to read
  */
-export async function readFromYSweet(canvasId: string): Promise<BlockNoteBlock[]> {
+/**
+ * The canvas as it stands, with a failed read told apart from an empty canvas.
+ *
+ * readFromYSweet answers `[]` for both, which is harmless when the answer is
+ * only being read and destructive when it is being written back: a write that
+ * restores what markdown cannot carry — a whiteboard's drawing — would take an
+ * unreachable Y-Sweet as "there was nothing here" and commit the document
+ * without it.
+ */
+export async function readFromYSweetStrict(
+  canvasId: string,
+  userId: string
+): Promise<BlockNoteBlock[]> {
+  const ysweetUrl = config.ysweet.url;
+  if (!ysweetUrl) {
+    logger.warn('[YSweetUtils] Y-Sweet URL not configured, returning empty content');
+    return [];
+  }
+
+  // Get a client token with read-only authorization
+  const clientToken = await ysweetGetClientToken(canvasId, {
+    authorization: 'read-only',
+    userId,
+  });
+
+  // Override URLs to use direct Y-Sweet URL instead of proxy URL
+  overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
+
+  const existingUpdate = await ysweetGetAsUpdate(clientToken);
+
+  if (!existingUpdate || existingUpdate.length === 0) {
+    logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
+    return [];
+  }
+
+  // Create a new Y.Doc and apply the existing state
+  const ydoc = new Y.Doc();
+  Y.applyUpdate(ydoc, existingUpdate);
+
+  // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
+  const editor = getServerEditor();
+  const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
+
+  logger.info(
+    `[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`
+  );
+  return blocks as BlockNoteBlock[];
+}
+
+/** The same read, with a failure reported as an empty canvas. */
+export async function readFromYSweet(canvasId: string, userId: string): Promise<BlockNoteBlock[]> {
   try {
-    const ysweetUrl = config.ysweet.url;
-    if (!ysweetUrl) {
-      logger.warn('[YSweetUtils] Y-Sweet URL not configured, returning empty content');
-      return [];
-    }
-
-    // Get a client token with read-only authorization
-    const clientToken = await ysweetGetClientToken(canvasId, {
-      authorization: 'read-only',
-    });
-
-    // Override URLs to use direct Y-Sweet URL instead of proxy URL
-    overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
-
-    const existingUpdate = await ysweetGetAsUpdate(clientToken);
-
-    if (!existingUpdate || existingUpdate.length === 0) {
-      logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
-      return [];
-    }
-
-    // Create a new Y.Doc and apply the existing state
-    const ydoc = new Y.Doc();
-    Y.applyUpdate(ydoc, existingUpdate);
-
-    // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
-    const editor = getServerEditor();
-    const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
-
-    logger.info(`[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`);
-    return blocks as BlockNoteBlock[];
+    return await readFromYSweetStrict(canvasId, userId);
   } catch (error) {
     logger.error('[YSweetUtils] Failed to read from Y-Sweet:', error);
     return [];

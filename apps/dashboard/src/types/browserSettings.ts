@@ -5,5 +5,5 @@ export interface BrowserSettings {
 
 export const defaultBrowserSettings: BrowserSettings = {
   popups: true,
-  openLinksExternally: false,
+  openLinksExternally: true,
 };

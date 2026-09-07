@@ -147,6 +147,7 @@ export function RunHistory({
             Failed to load runs.
             <button
               type='button'
+              data-ph-capture-attribute-track-id='automation_run_history_retry'
               data-track-category='automation-runs'
               data-track-name='run-history-retry'
               onClick={() => {

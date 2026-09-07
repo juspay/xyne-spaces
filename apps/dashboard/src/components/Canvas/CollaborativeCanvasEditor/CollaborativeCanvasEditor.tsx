@@ -40,6 +40,7 @@ import {
 } from '../../../hooks/useCanvasYjsProvider';
 import { useAuth } from '../../../hooks/useAuth';
 import { useSelf, useUsers, searchUsers } from '../../../hooks/useUsers';
+import { Button } from '../../ui/Button';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
@@ -62,7 +63,7 @@ import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
-import { withHeadingsTogether } from '../canvasSlashMenu';
+import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
 import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
@@ -83,9 +84,13 @@ import { AnimatePresence } from 'framer-motion';
 
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { CanvasObjectToolbar } from '../CanvasObjectToolbar';
+import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
 import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
+import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
+import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
 const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
@@ -186,15 +191,23 @@ export const CollaborativeCanvasEditor = forwardRef<
       'Anonymous';
     const currentUserColor = generateUserColor(currentUserId);
 
-    const { fragment, provider, awareness, collaborators, connectionStatus, isReadOnly } =
-      useCanvasYjsProvider({
-        canvasId,
-        userId: currentUserId,
-        userName: currentUserName,
-        userColor: currentUserColor,
-        channelId,
-        title,
-      });
+    const {
+      fragment,
+      provider,
+      awareness,
+      collaborators,
+      connectionStatus,
+      isReadOnly,
+      connectionFailed,
+      reconnect,
+    } = useCanvasYjsProvider({
+      canvasId,
+      userId: currentUserId,
+      userName: currentUserName,
+      userColor: currentUserColor,
+      channelId,
+      title,
+    });
 
     useEffect(() => {
       onCollaboratorsChange?.(collaborators);
@@ -333,7 +346,9 @@ export const CollaborativeCanvasEditor = forwardRef<
       const defaultItems = getDefaultReactSlashMenuItems(
         editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
       );
-      return withBlockShortcutBadges(withHeadingsTogether([...defaultItems, ...customSlashItems]));
+      return withBlockShortcutBadges(
+        withHeadingsTogether([...withUnifiedUpload(defaultItems), ...customSlashItems]),
+      );
     }, [editor, customSlashItems]);
 
     const getSlashMenuItems = useCallback(
@@ -552,6 +567,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       openCommentsForCurrentBlock,
       focusCommentBlock,
       clearActiveCommentAnchor,
+      finishInlineCommentDraft,
       closeInlineCommentThread,
       applyCommentAnchorStyle,
       removeCommentAnchorStyle,
@@ -562,6 +578,18 @@ export const CollaborativeCanvasEditor = forwardRef<
       initialBlockIdToFocus,
       initialCommentThreadId,
       onOpenCommentCountChange,
+      ready: isEditorReady,
+    });
+    const {
+      activeTicketAnchor,
+      isTicketChannelArchived,
+      openTicketForCurrentSelection,
+      closeTicketModal,
+      handleTicketCreated,
+    } = useCanvasTicketEditorBridge({
+      channelId,
+      containerRef,
+      getEditor: getCanvasCommentEditor,
       ready: isEditorReady,
     });
 
@@ -676,8 +704,18 @@ export const CollaborativeCanvasEditor = forwardRef<
           ...(canvasId && { canvasId }),
           ...(title && { canvasTitle: title }),
           canComment: editable && !isReadOnly,
+          canCreateTicket: editable && !isReadOnly && !isTicketChannelArchived,
+          onCreateTicket: openTicketForCurrentSelection,
         }),
-      [canvasId, editable, isReadOnly, openCommentsForCurrentBlock, title],
+      [
+        canvasId,
+        editable,
+        isReadOnly,
+        isTicketChannelArchived,
+        openCommentsForCurrentBlock,
+        openTicketForCurrentSelection,
+        title,
+      ],
     );
 
     useEffect((): (() => void) | void => {
@@ -748,6 +786,14 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
+        {connectionFailed && (
+          <div className='flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive'>
+            <span>Connection to the canvas failed. Your changes may not be saved.</span>
+            <Button size='sm' variant='outline' onClick={reconnect}>
+              Reconnect
+            </Button>
+          </div>
+        )}
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div
             className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
@@ -757,6 +803,7 @@ export const CollaborativeCanvasEditor = forwardRef<
               overflowWrap: 'break-word',
             }}
           >
+            <CanvasWidthHandles surfaceRef={containerRef} />
             <div
               className='blocknote-editor-wrapper w-full max-w-full'
               style={{
@@ -784,6 +831,12 @@ export const CollaborativeCanvasEditor = forwardRef<
                     onChange={handleCollaborativeChange}
                   >
                     <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                    <CanvasObjectToolbar
+                      onAddComment={openCommentsForCurrentBlock}
+                      canComment={editable && !isReadOnly}
+                      {...(canvasId && { canvasId })}
+                      {...(title && { canvasTitle: title })}
+                    />
                     <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
                     <CanvasPastedLinkToolbar />
                     <FilePanelController filePanel={CanvasFilePanel} />
@@ -829,11 +882,18 @@ export const CollaborativeCanvasEditor = forwardRef<
               editable={editable && !isReadOnly}
               onClose={closeInlineCommentThread}
               onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
+              onCreateThreadCreated={finishInlineCommentDraft}
               onCreateThreadFailed={removeCommentAnchorStyle}
             />
           )}
         </div>
+
+        <CanvasTicketCreationFlow
+          anchor={activeTicketAnchor}
+          channelId={channelId}
+          onClose={closeTicketModal}
+          onTicketCreated={handleTicketCreated}
+        />
 
         {/* Presentation Modal */}
         {showPresentation && (

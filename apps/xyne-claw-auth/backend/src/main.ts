@@ -11,6 +11,7 @@ import { errorMiddleware } from "./lib/http.js";
 import { serversRouter } from "./routes/servers.js";
 import { connectionsRouter } from "./routes/connections.js";
 import { mcpRouter } from "./routes/mcp.js";
+import { connectorsInternalRouter } from "./routes/connectors-internal.js";
 import { awakeningRouter } from "./routes/awakening.js";
 import { ensureTickScheduler, closeAwakeningQueues } from "./queue/awakening-queue.js";
 import { initAwakeningTickWorker, closeAwakeningTickWorker } from "./queue/awakening-tick-worker.js";
@@ -46,6 +47,7 @@ import { artifactAppAgentsRouter } from "./routes/artifact-app-agents.js";
 import { designSharesRouter, publicDesignSharesRouter } from "./routes/design-shares.js";
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
 import { experimentsInternalRouter } from "./routes/experiments-internal.js";
+import { artifactAppsInternalRouter } from "./routes/artifact-apps-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "./routes/error-pipeline.js";
 import { ERROR_PIPELINE } from "./config.js";
 import { runner as errorPipelineRunner } from "./error-pipeline/runner/runner.js";
@@ -228,9 +230,11 @@ app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRout
 app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
 app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
 app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
+app.use(`${BASE}/internal/artifact-apps`, requireStrictS2S, artifactAppsInternalRouter); // create-app reads the conversation's head build before an incremental update
 app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
 app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
 app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
+app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
 // Generic live OAuth-token read for every connector — GET /users/:userId/oauth/:provider/token.
 // Mounted before the per-provider routers (which now only serve authorize/callback)
 // so it owns the `/token` path. Same requireAuth guard; the handler additionally

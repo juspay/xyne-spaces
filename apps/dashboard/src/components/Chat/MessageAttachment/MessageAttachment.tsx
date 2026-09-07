@@ -49,6 +49,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
 import axios from 'axios';
@@ -649,6 +650,7 @@ const InlineTextFile: React.FC<{
               e.stopPropagation();
               void downloadAttachment(attachmentId, fileName);
             }}
+            data-ph-capture-attribute-track-id='download_text_file'
             className='p-2 hover:bg-accent rounded-lg transition-colors'
             title='Download file'
             data-track-category='MESSAGE'
@@ -687,6 +689,7 @@ const InlineTextFile: React.FC<{
             e.stopPropagation();
             void downloadAttachment(attachmentId, fileName);
           }}
+          data-ph-capture-attribute-track-id='download_text_file_inline'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
           data-track-category='MESSAGE'
@@ -811,6 +814,7 @@ const InlineCodeFile: React.FC<{
             e.stopPropagation();
             void downloadAttachment(attachmentId, fileName);
           }}
+          data-ph-capture-attribute-track-id='download_code_file'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
           data-track-category='MESSAGE'

@@ -7,7 +7,8 @@ export type SummaryTemplatePublicationAction =
   | 'publish'
   | 'withdraw'
   | 'approve'
-  | 'deny';
+  | 'deny'
+  | 'unpublish';
 
 export interface SummaryTemplatePublicationActor {
   userId: string;
@@ -74,6 +75,20 @@ export class SummaryTemplatePublicationService {
         throw new SummaryTemplatePublicationError('No Scribe admins are available', 409);
       }
       visibility = SummaryTemplateVisibility.WAITING_FOR_APPROVAL;
+    } else if (action === 'unpublish') {
+      // Reverses a publish. Allowed for the owner or any Scribe admin, mirroring who
+      // could have made it public in the first place. Existing EntityAccess shares are
+      // left intact, so explicitly shared recipients keep their access.
+      if (!isOwner && !isAdmin) {
+        throw new SummaryTemplatePublicationError(
+          'Only the template owner or a Scribe admin can make it private',
+          403
+        );
+      }
+      if (template.visibility !== SummaryTemplateVisibility.PUBLIC) {
+        throw new SummaryTemplatePublicationError('Template is not public', 409);
+      }
+      visibility = SummaryTemplateVisibility.PRIVATE;
     } else if (action === 'withdraw') {
       if (!isOwner)
         throw new SummaryTemplatePublicationError('Only the owner can withdraw it', 403);

@@ -53,6 +53,7 @@ import {
 } from '../../ui/dropdown-menu';
 import Tooltip from '../../ui/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
+
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
 interface ActiveCallForControls {
@@ -933,6 +934,7 @@ export function CallControls({
                     }}
                     className='text-2xl p-2 rounded-xl hover:bg-[#202224] transition-colors duration-150 hover:scale-125 transform'
                     title={emoji}
+                    data-ph-capture-attribute-track-id='send_reaction'
                     data-track-category='CALLS'
                     data-track-name='SEND_REACTION'
                     data-track-metadata={JSON.stringify({ emoji, callId })}
@@ -1132,6 +1134,7 @@ export function CallControls({
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Leave call'
           data-testid='end-call-button'
+          data-ph-capture-attribute-track-id='end_call'
           data-track-category='CALLS'
           data-track-name='END_CALL'
           data-track-metadata={JSON.stringify({ callId })}

@@ -118,6 +118,7 @@ export { ReleaseChangeTypesACL } from './release-change-types-acl';
 export { ReleaseChangesACL } from './release-changes-acl';
 export { ReleaseEventsACL } from './release-events-acl';
 export { SavedUserConfigurationValuesACL } from './saved-user-configuration-values-acl';
+export { ViewAccessACL } from './view-access-acl';
 export { StageApproversACL } from './stage-approvers-acl';
 export { SurfaceLinksACL } from './surface-links-acl';
 export { SurfaceNudgeCountsACL } from './surface-nudge-counts-acl';

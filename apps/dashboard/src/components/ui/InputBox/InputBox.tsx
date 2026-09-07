@@ -42,6 +42,7 @@ import {
 import { toast } from 'sonner';
 import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
+import { LinkPopover } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
@@ -71,6 +72,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
@@ -139,6 +141,67 @@ const MaxListDepthPlugin = Extension.create({
   },
 });
 
+/**
+ * When an ordered list is directly preceded by another ordered list of the same
+ * style, continue its numbering instead of restarting at 1.
+ *
+ * ProseMirror keeps split/pasted ordered lists as separate `<ol>` nodes, and the
+ * second one has no `start` attribute, so the browser renders it from 1 again.
+ * This happens when a middle list item is lifted out on Enter (splitting one list
+ * into two) or when two ordered lists end up adjacent. We reconcile the `start`
+ * attribute so the visible numbering stays continuous.
+ */
+const OrderedListContinuationPlugin = Extension.create({
+  name: 'orderedListContinuation',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('orderedListContinuation'),
+        appendTransaction: (transactions, _oldState, newState) => {
+          if (!transactions.some(tr => tr.docChanged)) return null;
+          const orderedList = newState.schema.nodes['orderedList'];
+          if (!orderedList) return null;
+
+          const tr = newState.tr;
+          let modified = false;
+
+          const visit = (parent: PMNode, contentStart: number) => {
+            let prev: { node: PMNode; effStart: number } | null = null;
+            parent.forEach((child, offset) => {
+              const childPos = contentStart + offset;
+              if (child.type === orderedList) {
+                let effStart = (child.attrs['start'] as number) ?? 1;
+                if (
+                  prev &&
+                  prev.node.type === orderedList &&
+                  (prev.node.attrs['type'] ?? null) === (child.attrs['type'] ?? null)
+                ) {
+                  const desired = prev.effStart + prev.node.childCount;
+                  if (((child.attrs['start'] as number) ?? 1) !== desired) {
+                    tr.setNodeMarkup(childPos, undefined, {
+                      ...child.attrs,
+                      start: desired,
+                    });
+                    modified = true;
+                  }
+                  effStart = desired;
+                }
+                prev = { node: child, effStart };
+              } else {
+                prev = null;
+              }
+              if (child.childCount) visit(child, childPos + 1);
+            });
+          };
+
+          visit(newState.doc, 0);
+          return modified ? tr : null;
+        },
+      }),
+    ];
+  },
+});
+
 // Eagerly start loading emoji data so it's ready for sync lookups
 preloadEmojiData();
 
@@ -195,6 +258,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideVoiceInput = false,
       compact = false,
       sendDisabled = false,
+      sendDisabledReason,
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
@@ -595,6 +659,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           },
         }),
         MaxListDepthPlugin,
+        OrderedListContinuationPlugin,
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
@@ -753,6 +818,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
+              // Keyboard sends are invisible to autocapture (click/change/submit
+              // only); emit it explicitly so keyboard vs button sends are visible.
+              posthogService.capture('message_send', {
+                trigger: 'keyboard',
+                keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
+              });
               void handleSend();
               return true;
             }
@@ -907,6 +978,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
+            // Keyboard sends are invisible to autocapture (click/change/submit
+            // only); emit it explicitly so keyboard vs button sends are visible.
+            posthogService.capture('message_send', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
             void handleSend();
             return true;
           }
@@ -1179,7 +1256,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const handleSend = useCallback(async () => {
-      if (!editor || isSending || sendDisabled) return;
+      if (!editor || isSending) return;
+      if (sendDisabled) {
+        // The button is disabled, but Enter still lands here — say why rather than
+        // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+        // tooltip carrying the same reason never opens.
+        if (sendDisabledReason) toast.warning(sendDisabledReason);
+        return;
+      }
 
       // If a voice stream is active, finalize it for send first: this strips any
       // unfinalized interim text and aborts the stream (discarding in-flight results)
@@ -1252,6 +1336,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const finalPlainText = editor?.getText().trim() || plainText;
 
         await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
         editor.commands.setContent('');
         setContent('');
         setAttachedCanvas(null);
@@ -1270,6 +1355,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       attachedCanvas,
       hasSendableContent,
       sendDisabled,
+      sendDisabledReason,
       commandItems,
       onCommandSelect,
       disableDraftUpload,
@@ -1469,6 +1555,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {features.emojiPicker && (
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
         )}
+
+        {features.richText && <LinkPopover editor={editor} />}
 
         {/* Activity bar — absolutely positioned above the input box so showing/hiding
             never shifts the chat layout. The typing indicator and the agent pill share
@@ -1998,7 +2086,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2083,7 +2171,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2149,7 +2237,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         </div>
                       ) : (
                         <Tooltip
-                          content='Send message'
+                          content={sendDisabledReason ?? 'Send message'}
                           side='top'
                           delayDuration={1000}
                           skipDelayDuration={1000}

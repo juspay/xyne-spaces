@@ -15,7 +15,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
@@ -241,7 +241,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const activityNavigationNonce =
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const { baseRoute } = useRouteContext();
-  const { editingMessageId, requestEdit } = useEditContext();
+  const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
   const isMember = !!channelParticipation;
   const channel = useVisibleChannel(channelId);
@@ -1061,13 +1061,13 @@ const ChatListV3: React.FC<ChatListProps> = ({
       });
     };
 
-    if (editingMessageId === message.messageId) {
+    if (isEditingMessage(message.messageId)) {
       scrollToConversation();
       return;
     }
 
     requestEdit(message.messageId, scrollToConversation);
-  }, [conversations, user?.id, firstItemIndex, editingMessageId, requestEdit]);
+  }, [conversations, user?.id, firstItemIndex, isEditingMessage, requestEdit]);
 
   useShortcutById('composer.editLastMessage', handleEditLastMessage, {
     enabled: conversations.length > 0,
@@ -1434,4 +1434,4 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 };
 
-export default withProfiler(ChatListV3, 'ChatListV3');
+export default withProfiler(withEditSurface(ChatListV3), 'ChatListV3');

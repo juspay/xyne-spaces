@@ -222,7 +222,7 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
     : servers;
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto'>
+    <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto pb-6'>
       {searchBar}
 
       {visibleServers.length === 0 ? (

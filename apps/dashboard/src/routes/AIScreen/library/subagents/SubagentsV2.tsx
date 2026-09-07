@@ -1,6 +1,7 @@
 import { ReactElement, useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Network } from 'lucide-react';
+import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useClawSubagents } from '@/hooks/useClawSubagents';
 import type { SubagentDef, SubagentSource } from '@/services/claw/clawSubagentsTypes';
 import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
@@ -33,10 +34,13 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
     setSearchParams(next, { replace: true });
   };
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const searched = useMemo(
     () =>
-      q ? subagents.filter(s => `${s.name} ${s.description}`.toLowerCase().includes(q)) : subagents,
+      searchByNameThenDescription(subagents, q, subagent => ({
+        name: subagent.name,
+        description: subagent.description,
+      })),
     [subagents, q],
   );
 

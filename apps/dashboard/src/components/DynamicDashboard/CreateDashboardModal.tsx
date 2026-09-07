@@ -170,6 +170,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
         </Button>
         <Button
           onClick={handleCreateClick}
+          trackId='create_dashboard'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CREATE_DASHBOARD'
           disabled={!name.trim() || isCreating}

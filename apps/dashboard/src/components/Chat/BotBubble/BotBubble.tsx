@@ -1,10 +1,11 @@
-import React, { ReactElement, useContext } from 'react';
+import React, { ReactElement, useContext, useMemo } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
-import { useChannel } from '../../../hooks/useChannels';
+import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
 import { usePlatform } from '../../../hooks/usePlatform';
 
-import { parseTicketMd } from '@xyne/shared';
+import { parseTicketMd, parseSubTicketsMd } from '@xyne/shared';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
@@ -39,24 +40,22 @@ const stripHtml = (html: string): string => {
 
 type TicketCardSummaryFromMd = NonNullable<ReturnType<typeof parseTicketMd>>;
 
-const TicketDisplayModeV2: React.FC<{
-  ticket: TicketCardSummaryFromMd;
-  channelId?: string;
-  conversationContext?: 'channel' | 'thread' | undefined;
-  conversationId?: string;
-}> = ({ ticket, channelId, conversationContext, conversationId }) => {
+type TicketCardTarget = {
+  id: string;
+  channelId?: string | null;
+  conversationId?: string | null;
+};
+
+const useOpenTicketCard = (
+  conversationContext?: 'channel' | 'thread',
+  fallbackChannelId?: string,
+  fallbackConversationId?: string,
+): ((ticket: TicketCardTarget, e: React.MouseEvent | KeyboardEvent) => void) => {
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
   const location = useLocation();
   const { onSelectThread: onSelectSearchThread } = useContext(SearchResultsContext);
-
-  const resolvedChannelId = ticket.channelId || channelId;
-  const resolvedConversationId = ticket.conversationId || conversationId;
-
-  if (!resolvedChannelId || !resolvedConversationId) {
-    return null;
-  }
 
   // In the Desk/email ticket-detail view the user is already looking at the
   // ticket whose card is being rendered in the right-panel thread — instead
@@ -65,7 +64,11 @@ const TicketDisplayModeV2: React.FC<{
   // watches this param reactively.
   const isDeskView = location.pathname.includes('/support');
 
-  const handleClick = (e: React.MouseEvent | KeyboardEvent): void => {
+  return (ticket, e) => {
+    const resolvedChannelId = ticket.channelId || fallbackChannelId;
+    const resolvedConversationId = ticket.conversationId || fallbackConversationId;
+    if (!resolvedChannelId || !resolvedConversationId) return;
+
     if (isDeskView) {
       const params = new URLSearchParams(location.search);
       params.set('selectedTab', 'details');
@@ -98,12 +101,25 @@ const TicketDisplayModeV2: React.FC<{
         `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}/${ticket.id}?selectedTab=details`,
         { event },
       );
-    } else if (resolvedChannelId && resolvedConversationId) {
+    } else {
       standaloneNavigate(navigate, `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}`, {
         event,
       });
     }
   };
+};
+
+const TicketDisplayModeV2: React.FC<{
+  ticket: TicketCardSummaryFromMd;
+  channelId?: string;
+  conversationContext?: 'channel' | 'thread' | undefined;
+  conversationId?: string;
+}> = ({ ticket, channelId, conversationContext, conversationId }) => {
+  const openTicketCard = useOpenTicketCard(conversationContext, channelId, conversationId);
+
+  if (!(ticket.channelId || channelId) || !(ticket.conversationId || conversationId)) {
+    return null;
+  }
 
   return (
     <div
@@ -111,7 +127,85 @@ const TicketDisplayModeV2: React.FC<{
       data-track-category='CHAT_BUBBLE'
       data-track-name='OPEN_TICKET_FROM_BOT_BUBBLE'
     >
-      <TicketCardV2 ticket={ticket} onClick={handleClick} isConversation={true} />
+      <TicketCardV2
+        ticket={ticket}
+        onClick={e => openTicketCard(ticket, e)}
+        isConversation={true}
+      />
+    </div>
+  );
+};
+
+const SubTicketsTree: React.FC<{
+  parentTicket: TicketCardSummaryFromMd;
+  subTicketsMd: string;
+  channelId?: string;
+  conversationContext?: 'channel' | 'thread' | undefined;
+  conversationId?: string;
+}> = ({ parentTicket, subTicketsMd, channelId, conversationContext, conversationId }) => {
+  const openTicketCard = useOpenTicketCard(conversationContext, channelId, conversationId);
+  const visibleChannels = useAllVisibleChannels();
+  const accessibleChannelIds = useMemo(
+    () => new Set(visibleChannels.map(channel => channel.id)),
+    [visibleChannels],
+  );
+  const { total, items } = useMemo(() => parseSubTicketsMd(subTicketsMd), [subTicketsMd]);
+
+  if (items.length === 0) return null;
+
+  const shown = items.slice(0, 2);
+  const hasMore = total > 2;
+
+  return (
+    <div className='w-full'>
+      {shown.map((child, index) => {
+        const hasFollowingRow = index < shown.length - 1 || hasMore;
+        const canOpen = !child.channelId || accessibleChannelIds.has(child.channelId);
+        return (
+          <div key={child.id} className='flex items-stretch'>
+            <div className='relative w-9 shrink-0'>
+              <div className='absolute bottom-1/2 left-3.5 right-0 top-0 rounded-bl-[10px] border-b-2 border-l-2 border-border' />
+              {hasFollowingRow && (
+                <div className='absolute -bottom-2 left-3.5 top-1/2 border-l-2 border-border' />
+              )}
+            </div>
+            <div
+              className={canOpen ? 'min-w-0 flex-1 pt-2' : 'min-w-0 flex-1 cursor-not-allowed pt-2'}
+              {...(!canOpen && { title: 'You do not have access to this ticket' })}
+            >
+              <div className={canOpen ? undefined : 'pointer-events-none opacity-60'}>
+                <TicketCardV2
+                  ticket={child}
+                  isConversation
+                  {...(canOpen && {
+                    onClick: (e: React.MouseEvent | KeyboardEvent) => openTicketCard(child, e),
+                  })}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {hasMore && (
+        <div className='flex items-stretch'>
+          <div className='relative w-9 shrink-0'>
+            <div className='absolute bottom-1/2 left-3.5 right-0 top-0 rounded-bl-[10px] border-b-2 border-l-2 border-border' />
+          </div>
+          <div className='pt-2.5'>
+            <button
+              type='button'
+              className='inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+              onClick={e => openTicketCard(parentTicket, e)}
+              data-track-category='TICKET_CARD'
+              data-track-name='VIEW_ALL_SUB_TICKETS'
+              data-track-metadata={JSON.stringify({ ticketId: parentTicket.id })}
+            >
+              View all {total} sub-tickets
+              <ChevronRight className='size-3.5' />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -126,7 +220,7 @@ const TicketCreateModeWithChannel: React.FC<{
   onModalOpenChange: (isOpen: boolean) => void;
   onTicketCreated?: (ticket: { id: string; conversationId?: string }) => void;
 }> = ({
-  messageId: _messageId,
+  messageId,
   messageContent,
   channelId,
   conversation,
@@ -163,6 +257,7 @@ const TicketCreateModeWithChannel: React.FC<{
       projectId={projectId}
       initialTitle=''
       initialDescription={stripHtml(messageContent)}
+      sourceMessageId={messageId}
       sourceConversation={conversation ?? undefined}
       {...(onTicketCreated && { onTicketCreated: handleTicketCreated })}
     />
@@ -182,16 +277,28 @@ export const BotBubble: React.FC<BotBubbleProps> = ({
 }): ReactElement | null => {
   const ticketMd = (conversation as { ticket_md?: string | null } | undefined)?.ticket_md;
   const ticketSummary = ticketMd ? parseTicketMd(ticketMd) : null;
+  const subTicketsMd = conversation?.sub_tickets_md;
 
   // Display existing ticket (md-only)
   if (renderTicketCard && ticketSummary && conversation?.initialMessageId === messageId) {
     return (
-      <TicketDisplayModeV2
-        ticket={ticketSummary}
-        conversationContext={context}
-        {...(channelId && { channelId: channelId })}
-        {...(conversation && { conversationId: conversation.conversationId })}
-      />
+      <>
+        <TicketDisplayModeV2
+          ticket={ticketSummary}
+          conversationContext={context}
+          {...(channelId && { channelId: channelId })}
+          {...(conversation && { conversationId: conversation.conversationId })}
+        />
+        {subTicketsMd && (
+          <SubTicketsTree
+            parentTicket={ticketSummary}
+            subTicketsMd={subTicketsMd}
+            conversationContext={context}
+            {...(channelId && { channelId: channelId })}
+            {...(conversation && { conversationId: conversation.conversationId })}
+          />
+        )}
+      </>
     );
   }
 

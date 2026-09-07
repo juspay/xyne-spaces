@@ -36,6 +36,8 @@ interface SdlcAskAiContextInput {
     url: string;
   };
   channelId: string;
+  /** The hub's other repositories. Named so the agent knows they exist; only `repo` is sandboxed. */
+  otherRepos?: Array<{ id: string; name: string; url: string }>;
   baselineDocuments: Array<{ title: string; content: string }>;
   linkedContext: string[];
   wikiFreshness?: WikiFreshnessContext;
@@ -81,6 +83,12 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     `Repository: ${input.repo.name} (${input.repo.url})`,
     `SDLC repository ID: ${input.repo.id}`,
     `Repository channel ID: ${input.channelId}`,
+    input.otherRepos?.length
+      ? [
+          'This hub contains other repositories. Only the repository above is pinned and inspectable in this session; to work in another one, ask the user to switch to it in the SDLC hub first.',
+          ...input.otherRepos.map((other) => `- ${other.name} (${other.url}) - SDLC repository ID: ${other.id}`),
+        ].join('\n')
+      : 'This hub contains no other repositories.',
     repositoryAccessInstruction,
     implementationInstruction,
     selectedArtifactInstruction,

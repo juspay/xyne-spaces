@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   apps: new Map<string, Record<string, unknown>>(),
   versions: new Map<string, Record<string, unknown>>(),
   workspaces: new Map<string, string | null>(),
+  users: new Map<string, { name: string | null; email: string | null }>(),
   streamed: [] as string[],
 }));
 
@@ -46,6 +47,13 @@ vi.mock("../db.js", () => ({
       findMany: vi.fn(async () => []),
       create: vi.fn(),
       update: vi.fn(),
+    },
+    artifactAppRestore: {
+      findMany: vi.fn(async () => []),
+      create: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => state.users.get(where.id) ?? null),
     },
   },
 }));
@@ -117,11 +125,14 @@ beforeEach(() => {
   state.apps.clear();
   state.versions.clear();
   state.workspaces.clear();
+  state.users.clear();
   state.streamed = [];
 
   state.workspaces.set(OWNER, WS);
   state.workspaces.set(PEER, WS);
   state.workspaces.set(OUTSIDER, "ws-other");
+
+  state.users.set(OWNER, { name: "Ada Owner", email: "ada@example.com" });
 
   state.versions.set("v1", { id: "v1", appId: "app-1", versionNumber: 1, storagePath: "artifact-apps/app-1/v1.json" });
   state.versions.set("v2", { id: "v2", appId: "app-1", versionNumber: 2, storagePath: "artifact-apps/app-1/v2.json" });
@@ -264,5 +275,20 @@ describe("GET /:id metadata", () => {
     const res = await call(PEER);
     expect(res.statusCode).toBe(200);
     expect((res.body as { app: { isOwner: boolean } }).app.isOwner).toBe(false);
+  });
+
+  // Settings names whoever built the app. A cuid answers nobody's question, and
+  // the peer looking at a published app is exactly who needs the name.
+  it("names the owner", async () => {
+    publish();
+    const res = await call(PEER);
+    expect((res.body as { app: { ownerName: string | null } }).app.ownerName).toBe("Ada Owner");
+  });
+
+  it("falls back to the email local-part when the owner has no name", async () => {
+    state.users.set(OWNER, { name: null, email: "ada@example.com" });
+    publish();
+    const res = await call(PEER);
+    expect((res.body as { app: { ownerName: string | null } }).app.ownerName).toBe("ada");
   });
 });

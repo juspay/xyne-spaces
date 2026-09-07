@@ -4,6 +4,7 @@ import { Upload, PanelRightOpen } from 'lucide-react';
 import { AIShell } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
 import { AppCreationModeProvider } from '../../components/AIScreen/ReactArtifact/appCreationModeContext';
+import { useAppModeCollapseSidebar } from '../../hooks/useAppModeCollapseSidebar';
 import { useAppCreationMode } from '../../components/AIScreen/ReactArtifact/useAppCreationMode';
 import { AIEmptyState } from '../../components/AIScreen/AIEmptyState';
 import {
@@ -270,6 +271,18 @@ const AIScreen = (): ReactElement => {
   const [appId, setAppId] = useState<string | null>(null);
   const [latestVersionId, setLatestVersionId] = useState<string | null>(null);
   const appMode = useAppCreationMode(appId, activeSessionId || null, latestVersionId);
+  const { appModeCollapseSidebar } = useAppModeCollapseSidebar();
+  // Sidebar plumbing: the panel lives in AIShell; the toggle button lives in
+  // the chat header. The ref carries the action up-and-over, the state carries
+  // the panel's real collapsed-ness back for the button's icon.
+  const sidebarToggleRef = useRef<(() => void) | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const handleToggleSidebar = useCallback(() => sidebarToggleRef.current?.(), []);
+  // One collapse per APP, and only for an app generated live with the
+  // preference on. A counter event, not state: state would re-assert itself on
+  // every thread switch and undo a sidebar the user deliberately opened.
+  const [collapseSignal, setCollapseSignal] = useState(0);
+  const collapsedForApps = useRef(new Set<string>());
 
   // The thread reports its app, but only while it is MOUNTED. On the landing
   // page (showChatView false) and in the gap before a newly-selected thread has
@@ -282,14 +295,55 @@ const AIScreen = (): ReactElement => {
       setLatestVersionId(null);
     }
   }, [showChatView]);
+  // Clear on a real thread SWITCH only.
+  //
+  // A draft acquiring its server id ('' → 'chat-…') is not a switch — it is the
+  // same thread being named, and it lands at roughly the same moment the first
+  // artifact is reported. Clearing there wiped the appId the thread had just
+  // surfaced, and because `displayMessages` does not change again after the
+  // stream ends, the scan never re-ran: a newly created app never entered App
+  // Creation mode, while an existing thread (id present from the start) did.
+  const prevSession = useRef(activeSessionId);
   useEffect(() => {
+    const from = prevSession.current;
+    prevSession.current = activeSessionId;
+    if (!from) return; // draft → named, or first mount: keep what we have
+    if (from === activeSessionId) return;
     setAppId(null);
     setLatestVersionId(null);
   }, [activeSessionId]);
-  const handleAppChange = useCallback((id: string | null, versionId: string | null) => {
-    setAppId(id);
-    setLatestVersionId(versionId);
-  }, []);
+  const handleAppChange = useCallback(
+    (id: string | null, versionId: string | null, generatedLive: boolean) => {
+      setAppId(id);
+      setLatestVersionId(versionId);
+      if (generatedLive && id && appModeCollapseSidebar && !collapsedForApps.current.has(id)) {
+        collapsedForApps.current.add(id);
+        setCollapseSignal(n => n + 1);
+      }
+    },
+    [appModeCollapseSidebar],
+  );
+  // Entry from a card. Sets the app and opens the mode together, so the pane
+  // never depends on the message-list scan having reported the app first —
+  // that chain (scan → onAppChange → state → hook effect) was the part that
+  // made entry a coin flip. The scan still runs, for clearing on thread switch
+  // and for the freshness signal, but it is no longer on the entry path.
+  const { open: openAppMode } = appMode;
+  const enterForApp = useCallback(
+    (id: string, versionId: string | null) => {
+      setAppId(id);
+      if (versionId) setLatestVersionId(versionId);
+      openAppMode();
+    },
+    [openAppMode],
+  );
+  // Routed through the thread's handle rather than a composer ref of its own:
+  // the thread owns submit (draft recovery, branch parenting), so a fix request
+  // takes exactly the path a typed message does.
+  const submitPrompt = useCallback(
+    (text: string): boolean => chatThreadRef.current?.submitPrompt(text) ?? false,
+    [],
+  );
   // A fresh object here re-renders every context consumer — that is every
   // artifact card in the transcript — on each AIScreen render.
   const appModeSignal = useMemo(
@@ -297,9 +351,28 @@ const AIScreen = (): ReactElement => {
       active: appMode.active,
       appId: appMode.appId,
       viewingVersionId: appMode.viewingVersionId,
+      headVersionId: appMode.headVersionId,
+      icon: appMode.icon,
+      restores: appMode.restores,
       viewVersion: appMode.viewVersion,
+      restoreVersion: appMode.restoreVersion,
+      restoring: appMode.restoring,
+      enterForApp,
+      submitPrompt,
     }),
-    [appMode.active, appMode.appId, appMode.viewingVersionId, appMode.viewVersion],
+    [
+      appMode.active,
+      appMode.appId,
+      appMode.viewingVersionId,
+      appMode.headVersionId,
+      appMode.icon,
+      appMode.restores,
+      appMode.viewVersion,
+      appMode.restoreVersion,
+      appMode.restoring,
+      enterForApp,
+      submitPrompt,
+    ],
   );
   // Likewise a fresh element remounts the pane's subtree each render.
   const appPane = useMemo(() => <ArtifactAppPane mode={appMode} />, [appMode]);
@@ -315,6 +388,9 @@ const AIScreen = (): ReactElement => {
           mobileOpen={mobileSidebarOpen}
           onMobileOpenChange={setMobileSidebarOpen}
           mainRef={dropZoneRef}
+          collapseSignal={collapseSignal}
+          onSidebarCollapsedChange={setSidebarCollapsed}
+          sidebarToggleRef={sidebarToggleRef}
           {...(appMode.active ? { rightPanel: appPane } : {})}
         >
           {isDragging && !showChatView && (
@@ -357,6 +433,8 @@ const AIScreen = (): ReactElement => {
                 onSetMobileSidebarOpen={setMobileSidebarOpen}
                 onConversationChange={handleConversationChange}
                 onAppChange={handleAppChange}
+                onToggleSidebar={handleToggleSidebar}
+                sidebarCollapsed={sidebarCollapsed}
                 onAgentChange={handleAgentChange}
                 onContextChange={handleContextChange}
                 onInitialQueryConsumed={handleInitialQueryConsumed}

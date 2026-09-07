@@ -200,6 +200,7 @@ const Settings = ({
                   setLivePresenceStatus('ONLINE');
                   setPresencePopoverOpen(false);
                 }}
+                data-ph-capture-attribute-track-id='set_presence_online'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceOnline'
@@ -215,6 +216,7 @@ const Settings = ({
                   setLivePresenceStatus('AWAY');
                   setPresencePopoverOpen(false);
                 }}
+                data-ph-capture-attribute-track-id='set_presence_away'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceAway'
@@ -273,6 +275,7 @@ const Settings = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
+                trackId='clear_user_status'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
                 data-track-category='Settings'
@@ -308,6 +311,7 @@ const Settings = ({
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 onClick={handleResumeNotifications}
+                trackId='resume_notifications'
                 data-track-category='Settings'
                 data-track-name='ResumeNotifications'
               >
@@ -353,6 +357,8 @@ const Settings = ({
                       e.stopPropagation();
                       handlePauseNotifications(option.minutes);
                     }}
+                    data-ph-capture-attribute-track-id='pause_notifications'
+                    data-ph-capture-attribute-duration={option.minutes}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='Settings'
                     data-track-name='PauseNotifications'
@@ -424,6 +430,7 @@ const Settings = ({
           variant='ghost'
           className='text-destructive w-full text-left hover:bg-transparent hover:text-destructive rounded-md'
           onClick={handleLogout}
+          trackId='logout'
           data-track-category='Settings'
           data-track-name='Logout'
         >

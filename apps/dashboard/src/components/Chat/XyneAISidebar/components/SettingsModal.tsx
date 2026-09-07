@@ -664,6 +664,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                             onClick={() => {
                               void handleDeleteSkill(skill.name);
                             }}
+                            data-ph-capture-attribute-track-id='delete_skill'
                             className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
                             title='Delete'
                             data-track-category='XyneAI'
@@ -688,6 +689,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
             <>
               <button
                 onClick={() => void handleClearInstruction()}
+                data-ph-capture-attribute-track-id='clear_custom_instructions'
                 className='px-4 py-2 text-sm font-medium text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors'
                 disabled={isSavingInstruction || isLoadingInstruction || !instruction}
                 data-track-category='XyneAI'
@@ -707,6 +709,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                 </button>
                 <button
                   onClick={() => void handleSaveInstruction()}
+                  data-ph-capture-attribute-track-id='save_custom_instructions'
                   className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                   disabled={
                     isSavingInstruction ||
@@ -747,6 +750,9 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               </button>
               <button
                 onClick={() => void handleSaveSkill()}
+                data-ph-capture-attribute-track-id={
+                  editingSkillName ? 'update_skill' : 'create_skill'
+                }
                 className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 disabled={isSavingSkill || !skillName.trim() || !!nameError}
                 data-track-category='XyneAI'

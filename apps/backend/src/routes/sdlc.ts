@@ -1,6 +1,8 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import {
+  addSdlcChannelRepositoriesSchema,
   attachSdlcRepositorySchema,
+  createSdlcChannelSchema,
   checkSdlcRepositoryAccessSchema,
   createSdlcLinkSchema,
   configureSdlcVcsCredentialSchema,
@@ -11,10 +13,12 @@ import {
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcQueue } from '@/queues/sdlcQueue';
 import { SdlcHubService, sdlcWiki, type SdlcActor } from '@/sdlc';
+import { requireSdlcProjectAccess } from '@/sdlc/sdlcProjectAccess';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
 import { DatabaseClient } from '@/database/client';
 import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
+import sdlcCleanupRoutes from '@/sdlc/cleanup/routes';
 
 const router = Router();
 const sdlcHub = new SdlcHubService();
@@ -42,8 +46,50 @@ router.post(
   '/repositories',
   route(async (req, res) => {
     const input = attachSdlcRepositorySchema.parse(req.body);
-    const repository = await sdlcHub.attachRepository(actorFromRequest(req), input);
+    const repository = await sdlcHub.createRepository(actorFromRequest(req), input);
     res.status(201).json({ success: true, repository });
+  })
+);
+
+router.post(
+  '/channels',
+  route(async (req, res) => {
+    const input = createSdlcChannelSchema.parse(req.body);
+    const channel = await sdlcHub.createChannel(actorFromRequest(req), input);
+    res.status(201).json({ success: true, channel });
+  })
+);
+
+router.get(
+  '/channels/:channelId',
+  route(async (req, res) => {
+    const channel = await sdlcHub.getChannel(actorFromRequest(req), req.params.channelId);
+    res.status(200).json({ success: true, channel });
+  })
+);
+
+router.post(
+  '/channels/:channelId/repositories',
+  route(async (req, res) => {
+    const input = addSdlcChannelRepositoriesSchema.parse(req.body);
+    const result = await sdlcHub.addChannelRepositories(
+      actorFromRequest(req),
+      req.params.channelId,
+      input.repoIds
+    );
+    res.status(200).json({ success: true, ...result });
+  })
+);
+
+router.delete(
+  '/channels/:channelId/repositories/:repoId',
+  route(async (req, res) => {
+    await sdlcHub.removeChannelRepository(
+      actorFromRequest(req),
+      req.params.channelId,
+      req.params.repoId
+    );
+    res.status(204).send();
   })
 );
 
@@ -92,12 +138,10 @@ router.get(
       select: { id: true },
     });
     if (!project) throw new AppError('Project not found', 404);
+    // Project access is the gate, not hub membership.
+    await requireSdlcProjectAccess(prisma, actor, project.id);
     const repositories = await prisma.repo.findMany({
-      where: {
-        projectId: project.id,
-        workspaceId: actor.workspaceId,
-        channel: { participants: { some: { userId: actor.userId } } },
-      },
+      where: { projectId: project.id, workspaceId: actor.workspaceId },
       select: {
         id: true,
         name: true,
@@ -276,7 +320,13 @@ router.post(
   '/repositories/:repoId/links',
   route(async (req, res) => {
     const input = createSdlcLinkSchema.parse(req.body);
-    const link = await sdlcHub.linkContext(actorFromRequest(req), req.params.repoId, input);
+    const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : undefined;
+    const link = await sdlcHub.linkContext(
+      actorFromRequest(req),
+      req.params.repoId,
+      input,
+      channelId
+    );
     res.status(201).json({ success: true, link });
   })
 );
@@ -288,5 +338,9 @@ router.delete(
     res.status(204).send();
   })
 );
+
+// One-off SDLC data migrations. Delete with src/sdlc/cleanup/ once every
+// environment has run them.
+router.use('/cleanup', sdlcCleanupRoutes);
 
 export default router;

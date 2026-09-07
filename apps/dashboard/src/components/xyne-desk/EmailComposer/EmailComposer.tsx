@@ -2185,6 +2185,7 @@ export const EmailComposer = ({
                     className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
                     data-track-category='Support'
                     data-track-name='ConfirmTwoStepSend'
+                    data-ph-capture-attribute-track-id='send_email_confirm'
                   >
                     {isSending ? (
                       <Loader2 size={14} className='animate-spin' />
@@ -2496,6 +2497,7 @@ export const EmailComposer = ({
                           title='Discard draft'
                           data-track-category='Support'
                           data-track-name='DiscardComposerDraft'
+                          data-ph-capture-attribute-track-id='discard_composer_draft'
                         >
                           <Trash2 size={14} />
                         </button>
@@ -2641,6 +2643,7 @@ export const EmailComposer = ({
                   aria-label='Suggest subject with AI'
                   data-track-category='Support'
                   data-track-name='SuggestComposeSubject'
+                  data-ph-capture-attribute-track-id='generate_compose_subject'
                 >
                   {subjectAI.isGenerating ? (
                     <RefreshCw size={14} className='animate-spin' />
@@ -3043,6 +3046,7 @@ export const EmailComposer = ({
                   conversationId,
                   attachmentCount: attachments.length,
                 })}
+                data-ph-capture-attribute-track-id='send_email'
               >
                 {isSending ? (
                   <RefreshCw size={16} className='animate-spin' />

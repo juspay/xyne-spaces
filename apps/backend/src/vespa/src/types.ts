@@ -134,6 +134,11 @@ export interface importedTicketFields {
   projectId: string;
 }
 
+export interface importedMailFields {
+  channelId: string;
+  channelName: string;
+}
+
 export interface importedChannelFields {
   isIm: boolean;
   isMpim: boolean;

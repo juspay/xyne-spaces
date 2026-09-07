@@ -100,7 +100,7 @@ export class ExternalSourceCore {
     const payloads = Array.isArray(enrichedPayload) ? enrichedPayload : [enrichedPayload];
 
     const allResults: IngestionResult[] = [];
-    let failedItemCount = 0;
+    const failedExternalIds: string[] = [];
     for (const payload of payloads) {
       if (payload && typeof payload === 'object' && (payload as any).__skipIngestion) {
         const reason = (payload as any).__skipReason || 'unspecified';
@@ -126,19 +126,24 @@ export class ExternalSourceCore {
           const results = await this.sync(adapter, sourceName, normalizedData, source);
           allResults.push(...results);
         } catch (error) {
-          failedItemCount += 1;
+          failedExternalIds.push(normalizedData.externalId);
           logger.error(`Failed to sync interaction from ${sourceName}`, {
             externalId: normalizedData.externalId,
             eventType: normalizedData.metadata.eventType,
+            errorMessage: error instanceof Error ? error.message : String(error),
             error,
           });
         }
       }
     }
 
-    if (failedItemCount > 0) {
+    if (failedExternalIds.length > 0) {
+      logger.error(
+        `[INGEST_INCOMPLETE] ${failedExternalIds.length} message(s) not ingested from ${sourceName}`,
+        { sourceName, externalIds: failedExternalIds },
+      );
       throw new Error(
-        `Failed to sync ${failedItemCount} interaction${failedItemCount === 1 ? '' : 's'} from ${sourceName}`,
+        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}`,
       );
     }
 
@@ -326,17 +331,19 @@ export class ExternalSourceCore {
     }
 
     // 4. Find or create conversation
-    const { conversation, message, email, isNew, blocked } = await this.findOrCreateConversation(
-      source,
-      normalizedData,
-      downloadedAttachments,
-      isDeskChannel
-    );
+    const { conversation, message, email, isNew, blocked, blockedReason } =
+      await this.findOrCreateConversation(
+        source,
+        normalizedData,
+        downloadedAttachments,
+        isDeskChannel
+      );
 
     if (blocked) {
-      logger.warn(`Ingestion blocked by Superposition for source ${sourceName}`, {
+      logger.warn(`Ingestion skipped (${blockedReason ?? 'unknown'}) for source ${sourceName}`, {
         externalThreadId: normalizedData.externalThreadId,
         externalId: normalizedData.externalId,
+        blockedReason,
       });
       return {
         success: true,
@@ -377,7 +384,11 @@ export class ExternalSourceCore {
       });
     }
 
-    logger.info(`Successfully ingested data from ${sourceName}`);
+    logger.info(`Successfully ingested data from ${sourceName}`, {
+      externalId: normalizedData.externalId,
+      channelId: source.channelId,
+      isNew,
+    });
 
     return {
       success: true,
@@ -459,6 +470,8 @@ export class ExternalSourceCore {
         sourceName: source.name,
         workspaceId,
         addrs,
+        externalId: normalizedData.externalId,
+        externalThreadId: normalizedData.externalThreadId,
       });
       return [];
     }
@@ -814,14 +827,18 @@ export class ExternalSourceCore {
         rfcMessageId: normalizedData.rfcMessageId,
         ticketMetadata: normalizedData.metadata,
         uploadedFiles: uploadedFiles,
-        sourceName: normalizedData.emailData.skipBlockingCheck
-          ? undefined
-          : source.name,
         receivedAt: normalizedData.metadata.timestamp,
         ...this.getEmailIntegrationFields(normalizedData),
       });
-      if ((createResult as any)?.blocked || (createResult as any)?.isDuplicate) {
-        return { conversation: undefined, message: undefined, email: undefined, isNew: false, blocked: true };
+      if ((createResult as any)?.isDuplicate) {
+        return {
+          conversation: undefined,
+          message: undefined,
+          email: undefined,
+          isNew: false,
+          blocked: true,
+          blockedReason: 'duplicate',
+        };
       }
       const { conversation, email } = createResult as any;
       return { conversation, email, isNew: true };

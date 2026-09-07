@@ -168,6 +168,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 return (
                   <button
                     key={tag}
+                    data-ph-capture-attribute-track-id='ticket_toggle_tag'
                     onClick={() => {
                       toggle(tag);
                       setSearch('');
@@ -201,6 +202,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
             {canCreate && (
               <div className='border-t border-border mt-1 pt-1'>
                 <button
+                  data-ph-capture-attribute-track-id='ticket_create_tag'
                   onClick={create}
                   onMouseEnter={() => setActiveIdx(filtered.length)}
                   className={`flex items-center gap-2 w-full px-3 py-2 text-sm rounded font-medium ${

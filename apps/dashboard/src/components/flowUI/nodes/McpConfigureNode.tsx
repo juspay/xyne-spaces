@@ -158,6 +158,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
           )}
           data-track-category='MCP_CONFIGURE_ARTIFACT'
           data-track-name='MCP_CONFIGURE_SUBMIT'
+          data-ph-capture-attribute-track-id='mcp_configure_submit'
         >
           <KeyRound size={14} strokeWidth={2} />
           {isSubmitting ? 'Configuring' : 'Configure'}

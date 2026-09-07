@@ -4,7 +4,7 @@ import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
 import { useZero } from './useZero';
 
-export type OatsRecordingScope = 'created' | 'shared';
+export type OatsRecordingScope = 'all' | 'created' | 'shared';
 export type OatsRecordingEntry = QueryResultType<typeof queries.createdOatsRecordings>[number];
 
 const FETCH_LIMIT = 20;
@@ -26,18 +26,34 @@ export function patchOatsRecordingLabels(recordingId: string, labels: string[]):
   for (const listener of labelsPatchListeners) listener(recordingId, labels);
 }
 type RecordingCursor = { id: string; startedAt: number } | null;
+type SingleOatsRecordingScope = Exclude<OatsRecordingScope, 'all'>;
 type OatsRecordingQuery =
   | ReturnType<typeof queries.createdOatsRecordings>
   | ReturnType<typeof queries.sharedOatsRecordings>;
 
 const recordingQuery = (
-  scope: OatsRecordingScope,
+  scope: SingleOatsRecordingScope,
   start: RecordingCursor,
   participantId: string | null,
 ): OatsRecordingQuery =>
   scope === 'created'
     ? queries.createdOatsRecordings({ limit: FETCH_LIMIT, start, participantId })
     : queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start, participantId });
+
+const mergeRecordingPages = (
+  current: OatsRecordingEntry[],
+  ...pages: Array<readonly OatsRecordingEntry[] | null | undefined>
+): OatsRecordingEntry[] => {
+  const byId = new Map<string, OatsRecordingEntry>();
+  for (const recording of current) byId.set(recording.id, recording);
+  for (const page of pages) {
+    if (!page) continue;
+    for (const recording of page) byId.set(recording.id, recording);
+  }
+  return Array.from(byId.values()).sort(
+    (left, right) => right.startedAt - left.startedAt || right.id.localeCompare(left.id),
+  );
+};
 
 export interface UsePaginatedOatsRecordingsReturn {
   recordings: OatsRecordingEntry[];
@@ -54,47 +70,115 @@ export function usePaginatedOatsRecordings(
   participantId: string | null,
 ): UsePaginatedOatsRecordingsReturn {
   const zero = useZero();
+  const isAllScope = scope === 'all';
+  const queryScope: SingleOatsRecordingScope = scope === 'shared' ? 'shared' : 'created';
   const [cursor, setCursor] = useState<RecordingCursor>(null);
+  const [sharedCursor, setSharedCursor] = useState<RecordingCursor>(null);
   const [recordings, setRecordings] = useState<OatsRecordingEntry[]>([]);
   const [hasMoreRecordings, setHasMoreRecordings] = useState(true);
+  const [hasMoreSharedRecordings, setHasMoreSharedRecordings] = useState(true);
   const recordingsRef = useRef(recordings);
   recordingsRef.current = recordings;
 
-  const [page, details] = useCachedQuery(recordingQuery(scope, cursor, participantId));
+  const [page, details] = useCachedQuery(recordingQuery(queryScope, cursor, participantId));
+  const [sharedPage, sharedDetails] = useCachedQuery(
+    queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start: sharedCursor, participantId }),
+    { enabled: isAllScope },
+  );
 
   useEffect(() => {
     setCursor(null);
+    setSharedCursor(null);
     setRecordings([]);
     setHasMoreRecordings(true);
+    setHasMoreSharedRecordings(true);
   }, [scope, participantId]);
 
   useEffect(() => {
     if (!page || details.type !== 'complete') return;
+
+    if (isAllScope) {
+      setRecordings(current => mergeRecordingPages(current, page));
+      setHasMoreRecordings(page.length === FETCH_LIMIT);
+      return;
+    }
 
     setRecordings(current => {
       const rows = cursor ? [...current, ...page] : [...page];
       return [...new Map(rows.map(recording => [recording.id, recording] as const)).values()];
     });
     setHasMoreRecordings(page.length === FETCH_LIMIT);
-  }, [cursor, details.type, page]);
+  }, [cursor, details.type, isAllScope, page]);
+
+  useEffect(() => {
+    if (!isAllScope || !sharedPage || sharedDetails.type !== 'complete') return;
+
+    setRecordings(current => mergeRecordingPages(current, sharedPage));
+    setHasMoreSharedRecordings(sharedPage.length === FETCH_LIMIT);
+  }, [isAllScope, sharedDetails.type, sharedPage]);
 
   const loadMoreRecordings = useCallback((): void => {
+    if (isAllScope) {
+      const currentUserId = zero.context.userID;
+      let nextCreatedCursor: RecordingCursor = null;
+      let nextSharedCursor: RecordingCursor = null;
+
+      for (let index = recordingsRef.current.length - 1; index >= 0; index -= 1) {
+        const recording = recordingsRef.current[index];
+        if (!recording) continue;
+
+        if (!nextCreatedCursor && recording.createdByUserId === currentUserId) {
+          nextCreatedCursor = { id: recording.id, startedAt: recording.startedAt };
+        }
+        if (!nextSharedCursor && recording.createdByUserId !== currentUserId) {
+          nextSharedCursor = { id: recording.id, startedAt: recording.startedAt };
+        }
+        if (
+          (!hasMoreRecordings || nextCreatedCursor) &&
+          (!hasMoreSharedRecordings || nextSharedCursor)
+        ) {
+          break;
+        }
+      }
+
+      if (hasMoreRecordings && nextCreatedCursor) setCursor(nextCreatedCursor);
+      if (hasMoreSharedRecordings && nextSharedCursor) setSharedCursor(nextSharedCursor);
+      return;
+    }
+
     if (!hasMoreRecordings) return;
     const last = recordingsRef.current.at(-1);
     if (!last) return;
     setCursor({ id: last.id, startedAt: last.startedAt });
-  }, [hasMoreRecordings]);
+  }, [hasMoreRecordings, hasMoreSharedRecordings, isAllScope, zero.context.userID]);
 
   const refreshRecordings = useCallback((): void => {
     setCursor(null);
+    if (isAllScope) {
+      setSharedCursor(null);
+      void Promise.all([
+        zero.run(recordingQuery('created', null, participantId), { type: 'complete' }),
+        zero.run(recordingQuery('shared', null, participantId), { type: 'complete' }),
+      ])
+        .then(([createdResult, sharedResult]) => {
+          const createdRows = (createdResult ?? []) as OatsRecordingEntry[];
+          const sharedRows = (sharedResult ?? []) as OatsRecordingEntry[];
+          setRecordings(mergeRecordingPages([], createdRows, sharedRows));
+          setHasMoreRecordings(createdRows.length === FETCH_LIMIT);
+          setHasMoreSharedRecordings(sharedRows.length === FETCH_LIMIT);
+        })
+        .catch(() => undefined);
+      return;
+    }
+
     void zero
-      .run(recordingQuery(scope, null, participantId), { type: 'complete' })
+      .run(recordingQuery(queryScope, null, participantId), { type: 'complete' })
       .then(result => {
         setRecordings((result ?? []) as OatsRecordingEntry[]);
         setHasMoreRecordings((result?.length ?? 0) === FETCH_LIMIT);
       })
       .catch(() => undefined);
-  }, [scope, participantId, zero]);
+  }, [isAllScope, participantId, queryScope, zero]);
 
   useEffect(() => {
     refreshListeners.add(refreshRecordings);
@@ -119,12 +203,19 @@ export function usePaginatedOatsRecordings(
     };
   }, []);
 
+  const hasMoreForScope = isAllScope
+    ? hasMoreRecordings || hasMoreSharedRecordings
+    : hasMoreRecordings;
+  const isLoadingForScope = isAllScope
+    ? recordings.length === 0 && (details.type === 'unknown' || sharedDetails.type === 'unknown')
+    : recordings.length === 0 && details.type === 'unknown';
+
   return {
     recordings,
-    hasMoreRecordings,
+    hasMoreRecordings: hasMoreForScope,
     loadMoreRecordings,
     onVisibleRangeChanged: () => undefined,
-    isLoading: recordings.length === 0 && details.type === 'unknown',
+    isLoading: isLoadingForScope,
     error: null,
     refreshRecordings,
   };

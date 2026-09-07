@@ -1,85 +1,61 @@
-import { isBaselineCanvasType } from '@xyne/shared/sdlc';
+import { buildSdlcPath, sdlcSectionForCanvas, type SdlcNavTarget } from '@xyne/shared/sdlc';
 
-interface SdlcActivityNavigationActivity {
-  canvasId?: string | null;
-  canvas?:
-    | {
-        readonly id: string;
-        readonly folderId?: string | null;
-        readonly sdlcArtifact?: { readonly artifactType?: unknown } | null;
-      }
-    | null
-    | undefined;
-  ticketId?: string | null;
-  ticket?: { readonly id: string } | null | undefined;
-  conversationId?: string | null;
-  messageId?: string | null;
-  message?:
-    | {
-        readonly messageId: string;
-        readonly conversation?: { readonly conversationId: string } | null | undefined;
-      }
-    | null
-    | undefined;
+interface SdlcCanvas {
+  readonly id: string;
+  readonly folderId?: string | null;
+  readonly sdlcArtifact?: { readonly artifactType?: string | null } | null;
+}
+interface SdlcActivity {
+  readonly channelId?: string | null;
+  readonly canvas?: SdlcCanvas | null;
+  readonly canvasId?: string | null;
+  readonly trackId?: string | null;
+  readonly ticketId?: string | null;
+  readonly conversationId?: string | null;
+  readonly messageId?: string | null;
+  readonly blockId?: string | null;
+  readonly actionSource?: string | null;
+  readonly actionSourceId?: string | null;
 }
 
-const canvasSpecialSection = (artifactType: unknown): string | null => {
-  if (typeof artifactType !== 'string') return null;
-  if (isBaselineCanvasType(artifactType)) return 'baseline';
-  if (artifactType === 'WIKI') return 'wiki';
-  return null;
-};
-
-const sdlcPath = (repoId: string, section: string, search?: URLSearchParams): string => {
-  const query = search?.toString();
-  return `/sdlc/${encodeURIComponent(repoId)}/${section}${query ? `?${query}` : ''}`;
-};
-
+/** SDLC's row-to-path rule. The owner is stamped at write time, so nothing is fetched. */
 export function resolveSdlcActivityTarget(input: {
-  activity: SdlcActivityNavigationActivity;
+  activity: SdlcActivity;
   channelType: string | null | undefined;
-  repoId: string | null | undefined;
   fallbackPath: string;
 }): string {
-  // SDLC repository channels are identified by channel type; the repo comes
-  // from the repos table (1:1 with the channel), not from channel metadata.
-  if (input.channelType !== 'SDLC' || !input.repoId) return input.fallbackPath;
-  const repoId = input.repoId;
+  const { activity } = input;
+  const channelId = activity.channelId;
+  if (input.channelType !== 'SDLC' || !channelId) return input.fallbackPath;
 
-  const canvasId = input.activity.canvasId ?? input.activity.canvas?.id;
-  if (canvasId) {
-    const special = canvasSpecialSection(input.activity.canvas?.sdlcArtifact?.artifactType);
-    if (special) {
-      return sdlcPath(repoId, special, new URLSearchParams({ canvas: canvasId }));
-    }
-    const folderId = input.activity.canvas?.folderId;
-    if (folderId) {
-      return sdlcPath(
-        repoId,
-        'artifacts',
-        new URLSearchParams({ type: folderId, canvas: canvasId }),
-      );
-    }
-  }
+  const conversationId = activity.conversationId ?? undefined;
+  const canvas = activity.canvas;
+  // Only a conversation with no owner is left to the ticket's own page.
+  const place: Partial<SdlcNavTarget> = activity.canvasId
+    ? {
+        ...sdlcSectionForCanvas(canvas?.sdlcArtifact?.artifactType, canvas?.folderId),
+        canvasId: activity.canvasId,
+        conversationId,
+      }
+    : activity.trackId
+      ? { section: 'tracks', trackId: activity.trackId, conversationId }
+      : activity.ticketId
+        ? // conversationId is only the scroll anchor here; the page has no panel.
+          { section: 'tickets', ticketId: activity.ticketId, conversationId }
+        : { section: 'overview' };
 
-  const ticketId = input.activity.ticketId ?? input.activity.ticket?.id;
-  if (ticketId) {
-    return sdlcPath(repoId, 'tickets', new URLSearchParams({ ticket: ticketId }));
-  }
+  // A canvas comment mention files the thread id in actionSourceId.
+  const commentThreadId =
+    activity.actionSource === 'canvas_comment' && activity.actionSourceId !== activity.canvasId
+      ? activity.actionSourceId
+      : undefined;
 
-  const conversationId =
-    input.activity.message?.conversation?.conversationId ?? input.activity.conversationId;
-  if (conversationId) {
-    const search = new URLSearchParams({
-      discussion: '1',
-      chat: 'conversations',
-      conversation: conversationId,
-    });
-    const messageId = input.activity.message?.messageId ?? input.activity.messageId;
-    const hash = new URLSearchParams({ origin: conversationId });
-    if (messageId) hash.set('messageId', messageId);
-    return `${sdlcPath(repoId, 'overview', search)}#${hash.toString()}`;
-  }
-
-  return sdlcPath(repoId, 'overview');
+  return buildSdlcPath({
+    ...place,
+    section: place.section ?? 'overview',
+    channelId,
+    ...(activity.messageId ? { messageId: activity.messageId } : {}),
+    ...(activity.blockId ? { blockId: activity.blockId } : {}),
+    ...(commentThreadId ? { commentThreadId } : {}),
+  });
 }

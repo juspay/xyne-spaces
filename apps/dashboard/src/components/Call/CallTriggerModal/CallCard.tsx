@@ -2,6 +2,7 @@ import React, { useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
+
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -229,8 +230,10 @@ export const CallCard: React.FC<CallCardProps> = ({
                 <div className='text-xs text-muted-foreground'>{callDuration}</div>
               )}
               <button
+                className='p-0 h-auto hover:bg-transparent'
                 onClick={handleLeaveCall}
                 data-track-category='CALLS'
+                data-ph-capture-attribute-track-id='leave_call'
                 data-track-name='LeaveCall'
                 data-track-metadata={JSON.stringify({
                   callId: call.externalId,

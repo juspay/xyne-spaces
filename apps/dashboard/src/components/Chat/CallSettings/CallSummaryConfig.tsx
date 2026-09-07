@@ -6,6 +6,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { callSummaryApi } from '../../../api/callSummaryApi';
 import { Dialog } from '../../ui/Dialog/Dialog';
+
 import { SummaryCanvasPreview } from './SummaryCanvasPreview';
 
 const AI_WORDS = [
@@ -277,6 +278,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                     disabled={!aiInstruction.trim() || aiLoading}
                     aria-label='Edit with AI'
                     className='absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-primary hover:bg-muted/60 disabled:pointer-events-none disabled:opacity-40'
+                    data-ph-capture-attribute-track-id='edit_call_summary_with_ai'
                     data-track-category='CallSummary'
                     data-track-name='EditWithAI'
                   >
@@ -304,6 +306,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                   onClick={() => void handleSave()}
                   disabled={!dirty || saving}
                   className='inline-flex items-center rounded-[10px] bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50'
+                  data-ph-capture-attribute-track-id='save_call_summary_prompt'
                   data-track-category='CallSummary'
                   data-track-name='SaveCallSummary'
                 >

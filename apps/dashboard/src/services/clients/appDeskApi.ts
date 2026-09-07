@@ -1,9 +1,45 @@
 import { apiInstance } from './apiClient';
 
-export async function disconnectAppDesk(channelId: string): Promise<void> {
-  await apiInstance.post<{ message: string }>(`/integrations/app-desk/${channelId}/disconnect`);
+export interface ConnectedChannelApp {
+  sourceId: string;
+  installedAppId: string;
+  /** Null for a binding whose app was uninstalled — nothing deletes the source row. */
+  appName: string | null;
+  isActive: boolean;
+  createdAt: string;
 }
 
-export async function reconnectAppDesk(channelId: string): Promise<void> {
-  await apiInstance.post<{ message: string }>(`/integrations/app-desk/${channelId}/reconnect`);
+export async function listChannelApps(channelId: string): Promise<ConnectedChannelApp[]> {
+  const res = await apiInstance.get<{ success: true; apps: ConnectedChannelApp[] }>(
+    `/integrations/app-desk/channels/${channelId}/apps`,
+  );
+  return res.data.apps;
+}
+
+export async function connectChannelApp(channelId: string, installedAppId: string): Promise<void> {
+  await apiInstance.post<{ success: true }>(`/integrations/app-desk/channels/${channelId}/apps`, {
+    installedAppId,
+  });
+}
+
+export async function disconnectChannelApp(
+  channelId: string,
+  installedAppId: string,
+): Promise<void> {
+  await apiInstance.delete<{ success: true }>(
+    `/integrations/app-desk/channels/${channelId}/apps/${installedAppId}`,
+  );
+}
+
+export interface AppDeskEligibleApp {
+  installedAppId: string;
+  appId: string;
+  name: string;
+  description: string | null;
+  deskCount: number;
+}
+
+export async function listAppDeskEligibleApps(): Promise<AppDeskEligibleApp[]> {
+  const res = await apiInstance.get<{ apps: AppDeskEligibleApp[] }>('/integrations/app-desk/apps');
+  return res.data.apps;
 }

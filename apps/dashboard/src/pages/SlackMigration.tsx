@@ -124,6 +124,17 @@ const ago = (ts: number): string => {
   return `${Math.round(h / 24)}d ago`;
 };
 
+// Human-readable ingest duration, e.g. "7m 12s".
+const fmtDuration = (ms: number): string => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600),
+    m = Math.floor((s % 3600) / 60),
+    sec = s % 60;
+  if (h) return `${h}h ${m}m ${sec}s`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
+};
+
 // Pipeline stages; position derived from status (and phase when stopped/failed).
 const STAGES = ['Collect', 'Approve', 'Ingest', 'Done'] as const;
 const activeStage = (j: MigrationJobView): number => {
@@ -394,6 +405,16 @@ function JobCard({
         <PhaseProgress job={job} />
       </div>
 
+      {job.status === 'COMPLETED' && typeof job.ingestDurationMs === 'number' && (
+        <div className='mt-3 flex items-start gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400'>
+          <Info className='mt-0.5 size-3.5 shrink-0' />
+          <span>
+            Ingested {job.stats.messages.toLocaleString()} messages in{' '}
+            <span className='font-medium tabular-nums'>{fmtDuration(job.ingestDurationMs)}</span>
+          </span>
+        </div>
+      )}
+
       {job.status === 'FAILED' && job.error && (
         <div className='mt-3 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive'>
           <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
@@ -413,13 +434,19 @@ function JobCard({
       )}
 
       {job.issues && job.issues.length > 0 && (
-        <div className='mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400'>
-          <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
-          <span className='break-words'>
-            {job.issues.length} conversation{job.issues.length > 1 ? 's' : ''} not fully migrated —{' '}
-            {job.issues[0]?.reason}
-            {job.issues.length > 1 ? ` (+${job.issues.length - 1} more)` : ''}
-          </span>
+        <div className='mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400'>
+          <div className='flex items-center gap-2 font-medium'>
+            <TriangleAlert className='size-3.5 shrink-0' />
+            {job.issues.length} conversation{job.issues.length > 1 ? 's' : ''} not fully migrated
+          </div>
+          <ul className='mt-1.5 space-y-1 pl-5'>
+            {job.issues.map((issue, i) => (
+              <li key={`${issue.conversationId}-${i}`} className='break-words'>
+                <span className='font-medium'>{issue.label ?? issue.conversationId}</span>
+                <span className='text-amber-600/70 dark:text-amber-400/70'> — {issue.reason}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -817,6 +844,7 @@ export default function SlackMigration(): React.JSX.Element {
                         <Button
                           disabled={busy || unreachable || !token.trim()}
                           loading={busy}
+                          trackId='slack_migration_submit_dm'
                           onClick={() =>
                             void run(() => slackMigrationApi.submitDm(token.trim())).then(ok => {
                               if (ok) setToken('');
@@ -913,6 +941,7 @@ export default function SlackMigration(): React.JSX.Element {
                         loading={busy}
                         data-track-category='SLACK_MIGRATION'
                         data-track-name='SUBMIT_CHANNEL_MIGRATION'
+                        trackId='slack_migration_submit_channel'
                         onClick={() =>
                           void run(() => slackMigrationApi.submitChannel(channel)).then(ok => {
                             if (ok)
@@ -1023,6 +1052,7 @@ function IngestionControl({
               variant='outline'
               size='sm'
               disabled={busy}
+              trackId='slack_migration_stop_ingestion'
               onClick={() => void run(() => slackMigrationApi.stopIngestion())}
               data-track-category='SLACK_MIGRATION'
               data-track-name='STOP_INGESTION'
@@ -1034,6 +1064,7 @@ function IngestionControl({
             <Button
               size='sm'
               disabled={busy}
+              trackId='slack_migration_start_ingestion'
               onClick={() => void run(() => slackMigrationApi.startIngestion())}
               data-track-category='SLACK_MIGRATION'
               data-track-name='START_INGESTION'
@@ -1077,6 +1108,7 @@ function OwnerActions({
           size='sm'
           disabled={busy}
           loading={pending === 'resume'}
+          trackId='slack_migration_resume_own'
           onClick={() => act('resume', () => slackMigrationApi.resumeMine(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='RESUME_OWN_JOB'
@@ -1091,6 +1123,7 @@ function OwnerActions({
           size='sm'
           disabled={busy}
           loading={pending === 'remove'}
+          trackId='slack_migration_remove_own'
           onClick={() => act('remove', () => slackMigrationApi.removeMine(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='DELETE_OWN_JOB'
@@ -1128,6 +1161,7 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'approve'}
+          trackId='slack_migration_approve'
           onClick={() => act('approve', () => slackMigrationApi.approve(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='APPROVE_JOB'
@@ -1142,6 +1176,7 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'stop'}
+          trackId='slack_migration_stop'
           onClick={() => act('stop', () => slackMigrationApi.stop(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='STOP_JOB'
@@ -1156,6 +1191,7 @@ function AdminActions({
           size='sm'
           disabled={busy}
           loading={pending === 'resume'}
+          trackId='slack_migration_resume_admin'
           onClick={() => act('resume', () => slackMigrationApi.resume(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='RESUME_JOB'
@@ -1169,6 +1205,7 @@ function AdminActions({
         size='sm'
         disabled={busy}
         loading={pending === 'remove'}
+        trackId='slack_migration_remove_admin'
         onClick={() => act('remove', () => slackMigrationApi.remove(job.id))}
         data-track-category='SLACK_MIGRATION'
         data-track-name='DELETE_JOB'

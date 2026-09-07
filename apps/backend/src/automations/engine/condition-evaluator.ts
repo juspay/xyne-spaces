@@ -1,6 +1,6 @@
 import type { Condition, LeafCondition } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
-import { ConditionOperator } from '../types/operators';
+import { compileConditionRegex, ConditionOperator } from '../types/operators';
 import { extractRefPath, isPureRef } from '../util/variable-ref';
 import { logger } from '@/utils/logger';
 
@@ -100,6 +100,17 @@ function applyOperator(
       }
       if (Array.isArray(resolved)) return resolved.includes(refValue);
       return false;
+
+    case ConditionOperator.MATCHES_REGEX:
+      if (typeof resolved !== 'string' || typeof refValue !== 'string') return false;
+      {
+        const regex = compileConditionRegex(refValue);
+        if (!regex) {
+          logger.info('[CONDITION] matches_regex — invalid pattern, result=false');
+          return false;
+        }
+        return regex.test(resolved);
+      }
 
     case ConditionOperator.GT:
     case ConditionOperator.GTE:

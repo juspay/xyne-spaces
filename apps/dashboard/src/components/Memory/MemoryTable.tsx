@@ -27,6 +27,7 @@ import type {
   MemoryFilters,
 } from '../../types/memory';
 import Dialog from '../ui/Dialog';
+
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -539,8 +540,9 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               });
             }}
             disabled={deleteSessionMutation.isPending}
-            className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            className='h-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
             title='Delete all Vespa memory docs for this session'
+            data-ph-capture-attribute-track-id='memory_delete_session'
             data-track-category='Memory'
             data-track-name='DeleteSession'
           >

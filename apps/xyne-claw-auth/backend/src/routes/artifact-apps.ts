@@ -26,6 +26,7 @@ import { getRequesterId } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { chatAttachmentRepository } from "../repositories/index.js";
 import { buildReactArtifact } from "xyne-claw-shared/tools/react-artifact";
+import { ICON_META } from "@xyne/icons/meta";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("artifact-apps");
@@ -56,6 +57,19 @@ const saveBody = z.object({
 
 const addVersionBody = z.object({ attachmentId: z.string().min(1) });
 const publishBody = z.object({ versionId: z.string().min(1) });
+const restoreBody = z.object({ versionId: z.string().min(1) });
+
+/** The dashboard can only draw icons the set contains; reject anything else at
+ *  the boundary rather than storing a name that renders as the fallback. */
+const ICON_NAMES = new Set(ICON_META.map((m) => m.name));
+const patchBody = z.object({
+  icon: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .refine((n) => ICON_NAMES.has(n), { message: "Not a Xyne icon id" })
+    .nullable(),
+});
 
 function badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
   res.status(400).json({
@@ -286,6 +300,94 @@ artifactAppsRouter.post("/:id/publish", async (req: Request<{ id: string }>, res
 });
 
 /** POST /:id/unpublish — back to private; the pin is cleared. */
+/**
+ * POST /:id/restore — move HEAD back to an earlier version.
+ *
+ * A pointer move, never a copy. `@@unique([appId, contentHash])` makes
+ * re-inserting an old build as a new row impossible by design, so restore
+ * declares which immutable version is current rather than duplicating content.
+ * That also means restoring is free and endlessly reversible: every version
+ * stays in the list, including the one you restored away from.
+ *
+ * Deliberately does NOT touch `publishedVersionId`. Head is what the owner and
+ * the agent work on; the pin is what everyone else sees. Rolling back your own
+ * draft must not silently republish something different to the workspace —
+ * un-publishing is its own explicit act.
+ *
+ * Because the move leaves no trace in the data it touches, the act itself is
+ * recorded as an `ArtifactAppRestore` in the same transaction. That row is the
+ * only thing that can later explain why a thread whose newest generation is v5
+ * is showing v2.
+ */
+artifactAppsRouter.post("/:id/restore", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const parsed = restoreBody.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  if (!app || app.isArchived) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  // Owner-only for now. Step 4 widens this to group-DM participants, at which
+  // point the check becomes channel membership rather than ownership.
+  if (app.ownerUserId !== requesterId) {
+    res.status(403).json({ success: false, error: "Forbidden" });
+    return;
+  }
+
+  // The version must belong to THIS app — otherwise head could be pointed at
+  // another app's build, which the payload route would then happily serve.
+  const version = await prisma.artifactAppVersion.findUnique({ where: { id: parsed.data.versionId } });
+  if (!version || version.appId !== app.id) {
+    res.status(404).json({ success: false, error: "Version not found for this app" });
+    return;
+  }
+
+  // Restoring to what is already current is a no-op, and logging it would put a
+  // "Restored to v3" line in the transcript that explains nothing. Return the
+  // app unchanged rather than 400 — the caller asked for a state that holds.
+  if (app.headVersionId === version.id) {
+    res.json({ success: true, app, versionId: version.id, versionNumber: version.versionNumber });
+    return;
+  }
+
+  const from = app.headVersionId
+    ? await prisma.artifactAppVersion.findUnique({
+        where: { id: app.headVersionId },
+        select: { id: true, versionNumber: true },
+      })
+    : null;
+
+  // One transaction: a head that moved without its event would be exactly the
+  // silent rollback this table exists to prevent.
+  const [updated] = await prisma.$transaction([
+    prisma.artifactApp.update({
+      where: { id: app.id },
+      data: { headVersionId: version.id, updatedAt: new Date() },
+    }),
+    prisma.artifactAppRestore.create({
+      data: {
+        workspaceId: app.workspaceId,
+        appId: app.id,
+        versionId: version.id,
+        versionNumber: version.versionNumber,
+        fromVersionId: from?.id ?? null,
+        fromVersionNumber: from?.versionNumber ?? null,
+        userId: requesterId,
+      },
+    }),
+  ]);
+
+  log.info(`app ${app.id} head restored to v${version.versionNumber} by ${requesterId}`);
+  res.json({ success: true, app: updated, versionId: version.id, versionNumber: version.versionNumber });
+});
+
 artifactAppsRouter.post("/:id/unpublish", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   const requesterId = getRequesterId(req);
   if (!requesterId) {
@@ -357,6 +459,23 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
     for (const v of all) if (!latestByApp.has(v.appId)) latestByApp.set(v.appId, v);
   }
 
+  // Owner display names for the library cards — an id is not an answer to "who
+  // made this". Resolved from claw-auth's OWN users table (kept current by JIT
+  // upsert) rather than across the Spaces connection: `ownerUserId` is set from
+  // the authenticated requester, so a local row always exists, and this is the
+  // same one-query id→name join every other route here uses. Falls back to the
+  // email local-part when a row has no name.
+  const ownerIds = [...new Set(apps.map((a) => a.ownerUserId))];
+  const owners = ownerIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: ownerIds } },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const ownerNames = new Map(
+    owners.map((u) => [u.id, u.name?.trim() || u.email?.split("@")[0] || null] as const),
+  );
+
   res.json({
     success: true,
     apps: apps.map((a) => {
@@ -372,12 +491,48 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
         description: a.description,
         visibility: a.visibility,
         ownerUserId: a.ownerUserId,
+        ownerName: ownerNames.get(a.ownerUserId) ?? null,
+        icon: a.icon,
         publishedAt: a.publishedAt,
         updatedAt: a.updatedAt,
         manifest: v?.manifest ?? null,
       };
     }),
   });
+});
+
+/**
+ * PATCH /:id — the owner's own edits to app identity. Today: `icon`.
+ *
+ * Sending `icon: null` clears it back to the fallback mark. The user's choice
+ * is durable — the session path never overwrites a non-null icon — so this is
+ * the one write that can change it after the first build.
+ */
+artifactAppsRouter.patch("/:id", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const parsed = patchBody.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  if (!app || app.isArchived) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  if (app.ownerUserId !== requesterId) {
+    res.status(403).json({ success: false, error: "Forbidden" });
+    return;
+  }
+
+  const updated = await prisma.artifactApp.update({
+    where: { id: app.id },
+    data: { icon: parsed.data.icon, updatedAt: new Date() },
+  });
+  res.json({ success: true, app: { ...updated, isOwner: true } });
 });
 
 /** GET /:id — metadata. Owners see every version; everyone else sees the pin. */
@@ -411,7 +566,36 @@ artifactAppsRouter.get("/:id", async (req: Request<{ id: string }>, res: Respons
     select: { id: true, versionNumber: true, manifest: true, sizeBytes: true, createdAt: true },
   });
 
-  res.json({ success: true, app: { ...app, isOwner }, versions });
+  // Restore history is DRAFT history: it names versions a non-owner is not
+  // served and describes edits behind the published pin. Owners only — everyone
+  // else gets an empty list rather than a shorter one, so the thread renders the
+  // same way whether the feature has events or the caller has no right to them.
+  const restores = isOwner
+    ? await prisma.artifactAppRestore.findMany({
+        where: { appId: app.id },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          versionId: true,
+          versionNumber: true,
+          fromVersionId: true,
+          fromVersionNumber: true,
+          userId: true,
+          createdAt: true,
+        },
+      })
+    : [];
+
+  // Who built it. An id is not an answer to "whose app is this", and the
+  // Settings tab shows this to a non-owner looking at a published app. Same
+  // local-users join the listing route uses, with the same email fallback.
+  const owner = await prisma.user.findUnique({
+    where: { id: app.ownerUserId },
+    select: { name: true, email: true },
+  });
+  const ownerName = owner?.name?.trim() || owner?.email?.split("@")[0] || null;
+
+  res.json({ success: true, app: { ...app, isOwner, ownerName }, versions, restores });
 });
 
 /**

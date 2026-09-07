@@ -33,7 +33,7 @@ const router = Router();
  * @param {boolean} filterOnly - Enable filter-only mode (no query text required) (optional)
  * @param {boolean} includeDebugInfo - Include debug info in response (optional)
  * @param {boolean} searchId - searchId (optional)
- * @param {string} presentationSummary - Vespa presentation.summary profile, e.g. "lean" (optional)
+ * @param {string} presentationSummary - Vespa presentation.summary profile, e.g. "lean" (optional, defaults to "lean")
  */
 router.get('/', validateQuery(vespaSearchQuerySchema), validateSearchFilters(), searchHandler);
 

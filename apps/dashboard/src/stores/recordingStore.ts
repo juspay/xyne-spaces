@@ -147,13 +147,16 @@ export const recordingStore = createStore({
     requestAutoStart: (
       context,
       event: { conversationId?: string; channelId?: string } = {},
-    ): RecordingState => ({
-      ...context,
-      pendingAutoStart: true,
-      autoStartRequestedAt: Date.now(),
-      pendingConversationId: event.conversationId ?? null,
-      pendingChannelId: event.channelId ?? null,
-    }),
+    ): RecordingState => {
+      if (context.status === 'starting') return context;
+      return {
+        ...context,
+        pendingAutoStart: true,
+        autoStartRequestedAt: Date.now(),
+        pendingConversationId: event.conversationId ?? null,
+        pendingChannelId: event.channelId ?? null,
+      };
+    },
 
     clearAutoStart: (context): RecordingState => ({
       ...context,

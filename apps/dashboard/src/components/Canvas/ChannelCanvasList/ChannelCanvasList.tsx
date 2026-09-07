@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText, Folder, Plus, Search } from 'lucide-react';
 import type { Canvas, CanvasFolder } from '../Canvas.types';
 import Input from '../../ui/Input';
+
 import { Dialog } from '../../ui/Dialog';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasRow } from '../CanvasRow';
@@ -257,6 +258,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                           disabled={isCreatingCanvas}
                           title='Create canvas in folder'
                           data-testid={`channel-folder-create-canvas-${folderGroup.folder.id}`}
+                          data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
                           data-track-category='CANVAS'
                           data-track-name='Create_Canvas_In_Channel_Folder'
                         >

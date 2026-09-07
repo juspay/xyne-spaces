@@ -1,6 +1,7 @@
 import React from 'react';
 import { Settings, Shield } from 'lucide-react';
 import Popover from '../ui/Popover';
+
 import { Switch } from '../ui/Switch';
 import { useSelector } from '@xstate/react';
 import { browserPanelActor } from '../../machines/browserPanelMachine';
@@ -72,7 +73,8 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
           onClick={() => {
             void handleClearSiteData();
           }}
-          className='w-full text-left text-sm text-red-500 hover:bg-red-500/10 px-2 py-1.5 rounded-md transition-colors font-medium border border-transparent hover:border-red-500/20'
+          data-ph-capture-attribute-track-id='clear_site_data'
+          className='h-auto w-full justify-start text-left text-sm text-red-500 hover:bg-red-500/10 hover:text-red-500 px-2 py-1.5 rounded-md transition-colors font-medium border border-transparent hover:border-red-500/20'
           data-track-category='browser_settings'
           data-track-name='clear_site_data'
         >

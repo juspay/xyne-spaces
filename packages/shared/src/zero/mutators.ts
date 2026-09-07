@@ -25,6 +25,7 @@ import {
   CanvasCommentThreadStatus,
   BookmarkEntityType,
   AttachmentEntityType,
+  AttachmentUploadStatus,
   UserPresenceStatus,
   FormFieldType,
   FormContextType,
@@ -55,6 +56,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   GuestEntity,
   WorkspaceRole,
   Status,
@@ -63,7 +65,6 @@ import {
   DraftOrigin,
   Schema,
   CollectionRole,
-  VCSProviderType,
   ReleaseTrackingMode,
   MessageArtifactStatus,
 } from './schema.js';
@@ -88,8 +89,11 @@ import {
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
 import {
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
-  sdlcDiscussionSchema,
+  entityLinkContextSchema,
 } from '../sdlc.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
@@ -110,6 +114,12 @@ import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
+import {
+  parseBoardEtaManagement,
+  mergeBoardEtaManagement,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+} from '../validation/etaManagementSchema.js';
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
@@ -163,6 +173,41 @@ async function resolveCollectionPermissionRole(
     if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
   }
   return role;
+}
+
+export const ATTACHMENT_STILL_UPLOADING = 'Attachment is still uploading';
+
+/**
+ * An attachment row is created the moment a file is picked, and its bytes land later over
+ * a separate upload request. Rows predating `uploadStatus` carry only a url.
+ */
+export function isAttachmentUploaded(attachment: {
+  url: string;
+  uploadStatus?: string | null;
+}): boolean {
+  return (
+    !!attachment.url &&
+    (attachment.uploadStatus == null ||
+      attachment.uploadStatus === AttachmentUploadStatus.COMPLETED)
+  );
+}
+
+/**
+ * Inside this window an unfinished upload is probably still streaming, so the send is
+ * rejected and the caller retries. Beyond it the upload is never coming back (the client
+ * died mid-transfer and its cleanup never reached the server), and the message goes
+ * without the attachment — otherwise one orphan row would block the composer forever.
+ */
+const ATTACHMENT_UPLOAD_WINDOW_MS = 30 * 60 * 1000;
+
+export function isAttachmentUploadInFlight(attachment: {
+  uploadStatus?: string | null;
+  createdAt: number;
+}): boolean {
+  return (
+    attachment.uploadStatus !== AttachmentUploadStatus.FAILED &&
+    Date.now() - attachment.createdAt < ATTACHMENT_UPLOAD_WINDOW_MS
+  );
 }
 
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
@@ -232,7 +277,11 @@ import {
   updateInitialMessageMdField,
   updateInitialMessageMdReaction,
 } from './messageMetadata.js';
-import { updateTicketMdFromZero } from '../utils/ticketMetadata.js';
+import {
+  updateTicketMdFromZero,
+  updateSubTicketsMdFromZero,
+  linkSubTicketConversationToParentFromZero,
+} from '../utils/ticketMetadata.js';
 import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
@@ -1696,7 +1745,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
         attachmentIds: z.array(z.string()).optional(),
-        sdlcDiscussion: sdlcDiscussionSchema.optional(),
+        entityLinkContext: entityLinkContextSchema.optional(),
       }),
       async ({
         tx,
@@ -1709,7 +1758,7 @@ export const mutators = defineMutators({
           messageId,
           timestamp,
           attachmentIds,
-          sdlcDiscussion,
+          entityLinkContext,
         },
       }) => {
         if (content === '') {
@@ -1724,7 +1773,7 @@ export const mutators = defineMutators({
           // Transfer only these specific ids; leave any other draft attachments
           // alone so a concurrent compose isn't corrupted. Never delete the draft row.
           if (attachmentIds.length > 0) {
-            hasAttachments = true;
+            let attachedCount = 0;
             for (const attachmentId of attachmentIds) {
               const attachment = await tx.run(
                 zql.message_attachments.where('id', attachmentId).one(),
@@ -1734,6 +1783,13 @@ export const mutators = defineMutators({
                 attachment.entityType === AttachmentEntityType.CHAT &&
                 attachment.entityId === messageId
               ) {
+                attachedCount++;
+                continue;
+              }
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
                 continue;
               }
               await tx.mutate.message_attachments.update({
@@ -1742,7 +1798,9 @@ export const mutators = defineMutators({
                 entityType: AttachmentEntityType.CHAT,
                 conversationId,
               });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
           }
         } else {
           // Legacy path: scan the current draft and transfer everything.
@@ -1761,17 +1819,23 @@ export const mutators = defineMutators({
                 .where('entityType', AttachmentEntityType.DRAFT),
             );
 
-            if (draftAttachments.length > 0) {
-              hasAttachments = true;
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
+            let attachedCount = 0;
+            for (const attachment of draftAttachments) {
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
+                continue;
               }
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
 
             await tx.mutate.draft_messages.delete({
               id: draft.id,
@@ -1802,13 +1866,13 @@ export const mutators = defineMutators({
           }),
         });
 
-        if (sdlcDiscussion) {
+        if (entityLinkContext) {
           await tx.mutate.sdlc_entity_links.insert({
-            id: sdlcDiscussion.linkId,
+            id: entityLinkContext.linkId,
             workspaceId: ctx.workspaceId,
-            repoId: sdlcDiscussion.repoId,
-            sourceType: sdlcDiscussion.ownerType,
-            sourceId: sdlcDiscussion.ownerId,
+            channelId,
+            sourceType: entityLinkContext.sourceType,
+            sourceId: entityLinkContext.sourceId,
             targetType: 'CONVERSATION',
             targetId: conversationId,
             relationType: 'DISCUSSION',
@@ -2340,7 +2404,7 @@ export const mutators = defineMutators({
           // those ids, leave any other DRAFT attachments alone, never touch
           // the draft row (the client's clearContent mutator owns draft state).
           if (attachmentIds.length > 0) {
-            hasAttachments = true;
+            let attachedCount = 0;
             for (const attachmentId of attachmentIds) {
               const attachment = await tx.run(
                 zql.message_attachments.where('id', attachmentId).one(),
@@ -2350,6 +2414,13 @@ export const mutators = defineMutators({
                 attachment.entityType === AttachmentEntityType.CHAT &&
                 attachment.entityId === messageId
               ) {
+                attachedCount++;
+                continue;
+              }
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
                 continue;
               }
               await tx.mutate.message_attachments.update({
@@ -2358,7 +2429,9 @@ export const mutators = defineMutators({
                 entityType: AttachmentEntityType.CHAT,
                 conversationId,
               });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
           }
         } else {
           // Legacy path: scan the draft for this conversation and transfer everything.
@@ -2377,17 +2450,23 @@ export const mutators = defineMutators({
                 .where('entityType', AttachmentEntityType.DRAFT),
             );
 
-            if (draftAttachments.length > 0) {
-              hasAttachments = true;
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
+            let attachedCount = 0;
+            for (const attachment of draftAttachments) {
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
+                continue;
               }
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
 
             await tx.mutate.draft_messages.delete({
               id: draft.id,
@@ -3279,6 +3358,7 @@ export const mutators = defineMutators({
               position: index,
               createdBy: ctx.userID,
               url: '', // Will be populated after upload completes
+              uploadStatus: AttachmentUploadStatus.PENDING,
               workspaceId: ctx.workspaceId,
               metadata: attachmentMetadata,
               conversationId: conversationId || null,
@@ -4305,6 +4385,41 @@ export const mutators = defineMutators({
         await updateTicketMdFromZero(tx, zql, ticketId);
       },
     ),
+    acknowledgeEtaRisk: defineMutator(
+      z.object({
+        ticketId: z.string(),
+        expectedFingerprint: z.string(),
+        reason: z.string().min(1),
+        clientTimestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { ticketId, expectedFingerprint, reason, clientTimestamp } }) => {
+        const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+        if (!ticket) return;
+
+        const current = parseTicketEtaManagement(ticket.metadata);
+        // Optimistic no-op on a stale fingerprint - the server is authoritative and will
+        // reject with a conflict the client can refetch from; this just avoids the local
+        // optimistic UI flashing an acknowledgment that won't be confirmed.
+        if (current.planningRisk.state !== 'ACTIVE' || current.planningRisk.fingerprint !== expectedFingerprint) {
+          return;
+        }
+
+        const merged = mergeTicketEtaManagement(ticket.metadata, {
+          planningRisk: {
+            state: 'ACKNOWLEDGED',
+            acknowledgedAt: clientTimestamp,
+            acknowledgedBy: ctx.userID,
+            acknowledgmentReason: reason,
+          },
+        });
+
+        await tx.mutate.tickets.update({
+          id: ticketId,
+          metadata: merged as ReadonlyJSONValue,
+          updatedAt: clientTimestamp,
+        });
+      },
+    ),
   },
   ticketStageEta: {
     update: defineMutator(
@@ -4403,6 +4518,23 @@ export const mutators = defineMutators({
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });
+
+        if (mappedTicketId !== undefined) {
+          const mappings = (await tx.run(
+            zql.ticket_sub_ticket_mappings.where('subTicketId', subTicketId),
+          )) as Array<{ ticketId: string }>;
+          for (const mapping of mappings) {
+            await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
+          }
+          if (mappedTicketId && mappings[0]) {
+            await linkSubTicketConversationToParentFromZero(
+              tx,
+              zql,
+              mappedTicketId,
+              mappings[0].ticketId,
+            );
+          }
+        }
       },
     ),
   },
@@ -4461,7 +4593,6 @@ export const mutators = defineMutators({
         projectId: z.string(),
         mainBoardId: z.string(),
         mainBoardName: z.string(),
-        vcsProvider: z.nativeEnum(VCSProviderType),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
         applications: z.array(
@@ -4761,6 +4892,11 @@ export const mutators = defineMutators({
         projectId: z.string().optional(),
         boardType: z.nativeEnum(BoardType).optional(),
         metadata: z.any().optional(),
+        // Automatic ETA management - see the backend mutator for the Standard Path
+        // validation this optimistic client-side write deliberately skips (the server is
+        // authoritative and will reject an invalid path, rolling this write back).
+        autoRecomputeEnabled: z.boolean().optional(),
+        standardPathStageIds: z.array(z.string()).optional(),
         stages: z
           .array(
             z.object({
@@ -4797,6 +4933,8 @@ export const mutators = defineMutators({
           description,
           projectId,
           metadata,
+          autoRecomputeEnabled,
+          standardPathStageIds,
           stages,
           timestamp,
           stageIds = {},
@@ -4844,6 +4982,21 @@ export const mutators = defineMutators({
           }
         }
 
+        // ETA settings merge into the etaManagement subtree instead of replacing the whole
+        // column. Base is the caller's `metadata` when it sent one (so both survive),
+        // otherwise the board's current metadata.
+        const nextMetadata =
+          autoRecomputeEnabled !== undefined || standardPathStageIds !== undefined
+            ? mergeBoardEtaManagement(
+                metadata !== undefined ? metadata : board.metadata,
+                boardType ?? board.boardType,
+                {
+                  ...(autoRecomputeEnabled !== undefined && { autoRecomputeEnabled }),
+                  ...(standardPathStageIds !== undefined && { standardPathStageIds }),
+                },
+              )
+            : metadata;
+
         // Update board
         await tx.mutate.boards.update({
           id: boardId,
@@ -4851,7 +5004,7 @@ export const mutators = defineMutators({
           ...(description !== undefined && { description }),
           ...(projectId !== undefined && { projectId }),
           ...(boardType !== undefined && { boardType }),
-          ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
+          ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });
@@ -6413,6 +6566,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comment_threads.insert({
           id: threadId,
+          workspaceId: ctx.workspaceId,
           canvasId,
           blockId,
           anchorText: anchorText || null,
@@ -6427,6 +6581,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: ctx.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6458,6 +6613,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: ctx.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6495,7 +6651,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }
@@ -6520,7 +6678,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }
@@ -7910,41 +8070,44 @@ export const mutators = defineMutators({
     createLink: defineMutator(
       createSdlcLinkSchema.extend({
         id: z.string(),
-        repoId: z.string(),
+        channelId: z.string(),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {
-        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
-        }
+        // Links belong to the hub. createSdlcLinkSchema already excludes the
+        // membership relation, so this cannot forge a CHANNEL -> REPOSITORY edge.
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', args.channelId)
             .where('userId', ctx.userID)
             .one(),
         );
         if (!participant) {
-          throw new Error('Repository membership required');
+          throw new Error('Hub membership required');
         }
-        const sourceExists = args.sourceType === 'CANVAS'
-          ? Boolean(await tx.run(
-              zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one(),
-            ))
-          : args.sourceType === 'TICKET'
-            ? Boolean(await tx.run(
-                zql.tickets.where('id', args.sourceId).where('channelId', repo.channelId).one(),
-              ))
-            : args.sourceType === 'CHANNEL'
-              ? args.sourceId === repo.channelId
-              : false;
+        const sourceExists =
+          args.sourceType === 'CANVAS'
+            ? Boolean(
+                await tx.run(
+                  zql.canvases.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                ),
+              )
+            : args.sourceType === 'TICKET'
+              ? Boolean(
+                  await tx.run(
+                    zql.tickets.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                  ),
+                )
+              : args.sourceType === 'CHANNEL'
+                ? args.sourceId === args.channelId
+                : false;
         if (!sourceExists) {
-          throw new Error('Relationship source does not belong to this SDLC repository');
+          throw new Error('Relationship source does not belong to this SDLC hub');
         }
         await tx.mutate.sdlc_entity_links.insert({
           id: args.id,
           workspaceId: ctx.workspaceId,
-          repoId: args.repoId,
+          channelId: args.channelId,
           sourceType: args.sourceType,
           sourceId: args.sourceId,
           targetType: args.targetType,
@@ -7956,26 +8119,27 @@ export const mutators = defineMutators({
       },
     ),
     deleteLink: defineMutator(
-      z.object({ repoId: z.string(), linkId: z.string() }),
-      async ({ tx, ctx, args: { repoId, linkId } }) => {
-        const repo = await tx.run(zql.repos.where('id', repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
-        }
+      z.object({ channelId: z.string(), linkId: z.string() }),
+      async ({ tx, ctx, args: { channelId, linkId } }) => {
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', channelId)
             .where('userId', ctx.userID)
             .one(),
         );
         if (!participant) {
-          throw new Error('Repository membership required');
+          throw new Error('Hub membership required');
         }
         const link = await tx.run(
-          zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one(),
+          zql.sdlc_entity_links.where('id', linkId).where('channelId', channelId).one(),
         );
         if (!link) {
           throw new Error('SDLC relationship not found');
+        }
+        // Structural edges are not content: repository membership is detached through
+        // the hub API, track membership only with the track. The mutation ACL agrees.
+        if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(link.relationType)) {
+          throw new Error('Structural SDLC edges are not deleted through the link API');
         }
         await tx.mutate.sdlc_entity_links.delete({ id: linkId });
       },
@@ -7984,35 +8148,45 @@ export const mutators = defineMutators({
     createTrack: defineMutator(
       z.object({
         id: z.string(),
-        repoId: z.string(),
+        linkId: z.string(),
+        channelId: z.string(),
         name: z.string().trim().min(1).max(120),
         description: z.string().trim().max(2000).optional(),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {
-        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
-        }
+        // Tracks belong to the hub, never to one repository in it.
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', args.channelId)
             .where('userId', ctx.userID)
             .one(),
         );
         if (!participant) {
-          throw new Error('Repository membership required');
+          throw new Error('Hub membership required');
         }
         await tx.mutate.sdlc_tracks.insert({
           id: args.id,
           workspaceId: ctx.workspaceId,
-          repoId: args.repoId,
           name: args.name,
           description: args.description,
           status: 'ACTIVE',
           createdBy: ctx.userID,
           createdAt: args.timestamp,
           updatedAt: args.timestamp,
+        });
+        // The track carries no scope column; this edge is what places it in the hub.
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.linkId,
+          workspaceId: ctx.workspaceId,
+          channelId: args.channelId,
+          sourceType: 'CHANNEL',
+          sourceId: args.channelId,
+          targetType: 'TRACK',
+          targetId: args.id,
+          relationType: SDLC_TRACK_MEMBERSHIP_RELATION,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
         });
       },
     ),
@@ -8029,13 +8203,20 @@ export const mutators = defineMutators({
         if (!track) {
           throw new Error('SDLC track not found');
         }
-        const repo = await tx.run(zql.repos.where('id', track.repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
+        const membership = await tx.run(
+          zql.sdlc_entity_links
+            .where('targetType', 'TRACK')
+            .where('targetId', args.trackId)
+            .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+            .one(),
+        );
+        if (!membership?.channelId) {
+          throw new Error('SDLC channel not found');
         }
+        const channelId = membership.channelId;
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', channelId)
             .where('userId', ctx.userID)
             .one(),
         );
@@ -10838,6 +11019,45 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.saved_user_configurations.delete({ id: configId });
+      },
+    ),
+  },
+  viewAccess: {
+    grant: defineMutator(
+      z.object({
+        id: z.string(),
+        viewId: z.string(),
+        entityType: z.nativeEnum(ViewAccessEntityType),
+        entityId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, viewId, entityType, entityId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.view_access
+            .where('viewId', viewId)
+            .where('entityType', entityType)
+            .where('entityId', entityId)
+            .one(),
+        );
+        if (existing) return;
+
+        await tx.mutate.view_access.insert({
+          workspaceId: ctx.workspaceId,
+          id,
+          viewId,
+          entityType,
+          entityId,
+          sharedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    revoke: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        await tx.mutate.view_access.delete({ id });
       },
     ),
   },

@@ -25,6 +25,7 @@ import {
   agentRequestRepository,
 } from "../repositories/index.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
+import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
 import {
   identityFromAgentRow,
   identityFromDraftSpec,
@@ -129,8 +130,8 @@ import type { TwinDelivery, UiWidget } from "xyne-claw-shared";
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
-import { connectorTypesFromText, connectorTypesUserAskedToConnect } from "../lib/connector-hints.js";
-import { availableServerIds } from "../lib/connector-availability.js";
+import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
+import { availabilityForServerIds } from "../lib/connector-availability.js";
 
 const clog = createLogger("webhook");
 const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
@@ -858,6 +859,65 @@ async function pendingActionTargetValidation(
     );
     return { error: null };
   }
+}
+
+async function postPendingWriteApprovalCards(
+  pendingActions: Array<Record<string, unknown>> | undefined,
+  ctx: SessionContext,
+  appToken: string,
+): Promise<number> {
+  if (!pendingActions?.length) return 0;
+  if (!ctx.channelId || !ctx.conversationId) {
+    clog.warn(
+      `[webhook/result] cannot post ${pendingActions.length} write approval card(s): originating thread context is missing`,
+    );
+    return 0;
+  }
+
+  let approvalCardsSent = 0;
+  for (const action of pendingActions) {
+    const targetValidation = await pendingActionTargetValidation(action, ctx, appToken);
+    if (targetValidation.error) {
+      clog.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
+      continue;
+    }
+
+    const params = recordParam(action["params"]);
+    const actionDesc = formatActionDescription(String(action["tool"] ?? ""), params, targetValidation);
+    const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+      serverType: String(action["serverType"] ?? ""),
+      tool: String(action["tool"] ?? ""),
+      params,
+      userId: String(action["userId"] ?? ""),
+      signature: String(action["signature"] ?? ""),
+      agentSlug: ctx.agentSlug ?? "",
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+    }), ctx.spacesAppId);
+
+    if (action["tool"] === "spaces-memory-create" && params["content"]) {
+      const memContent = String(params["content"]);
+      const memDocType = typeof params["docType"] === "string" ? params["docType"] : "fact";
+      const form = new FormData();
+      const blob = new Blob([memContent], { type: "text/markdown" });
+      form.append("files", blob, `memory-${memDocType}-${Date.now()}.md`);
+      form.append("channelId", ctx.channelId);
+      form.append("conversationId", ctx.conversationId);
+      form.append("userId", ctx.spacesAppUserId);
+      form.append("flow", JSON.stringify(writeFlow));
+      await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
+    } else {
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        flow: writeFlow,
+        userId: ctx.spacesAppUserId,
+      }, appToken);
+    }
+    approvalCardsSent += 1;
+  }
+
+  return approvalCardsSent;
 }
 
 /**
@@ -4721,6 +4781,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     };
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     pendingResponses?: Array<{ responseId: string; message: string }>;
+    pendingActions?: Array<Record<string, unknown>>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
     // one-click button below the agent's reply so the user can promote the
     // remaining work to a /goal autonomous loop. See start-goal handling in
@@ -4775,6 +4836,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // Connector cards to post alongside the reply, so the user can connect
     // without leaving the conversation.
     pendingConnectorSuggestions?: PendingConnectorSuggestions;
+    blockedConnectors?: string[];
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -5664,6 +5726,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (payload.emptyReason === "provider_capacity" && !forwardText.trim()) {
       await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
     }
+    if (payload.pendingActions?.length) {
+      try {
+        const approvalCardsSent = await postPendingWriteApprovalCards(payload.pendingActions, ctx, ctx.appToken);
+        log.info(`Automation: posted ${approvalCardsSent}/${payload.pendingActions.length} write action approval(s) in thread ${ctx.conversationId}`);
+      } catch (err) {
+        // Keep forwarding the automation result if Spaces temporarily rejects a
+        // card post. The pending action remains unexecuted and fail-closed.
+        log.warn("Automation: failed to post write action approval card", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     await forwardResult(ctx.resultForwardUrl, payload, forwardText);
     return;
   }
@@ -6121,10 +6195,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   let inferredTypes: string[] = [];
   if (!payload.pendingConnectorSuggestions) {
     try {
-      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "").slice(
-        0,
-        MCP_SUGGEST_INFERRED_MAX,
-      );
+      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "", {
+        includeKeywords: true,
+      }).slice(0, MCP_SUGGEST_INFERRED_MAX);
     } catch (err) {
       log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -6132,9 +6205,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
+  const rosterAsked =
+    !payload.pendingConnectorSuggestions && wantsConnectorRoster(ctx.rootTask ?? ctx.task ?? "");
+
   const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
     payload.pendingConnectorSuggestions ??
-    (inferredTypes.length > 0 ? { serverTypes: inferredTypes, inferred: true } : undefined);
+    (rosterAsked
+      ? { serverTypes: [], listAll: true, inferred: true }
+      : inferredTypes.length > 0
+        ? { serverTypes: inferredTypes, inferred: true }
+        : undefined);
   if (pendingConnectorSuggestions && agentCardDeliverable) {
     try {
       // Roster mode: the user asked what exists, so the SERVER picks the sample
@@ -6147,23 +6227,27 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Resolve every requested type against the catalog. The model supplies
       // names only — descriptions and display names come from the row, and an
       // unknown type is dropped rather than rendered as an empty card.
-      const rows = listAll
+      const candidates = listAll
         ? await prisma.mcpServer.findMany({
             where: { enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
             orderBy: { name: "asc" },
-            take: MCP_SUGGEST_ROSTER_SAMPLE,
           })
         : await prisma.mcpServer.findMany({
             where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
           });
+      const visibleRows = candidates.filter((row) =>
+        isVisibleToUser(parseConnectorMeta(row.connectorMeta), ctx.senderId),
+      );
+      const rows = listAll ? visibleRows.slice(0, MCP_SUGGEST_ROSTER_SAMPLE) : visibleRows;
       const byType = new Map(rows.map((row) => [row.type, row]));
 
-      const connectedIds = await availableServerIds(
+      const availability = await availabilityForServerIds(
         ctx.senderId,
         rows.map((r) => r.id),
       );
+      const blockedTypes = new Set(payload.blockedConnectors ?? []);
 
       // Roster mode is already ordered by the query; otherwise preserve the
       // model's ordering, since it ranked them by relevance.
@@ -6180,7 +6264,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // request, which is exactly how an already-usable connector slipped
       // through. The server owns this fact like every other on the card.
       const askedToConnect = new Set(
-        connectorTypesUserAskedToConnect(ctx.rootTask ?? ctx.task ?? ""),
+        connectorTypesUserAskedFor(ctx.rootTask ?? ctx.task ?? ""),
       );
 
       const connectors = ordered
@@ -6189,12 +6273,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // exceptions, both genuine user intent: roster mode ("what exists?"),
         // and the user naming a connector they want to connect, where a personal
         // connection is a legitimate want even under an org credential.
-        .filter((row) => listAll || askedToConnect.has(row.type) || !connectedIds.has(row.id))
+        .filter((row) => {
+          if (listAll || askedToConnect.has(row.type)) return true;
+          if (availability.personal.has(row.id)) return false;
+          if (availability.org.has(row.id)) return blockedTypes.has(row.type);
+          return true;
+        })
         .map((row) => ({
           serverType: row.type,
           name: row.name,
           ...(row.description ? { description: row.description } : {}),
-          connected: connectedIds.has(row.id),
+          connected: availability.personal.has(row.id) || availability.org.has(row.id),
         }));
 
       if (connectors.length === 0) {

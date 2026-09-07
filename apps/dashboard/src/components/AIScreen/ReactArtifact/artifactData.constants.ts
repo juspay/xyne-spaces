@@ -185,7 +185,7 @@ export interface HostAgentStateMessage {
 export interface AppArtifactMessage {
   source: 'xyne-artifact';
   v: number;
-  type: 'ready' | 'refresh' | 'mutate' | 'agent-run' | 'agent-cancel' | 'agent-attach';
+  type: 'ready' | 'refresh' | 'mutate' | 'agent-run' | 'agent-cancel' | 'agent-attach' | 'error';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
   /** `mutate` only. */
@@ -196,6 +196,11 @@ export interface AppArtifactMessage {
   /** `agent-run` only. */
   prompt?: string;
   agentSlug?: string;
+  /** `error` only: an uncaught failure inside the app, reported so the host can
+   *  show it and offer a fix. `componentStack` comes from the root boundary. */
+  message?: string;
+  stack?: string;
+  componentStack?: string;
 }
 
 export function isAppArtifactMessage(value: unknown): value is AppArtifactMessage {
@@ -203,6 +208,7 @@ export function isAppArtifactMessage(value: unknown): value is AppArtifactMessag
   const msg = value as Partial<AppArtifactMessage>;
   if (msg.source !== 'xyne-artifact') return false;
   if (msg.type === 'ready' || msg.type === 'refresh') return true;
+  if (msg.type === 'error') return typeof msg.message === 'string';
   if (msg.type === 'agent-attach' || msg.type === 'agent-cancel') {
     return typeof msg.runKey === 'string';
   }

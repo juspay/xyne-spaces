@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { Prisma } from '@prisma/client';
+import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
@@ -17,9 +17,12 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
-import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
+import { executeCallLlmWithRetry, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
+import { callLabelService } from '@/services/callLabelService';
+import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -227,13 +230,18 @@ TRANSCRIPT:
 
 // Short topical labels for browsing/search. Kept intentionally simple (no
 // categories/config) — persisted as generic Tag rows by noteTakerTranscriptService.
+// Each label is a single word; multi-word labels would be slugified into
+// hyphenated tags downstream.
+const MAX_CALL_LABELS = 3;
+
 const CALL_LABELS_PROMPT = `
 You are analyzing a call transcript to generate a small set of short topical labels/tags for browsing and search.
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Generate 1-4 short labels that best describe the topics/themes discussed
-- Each label must be 1-3 words, lowercase, describing a topic (e.g. "pricing", "bug report", "onboarding")
+- Generate 1-3 short labels that best describe the topics/themes discussed
+- Each label must be EXACTLY ONE word, lowercase (e.g. "pricing", "onboarding", "billing", "latency")
+- NEVER use multi-word labels, spaces, hyphens or underscores (write "pricing", not "pricing-discussion" or "bug report")
 - Do NOT include people's names, company names, or dates as labels
 - Do NOT duplicate labels
 
@@ -243,7 +251,7 @@ BRAND NAME CORRECTION:
 
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
-  "labels": ["[short topic label]", "[short topic label]"]
+  "labels": ["[one-word topic label]", "[one-word topic label]"]
 }
 
 Only output valid JSON.
@@ -517,13 +525,7 @@ export class TranscriptService {
 
       logger.info(`[${callId}] transcript_processing_completed`, { message_id: messageId });
 
-      // 13. Fire-and-forget: Translate transcript asynchronously in background
-      // This updates the same GCS file without blocking the response
-      this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
-        logger.error(`[${callId}] background_translation_failed`, { error: err });
-      });
-
-      // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
+      // 13. Attach identified transcript (real-name labelled) as a second attachment when available.
       // Written by the Python agent's RealtimeIdentifier during the call into
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
       void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
@@ -759,11 +761,6 @@ export class TranscriptService {
         });
         logger.info(`[${callId}] identified_transcript_attachment_created`, { attachment_id: attachment.id });
       }
-
-      // Apply the same background translation as the plain transcript
-      this.translateIdentifiedTranscriptAsync(callId, formattedPath).catch((err) => {
-        logger.error(`[${callId}] identified_background_translation_failed`, { error: err });
-      });
     } catch (err) {
       logger.error(`[${callId}] identified_transcript_attach_failed`, { error: err });
     }
@@ -875,203 +872,6 @@ export class TranscriptService {
   }
 
   /**
-   * Translate transcript asynchronously in background (fire-and-forget)
-   * Downloads raw transcript from GCS, translates it, and overwrites the same file
-   * @param callId - The external call ID
-   * @param gcsPath - The GCS path to the transcript file
-   */
-  async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
-    try {
-      logger.info(`Starting background translation for call: ${callId}`);
-
-      // 1. Download raw transcript
-      const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
-      const rawTranscript = buffer.toString('utf-8');
-
-      // 2. Translate the transcript
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript, callId);
-
-      // 3. Re-upload translated version (overwrites the same file)
-      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
-        path: storagePath,
-        contentType: 'text/plain',
-        metadata: { callId, type: 'transcript', translated: 'true' },
-      });
-
-      // 4. Update database attachment metadata to mark as translated
-      const attachments = await repositories.messageAttachments.findByCallId(callId);
-
-      if (attachments.length > 0) {
-        const transcriptAttachment = attachments[0];
-        const current = await repositories.messageAttachments.findById(transcriptAttachment.id);
-        const currentMetadata = (current?.metadata as Record<string, any>) || {}; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-        await repositories.messageAttachments.updateVersion(transcriptAttachment.id, {
-          ...currentMetadata,
-        });
-        logger.info(`Updated database attachment metadata for call: ${callId}`);
-      } else {
-        logger.warn(`No attachment found in database for call: ${callId}`);
-      }
-
-      logger.info(`Successfully completed background translation for call: ${callId}`);
-    } catch (error) {
-      logger.error(`Failed to translate transcript in background for call ${callId}:`, error);
-    }
-  }
-
-  /**
-   * Same as translateTranscriptAsync but for the identified transcript GCS file.
-   * Overwrites the identified formatted .txt with the translated version.
-   */
-  private async translateIdentifiedTranscriptAsync(callId: string, gcsPath: string): Promise<void> {
-    try {
-      logger.info(`[${callId}] identified_translation_started`);
-
-      const buffer = await this.transcriptStorage.getFileBuffer(gcsPath);
-      const rawTranscript = buffer.toString('utf-8');
-
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript, callId);
-
-      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
-        path: gcsPath,
-        contentType: 'text/plain',
-        metadata: { callId, type: 'identified_transcript', translated: 'true' },
-      });
-
-      logger.info(`[${callId}] identified_translation_completed`);
-    } catch (error) {
-      logger.error(`[${callId}] identified_translation_failed`, { error: error });
-    }
-  }
-
-  /**
-   * Post-process transcript: translate to English
-   * Handles long transcripts by chunking them into smaller pieces
-   * @param transcript - The formatted transcript text
-   * @returns Post-processed transcript or original if processing fails
-   */
-  async postProcessTranscript(transcript: string, callId?: string): Promise<string> {
-    const systemInstructions = `You are processing a call transcript. Your task is to translate any non-English text to English, and to fix one specific brand name spelling.
-
-IMPORTANT:
-- Keep ALL timestamps exactly as they are: [MM:SS] format
-- Keep ALL speaker names exactly as they are
-- Only translate the spoken text to English
-- Do not modify, fix, or improve the text beyond translation
-- Do not add new lines or remove existing ones
-- Do not add commentary or explanations
-- Do not use placeholders like "[...]" or "[content continues]"
-- Preserve the exact line-by-line structure: [MM:SS] Speaker Name: text
-- Translate EVERY line completely, do not skip or truncate any content
-
-BRAND NAME CORRECTION:
-- The word "Xyne" (a product/brand name, pronounced like "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
-- When any of word that phonetically sounds like XYNE appear as a standalone word or as part of a compound like "Zain Spaces", "Zine Calls", etc., replace it with "Xyne"
-- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls"), not when it is part of an unrelated proper noun or personal name
-
-Output ONLY the processed transcript, nothing else.`;
-
-    try {
-      const lines = transcript.split('\n').filter((l) => l.trim());
-      const MAX_LINES_PER_CHUNK = 100;
-
-      if (lines.length <= MAX_LINES_PER_CHUNK) {
-        const translated = await executeStreamingLlmRequest({
-          userPrompt: transcript,
-          systemPrompt: systemInstructions,
-          operation: 'transcript_translation',
-          callId,
-        });
-
-        if (!translated.ok) {
-          logger.warn(`post_process_transcript_failed | reason=${translated.reason} | using_original=true`);
-          return transcript;
-        }
-
-        logger.info('Successfully post-processed transcript (streaming translation)');
-        return translated.content;
-      }
-
-      // For long transcripts, process in chunks with LIMITED CONCURRENCY.
-      // Each chunk is a separate streaming request; a bounded worker pool keeps
-      // the number of concurrent streams in check (the previous unbounded
-      // Promise.all overwhelmed the LiteLLM deployment).
-      const CHUNK_CONCURRENCY = 3;
-      const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
-
-      logger.info(
-        `Transcript has ${lines.length} lines, processing in ${totalChunks} chunks of ${MAX_LINES_PER_CHUNK} (concurrency ${CHUNK_CONCURRENCY})`
-      );
-
-      // Build chunk metadata up front so results can be reassembled in order.
-      const chunks: Array<{ chunkText: string; chunkIndex: number; startLine: number; endLine: number }> = [];
-      for (let i = 0; i < lines.length; i += MAX_LINES_PER_CHUNK) {
-        const chunkLines = lines.slice(i, i + MAX_LINES_PER_CHUNK);
-        chunks.push({
-          chunkText: chunkLines.join('\n'),
-          chunkIndex: Math.floor(i / MAX_LINES_PER_CHUNK) + 1,
-          startLine: i + 1,
-          endLine: i + chunkLines.length,
-        });
-      }
-
-      const results: string[] = new Array(chunks.length);
-      let nextIndex = 0;
-
-      const processChunk = async (chunk: typeof chunks[0], index: number): Promise<void> => {
-        logger.info(
-          `Processing chunk ${chunk.chunkIndex}/${totalChunks} (lines ${chunk.startLine}-${chunk.endLine})`
-        );
-
-        try {
-          const translated = await executeStreamingLlmRequest({
-            userPrompt: chunk.chunkText,
-            systemPrompt: systemInstructions,
-            operation: 'transcript_translation',
-            callId,
-          });
-
-          if (!translated.ok) {
-            logger.warn(`post_process_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
-            results[index] = chunk.chunkText;
-            return;
-          }
-
-          logger.info(`Chunk ${chunk.chunkIndex}/${totalChunks} completed`);
-          results[index] = translated.content;
-        } catch (error) {
-          logger.error(`Error processing chunk ${chunk.chunkIndex}:`, error);
-          results[index] = chunk.chunkText;
-        }
-      };
-
-      // Worker-pool: run up to CHUNK_CONCURRENCY chunks at a time.
-      const workers = Array.from(
-        { length: Math.min(CHUNK_CONCURRENCY, chunks.length) },
-        async () => {
-          while (nextIndex < chunks.length) {
-            const currentIndex = nextIndex;
-            nextIndex += 1;
-            await processChunk(chunks[currentIndex], currentIndex);
-          }
-        }
-      );
-
-      await Promise.all(workers);
-
-      const processedTranscript = results.join('\n');
-      logger.info(
-        `Successfully post-processed transcript in ${results.length} chunks (streaming translation)`
-      );
-      return processedTranscript;
-    } catch (error) {
-      logger.error('Error during transcript post-processing:', error);
-      return transcript; // Fallback to original if processing fails
-    }
-  }
-
-  /**
    * Generate AI summary from the formatted transcript
    * @param transcript - The formatted transcript text
    * @param callId - The call ID for logging
@@ -1116,7 +916,7 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate a short AI title from transcript
    * @param transcript - The formatted transcript text
-   * @returns AI-generated title (max 50 chars) or null if generation fails
+   * @returns AI-generated title (length is governed by the prompt) or null if generation fails
    */
   /**
    * Generate a short AI title from transcript with explicit retry loop.
@@ -1140,7 +940,7 @@ Output ONLY the processed transcript, nothing else.`;
       return null;
     }
 
-    return extracted.content.substring(0, 60);
+    return extracted.content;
   }
 
   /**
@@ -1299,7 +1099,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       const labels = parsed.labels
         .filter((l: unknown): l is string => typeof l === 'string' && l.trim().length > 0)
-        .slice(0, 4);
+        .slice(0, MAX_CALL_LABELS);
 
       logger.info(`Generated ${labels.length} call labels`);
       return labels;
@@ -1307,6 +1107,36 @@ Output ONLY the processed transcript, nothing else.`;
       logger.error(`call_labels_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
       return [];
     }
+  }
+
+  /**
+   * Generate topical labels and persist each as a Tag row, returning ids for
+   * Call.labels. Returns [] on any failure, so a bad run never clobbers good
+   * labels. `logPath` names the calling pipeline in the logs.
+   */
+  async generateAndSaveLabels(
+    call: Call,
+    formattedTranscript: string,
+    method: TagMethod = TagMethod.LLM,
+    logPath?: string,
+  ): Promise<string[]> {
+    const callId = call.externalId;
+    if (!call.workspaceId) {
+      logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: logPath });
+      return [];
+    }
+
+    const labels = await this.generateCallLabels(formattedTranscript, callId).catch((err) => {
+      logger.error(`[${callId}] generate_labels_threw`, {
+        path: logPath,
+        error: err,
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      return [] as string[];
+    });
+    if (labels.length === 0) return [];
+
+    return callLabelService.persistGeneratedLabels(call, labels, method, logPath);
   }
 
   /**
@@ -1717,10 +1547,40 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Queue Vespa indexing for the stored transcript (call.id is the doc id).
+   * Best-effort: a queue failure is logged, never thrown, so it can run from
+   * both the normal tail of processing and the solo-call early exit.
+   */
+  private async queueTranscriptIndexing(
+    call: Pick<Call, 'id' | 'channelId' | 'createdByUserId'>,
+  ): Promise<void> {
+    try {
+      const callChannel = call.channelId
+        ? await db.channel.findUnique({ where: { id: call.channelId }, select: { workspaceId: true } })
+        : null;
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: call.id,
+        jobType: 'feed',
+        userId: call.createdByUserId,
+        app: SubApp.TRANSCRIPT,
+        ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
+      });
+      logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
+    } catch (vespaError) {
+      logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+    }
+  }
+
+  /**
    * NOTE_TAKER (HEADLESS / "Xyne Oats") calls never reach this method — their
    * entire pipeline (transcriptReady webhook, reconcile) is routed straight to
    * noteTakerTranscriptService, which never creates or posts a message. This
    * method is for the channel/conversation-based flow only.
+   *
+   * Solo or very short calls (see callRepository.getPostCallAiSkipReason) attach
+   * and index the transcript but produce no AI outputs — no summary, title,
+   * tickets, or detailed-summary canvas.
    */
 
   async processCallWithSummary(
@@ -1799,6 +1659,20 @@ Output ONLY the processed transcript, nothing else.`;
         // may still succeed even if the DB-side attachment step inside postCallTranscript failed.
       }
 
+      // Solo or very short calls: keep the transcript but skip every LLM output.
+      // Headless recordings never reach this method, so the rule cannot misfire on
+      // note-taker calls.
+      const aiSkip = await repositories.calls.getPostCallAiSkipReason(call);
+      if (aiSkip.reason) {
+        logger.info(`[${callId}] ai_summary_skipped`, {
+          reason: aiSkip.reason,
+          joined_count: aiSkip.joinedCount,
+          duration_seconds: aiSkip.durationSeconds,
+        });
+        await this.queueTranscriptIndexing(call);
+        return;
+      }
+
       // Retrieve and format transcript for AI.
       const transcriptContent = await this.retrieveTranscript(callId);
       if (!transcriptContent) {
@@ -1843,8 +1717,14 @@ Output ONLY the processed transcript, nothing else.`;
         logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
         return [];
       });
+      // Recordings already label themselves on the note-taker path; running here
+      // too would spend a second LLM call on the same tags.
+      const labelsPromise =
+        call.callType === CallType.HEADLESS
+          ? Promise.resolve([] as string[])
+          : this.generateAndSaveLabels(call, formattedTranscript);
 
-      // Start all four post-call LLM operations immediately. Detailed-summary
+      // Start all five post-call LLM operations immediately. Detailed-summary
       // streaming remains unchanged; title, summary, and tickets persist their
       // own result as soon as it is ready rather than waiting on one another.
       pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
@@ -1854,11 +1734,9 @@ Output ONLY the processed transcript, nothing else.`;
         undefined,
         { callTitlePromise },
       ).catch((error) => {
-        logger.error(`[${callId}] detailed_summary_failed`, {
-          stage: 'detailed_summary_generation',
-          error,
-          stack: error instanceof Error ? error.stack : undefined,
-        });
+        // generateAndPostDetailedSummary logs its own failure exits; reaching
+        // here means it threw outside them, so this is the only record.
+        logDetailedSummaryFailed(callId, 'unexpected_error', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       });
 
@@ -1941,10 +1819,23 @@ Output ONLY the processed transcript, nothing else.`;
         return ticketSuggestions;
       });
 
+      // appendLabels merges, so a label typed mid-processing survives this write.
+      const labelsUiPromise = labelsPromise.then(async (labelIds) => {
+        if (labelIds.length === 0) return labelIds;
+        try {
+          await repositories.calls.appendLabels(call.id, labelIds);
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
+        } catch (error) {
+          logger.error(`[${callId}] labels_save_failed`, { error });
+        }
+        return labelIds;
+      });
+
       const [summary, title, ticketSuggestions] = await Promise.all([
         summaryUiPromise,
         titleUiPromise,
         ticketsUiPromise,
+        labelsUiPromise,
       ]);
 
       const duration = Date.now() - startTime;
@@ -2022,38 +1913,19 @@ Output ONLY the processed transcript, nothing else.`;
             const detailedSummaryResult = await detailedSummaryPromise;
             if (detailedSummaryResult.success) {
               logger.info(`Auto-generated detailed summary for call: ${callId}`);
-            } else {
-              logger.error(`[${callId}] detailed_summary_failed`, {
-                stage: 'detailed_summary_generation',
-                error: detailedSummaryResult.error || 'Unknown detailed summary failure',
-              });
             }
+            // A failure here was already logged by whichever exit gave up, so
+            // there is no second line and the alert counts one per recording.
           } catch (error) {
-            // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-            logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+            logDetailedSummaryFailed(callId, 'unexpected_error', error);
           }
         }
       } else {
         // Use error (not warn) so LLM-down conditions generate alertable signal.
         logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
       }
-    // Queue Vespa indexing for the transcript (using call.id as the identifier)
-      try {
-        const callChannel = call.channelId
-          ? await db.channel.findUnique({ where: { id: call.channelId }, select: { workspaceId: true } })
-          : null;
-        await vespaQueue.addJob({
-          schema: fileSchema,
-          docId: call.id,
-          jobType: 'feed',
-          userId: call.createdByUserId,
-          app: SubApp.TRANSCRIPT,
-          ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
-        });
-        logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
-      } catch (vespaError) {
-        logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
-      }
+      // Queue Vespa indexing for the transcript (using call.id as the identifier)
+      await this.queueTranscriptIndexing(call);
 
     } catch (error) {
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });

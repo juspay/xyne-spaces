@@ -311,6 +311,7 @@ export class ReleaseService {
 				workspace,
 				repoSlug,
 				currentTicketId,
+				mainReleaseBoardId,
 			);
 			summaryMigrationLinks = authoritative.migrationLinks;
 			summaryEnvChanges = authoritative.envChanges;
