@@ -2,6 +2,7 @@ import { metrics } from '@opentelemetry/api';
 import type { Attributes, Counter, Meter, ObservableGauge } from '@opentelemetry/api';
 import { OTEL_SERVICE_NAME } from '../../config';
 import { isStandaloneWindow } from '../../utils/electronApp';
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { safeRecordMetric } from './index';
 
 function getMeter(): Meter {
@@ -92,7 +93,11 @@ export function registerGlassStateGauge(): void {
       }
       observer.observe(_snapshot.enabled ? 1 : 0, gaugeAttributes(_snapshot));
     } catch (error) {
-      console.error('[OTel] glass_effect_enabled observation failed:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[OTel] glass_effect_enabled observation failed:'),
+        error: error,
+      });
     }
   });
 

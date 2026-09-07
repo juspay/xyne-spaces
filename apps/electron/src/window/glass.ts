@@ -7,11 +7,9 @@ import {
 import Store from 'electron-store';
 import log from 'electron-log/main';
 import {
-  applyLiquidGlassClarityKnobs,
   attachLiquidGlass,
+  detachLiquidGlass,
   isLiquidGlassAvailable,
-  LIQUID_GLASS_VARIANT_BY_APPEARANCE,
-  setLiquidGlassVariant,
 } from './liquid-glass';
 
 /**
@@ -210,7 +208,7 @@ export function resolveGlassWindowOptions(): BrowserWindowConstructorOptions {
 
   if (process.platform === 'darwin' && isLiquidGlassAvailable()) {
     glassTier = 'liquid';
-    log.info('[Glass] tier: liquid (NSGlassEffectView via electron-liquid-glass)');
+    log.info('[Glass] tier: liquid (NSGlassEffectView via native/glass)');
     return { backgroundColor: '#00000000', transparent: true };
   }
 
@@ -262,8 +260,6 @@ export function applyGlassToWindow(win: BrowserWindow): void {
     return;
   }
   win.setWindowButtonVisibility(true);
-  setLiquidGlassVariant(LIQUID_GLASS_VARIANT_BY_APPEARANCE[currentAppearance()]);
-  applyLiquidGlassClarityKnobs();
 }
 
 /** Platform / OS-setting capability only — says nothing about the user's choice. */
@@ -326,8 +322,13 @@ export function setGlassEnabled(win: BrowserWindow, enabled: boolean): void {
   }
 
   if (glassTier === 'liquid') {
+    // Symmetric on purpose: the backdrop is a real NSView, so turning glass off
+    // has to tear it out. Leaving it attached meant the toggle only ever worked
+    // in one direction on this tier.
     if (enabled) {
       applyGlassToWindow(win);
+    } else {
+      detachLiquidGlass();
     }
     return;
   }
@@ -392,8 +393,10 @@ export function applyGlassAppearance(win: BrowserWindow, appearance: 'light' | '
     return;
   }
 
+  // Nothing to re-apply for liquid: NSGlassEffectView takes its lightness from
+  // the window's NSAppearance, which the themeSource sync above just set, and
+  // the Regular/Clear style is a user choice that must not follow the theme.
   if (glassTier === 'liquid') {
-    setLiquidGlassVariant(LIQUID_GLASS_VARIANT_BY_APPEARANCE[appearance]);
     return;
   }
 

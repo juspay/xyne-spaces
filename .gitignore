@@ -239,3 +239,8 @@ security-reports/
 /vespa-core/generated
 #vespa models
 /vespa-core/vespa/models/*
+
+# Compiled native helpers for the Electron app — sources are tracked, the
+# binaries are produced by `pnpm run build:native` at package time.
+apps/electron/native/glass/glass.node
+apps/electron/native/mic-monitor/mic-monitor

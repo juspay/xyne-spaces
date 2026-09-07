@@ -30,3 +30,9 @@ packages:
   - tools/xyne-automation-old
   - tools/deadcode-analyzer
   - tools/fcm-ota-trigger
+
+# pnpm 10 blocks dependency build scripts unless listed here. Electron's
+# postinstall downloads the platform binary and writes path.txt; without it
+# `electron .` throws "Electron failed to install correctly".
+onlyBuiltDependencies:
+  - electron

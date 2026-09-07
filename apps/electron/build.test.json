@@ -18,11 +18,13 @@
     "assets",
     "certs",
     "ui-active",
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "native/glass/glass.node"
   ],
 
   "asarUnpack": [
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "native/glass/glass.node"
   ],
 
   "mac": {

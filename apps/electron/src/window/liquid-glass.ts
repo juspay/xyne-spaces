@@ -1,82 +1,88 @@
-import type { BrowserWindow } from 'electron';
+import path from 'path';
+import { app, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 
-export const LIQUID_GLASS_VARIANTS = {
+/**
+ * macOS 26 Liquid Glass backdrop, via our own native addon in
+ * `native/glass/glass.mm`.
+ *
+ * ── Why our own addon rather than a package ────────────────────────────────
+ * The published wrappers drive NSGlassEffectView through PRIVATE underscore
+ * selectors (`_variant`, `_scrimState`, `_subduedState`) which can vanish in
+ * any macOS point release, and they apply the tint only at attach time. This
+ * addon uses the four public, documented properties instead — `style`,
+ * `cornerRadius`, `tintColor`, `contentView` — all of which AppKit lets us
+ * reconfigure on a live view. `style` is the same Regular / Clear choice macOS
+ * offers in System Settings > Appearance > Liquid Glass, which is the only knob
+ * that actually matters here.
+ *
+ * Electron exposes no Liquid Glass API of its own: the maintainer PR that would
+ * have added `win.setGlassEffect()` (electron/electron#50415) was closed
+ * unmerged in June 2026 with nothing to replace it, so a native addon remains
+ * the only route.
+ */
+
+export const LIQUID_GLASS_STYLES = {
+  /** Honours System Settings > Appearance > Liquid Glass — reads as "Tinted". */
   regular: 0,
+  /** Forces the "Clear" look and ignores that system preference. */
   clear: 1,
-  dock: 2,
-  appIcons: 3,
-  widgets: 4,
-  text: 5,
-  avplayer: 6,
-  facetime: 7,
-  controlCenter: 8,
-  notificationCenter: 9,
-  monogram: 10,
-  bubbles: 11,
-  identity: 12,
-  focusBorder: 13,
-  focusPlatter: 14,
-  keyboard: 15,
-  sidebar: 16,
-  abuttedSidebar: 17,
-  inspector: 18,
-  control: 19,
-  loupe: 20,
-  slider: 21,
-  camera: 22,
-  cartouchePopover: 23,
 } as const;
 
-export type LiquidGlassVariant = (typeof LIQUID_GLASS_VARIANTS)[keyof typeof LIQUID_GLASS_VARIANTS];
+export type LiquidGlassStyle = (typeof LIQUID_GLASS_STYLES)[keyof typeof LIQUID_GLASS_STYLES];
 
 /* ═══════════════ LIQUID GLASS CONTROL PANEL — edit, then restart ═══════════════
- * opaque         false = real glass | true = opaque NSColor windowBackgroundColor
- *                NSBox behind the glass, nothing shows through.  clearer: false
- * variant        0-23, see LIQUID_GLASS_VARIANTS.                 clearer: clear(1)
- * tintColor      '#RRGGBBAA' (NOT AARRGGBB — the README is wrong; see
- *                ColorFromHexNSString) | null = no tint at all.   clearer: null
- * nativeScrim    null = OS default | 0 = off | 1 = on.            clearer: 0 or null
- * subdued        null = OS default | 0 = off | 1 = on (dimmer).   clearer: 0 or null
+ * These are developer knobs, not user settings. Style and tint were briefly
+ * exposed in Preferences and taken back out: Regular is the only look we want
+ * to ship, and a tint on top of the material made it muddier rather than
+ * richer. Preferences keeps just the on/off toggle and the wallpaper slider.
+ *
+ * style          regular(0) follows the system Clear/Tinted preference;
+ *                clear(1) forces Clear. NSGlassEffectViewStyle has exactly
+ *                these two cases — AppKit coerces anything else to regular.
+ *                Deliberately NOT keyed off light/dark: NSGlassEffectView takes
+ *                its lightness from the window's NSAppearance, which
+ *                `applyGlassAppearance` already keeps in step with the theme.
+ * tintColor      '#RRGGBB' or '#RRGGBBAA' | null = no tint. RGBA, matching CSS.
+ *                (Electron's own docs for the API it never shipped used
+ *                #AARRGGBB — do not copy values across.)
  * cornerRadius   px. 0 = let AppKit's hiddenInset mask round it.
- * CSS scrim      other half of the tint: apps/dashboard/src/global.css
- *                --glass-scrim-default (liquid tier 0%, others 30%) and the
- *                Preferences > Background tint slider.            clearer: 0%
- * Live on theme change: variant, nativeScrim, subdued.
- * Restart required: opaque, tintColor, cornerRadius.
+ * CSS scrim      the other half of the look: apps/dashboard/src/global.css
+ *                --wallpaper-opacity-default (liquid tier 0%, others 30%) and
+ *                the Preferences > Wallpaper slider.              clearer: 0%
+ * All three are applied when the backdrop is attached, so a change needs a
+ * restart to take effect.
  * ════════════════════════════════════════════════════════════════════════════ */
 
-export const LIQUID_GLASS_VARIANT_BY_APPEARANCE: Record<'light' | 'dark', LiquidGlassVariant> = {
-  light: LIQUID_GLASS_VARIANTS.clear,
-  dark: LIQUID_GLASS_VARIANTS.clear,
-};
-
-const LIQUID_GLASS_OPAQUE = false;
-const LIQUID_GLASS_NATIVE_SCRIM: 0 | 1 | null = null;
-const LIQUID_GLASS_SUBDUED: 0 | 1 | null = null;
+const LIQUID_GLASS_STYLE: LiquidGlassStyle = LIQUID_GLASS_STYLES.regular;
 const LIQUID_GLASS_CORNER_RADIUS = 0;
 const LIQUID_GLASS_TINT_COLOR: string | null = null;
 
-interface LiquidGlassModule {
-  isMacOS?: () => boolean;
-  isGlassSupported?: () => boolean;
-  addView?: (
+interface GlassAddon {
+  isSupported(): boolean;
+  attach(
     handle: Buffer,
-    options?: { cornerRadius?: number; tintColor?: string; opaque?: boolean },
-  ) => number;
-  unstable_setVariant?: (id: number, variant: number) => void;
-  unstable_setScrim?: (id: number, scrim: number) => void;
-  unstable_setSubdued?: (id: number, subdued: number) => void;
+    options: { style?: number; cornerRadius?: number; tintColor?: string },
+  ): number;
+  detach(id: number): void;
 }
 
 let moduleLoadAttempted = false;
-let liquidGlass: LiquidGlassModule | null = null;
+let addon: GlassAddon | null = null;
 let availability: boolean | null = null;
 let viewId: number | null = null;
 
-function loadModule(): LiquidGlassModule | null {
+/** Mirrors MeetingDetector.getBinaryPath — same asarUnpack layout. */
+function addonPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'app.asar.unpacked', 'native', 'glass', 'glass.node');
+  }
+  return path.join(app.getAppPath(), 'native', 'glass', 'glass.node');
+}
+
+function loadAddon(): GlassAddon | null {
   if (moduleLoadAttempted) {
-    return liquidGlass;
+    return addon;
   }
   moduleLoadAttempted = true;
 
@@ -86,25 +92,18 @@ function loadModule(): LiquidGlassModule | null {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const required: unknown = require('electron-liquid-glass');
-    const resolved =
-      required && typeof required === 'object' && 'default' in required
-        ? (required as { default: unknown }).default
-        : required;
-    if (!resolved || typeof resolved !== 'object') {
-      log.warn('[LiquidGlass] module resolved to a non-object; falling back to vibrancy');
-      return null;
-    }
-    liquidGlass = resolved as LiquidGlassModule;
-    log.info('[LiquidGlass] native module loaded');
+    addon = require(addonPath()) as GlassAddon;
+    log.info('[LiquidGlass] native addon loaded');
   } catch (error) {
-    log.info('[LiquidGlass] module unavailable; falling back to vibrancy', {
+    // Not fatal: the caller drops to the vibrancy tier, which is what shipped
+    // before Liquid Glass existed.
+    log.info('[LiquidGlass] addon unavailable; falling back to vibrancy', {
       reason: error instanceof Error ? error.message : String(error),
     });
-    liquidGlass = null;
+    addon = null;
   }
 
-  return liquidGlass;
+  return addon;
 }
 
 export function isLiquidGlassAvailable(): boolean {
@@ -112,17 +111,16 @@ export function isLiquidGlassAvailable(): boolean {
     return availability;
   }
 
-  const mod = loadModule();
+  const mod = loadAddon();
   if (!mod) {
     availability = false;
     return availability;
   }
 
   try {
-    const onMac = typeof mod.isMacOS === 'function' ? mod.isMacOS() : process.platform === 'darwin';
-    const supported = typeof mod.isGlassSupported === 'function' ? mod.isGlassSupported() : false;
-    availability = onMac === true && supported === true && typeof mod.addView === 'function';
-    log.info('[LiquidGlass] capability probe', { onMac, supported, available: availability });
+    // True only where AppKit actually has the class, i.e. macOS 26+.
+    availability = mod.isSupported() === true;
+    log.info('[LiquidGlass] capability probe', { available: availability });
   } catch (error) {
     log.warn('[LiquidGlass] capability probe threw; falling back to vibrancy', {
       reason: error instanceof Error ? error.message : String(error),
@@ -141,73 +139,43 @@ export function attachLiquidGlass(win: BrowserWindow): boolean {
   if (viewId !== null) {
     return true;
   }
-  if (!isLiquidGlassAvailable() || win.isDestroyed()) {
-    return false;
-  }
-
-  const mod = liquidGlass;
-  if (!mod?.addView) {
+  if (!isLiquidGlassAvailable() || win.isDestroyed() || !addon) {
     return false;
   }
 
   try {
-    const handle = win.getNativeWindowHandle();
-    const id = mod.addView(handle, {
+    const id = addon.attach(win.getNativeWindowHandle(), {
+      style: LIQUID_GLASS_STYLE,
       cornerRadius: LIQUID_GLASS_CORNER_RADIUS,
-      opaque: LIQUID_GLASS_OPAQUE,
       ...(LIQUID_GLASS_TINT_COLOR ? { tintColor: LIQUID_GLASS_TINT_COLOR } : {}),
     });
     if (typeof id !== 'number' || id < 0) {
-      log.warn('[LiquidGlass] addView returned no usable id; falling back to vibrancy', { id });
+      log.warn('[LiquidGlass] attach returned no usable id; falling back to vibrancy', { id });
       return false;
     }
     viewId = id;
     log.info('[LiquidGlass] backdrop attached', { viewId });
     return true;
   } catch (error) {
-    log.warn('[LiquidGlass] addView threw; falling back to vibrancy', {
+    log.warn('[LiquidGlass] attach threw; falling back to vibrancy', {
       reason: error instanceof Error ? error.message : String(error),
     });
     return false;
   }
 }
 
-export function setLiquidGlassVariant(variant: LiquidGlassVariant): void {
-  if (viewId === null || !liquidGlass?.unstable_setVariant) {
+export function detachLiquidGlass(): void {
+  if (viewId === null || !addon) {
     return;
   }
   try {
-    liquidGlass.unstable_setVariant(viewId, variant);
-    log.info('[LiquidGlass] variant applied', { variant });
+    addon.detach(viewId);
+    log.info('[LiquidGlass] backdrop detached', { viewId });
   } catch (error) {
-    log.warn('[LiquidGlass] setVariant threw', {
+    log.warn('[LiquidGlass] detach threw', {
       reason: error instanceof Error ? error.message : String(error),
     });
-  }
-}
-
-export function applyLiquidGlassClarityKnobs(): void {
-  if (viewId === null) {
-    return;
-  }
-  if (LIQUID_GLASS_NATIVE_SCRIM !== null && liquidGlass?.unstable_setScrim) {
-    try {
-      liquidGlass.unstable_setScrim(viewId, LIQUID_GLASS_NATIVE_SCRIM);
-      log.info('[LiquidGlass] native scrim applied', { scrim: LIQUID_GLASS_NATIVE_SCRIM });
-    } catch (error) {
-      log.warn('[LiquidGlass] setScrim threw', {
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  if (LIQUID_GLASS_SUBDUED !== null && liquidGlass?.unstable_setSubdued) {
-    try {
-      liquidGlass.unstable_setSubdued(viewId, LIQUID_GLASS_SUBDUED);
-      log.info('[LiquidGlass] subdued applied', { subdued: LIQUID_GLASS_SUBDUED });
-    } catch (error) {
-      log.warn('[LiquidGlass] setSubdued threw', {
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
+  } finally {
+    viewId = null;
   }
 }

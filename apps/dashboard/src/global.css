@@ -22,7 +22,8 @@
   [data-theme="classic"] {
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper-v2.png");
-    --background: 0 0% 100%;
+    --background-base: 0 0% 100%;
+    --background: var(--background-base);
     --foreground: 248.57 9.33% 14.71%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
@@ -172,7 +173,8 @@
   [data-theme="summer_breeze"] {
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper-v2.png");
-    --background: 0 0% 100%;
+    --background-base: 0 0% 100%;
+    --background: var(--background-base);
     --foreground: 248.57 9.33% 14.71%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
@@ -313,7 +315,8 @@
   [data-theme="midnight"] {
     --root-bg: transparent;
     --wallpaper-image: url("/images/wallpaper-midnight.png");
-    --background: 232 9% 11%; /* #1A1A1F */
+    --background-base: 232 9% 11%;
+    --background: var(--background-base); /* #1A1A1F */
     --foreground: 220 18% 90%;
     --card: 233 11% 15%; /* #22232A */
     --card-foreground: 210 8% 93%;
@@ -5164,4 +5167,36 @@ img.inline-emoji,
 
 [data-glass="on"][data-glass-tier="liquid"] {
   --wallpaper-opacity-default: 0%;
+}
+
+/* ── Liquid-glass surface opacity ───────────────────────────────────────────
+ * Only the liquid tier gets this. It is the one tier that paints a real
+ * NSGlassEffectView behind the page, so it is the only one where making a
+ * surface token semi-transparent reveals glass rather than the flat wallpaper
+ * the other tiers rely on.
+ *
+ * How it works: the theme tokens are bare HSL triples consumed as
+ * `hsl(var(--background))` — Tailwind declares `background` with no
+ * `<alpha-value>` placeholder, so an alpha component composed into the token
+ * itself flows through to every `bg-background` in the app. Each theme now
+ * keeps its raw triple in `--background-base` and derives `--background` from
+ * it, so this block can re-compose the same triple with an alpha without
+ * duplicating any theme's colour.
+ *
+ * `1` is a deliberate no-op default: nothing changes until the value is
+ * lowered, so this block is inert until someone tunes it.
+ *
+ * To bring another token under the same knob, do the two steps this one does:
+ *   1. in each [data-theme] block, split `--card: <triple>` into
+ *      `--card-base: <triple>; --card: var(--card-base);`
+ *   2. add `--card: var(--card-base) / var(--glass-surface-opacity);` below.
+ * Check its Tailwind entry first: a token declared with `<alpha-value>` (only
+ * `--action-accent` today) must NOT carry an alpha here, or it renders as
+ * `hsl(H S L / A / <alpha>)` and the declaration is dropped.
+ *
+ * Note `.email-read-card` sets `--background` to a plain triple of its own, so
+ * it stays opaque under glass by design. */
+[data-glass="on"][data-glass-tier="liquid"] {
+  --glass-surface-opacity: 0.3;
+  --background: var(--background-base) / var(--glass-surface-opacity);
 }
