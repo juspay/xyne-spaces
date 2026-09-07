@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { UserGroupLike, VisibleChannel } from '@xyne/shared/hooks';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { searchChannels } from '@xyne/shared/utils';
+import { rankChannelsByAffinity } from '../utils/rankingUtils';
 import type { User } from '../machines/stateMachine';
 import { searchUsers, useActiveUsers } from './useUsers';
 import { useAllVisibleChannels } from './useChannels';
@@ -83,7 +84,11 @@ function useVisibleChannelCandidates(
 
   return useMemo(() => {
     if (pool.length === 0) return [];
-    // searchChannels slices to `limit` for both the query and the browse case.
+    // Browse (no query): `searchChannels` would just `slice(0, limit)` in whatever
+    // order the visible-channel list happens to be in — arbitrary once a workspace
+    // has hundreds of channels. Rank by affinity + recency instead, the same
+    // most-used-first ordering Cmd+K and the slash pickers use for their browse state.
+    if (!query) return rankChannelsByAffinity(pool).slice(0, limit);
     return searchChannels(pool, query, limit);
   }, [pool, query, limit]);
 }
