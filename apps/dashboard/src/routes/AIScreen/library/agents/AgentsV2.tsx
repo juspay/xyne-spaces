@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
@@ -23,10 +24,14 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
   const { user } = useAuth();
   const userId = user?.id;
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const searched = useMemo(
     () =>
-      q ? agents.filter(a => `${a.name} ${a.description ?? ''}`.toLowerCase().includes(q)) : agents,
+      searchByNameThenDescription(agents, q, agent => ({
+        name: agent.name,
+        description: agent.description,
+        ...(agent.slug && agent.slug !== agent.name ? { aliases: [agent.slug] as const } : {}),
+      })),
     [agents, q],
   );
 

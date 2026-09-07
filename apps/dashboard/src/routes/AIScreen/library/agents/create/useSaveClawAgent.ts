@@ -30,6 +30,7 @@ export function useSaveClawAgent(agent: Agent | undefined): SaveClawAgent {
           direct: state.tools.direct,
           custom: state.tools.custom,
           gateway: state.tools.gateway,
+          callableAgents: state.tools.callableAgents,
         },
       };
       if (state.researchAgentProductId) config['product_id'] = state.researchAgentProductId;

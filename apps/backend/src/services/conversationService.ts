@@ -85,6 +85,8 @@ export interface CreateConversationWithMessageParams {
   isAddingParticipant?: boolean;
   isMarkdown?: boolean;
   pinned?: boolean;
+  /** Migration import: skip live-only side effects (MESSAGE_RECEIVED automations, meet-link extraction) so bulk-imported history never fires workflows. */
+  suppressAutomations?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -103,6 +105,8 @@ export interface AddMessageToConversationParams {
   isMarkdown?: boolean;
   /** Migration-only: advance participant read state to the imported reply timestamp. */
   markParticipantsRead?: boolean;
+  /** Migration import: skip live-only side effects (TICKET_COMMENTED automations, meet-link extraction) so bulk-imported history never fires workflows. */
+  suppressAutomations?: boolean;
 }
 
 export interface UpdateMessageParams {
@@ -335,6 +339,7 @@ export class ConversationService {
       createdAt,
       isAddingParticipant = true,
       pinned,
+      suppressAutomations = false,
     } = params;
 
     // Check if channel exists
@@ -485,6 +490,7 @@ export class ConversationService {
     await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     if (
+      !suppressAutomations &&
       !isBot &&
       message.msgType === MessageType.USER &&
       channel.workspaceId &&
@@ -534,13 +540,16 @@ export class ConversationService {
     // Fan out the automation `MESSAGE_RECEIVED` event for the first message in a
     // new channel conversation. Which message kinds fire is a user-configured
     // trigger condition; loops are prevented by the run chain. Fire-and-forget.
-    void emitMessageReceived({
-      messageId: message.messageId,
-      conversationId: conversation.conversationId,
-      channelId,
-      msgType: message.msgType as MessageType,
-      userId,
-    });
+    // Migration import suppresses this so bulk-imported history never fires workflows.
+    if (!suppressAutomations) {
+      void emitMessageReceived({
+        messageId: message.messageId,
+        conversationId: conversation.conversationId,
+        channelId,
+        msgType: message.msgType as MessageType,
+        userId,
+      });
+    }
 
     return {
       conversation,
@@ -571,6 +580,7 @@ export class ConversationService {
       createdAt,
       isAddingParticipant = true,
       markParticipantsRead = false,
+      suppressAutomations = false,
     } = params;
 
     const conversation = await this.conversationRepository.findById(conversationId);
@@ -713,6 +723,7 @@ export class ConversationService {
     });
 
     if (
+      !suppressAutomations &&
       !isBot &&
       message.msgType === MessageType.USER &&
       channel?.workspaceId &&
@@ -805,15 +816,18 @@ export class ConversationService {
     // helper itself filters out bot/system messages and conversations not
     // tied to a ticket, so it's safe to invoke unconditionally. Failures are
     // logged inside the helper and must not fail the message write.
-    void emitTicketCommented({
-      messageId: message.messageId,
-      conversationId,
-      content: message.content ?? undefined,
-      msgType: message.msgType as MessageType,
-      isBot,
-      userId,
-      createdAt: message.createdAt,
-    });
+    // Migration import suppresses this so bulk-imported history never fires workflows.
+    if (!suppressAutomations) {
+      void emitTicketCommented({
+        messageId: message.messageId,
+        conversationId,
+        content: message.content ?? undefined,
+        msgType: message.msgType as MessageType,
+        isBot,
+        userId,
+        createdAt: message.createdAt,
+      });
+    }
 
     return {
       conversation,

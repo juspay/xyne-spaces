@@ -86,12 +86,8 @@ const envSchema = Joi.object({
   MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
   MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
   RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
-  MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(250),       // pause between paged Slack calls during collection (SDK still honors Retry-After on 429)
-  MIGRATION_SLACK_LIST_DELAY_MS: Joi.number().default(3000),      // pause between Tier-2 list pages (conversations.list/users.list ≈ 20/min) to stay under the limit
-  MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(600000),  // per-attachment download timeout (~10 min: enough for Slack's 1GB max at ~3MB/s)
-  MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
-  MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
-  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
+  MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
+  MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -122,12 +118,20 @@ const envSchema = Joi.object({
   // so the next enqueue replays everything above them.
   ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
   RADAR_PARSER_MODEL: Joi.string().default('open-fast'),
+  RADAR_PARSER_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
   RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Kept as a knob deliberately: this is the hard ceiling on how much text can
   // enter one parse, so it is the emergency brake on parser spend.
-  RADAR_MAX_WINDOW_MESSAGES: Joi.number().integer().min(1).default(200),
-  RADAR_EXECUTION_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
-  RADAR_RUN_LOG_RETENTION_DAYS: Joi.number().integer().min(1).default(3),
+  RADAR_MAX_WINDOW_MESSAGES: Joi.number().integer().min(1).max(200).default(60),
+  RADAR_MAX_OPEN_ITEMS: Joi.number().integer().min(1).max(500).default(50),
+  RADAR_CONTEXT_MESSAGES: Joi.number().integer().min(0).max(100).default(20),
+  RADAR_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(30_000),
+  RADAR_MAX_CONSECUTIVE_FAILURES: Joi.number().integer().min(1).max(20).default(3),
+  RADAR_MAX_MESSAGE_TEXT_CHARS: Joi.number().integer().min(100).max(20_000).default(5_000),
+  RADAR_RATE_LIMIT_MAX_RETRIES: Joi.number().integer().min(0).max(3).default(3),
+  RADAR_BOOTSTRAP_LOOKBACK_MINUTES: Joi.number().integer().min(1).max(10_080).default(120),
+  RADAR_EXECUTION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(50).default(1),
+  RADAR_RUN_LOG_RETENTION_DAYS: Joi.number().integer().min(1).max(365).default(3),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
   TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
@@ -706,12 +710,8 @@ export const config = {
   },
   runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
   slackMigration: {
-    pageDelayMs: envVars.MIGRATION_SLACK_PAGE_DELAY_MS,
-    listDelayMs: envVars.MIGRATION_SLACK_LIST_DELAY_MS,
-    fileTimeoutMs: envVars.MIGRATION_SLACK_FILE_TIMEOUT_MS,
-    requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
-    stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
-    ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
+    ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
+    workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)
   },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
@@ -746,10 +746,22 @@ export const config = {
     enabled: envVars.ENABLE_RADAR_EXECUTION as boolean,
     // Required once radar is enabled — a blank model throws at parse time.
     parserModel: envVars.RADAR_PARSER_MODEL as string,
+    // At concurrency 1 this is the drain's maximum stall, not just one call's.
+    parserTimeoutMs: envVars.RADAR_PARSER_TIMEOUT_MS as number,
     // Blank falls back to the shared LITELLM_API_KEY. A dedicated key keeps
     // radar's rate limit and spend off the quota other features draw on.
     litellmApiKey: envVars.RADAR_EXECUTION_LITELLM_API_KEY as string,
     maxWindowMessages: envVars.RADAR_MAX_WINDOW_MESSAGES as number,
+    contextMessages: envVars.RADAR_CONTEXT_MESSAGES as number,
+    // Open items grow with a thread's life and every parse carries all of
+    // them, so an ownerless item nobody resolves would sit in the prompt
+    // forever.
+    maxOpenItems: envVars.RADAR_MAX_OPEN_ITEMS as number,
+    debounceMs: envVars.RADAR_DEBOUNCE_MS as number,
+    maxConsecutiveFailures: envVars.RADAR_MAX_CONSECUTIVE_FAILURES as number,
+    maxMessageTextChars: envVars.RADAR_MAX_MESSAGE_TEXT_CHARS as number,
+    rateLimitMaxRetries: envVars.RADAR_RATE_LIMIT_MAX_RETRIES as number,
+    bootstrapLookbackMinutes: envVars.RADAR_BOOTSTRAP_LOOKBACK_MINUTES as number,
     workerConcurrency: envVars.RADAR_EXECUTION_WORKER_CONCURRENCY as number,
     // execution_run_logs is the fastest-growing table here — one row per
     // drain pass, carrying full LLM payloads. Swept on a timer by the worker.
