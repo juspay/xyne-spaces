@@ -1,3 +1,15 @@
+## [1.283.0](https://github.com/juspay/xyne-spaces/compare/v1.282.1...v1.283.0) (2026-09-07)
+
+
+### Features
+
+* resolve SDLC deep links at write time ([#1425](https://github.com/juspay/xyne-spaces/issues/1425)) ([#1472](https://github.com/juspay/xyne-spaces/issues/1472)) ([80e3371](https://github.com/juspay/xyne-spaces/commit/80e3371c46bcdf12ec2e01845fdbaf89582f9253))
+
+
+### Bug Fixes
+
+* allow pausing steps inside control-flow branches ([#477](https://github.com/juspay/xyne-spaces/issues/477)) ([6325b94](https://github.com/juspay/xyne-spaces/commit/6325b945ee9dfa96187cfceef151defdc24c0652))
+
 ## [1.282.1](https://github.com/juspay/xyne-spaces/compare/v1.282.0...v1.282.1) (2026-09-07)
 
 ## [1.282.0](https://github.com/juspay/xyne-spaces/compare/v1.281.0...v1.282.0) (2026-09-07)
