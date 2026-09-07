@@ -127,7 +127,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     );
 
     try {
-      const parsed = parseAgentJson(rawResult);
+      const parsed = coerceAgentResult(rawResult);
       assertMatchesSchema(parsed, declaredSchema);
       if (attachments.length === 0) return parsed as RunAgentOutput;
       if ('attachments' in parsed) {
@@ -222,12 +222,16 @@ function resolveVisibleConversationContext(
   context: AutomationContext,
 ): { conversationId: string; channelId: string } | null {
   const trigger = context.trigger as Record<string, unknown> | undefined;
+  const message = trigger?.message as Record<string, unknown> | undefined;
+  const ticket = trigger?.ticket as Record<string, unknown> | undefined;
   const conversationId =
     asNonEmptyString(trigger?.conversationId) ??
-    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.conversationId);
+    asNonEmptyString(message?.conversationId) ??
+    asNonEmptyString(ticket?.conversationId);
   const channelId =
     asNonEmptyString(trigger?.channelId) ??
-    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.channelId);
+    asNonEmptyString(message?.channelId) ??
+    asNonEmptyString(ticket?.channelId);
   return conversationId && channelId ? { conversationId, channelId } : null;
 }
 
@@ -383,6 +387,17 @@ function parseAgentJson(raw: unknown): Record<string, unknown> {
     throw new Error('result is not a JSON object');
   }
   return parsed as Record<string, unknown>;
+}
+
+function coerceAgentResult(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  try {
+    return parseAgentJson(raw);
+  } catch {
+    return { result: typeof raw === 'string' ? raw : String(raw ?? '') };
+  }
 }
 
 function stripJsonFence(text: string): string {
