@@ -35,9 +35,8 @@ jobs:
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
-    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Backend typecheck + build
-    runs-on:  github-builds-runners
+    runs-on:  ci-cluster-github-runners
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
