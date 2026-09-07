@@ -1031,14 +1031,10 @@ export const TicketFiltersDropdown = ({
 
         {/* ticket search */}
         <div className='flex items-center w-full max-w-[18.75rem]'>
-          <div
-            className={cn(
-              'relative w-full rounded-lg border bg-background transition-shadow',
-              isExactSearch
-                ? 'border-[var(--desk-accent-subtle)] ring-2 ring-[var(--desk-accent-subtle)]'
-                : 'border-border',
-            )}
-          >
+          {/* The box keeps its normal border in both modes. The lit `"ab"` button already
+              says exact match is on, and colouring the whole field for it reads as focus
+              or as an error rather than as a mode. */}
+          <div className='relative w-full rounded-lg border border-border bg-background'>
             <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
             <input
               ref={inputRef}
