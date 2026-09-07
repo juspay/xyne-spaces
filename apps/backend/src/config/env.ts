@@ -116,6 +116,10 @@ const envSchema = Joi.object({
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_SYNC_ENGINE: Joi.boolean().default(false),
+  // Gates multi-pod materialization ownership (per-group lease + fence + interest). OFF = the
+  // sync engine materializes as a single unfenced owner (correct for exactly one replica); ON
+  // is required before running >1 sync-engine replica. Needs a non-evicting Redis (asserted).
+  ENABLE_SYNC_ENGINE_MULTIPOD: Joi.boolean().default(false),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
@@ -692,6 +696,7 @@ export const config = {
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableSyncEngine: envVars.ENABLE_SYNC_ENGINE,
+  enableSyncEngineMultiPod: envVars.ENABLE_SYNC_ENGINE_MULTIPOD,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
