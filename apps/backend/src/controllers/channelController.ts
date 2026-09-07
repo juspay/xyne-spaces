@@ -860,20 +860,21 @@ export class ChannelController {
 
       const userId = req.user!.id;
 
-      // Validate required fields. projectId is required only for DESK channels
-      // (EMAIL/CALL/SLACK/APP) — native channels may be created without a project
-      // (projects are being decoupled from channels).
-      const isDeskChannel =
-        channelType === 'EMAIL' ||
-        channelType === 'CALL' ||
-        channelType === 'SLACK' ||
-        channelType === 'APP';
-      if (!scopeType || (isDeskChannel && !projectId)) {
+      // Validate required fields. projectId is OPTIONAL only for a NATIVE channel
+      // (scopeType DEFAULT + type DEFAULT/unset). Everything else still requires a
+      // project: every desk type (EMAIL/SLACK/APP/CALL/SUPPORT/SOCIAL_MEDIA/SDLC — and
+      // any future type), plus DM/GROUP_DM/TICKET/DOCUMENT. Inverted on purpose so a
+      // new desk type is projectId-required by default without editing this check.
+      const isNativeChannel =
+        scopeType === ChannelScopeType.DEFAULT &&
+        (channelType === undefined || channelType === 'DEFAULT');
+      const projectIdRequired = !isNativeChannel;
+      if (!scopeType || (projectIdRequired && !projectId)) {
         res.status(400).json({
-          error: isDeskChannel ? 'ScopeType and projectId are required' : 'ScopeType is required',
+          error: projectIdRequired ? 'ScopeType and projectId are required' : 'ScopeType is required',
           details: {
             scopeType: !scopeType ? 'ScopeType is required' : undefined,
-            projectId: isDeskChannel && !projectId ? 'ProjectId is required' : undefined,
+            projectId: projectIdRequired && !projectId ? 'ProjectId is required' : undefined,
           }
         });
         return;
