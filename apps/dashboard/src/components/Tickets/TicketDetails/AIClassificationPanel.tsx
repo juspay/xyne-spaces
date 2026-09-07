@@ -13,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/Select/Select';
-import { Button } from '../../ui/Button/Button';
 
 interface UserGroupOption {
   id: string;
@@ -240,17 +239,16 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                 </div>
               </div>
               <div className='flex gap-2'>
-                <Button
-                  trackAction={() => handleSave()}
-                  trackId='save_classification_override'
+                <button
+                  onClick={() => void handleSave()}
+                  data-ph-capture-attribute-track-id='save_classification_override'
                   disabled={isSaving || !editCategory}
-                  variant='ghost'
                   className='text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
                   data-track-category='AIClassification'
                   data-track-name='SaveClassificationOverride'
                 >
                   {isSaving ? 'Saving...' : 'Save'}
-                </Button>
+                </button>
                 <button
                   onClick={() => {
                     setIsEditing(false);
@@ -293,17 +291,16 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                         data-track-category='AIClassification'
                         data-track-name='RawFieldInput'
                       />
-                      <Button
-                        trackAction={() => handleSaveField(key)}
-                        trackId='save_raw_classification_field'
+                      <button
+                        onClick={() => void handleSaveField(key)}
+                        data-ph-capture-attribute-track-id='save_raw_classification_field'
                         disabled={savingField}
-                        variant='ghost'
                         className='text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground disabled:opacity-50'
                         data-track-category='AIClassification'
                         data-track-name='SaveRawField'
                       >
                         {savingField ? '…' : '✓'}
-                      </Button>
+                      </button>
                       <button
                         onClick={() => setEditingField(null)}
                         className='text-xs px-2 py-0.5 rounded border border-border hover:bg-muted'

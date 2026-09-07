@@ -4,7 +4,6 @@ import { useSelector } from '@xstate/react';
 import { RefreshCw, X } from 'lucide-react';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
-import { Button } from '../ui/Button/Button';
 
 // Kill switch for the Electron auto-update nudge. While false the component is
 // fully inert: no event listener is registered and nothing is rendered.
@@ -404,18 +403,17 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         <p className='shrink-0 text-xs font-semibold text-foreground'>{title}</p>
         <p className='truncate text-xs text-muted-foreground'>{message}</p>
       </div>
-      <Button
+      <button
         type='button'
-        variant='ghost'
         onClick={() => applyUpdate('manual')}
         disabled={activationBlocked}
         className='h-auto shrink-0 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
-        trackId='electron_apply_update'
+        data-ph-capture-attribute-track-id='electron_apply_update'
         data-track-category='ElectronUpdate'
         data-track-name='UpdateNow'
       >
         Update now
-      </Button>
+      </button>
       {!nudge.autoApprovalRequired && (
         <button
           type='button'

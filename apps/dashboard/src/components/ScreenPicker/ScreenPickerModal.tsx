@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Monitor, AppWindow, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
-import { Button } from '../ui/Button/Button';
+
 import { useTheme } from '../../hooks/useTheme';
 import { MACOS_PRIVACY_URLS } from '../../constants/permissions';
 import type { ScreenSource } from '../../types/electron';
@@ -266,11 +266,10 @@ export function ScreenPickerModal(): React.ReactElement | null {
             >
               Cancel
             </button>
-            <Button
-              variant='ghost'
+            <button
               onClick={handleShare}
               disabled={!selectedId}
-              trackId='share_screen'
+              data-ph-capture-attribute-track-id='share_screen'
               data-track-category='screen-picker'
               data-track-name='share'
               className={cn(
@@ -281,7 +280,7 @@ export function ScreenPickerModal(): React.ReactElement | null {
               )}
             >
               Share
-            </Button>
+            </button>
           </div>
         </div>
       </div>
