@@ -67,6 +67,13 @@ export interface HoverActionsToolbarProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
+  /**
+   * Whether this message's conversation can be subscribed to for notifications.
+   * Conversation-level capability, decoupled from onReplyInThread so the toggle
+   * is available in the per-message menu both in the channel list and inside the
+   * thread view (thread replies carry the thread's conversationId).
+   */
+  canSubscribe?: boolean;
   onCreateTicket?: () => void;
   onCreateSubTicket?: () => void;
   onEditMessage?: () => void;
@@ -125,6 +132,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
+  canSubscribe,
   onCreateTicket,
   onCreateSubTicket,
   onEditMessage,
@@ -384,7 +392,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             {(() => {
               const hasEditSection = (showEditAction && onEditMessage) || onSendToChannel;
               const hasSubscriptionSection =
-                (onReplyInThread && conversationId) ||
+                (canSubscribe && conversationId) ||
                 onMarkAsUnread ||
                 onBookmark ||
                 onRemindMeOption ||
@@ -430,7 +438,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {hasEditSection && hasSubscriptionSection && <DropdownMenuSeparator />}
 
                   {/* Conversation Subscription */}
-                  {isDropdownOpen && onReplyInThread && conversationId && (
+                  {isDropdownOpen && canSubscribe && conversationId && (
                     <DropdownMenuItem asChild>
                       <ConversationSubscription
                         conversationId={conversationId}

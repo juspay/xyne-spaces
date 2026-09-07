@@ -1069,6 +1069,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         (!isMessageDeleted || context === 'channel') && {
           onReplyInThread: replies.onOpenThread,
         }),
+      // Conversation-level subscription. Decoupled from onReplyInThread so the
+      // toggle stays available in the per-message menu inside the thread view
+      // (thread replies carry the thread's conversationId), matching the channel.
+      ...(conversation?.conversationId &&
+        (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
+        !isShowInChannel &&
+        !isMessageDeleted && {
+          canSubscribe: true,
+        }),
       ...(!isSystemMessage &&
         !isMessageDeleted && {
           onInitiateCall: handleInitiateCall,
@@ -1403,6 +1412,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     replies?.onOpenThread?.(e);
                   },
                 })}
+              {...(conversation?.conversationId &&
+                (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
+                !isShowInChannel &&
+                !isMessageDeleted && { canSubscribe: true })}
               {...(!isSystemMessage &&
                 !isMessageDeleted && {
                   onInitiateCall: handleInitiateCall,

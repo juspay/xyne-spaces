@@ -43,6 +43,8 @@ export interface MessageActionsDrawerProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
+  /** Conversation-level subscription capability (see HoverActionsToolbar). */
+  canSubscribe?: boolean;
   onCreateTicket?: () => void;
   onEditMessage?: () => void;
   onDeleteMessage?: () => void;
@@ -77,6 +79,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
+  canSubscribe,
   onCreateTicket,
   onEditMessage,
   onDeleteMessage,
@@ -338,7 +341,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   )}
 
                   {/* Conversation Subscription */}
-                  {open && onReplyInThread && conversationId && (
+                  {open && canSubscribe && conversationId && (
                     <ConversationSubscription
                       conversationId={conversationId}
                       {...(conversation && { conversation })}
