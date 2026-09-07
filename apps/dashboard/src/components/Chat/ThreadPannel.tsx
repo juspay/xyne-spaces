@@ -61,6 +61,7 @@ import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
 import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
+import { ReleasePanelView } from '../Tickets/ReleasePanelView';
 import Tooltip from '../ui/Tooltip';
 import { ShortcutTooltip } from '../ui/ShortcutTooltip';
 import { useScope } from '../../shortcuts';
@@ -75,6 +76,7 @@ import {
   APP_NO_DRAG_STYLE,
 } from '../../utils/electronApp';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useReleaseForDevTicket } from '../../hooks/useReleaseForDevTicket';
 import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
@@ -99,7 +101,7 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'rca';
+type TabType = 'thread' | 'details' | 'files' | 'rca' | 'release';
 type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
@@ -197,7 +199,7 @@ export const ThreadMessages = ({
 
   const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
+  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca', 'release'];
   const selectedTab: TabType =
     defaultTab ??
     (validTabs.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
@@ -773,6 +775,9 @@ export const ThreadMessages = ({
   // Build tabs array - exclude Details tab when ticketId is present
   const isFixTicket = ticket?.ticketType === BaseTicketType.Fix;
 
+  // A dev ticket picked up by a release has ART rows; that gates the Release tab.
+  const { isReleaseDevTicket } = useReleaseForDevTicket(derivedTicketId);
+
   // Support URL-driven tab selection for the compact side panel mode as well.
   useEffect(() => {
     if (!underTicketView) return;
@@ -801,11 +806,14 @@ export const ThreadMessages = ({
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
         : []),
+      ...(isReleaseDevTicket
+        ? [{ value: 'release' as const, label: 'Release', icon: <TicketToken size={14} /> }]
+        : []),
     ];
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, ticketId, derivedTicketId, isFixTicket]);
+  }, [files.length, ticketId, derivedTicketId, isFixTicket, isReleaseDevTicket]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -1707,6 +1715,16 @@ export const ThreadMessages = ({
                 className='flex-1 overflow-hidden bg-background data-[state=inactive]:hidden'
               >
                 <RCAPanelView ticketId={derivedTicketId} />
+              </Tabs.Content>
+            )}
+
+            {/* Release Tab Content */}
+            {isReleaseDevTicket && (
+              <Tabs.Content
+                value='release'
+                className='flex-1 overflow-hidden bg-background data-[state=inactive]:hidden'
+              >
+                <ReleasePanelView ticketId={derivedTicketId} />
               </Tabs.Content>
             )}
 

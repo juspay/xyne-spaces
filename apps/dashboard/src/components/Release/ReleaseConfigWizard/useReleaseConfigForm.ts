@@ -167,6 +167,38 @@ export function useReleaseConfigForm({
     setReleaseTrackingMode(mode);
   }, []);
 
+  // Apply AI-suggested services (envPaths/migrationPaths arrive as arrays; form
+  // state holds them as CSV strings). 'replace' swaps all rows; 'add' keeps your
+  // named rows and appends suggestions not already present by name.
+  const applyServiceSuggestions = useCallback(
+    (
+      services: { name: string; regex: string; envPaths: string[]; migrationPaths: string[] }[],
+      mode: 'replace' | 'add',
+    ) => {
+      if (services.length === 0) return;
+      setUserTouched(true);
+      const toRow = (service: (typeof services)[number]): ApplicationConfig => ({
+        ...EMPTY_APP,
+        id: uuidv4(),
+        boardId: uuidv4(),
+        name: service.name,
+        regex: service.regex,
+        envPaths: service.envPaths.join(', '),
+        migrationPaths: service.migrationPaths.join(', '),
+      });
+      setApplications(prev => {
+        if (mode === 'replace') return services.map(toRow);
+        const kept = prev.filter(app => app.name.trim());
+        const keptNames = new Set(kept.map(app => app.name.trim().toLowerCase()));
+        const additions = services
+          .filter(service => !keptNames.has(service.name.trim().toLowerCase()))
+          .map(toRow);
+        return [...kept, ...additions];
+      });
+    },
+    [],
+  );
+
   // ─── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
@@ -288,6 +320,7 @@ export function useReleaseConfigForm({
     addApplication,
     removeApplication,
     updateApplication,
+    applyServiceSuggestions,
     // Add-service mode: id of the blank service row seeded into the group.
     addedServiceId: addedService?.id ?? null,
     // Channel

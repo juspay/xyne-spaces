@@ -22,8 +22,8 @@ export function parseAgentOutput<T>(
   content: string,
   schema: z.ZodSchema<T>
 ): T {
-  // Remove <think>...</think> blocks (used by some reasoning models)
-  let jsonContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // Remove <think>…</think> / <thinking>…</thinking> blocks (reasoning models)
+  let jsonContent = content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
 
   // Try to find JSON object in the content
   const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);

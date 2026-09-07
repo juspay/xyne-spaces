@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { TicketController } from '../controllers/ticketController';
 import { ReleaseNotesController } from '../controllers/releaseNotesController';
+import { ReleaseInsightsController } from '../controllers/releaseInsightsController';
 import { AnalyticsController } from '../controllers/analyticsController';
 import { KanbanTicketController } from '../controllers/kanbanTicketController';
 import { uploadMultiple } from '../middleware/upload';
@@ -19,6 +20,7 @@ const releaseNotesController = new ReleaseNotesController();
 const analyticsController = new AnalyticsController();
 const kanbanTicketController = new KanbanTicketController();
 const releaseReportController = new ReleaseReportController();
+const releaseInsightsController = new ReleaseInsightsController();
 const flowRunExportController = new FlowRunExportController();
 
 // Note: Authentication and ACL middleware are applied at the app level
@@ -58,6 +60,11 @@ router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
 router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
+router.post(
+  '/:ticketId/release-insights',
+  authorize('TICKETS', AccessType.WRITE),
+  releaseInsightsController.generate,
+);
 router.post(
   '/:ticketId/release-report/publish',
   authorize('TICKETS', AccessType.WRITE),

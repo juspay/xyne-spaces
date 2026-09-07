@@ -1,8 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { CommitAnalysisController } from '@/controllers/commitAnalysisController';
-import { testRepoConnection } from '@/services/release/repoInspector';
-import { AccessType, BaseTicketType, FormEntityType } from '@xyne/shared';
+import {
+  testRepoConnection,
+  listGitHubRepoFilePaths,
+  listBitbucketRepoFilePaths,
+} from '@/services/release/repoInspector';
+import { suggestReleaseServices } from '@/agents/release-service-suggest/index.js';
+import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
@@ -159,6 +164,53 @@ router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER',
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.json({ ok: false, message: msg });
+  }
+});
+
+// AI-suggest services + env/migration paths from the repo's file tree, to
+// prefill the release-config wizard. Supports GitHub and Bitbucket Server.
+router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
+  const { repoUrl, projectId: rawProjectId } = req.body as { repoUrl?: string; projectId?: unknown };
+  const projectId = typeof rawProjectId === 'string' && rawProjectId ? rawProjectId : null;
+  const userId = req.user?.id;
+  const workspaceId = req.user?.workspaceId;
+  if (!userId || !workspaceId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (!repoUrl) {
+    res.status(400).json({ error: 'repoUrl is required' });
+    return;
+  }
+  if (projectId) {
+    const project = await db.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true },
+    });
+    if (!project || project.workspaceId !== workspaceId) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+  }
+  const provider = detectVcsProvider(repoUrl);
+  if (provider !== VCSProviderType.GITHUB && provider !== VCSProviderType.BITBUCKET_SERVER) {
+    res.json({
+      services: [],
+      message: 'AI suggestions support GitHub and Bitbucket Server repositories.',
+    });
+    return;
+  }
+  try {
+    const paths =
+      provider === VCSProviderType.GITHUB
+        ? await listGitHubRepoFilePaths(repoUrl)
+        : await listBitbucketRepoFilePaths(repoUrl);
+    const result = await suggestReleaseServices({ paths }, { projectId: projectId ?? null, userId });
+    res.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error('[CommitAnalysis] suggest-services failed', { repoUrl, error: msg });
+    res.status(500).json({ error: 'Failed to suggest services for this repository' });
   }
 });
 
