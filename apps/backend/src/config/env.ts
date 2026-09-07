@@ -121,7 +121,7 @@ const envSchema = Joi.object({
   // decision, not a config one. Toggling loses nothing — watermarks persist,
   // so the next enqueue replays everything above them.
   ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
-  RADAR_PARSER_MODEL: Joi.string().default('open-fast'),
+  RADAR_PARSER_MODEL: Joi.string().default('open-fast-sa'),
   RADAR_PARSER_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
   RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Kept as a knob deliberately: this is the hard ceiling on how much text can
