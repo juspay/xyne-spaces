@@ -1,3 +1,11 @@
+## [1.284.1](https://github.com/juspay/xyne-spaces/compare/v1.284.0...v1.284.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* align DM sidebar item preview styling ([#1535](https://github.com/juspay/xyne-spaces/issues/1535)) ([6e10775](https://github.com/juspay/xyne-spaces/commit/6e10775a2d328655d600e986b8d0e2df22c35d42))
+* singleselect custom feild filter ([#1610](https://github.com/juspay/xyne-spaces/issues/1610)) ([d1da7e6](https://github.com/juspay/xyne-spaces/commit/d1da7e60eaf16d3fc2d23dacbf0c754070c7dd3f))
+
 ## [1.284.0](https://github.com/juspay/xyne-spaces/compare/v1.283.1...v1.284.0) (2026-09-07)
 
 
