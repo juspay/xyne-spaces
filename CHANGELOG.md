@@ -1,3 +1,10 @@
+## [1.282.0](https://github.com/juspay/xyne-spaces/compare/v1.281.0...v1.282.0) (2026-09-07)
+
+
+### Features
+
+* downtime prevention ([#1442](https://github.com/juspay/xyne-spaces/issues/1442)) ([bf7fd7c](https://github.com/juspay/xyne-spaces/commit/bf7fd7c328880b919830b9efb06016ecc89b9a52))
+
 ## [1.281.0](https://github.com/juspay/xyne-spaces/compare/v1.280.0...v1.281.0) (2026-09-07)
 
 
