@@ -1,3 +1,10 @@
+## [1.281.0](https://github.com/juspay/xyne-spaces/compare/v1.280.0...v1.281.0) (2026-09-07)
+
+
+### Features
+
+* eta management new ([#732](https://github.com/juspay/xyne-spaces/issues/732)) ([ebe9861](https://github.com/juspay/xyne-spaces/commit/ebe98615a5cbc16d885d5701c9a8ea27da68fe8f))
+
 ## [1.280.0](https://github.com/juspay/xyne-spaces/compare/v1.279.2...v1.280.0) (2026-09-07)
 
 
