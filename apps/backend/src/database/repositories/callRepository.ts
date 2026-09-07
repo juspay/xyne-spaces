@@ -1419,6 +1419,9 @@ export class CallRepository {
       now: Date;
       callOrigin?: CallOrigin;
       artifactMessageId?: string;
+      /** Transcription agent this call was pinned to at creation time (from room metadata). */
+      agentName?: string;
+      dispatchStatus?: string;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1436,6 +1439,8 @@ export class CallRepository {
       now,
       callOrigin,
       artifactMessageId,
+      agentName,
+      dispatchStatus,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1466,6 +1471,8 @@ export class CallRepository {
             systemMessageId: messageId,
             conversationId,
             ...(artifactMessageId && { artifactMessageId }),
+            ...(agentName && { agentName }),
+            ...(dispatchStatus && { dispatchStatus }),
           },
         },
       });
