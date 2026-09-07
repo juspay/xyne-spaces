@@ -142,7 +142,7 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -214,7 +214,7 @@ jobs:
   # ---------------------------------------------------------------------------
   trivy:
     name: Vulnerability scan (Trivy)
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     env:
       TRIVY_VERSION: "0.72.0"
       # secrets handled by gitleaks; scan deps (vuln) + IaC (misconfig) only.
