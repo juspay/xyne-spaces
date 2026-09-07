@@ -2242,6 +2242,24 @@ export const queries = defineQueries({
     },
   ),
 
+  /**
+   * A single non-HEADLESS call (+ its shares) by row id — what the detail route
+   * carries. Used both to resolve a call reached by link, with no navigation state
+   * to read it from, and to list who a call is shared with.
+   */
+  callById: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('id', callId)
+        .related('participants', p => p.where('userId', ctx.userID))
+        .related('shares', shares =>
+          shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+        )
+        .one(),
+  ),
+
   // Fetches the HEADLESS recording (+ shares) by its public
   // externalId (what's in the URL / RecordingDetail.externalId) — used by
   // the Share modal and the detail screen alike.

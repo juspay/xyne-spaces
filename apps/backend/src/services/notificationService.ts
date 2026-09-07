@@ -1504,6 +1504,7 @@ class NotificationService {
     actorId: string,
     actorName: string,
     actorAction: 'recording_shared' | 'recording_access_revoked',
+    subject: string = 'recording',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1518,8 +1519,8 @@ class NotificationService {
 
     const isRevoked = actorAction === 'recording_access_revoked';
     const title = isRevoked
-      ? `${actorName} removed your access to a recording`
-      : `${actorName} shared a recording with you`;
+      ? `${actorName} removed your access to a ${subject}`
+      : `${actorName} shared a ${subject} with you`;
     const message = isRevoked
       ? `${actorName} removed your access to "${recordingTitle}"`
       : `${actorName} shared "${recordingTitle}" with you`;

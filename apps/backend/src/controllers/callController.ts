@@ -1726,7 +1726,7 @@ export class CallController {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -1885,7 +1885,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2016,7 +2016,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2120,7 +2120,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2698,21 +2698,6 @@ export class CallController {
    * channel members can view/download them even if they didn't join the call.
    * Mutating ops (start/stop/rename/delete) stay participant/starter-gated.
    */
-  /**
-   * Whether a caller belongs to a call's audience: its host, anyone who took part, or a
-   * member of the channel it happened in. A channel call is offered to the channel, so a
-   * member who could not attend can still read what came out of it.
-   */
-  private async isCallAudience(
-    call: { id: string; channelId: string | null; createdByUserId: string },
-    userId: string,
-  ): Promise<boolean> {
-    if (call.createdByUserId === userId) return true;
-    if (await repositories.calls.findParticipant(call.id, userId)) return true;
-    if (!call.channelId) return false;
-    return repositories.channelParticipants.isParticipant(call.channelId, userId);
-  }
-
   private async assertCanViewCallRecordings(callId: string, userId: string): Promise<boolean> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call) return false;
