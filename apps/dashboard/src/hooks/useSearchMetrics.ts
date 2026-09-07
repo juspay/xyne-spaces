@@ -158,7 +158,14 @@ function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilt
   // standing for a window, so the user reads back what they picked. The window is resolved
   // here, at the request boundary, so the backend still gets the two bounds it wants.
   const preset = dates.map(m => resolveDateKeyword(m.id)).find(Boolean);
-  if (preset) return { after: preset.after, before: preset.before };
+  // A one-day window goes as `on`, never as equal bounds: the backend reads `before` as
+  // "< start of that day" and `after` as "> end of it", so the pair contradicts itself and
+  // matches nothing. `on` builds the inclusive range.
+  if (preset) {
+    return preset.after === preset.before
+      ? { on: preset.after }
+      : { after: preset.after, before: preset.before };
+  }
   const on = dates.find(m => m.prefix === 'on:');
   if (on) return { on: on.id };
   const after = dates.find(m => m.prefix === 'after:')?.id;

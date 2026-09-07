@@ -612,15 +612,13 @@ export const FILTER_REGISTRY: FilterEntry[] = [
       // re-derived at the request boundary, so the query itself is identical.
       //
       // The prefix is `before:` because the palette can't tell us which one was typed —
-      // `dateRange` records the window, not the syntax that reached for it. A picked
-      // `after:<preset>` therefore reads back as `before:<preset>` after a round-trip
-      // through this screen; the window it stands for is the same either way.
       if (f.dateRange && !f.after && !f.before && resolveDateKeyword(f.dateRange)) {
         return [
           {
             id: f.dateRange,
             type: ChipType.DATE,
-            prefix: 'before:',
+            // `on:` reads as *within* the window; a bound prefix describes half of it.
+            prefix: 'on:',
             name: presetLabel(f.dateRange),
           },
         ];
@@ -669,6 +667,9 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     searchFilters: f => {
       const bounds = dateBounds(f);
       if (!bounds) return f.dateRange ? { range: f.dateRange } : {};
+      // One day goes as `on`: the backend reads `before` as "< start of day" and `after` as
+      // "> end of day", so equal bounds contradict and match nothing.
+      if (bounds.after && bounds.after === bounds.before) return { on: bounds.after };
       return {
         ...(bounds.after ? { after: bounds.after } : {}),
         ...(bounds.before ? { before: bounds.before } : {}),
@@ -682,7 +683,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
         return [
           {
             key: 'range',
-            prefix: 'before:',
+            prefix: 'on:',
             label: presetLabel(f.dateRange),
             patch: DATE_CLEARED,
             icon: { kind: 'date' as const },

@@ -415,6 +415,8 @@ const ChannelCommandMenu = ({
   // The search the user left behind when the palette sent them to the results page, handed
   // back by the history hook so pressing back reopens cmd+K exactly as they typed it.
   const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
+  // Which of on:/after:/before: opened the date list — it decides what a pick means.
+  const [dateTrigger, setDateTrigger] = useState<'on:' | 'after:' | 'before:'>('on:');
   // Held in a ref so `onRestore` (registered once) always calls the current closure.
   const restoreFromLastSearchRef = useRef(restoreFromLastSearch);
   restoreFromLastSearchRef.current = restoreFromLastSearch;
@@ -1385,9 +1387,14 @@ const ChannelCommandMenu = ({
    */
   const selectDate = useCallback(
     (option: { id: string; name: string }) => {
-      void handleMentionSelect({ id: option.id, name: option.name, type: ChipType.DATE });
+      // `on:` keeps the keyword, so the window stays live. A bound prefix means something
+      // else entirely — `before:yesterday` is "older than yesterday", not "on yesterday" —
+      // so the preset is resolved to a concrete date and lands on that bound.
+      const bounds = dateTrigger === 'on:' ? null : resolveDateKeyword(option.id);
+      const resolved = bounds ? bounds.after : option.id;
+      void handleMentionSelect({ id: resolved, name: resolved, type: ChipType.DATE });
     },
-    [handleMentionSelect],
+    [handleMentionSelect, dateTrigger],
   );
 
   // Store the insertMention function when it's ready
@@ -1486,8 +1493,9 @@ const ChannelCommandMenu = ({
   // Date search from the mention plugin. Like priority, the candidates are a fixed list,
   // so there's no lookup — we just track the typed query and which bound was triggered.
   const handleDateSearch = useCallback(
-    (query: string | null, _trigger?: 'on:' | 'after:' | 'before:') => {
+    (query: string | null, trigger?: 'on:' | 'after:' | 'before:') => {
       if (isInCommandMode()) return;
+      if (trigger) setDateTrigger(trigger);
       if (query === null) {
         setMentionSearchType(null);
         setMentionSearchQuery('');

@@ -244,9 +244,16 @@ export function useQuerySuggestions(
               id: option.value,
               label: option.label,
               icon: { kind: 'value' as const },
-              // A preset is a window, not a bound — it replaces both, whichever prefix
-              // reached for it.
-              apply: () => ({ dateRange: option.value, after: '', before: '' }),
+              // `on:` keeps the keyword so the window stays live. A bound prefix means
+              // something else — `before:yesterday` is "older than yesterday" — so the
+              // preset resolves to a date and lands on that bound.
+              apply: () => {
+                if (typedSyntax === 'on:') {
+                  return { dateRange: option.value, after: '', before: '' };
+                }
+                const resolved = resolveDateKeyword(option.value);
+                return resolved ? dated(resolved.after) : {};
+              },
             })),
           ],
         };
