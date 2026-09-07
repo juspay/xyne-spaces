@@ -2343,7 +2343,7 @@ export const queries = defineQueries({
       .orderBy('updatedAt', 'desc')
       .related('message', m => m.related('conversation').related('attachments'))
       .related('reaction')
-      .related('canvas')
+      .related('canvas', c => c.related('sdlcArtifact'))
       .related('call')
       .related('ticket');
   }),
@@ -2437,7 +2437,7 @@ export const queries = defineQueries({
         .limit(limit)
         .related('message', m => m.related('conversation').related('attachments'))
         .related('reaction')
-        .related('canvas')
+        .related('canvas', c => c.related('sdlcArtifact'))
         .related('call')
         .related('ticket');
     },
@@ -3880,7 +3880,7 @@ export const queries = defineQueries({
         .limit(limit)
         .related('message', message => message.related('conversation').related('attachments'))
         .related('reaction')
-        .related('canvas')
+        .related('canvas', c => c.related('sdlcArtifact'))
         .related('call')
         .related('ticket');
     },
