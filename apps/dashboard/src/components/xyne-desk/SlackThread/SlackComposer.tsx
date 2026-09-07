@@ -20,7 +20,6 @@ import { MentionExtension, mentionPluginKey } from '../../ui/TipTapExtensions';
 import { MentionSelector } from '../../ui/Selectors';
 import { useComposerDragDrop } from '../EmailComposer/useComposerDragDrop';
 import { uploadComposerAttachments } from '../EmailComposer/composerAttachmentUpload';
-import { Button } from '../../ui/Button/Button';
 
 const lowlight = createLowlight(all);
 
@@ -268,34 +267,32 @@ const SlackComposer = ({
             <>
               <span className='inline-block size-1.5 rounded-full bg-green-500' />
               <span>Replying as you</span>
-              <Button
+              <button
                 type='button'
-                variant='ghost'
                 onClick={handleDisconnect}
                 disabled={disconnectMutation.isPending}
                 className='text-xs text-muted-foreground underline hover:text-foreground cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='disconnect-slack-user'
-                trackId='disconnect_slack_user'
+                data-ph-capture-attribute-track-id='disconnect_slack_user'
               >
                 Disconnect
-              </Button>
+              </button>
             </>
           ) : (
             <>
               <span className='inline-block size-1.5 rounded-full bg-muted-foreground' />
               <span>Replying as Xyne Bot</span>
-              <Button
+              <button
                 type='button'
-                variant='ghost'
                 onClick={handleConnect}
                 className='text-xs text-primary underline hover:text-primary/80 cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='connect-slack-user'
-                trackId='connect_slack_user'
+                data-ph-capture-attribute-track-id='connect_slack_user'
               >
                 Connect your Slack
-              </Button>
+              </button>
             </>
           )}
         </div>
@@ -408,9 +405,8 @@ const SlackComposer = ({
           {(() => {
             const canSend = (!!content || attachments.length > 0) && !sending && !uploading;
             return (
-              <Button
+              <button
                 type='button'
-                variant='ghost'
                 onClick={() => void handleSend()}
                 disabled={!canSend}
                 className={`p-2 rounded-md transition-all ${
@@ -421,10 +417,10 @@ const SlackComposer = ({
                 data-track-category='slack-composer'
                 data-track-name='send-reply'
                 aria-label='Send reply'
-                trackId='send_slack_reply'
+                data-ph-capture-attribute-track-id='send_slack_reply'
               >
                 {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
-              </Button>
+              </button>
             );
           })()}
         </div>

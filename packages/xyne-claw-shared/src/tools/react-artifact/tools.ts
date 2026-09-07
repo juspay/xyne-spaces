@@ -21,6 +21,8 @@ import {
   type ReactArtifactDataRequirement,
 } from "./dataSources.js";
 
+import { ICON_META, ICON_SECTIONS } from "@xyne/icons/meta";
+
 export type { ArtifactDataSource, ReactArtifactDataRequirement } from "./dataSources.js";
 
 const ARTIFACT_MIME = "application/json";
@@ -103,6 +105,29 @@ const SHADCN_UI_COMPONENTS = [
 
 const RESERVED_PATH_PREFIXES = ["/components/ui/", "/lib/utils", "/lib/xyne-data", "/public/"] as const;
 
+/**
+ * The icon vocabulary is the Xyne icon set itself — `@xyne/icons/meta` is the
+ * package's own generated index, imported here (React-free) so the tool can
+ * reject a name the dashboard could not draw. Kebab-case ids, e.g. "kanban-board".
+ */
+const ICON_NAMES: ReadonlySet<string> = new Set(ICON_META.map((m) => m.name));
+
+/**
+ * Examples surfaced to the model. Nine hundred names is not guidance; a few
+ * dozen good ones for common app shapes is. Filtered against the real set at
+ * load so a renamed icon drops out of the description instead of teaching the
+ * model a name that no longer exists.
+ */
+const SUGGESTED_ICONS = [
+  "barchart-default", "barchart-line", "graph-chart-average", "grid-table", "grid-dashboard-01",
+  "kanban-board", "list-check", "ticket-token", "calendar-default", "clock-default", "timer-default",
+  "notification-bell-on", "chat-default", "user-ai", "search-big", "file-search", "folder-search",
+  "code", "terminal-console-square", "database", "server", "rocket-ship", "cloud-default",
+  "map", "map-pin", "globe", "link-horizontal", "shopping-cart", "money-dollar-bag", "wallet-arrow-up",
+  "trophy", "dice-1", "play-circle", "music-beam-note", "camera", "video-call-default",
+  "home-default", "star", "heart", "bookmark-default", "tag",
+].filter((n) => ICON_NAMES.has(n));
+
 /** Agent slugs an app may name. A short list: this is a preference, not a menu —
  *  the viewer's own access is always the real ceiling. */
 const MAX_DECLARED_AGENTS = 4;
@@ -153,6 +178,10 @@ export interface ReactArtifactPayload {
   writes?: boolean;
   /** Set when the app calls useXyneAgent. Drives a UI badge only. */
   invokesAgents?: boolean;
+  /** Xyne icon id (kebab-case) the agent chose to represent the app. Seeded
+   *  onto the app on creation; the user can change it afterwards, and that
+   *  choice wins — later builds never overwrite it. */
+  icon?: string;
   /** Agents the app prefers, by slug. NARROWING only: the run is authorized
    *  against what the viewer can reach, so naming an agent here can never grant
    *  access to it. Absent/empty means "any agent the viewer can reach". */
@@ -171,6 +200,7 @@ export interface ReactArtifactManifest {
   writes?: boolean;
   invokesAgents?: boolean;
   agents?: string[];
+  icon?: string;
 }
 
 /**
@@ -429,6 +459,26 @@ function parseDataRequirements(raw: unknown): ReactArtifactDataRequirement[] {
  * a slug exists, and whether the person opening the app may use it, is decided
  * per-viewer at dispatch time and cannot be decided here.
  */
+/**
+ * Validate the icon against the real set. On a miss the error carries the
+ * closest names, because a model guessing "bar-chart" for "barchart-default"
+ * should fix itself in one retry, not by being told only that it was wrong.
+ */
+function parseIcon(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const name = asString(raw).trim().toLowerCase();
+  if (ICON_NAMES.has(name)) return name;
+
+  const words = name.split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  const near = [...ICON_NAMES]
+    .filter((n) => words.some((w) => n.includes(w)))
+    .slice(0, 8);
+  const hint = near.length
+    ? ` Closest matches: ${near.join(", ")}.`
+    : ` Examples: ${SUGGESTED_ICONS.slice(0, 10).join(", ")}.`;
+  fail(`"${name}" is not a Xyne icon.${hint} Omit \`icon\` to use the default.`);
+}
+
 function parseAgents(raw: unknown): string[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) fail("`agents` must be an array of agent slugs.");
@@ -518,6 +568,7 @@ export function mergeArtifactParams(
     writes: has("writes") ? params["writes"] : base.writes,
     invokesAgents: has("invokesAgents") ? params["invokesAgents"] : base.invokesAgents,
     agents: has("agents") ? params["agents"] : base.agents,
+    icon: has("icon") ? params["icon"] : base.icon,
     // Describes this turn's change, so never inherited.
     ...(has("summary") ? { summary: params["summary"] } : {}),
   };
@@ -573,6 +624,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
   const writes = params["writes"] === true;
   const agents = parseAgents(params["agents"]);
   const invokesAgents = params["invokesAgents"] === true || agents.length > 0;
+  const icon = parseIcon(params["icon"]);
 
   const payload: ReactArtifactPayload = {
     version: ARTIFACT_VERSION,
@@ -585,6 +637,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     ...(writes ? { writes: true } : {}),
     ...(invokesAgents ? { invokesAgents: true } : {}),
     ...(agents.length ? { agents } : {}),
+    ...(icon ? { icon } : {}),
   };
 
   const manifest: ReactArtifactManifest = {
@@ -598,6 +651,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     ...(writes ? { writes: true } : {}),
     ...(invokesAgents ? { invokesAgents: true } : {}),
     ...(agents.length ? { agents } : {}),
+    ...(icon ? { icon } : {}),
   };
 
   return { payload, manifest, summary };
@@ -726,6 +780,13 @@ export const createReactArtifactTool: ToolDefinition = {
     "bugs you already fixed. Only use `mode: \"create\"` for the first build, or when the user " +
     "genuinely wants a different app. Users can roll back to any earlier version, so a mistake " +
     "is recoverable — but a silent regression is not obvious.\n\n" +
+    "ICON — on the FIRST build, set `icon` to the Xyne icon that best says what the app is about; it " +
+    "becomes the app's mark in the sidebar and library. Pick for the app's SUBJECT (a stopwatch → " +
+    "\"timer-default\", a ticket board → \"kanban-board\", a sales chart → \"barchart-default\"), not " +
+    "for the UI widgets it happens to use. Names are kebab-case from these categories: " +
+    `${ICON_SECTIONS.join(", ")}. Good choices for common apps: ${SUGGESTED_ICONS.join(", ")}. ` +
+    "An unknown name is rejected with the closest matches, so retry with one of those. Omit " +
+    "`icon` on updates unless asked — the user may have chosen their own, and theirs wins.\n\n" +
     "DESIGN SYSTEM — the project is preloaded with Tailwind v4 and the shadcn/ui base set. Do NOT " +
     "write these yourself and do NOT list them in `dependencies`; they are injected for you:\n" +
     `  • shadcn/ui components at /components/ui/<name>: ${SHADCN_UI_COMPONENTS.join(", ")}\n` +
@@ -843,6 +904,13 @@ export const createReactArtifactTool: ToolDefinition = {
       title: {
         type: "string",
         description: "Short, user-facing name for the app, e.g. \"Weekly ticket volume\".",
+      },
+      icon: {
+        type: "string",
+        description:
+          "Kebab-case id of a Xyne icon that represents what the app IS — shown in the sidebar and " +
+          "library card. e.g. \"kanban-board\" for a task board, \"barchart-default\" for a chart. " +
+          "See the ICON section for the vocabulary.",
       },
       summary: {
         type: "string",

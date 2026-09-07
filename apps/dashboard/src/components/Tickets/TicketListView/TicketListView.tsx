@@ -103,6 +103,7 @@ interface TicketListViewProps {
     aiCategory?: string[] | undefined;
     conversationIdWhitelist?: string[] | undefined;
     hasAiDraft?: boolean | undefined;
+    hasSubTickets?: boolean | undefined;
     userGroups?: string[] | undefined;
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
@@ -181,6 +182,7 @@ export const TicketListView = function TicketListView({
     aiCategory,
     conversationIdWhitelist,
     hasAiDraft,
+    hasSubTickets,
     userGroups,
     lastEmailAtStart,
     lastEmailAtEnd,
@@ -417,6 +419,7 @@ export const TicketListView = function TicketListView({
         ? { conversationIds: conversationIdWhitelist }
         : {}),
       hasAiDraft,
+      hasSubTickets,
       lastEmailAtStart,
       lastEmailAtEnd,
       createdAtStart,
@@ -448,6 +451,7 @@ export const TicketListView = function TicketListView({
         ac: aiCategory ?? null,
         ci: conversationIdWhitelist ?? null,
         ad: hasAiDraft ?? null,
+        hst: hasSubTickets ?? null,
         mf: mailboxFolder ?? null,
         g: userGroups ?? null,
         ds: lastEmailAtStart ?? null,
@@ -466,6 +470,7 @@ export const TicketListView = function TicketListView({
       aiCategory,
       conversationIdWhitelist,
       hasAiDraft,
+      hasSubTickets,
       mailboxFolder,
       userGroups,
       lastEmailAtStart,

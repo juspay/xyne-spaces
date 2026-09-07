@@ -56,6 +56,19 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     });
   }
 
+  /**
+   * Resolve a caller-supplied user id, scoped to the caller's workspace. Use this
+   * for ids from a request body: `findById` matches installation-wide, so it would
+   * let a member reference any user in any workspace. Returns null both when the
+   * user does not exist and when they exist elsewhere, so the two cannot be told
+   * apart to enumerate accounts.
+   */
+  async findByIdInWorkspace(id: string, workspaceId: string): Promise<User | null> {
+    return await this.db.user.findFirst({
+      where: { id, workspaceId },
+    });
+  }
+
   async findByIdWithWorkspace(id: string): Promise<
     (User & { workspace: { id: string; name: string } }) | null
   > {
@@ -251,6 +264,23 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
       where: { status },
       orderBy: { email: 'asc' },
     });
+  }
+
+  /**
+   * Resolve ids to ACTIVE users, reporting the first id that does not resolve.
+   */
+  async findActiveByIds(userIds: string[]): Promise<{ users: User[]; missingUserId: string | null }> {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) {
+      return { users: [], missingUserId: null };
+    }
+
+    const users = await this.db.user.findMany({
+      where: { id: { in: ids }, status: UserStatus.ACTIVE },
+    });
+
+    const found = new Set(users.map(user => user.id));
+    return { users, missingUserId: ids.find(id => !found.has(id)) ?? null };
   }
 
   /**

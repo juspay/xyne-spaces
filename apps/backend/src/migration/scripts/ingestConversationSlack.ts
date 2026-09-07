@@ -113,28 +113,42 @@ export const findOrCreateUser = async (
       if (!workspace) {
         throw new Error(`Workspace ${workspaceId} not found`);
       }
-      orgMember = await db.orgMember.create({
-        data: {
-          orgId: workspace.orgId,
-          email: userEmail,
-          role: OrgRole.MEMBER,
-        },
-        select: { memberId: true },
-      });
-      logger.info('[IngestSlack] OrgMember created for migration user', { userEmail });
+      try {
+        orgMember = await db.orgMember.create({
+          data: {
+            orgId: workspace.orgId,
+            email: userEmail,
+            role: OrgRole.MEMBER,
+          },
+          select: { memberId: true },
+        });
+        logger.info('[IngestSlack] OrgMember created for migration user', { userEmail });
+      } catch (err) {
+        // Parallel ingest workers can create the same org member at the same instant — on a unique-violation, re-read the winner.
+        if ((err as { code?: string })?.code !== 'P2002') throw err;
+        orgMember = await db.orgMember.findUnique({ where: { email: userEmail }, select: { memberId: true } });
+        if (!orgMember) throw err;
+      }
     }
 
-    user = await userRepo.create({
-      email: userEmail,
-      name: userName,
-      providerUserId: `slack-migrated-${userEmail}`,
-      authProvider: AuthProvider.GOOGLE,
-      status: isDeactivated ? 'INACTIVE' : 'ACTIVE',
-      workspace: { connect: { id: workspaceId } },
-      orgMember: { connect: { memberId: orgMember.memberId } },
-    });
-    logger.info('[IngestSlack] User created', { userId: user.id, userEmail });
-    await grantPermissionsForRole(user.id, userEmail, WorkspaceRole.MEMBER, workspaceId);
+    try {
+      user = await userRepo.create({
+        email: userEmail,
+        name: userName,
+        providerUserId: `slack-migrated-${userEmail}`,
+        authProvider: AuthProvider.GOOGLE,
+        status: isDeactivated ? 'INACTIVE' : 'ACTIVE',
+        workspace: { connect: { id: workspaceId } },
+        orgMember: { connect: { memberId: orgMember.memberId } },
+      });
+      logger.info('[IngestSlack] User created', { userId: user.id, userEmail });
+      await grantPermissionsForRole(user.id, userEmail, WorkspaceRole.MEMBER, workspaceId);
+    } catch (err) {
+      // Same race for the user row: another worker won — re-read and reuse it (its permissions are already granted).
+      if ((err as { code?: string })?.code !== 'P2002') throw err;
+      user = await userRepo.findByEmail(userEmail, workspaceId);
+      if (!user) throw err;
+    }
   }
 
   if (userCache) {
@@ -484,6 +498,7 @@ export async function ingestConversationSlack(
           createdAt,
           isAddingParticipant: false,
           pinned: isPinned || false,
+          suppressAutomations: true, // migrated history must never fire workflows/automations
         });
 
         message = result.message;
@@ -505,6 +520,7 @@ export async function ingestConversationSlack(
           createdAt,
           isAddingParticipant: false,
           markParticipantsRead: true,
+          suppressAutomations: true, // migrated history must never fire workflows/automations
         });
 
         message = result.message;

@@ -13,6 +13,7 @@ import { AgentKnowledgeTabV2 } from './knowledge/AgentKnowledgeTabV2';
 import { AgentPeopleTabV2 } from './people/AgentPeopleTabV2';
 import { AgentToolsTabV2 } from './tools/AgentToolsTabV2';
 import { AGENT_DETAIL_TABS, resolveTab, type AgentDetailTabId } from './detailTabs';
+import { AgentCallGraphTabV2 } from './callGraph/AgentCallGraphTabV2';
 import { useAgentDetailActions } from './useAgentDetailActions';
 
 const DATE = new Intl.DateTimeFormat('en-GB', {
@@ -48,6 +49,11 @@ const ClawAgentDetailV2 = (): ReactElement => {
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
   const actions = useAgentDetailActions(agent);
 
+  // Delegation approvals spend the callee's credentials and quota, so the
+  // inbox is the owner's (or an admin's) — mirrors claw's canManageRequests.
+  const canManageDelegation = actions.isOwner || actions.isAdmin;
+  const visibleTabs = AGENT_DETAIL_TABS.filter(entry => !entry.ownerOnly || canManageDelegation);
+
   const setTab = (next: AgentDetailTabId): void => {
     const params = new URLSearchParams(searchParams);
     params.set('tab', next);
@@ -71,7 +77,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
           )}
 
           <div className='flex w-full items-center gap-1'>
-            {AGENT_DETAIL_TABS.map(entry => (
+            {visibleTabs.map(entry => (
               <button
                 key={entry.id}
                 type='button'
@@ -158,6 +164,8 @@ const ClawAgentDetailV2 = (): ReactElement => {
               <AgentKnowledgeTabV2 agent={agent} canEdit={actions.permissions?.canEdit ?? false} />
             ) : tab === 'people' ? (
               <AgentPeopleTabV2 agent={agent} actions={actions} />
+            ) : tab === 'call-graph' && canManageDelegation ? (
+              <AgentCallGraphTabV2 agent={agent} />
             ) : (
               <AgentActivityTabV2 agent={agent} canEdit={actions.permissions?.canEdit ?? false} />
             )}

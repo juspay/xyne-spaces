@@ -5,6 +5,7 @@ import type { FlowComponent } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { Button, buttonVariants } from '../../ui/Button/Button';
 import { useMcpCatalog } from '../../../routes/AIScreen/library/shared/pickers/mcp/useMcpCatalog';
+import { useMcpCredentialFields } from '../../../routes/AIScreen/library/shared/pickers/mcp/useMcpCredentialFields';
 import { McpLogo } from '../../../routes/AIScreen/library/shared/pickers/mcp/McpLogo';
 import { McpConnectDialog } from '../../../routes/AIScreen/library/mcp/detail/McpConnectDialog';
 import { openOAuthConsent } from '../../../routes/AIScreen/library/shared/pickers/mcp/openOAuthConsent';
@@ -51,6 +52,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
   const props = node.props as McpSuggestProps | undefined;
   const { user } = useAuth();
   const { entries, connectedServerIds, refetch } = useMcpCatalog();
+  const { ensureFieldsFor } = useMcpCredentialFields();
   const [busyType, setBusyType] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<string | null>(null);
   const [credentialsFor, setCredentialsFor] = useState<McpServer | null>(null);
@@ -73,7 +75,9 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
     if (!server || !user?.id) return;
     setErrorType(null);
 
-    if (mcpRequiresCredentials(server)) {
+    // Resolved from the registry, not the connector's DB columns: those are
+    // unset in some environments and the form would be skipped entirely.
+    if (mcpRequiresCredentials(server, await ensureFieldsFor(server))) {
       setCredentialsFor(server);
       return;
     }

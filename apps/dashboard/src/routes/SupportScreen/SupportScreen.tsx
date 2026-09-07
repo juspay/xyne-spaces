@@ -1,4 +1,4 @@
-import { ReplyAll, Split, Wand2, Archive, Plug, MailOpen } from 'lucide-react';
+import { ReplyAll, Split, Wand2, Archive, Plug, MailOpen, MoreHorizontal, Ban } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelType,
@@ -7,6 +7,7 @@ import {
   TicketReferenceRelation,
   NotificationLevel,
   AutoDraftStatus,
+  MailboxState,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -123,6 +124,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from '../../components/ui/dropdown-menu';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine, clearTicketFilterParams } from '../../machines/ticketFiltersMachine';
@@ -751,6 +753,7 @@ const SupportScreen = (): ReactElement => {
           ? (tagFilterConversationIds ?? [])
           : undefined,
       hasAiDraft: filters.hasAiDraft === true ? true : undefined,
+      hasSubTickets: filters.hasSubTickets === true ? true : undefined,
       userGroups:
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
@@ -860,6 +863,7 @@ const SupportScreen = (): ReactElement => {
   const moreFiltersActiveCount =
     (filters.assigned ? 1 : 0) +
     (filters.hasAiDraft === true ? 1 : 0) +
+    (filters.hasSubTickets === true ? 1 : 0) +
     (filters.aiCategory && filters.aiCategory.length > 0 ? 1 : 0) +
     (filters.generatedTags && filters.generatedTags.length > 0 ? 1 : 0) +
     (filters.userGroups && filters.userGroups.length > 0 ? 1 : 0) +
@@ -1242,6 +1246,10 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  const metricsEnabled =
+    !!selectedChannelId &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.metricsEnabled;
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
@@ -1395,8 +1403,13 @@ const SupportScreen = (): ReactElement => {
     const mailId = searchParams.get('mail');
     if (mailId) params.set('mail', mailId);
     const qs = params.toString();
+    // the router state the caller arrived with — `shouldNavigateBack` (set by cmd+K
+    // and the search results screen) decides where Back goes, and this effect always
+    // Read from `window.history` rather than `location.state`: this effect
+    const carriedState = (window.history.state as { usr?: Record<string, unknown> } | null)?.usr;
     void navigate(`${supportBase}/${selectedChannelId}/${xyneId}${qs ? `?${qs}` : ''}`, {
       replace: true,
+      state: carriedState,
     });
   }, [
     deeplinkConversationId,
@@ -1908,7 +1921,7 @@ const SupportScreen = (): ReactElement => {
             state: {
               conversationId: parentTicket.conversationId,
               ticketId: parentTicket.id,
-              fromDeskList: true,
+              shouldNavigateBack: true,
             },
           });
         }
@@ -2216,7 +2229,7 @@ const SupportScreen = (): ReactElement => {
         state: {
           conversationId: ticketData.conversationId,
           ticketId: ticketData.id,
-          fromDeskList: true,
+          shouldNavigateBack: true,
         },
       });
     },
@@ -2836,35 +2849,33 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
-                      {isSelectedChannelJoined &&
-                        selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.metricsEnabled && (
-                          <Tooltip content='Desk metrics' side='bottom'>
-                            <button
-                              onClick={() => {
-                                const base = selectedChannelId
-                                  ? `${supportBase}/${selectedChannelId}`
-                                  : supportBase;
-                                if (isMetricsOpen) {
-                                  void navigate(base, { replace: true });
-                                } else {
-                                  void navigate(`${base}?metrics=open`);
-                                }
-                              }}
-                              className={cn(
-                                'p-1.5 rounded transition-colors',
-                                isMetricsOpen
-                                  ? 'bg-muted text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                              )}
-                              data-track-category='Support'
-                              data-track-name='OpenDeskMetrics'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <BarChart3 size={16} />
-                            </button>
-                          </Tooltip>
-                        )}
+                      {isSelectedChannelJoined && metricsEnabled && (
+                        <Tooltip content='Desk metrics' side='bottom'>
+                          <button
+                            onClick={() => {
+                              const base = selectedChannelId
+                                ? `${supportBase}/${selectedChannelId}`
+                                : supportBase;
+                              if (isMetricsOpen) {
+                                void navigate(base, { replace: true });
+                              } else {
+                                void navigate(`${base}?metrics=open`);
+                              }
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isMetricsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenDeskMetrics'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <BarChart3 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         channelPreference?.deskReportEnabled && (
@@ -3209,6 +3220,25 @@ const SupportScreen = (): ReactElement => {
                                     }
                                     label='AI draft'
                                     aria-label='Has AI draft'
+                                  />
+                                </div>
+                                <div
+                                  data-track-category='Support'
+                                  data-track-name='ToggleHasSubTickets'
+                                  data-track-metadata={JSON.stringify({
+                                    hasSubTickets: filters.hasSubTickets !== true,
+                                  })}
+                                >
+                                  <Switch
+                                    checked={filters.hasSubTickets === true}
+                                    onCheckedChange={checked =>
+                                      handleFilterChange(
+                                        'hasSubTickets',
+                                        checked ? true : undefined,
+                                      )
+                                    }
+                                    label='Has sub-tickets'
+                                    aria-label='Has sub-tickets'
                                   />
                                 </div>
                               </div>
@@ -3614,7 +3644,7 @@ const SupportScreen = (): ReactElement => {
                   availableStages={availableStages}
                   onTicketClick={ticket => {
                     void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId, fromDeskList: true },
+                      state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
                     });
                   }}
                 />
@@ -3740,7 +3770,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
-                              fromDeskList: true,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -3762,7 +3792,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
-                              fromDeskList: true,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -3793,7 +3823,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
-                              fromDeskList: true,
+                              shouldNavigateBack: true,
                             },
                           });
                         }}
@@ -4008,7 +4038,6 @@ const SupportScreen = (): ReactElement => {
 
 const TicketMetaRow = ({
   ticket,
-  boardId,
 }: {
   ticket:
     | {
@@ -4021,39 +4050,46 @@ const TicketMetaRow = ({
       }
     | undefined
     | null;
-  boardId: string | null;
 }): ReactElement | null => {
   const resolvedAssigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
   const assignee = useUser(resolvedAssigneeId);
   if (!ticket) return null;
-  const stage = ticket.stageName || 'To Do';
   const assigneeName = resolvedAssigneeId
     ? assignee
       ? getUserDisplayName(assignee)
       : '…'
     : 'Unassigned';
   return (
-    <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
-      <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
-      <StagePicker
-        ticketId={ticket.id}
-        stageName={ticket.stageName}
-        stageLabel={stage}
-        boardId={boardId}
-      />
-      <AssigneePicker
-        ticketId={ticket.id}
-        assignedTo={ticket.assignedTo}
-        channelId={ticket.channelId ?? undefined}
-        label={assigneeName}
-      />
-      {ticket.aiCategory && (
-        <span
-          className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'
-          title={`AI Category: ${ticket.aiCategory}`}
-        >
-          {ticket.aiCategory}
+    <div className='flex items-center flex-wrap gap-y-1 min-h-[24px]'>
+      <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
+        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
+          Priority
         </span>
+        <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
+      </div>
+      <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
+        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
+          Assignee
+        </span>
+        <AssigneePicker
+          ticketId={ticket.id}
+          assignedTo={ticket.assignedTo}
+          channelId={ticket.channelId ?? undefined}
+          label={assigneeName}
+        />
+      </div>
+      {ticket.aiCategory && (
+        <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
+          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
+            Type
+          </span>
+          <span
+            className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'
+            title={`AI Category: ${ticket.aiCategory}`}
+          >
+            {ticket.aiCategory}
+          </span>
+        </div>
       )}
     </div>
   );
@@ -4068,6 +4104,7 @@ type SupportTicketDetailProps = {
     aiCategory: string[] | undefined;
     conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
+    hasSubTickets: boolean | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
@@ -4099,6 +4136,19 @@ type SupportTicketDetailProps = {
     title: string;
     lastEmailAt?: number | null;
   }>;
+};
+
+type TicketReplyKind = 'app' | 'channel';
+
+/**
+ * Reply routing is per-ticket, not per-channel: an app-sourced ticket can live in ANY
+ * desk channel (e.g. EMAIL intake + a connected app), so channel.type alone can no
+ * longer pick the thread/composer. 'channel' = the channel-type chain, unchanged.
+ */
+const getTicketReplyKind = (ticketMetadata: unknown): TicketReplyKind => {
+  const deskSource = (ticketMetadata as { deskSource?: { type?: string } } | null | undefined)
+    ?.deskSource;
+  return deskSource?.type === 'app' ? 'app' : 'channel';
 };
 
 export const SupportTicketDetail = ({
@@ -4159,7 +4209,7 @@ export const SupportTicketDetail = ({
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
-    fromDeskList?: boolean;
+    shouldNavigateBack?: boolean;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -4188,6 +4238,7 @@ export const SupportTicketDetail = ({
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
+  const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
@@ -4236,7 +4287,7 @@ export const SupportTicketDetail = ({
           void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`, {
             replace: true,
             state: {
-              ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(routerState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
               ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
             },
           });
@@ -4252,7 +4303,7 @@ export const SupportTicketDetail = ({
       channelIdParam,
       navigate,
       navBasePath,
-      routerState?.fromDeskList,
+      routerState?.shouldNavigateBack,
       routerState?.returnToUrl,
       supportBase,
     ],
@@ -4413,7 +4464,7 @@ export const SupportTicketDetail = ({
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
-        ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+        ...(routerState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
         ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
@@ -4470,10 +4521,11 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
-    // Both markers are stamped by the opener (desk list, Kanban, My Tickets) as it pushes
-    // this entry, so its page is one Back away — pop it rather than stacking a second copy.
+    // Every marker is stamped by the opener (desk list, Kanban, My Tickets, cmd+K,
+    // the search results screen) as it pushes this entry, so its page is one Back
+    // away — pop it rather than stacking a second copy.
     // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
-    if (routerState?.fromDeskList || routerState?.returnToUrl) {
+    if (routerState?.shouldNavigateBack || routerState?.returnToUrl) {
       void navigate(-1);
       return;
     }
@@ -4485,7 +4537,7 @@ export const SupportTicketDetail = ({
     navBasePath,
     navigate,
     onBack,
-    routerState?.fromDeskList,
+    routerState?.shouldNavigateBack,
     routerState?.returnToUrl,
     supportBase,
   ]);
@@ -4724,6 +4776,8 @@ export const SupportTicketDetail = ({
   const zero = useZero();
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -4784,174 +4838,9 @@ export const SupportTicketDetail = ({
                   </span>
                 </TruncatedTooltip>
 
-                {/* One cluster so the actions wrap as a block rather than dribbling
-                    onto the next line one icon at a time. `[&>*]:shrink-0` keeps the
-                    1px dividers alive — their min-content size is 0, so they are the
-                    first thing flexbox would collapse. */}
-                <div className='flex flex-wrap items-center gap-2 min-w-0 [&>*]:shrink-0'>
-                  {/* Same self-gating trick as the row-2 pill box: the trailing divider
-                      is an `after:` pseudo and `empty:hidden` drops the whole group, so a
-                      SPAM ticket with no conversation (picker absent, and the 'actions'
-                      slot renders nothing in that state) cannot strand a leading divider. */}
-                  <div className="flex items-center gap-2 empty:hidden after:w-px after:h-4 after:shrink-0 after:bg-border after:content-['']">
-                    {conversationId && channelId && (
-                      <ConversationLabels
-                        conversationId={conversationId}
-                        channelId={channelId}
-                        isMember={isMember}
-                        slot='picker'
-                        appliedMappings={conversationLabelMappings ?? []}
-                      />
-                    )}
-                    {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
-                      <MailboxActions
-                        ticketId={mailboxTicketId}
-                        channelId={channelId}
-                        slot='actions'
-                        mailboxOverlay={mailboxOverlay}
-                      />
-                    )}
-                  </div>
-                  {emailCollapseState.canToggleAll && (
-                    <>
-                      <Tooltip
-                        side='bottom'
-                        delayDuration={300}
-                        content={
-                          <span className='flex items-center gap-2'>
-                            {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
-                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                              E
-                            </kbd>
-                          </span>
-                        }
-                      >
-                        <button
-                          type='button'
-                          onClick={emailCollapseState.toggleAll}
-                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                          data-track-category='Support'
-                          data-track-name={
-                            emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
-                          }
-                        >
-                          {emailCollapseState.anyExpanded ? (
-                            <ChevronsDownUp size={16} />
-                          ) : (
-                            <ChevronsUpDown size={16} />
-                          )}
-                        </button>
-                      </Tooltip>
-
-                      <div className='w-px h-4 bg-border' />
-                    </>
-                  )}
-
-                  {emails.length > 0 && (
-                    <>
-                      <Tooltip side='bottom' delayDuration={300} content='Summarize email thread'>
-                        <button
-                          type='button'
-                          onClick={() => {
-                            if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
-                              setShowEmailSummary(true);
-                              scrollThreadToTop();
-                              void fetchEmailSummary();
-                            } else if (emailSummaryState === 'done') {
-                              setShowEmailSummary(prev => {
-                                const next = !prev;
-                                if (next) scrollThreadToTop();
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={emailSummaryState === 'loading'}
-                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors'
-                          data-track-category='Support'
-                          data-track-name='SummarizeEmailThread'
-                        >
-                          {emailSummaryState === 'loading' ? (
-                            <Loader2 size={16} className='animate-spin' />
-                          ) : (
-                            <Wand2 size={16} />
-                          )}
-                        </button>
-                      </Tooltip>
-                      <div className='w-px h-4 bg-border' />
-                    </>
-                  )}
-
-                  <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        if (!channelId || !ticketIdParam) {
-                          toast.error('Cannot copy link');
-                          return;
-                        }
-                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
-                        void navigator.clipboard
-                          .writeText(url)
-                          .then(() => toast.success('Link copied'))
-                          .catch(() => toast.error('Failed to copy link'));
-                      }}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                      aria-label='Copy link to ticket'
-                      data-track-category='Support'
-                      data-track-name='CopyTicketLink'
-                    >
-                      <LinkIcon size={16} />
-                    </button>
-                  </Tooltip>
-                  <div className='w-px h-4 bg-border' />
-
-                  {channel && <CloudAgentDock buttonBehavior='floating' />}
-
-                  <Tooltip
-                    side='bottom'
-                    delayDuration={300}
-                    content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
-                  >
-                    <button
-                      type='button'
-                      onClick={() => setShowArchiveConfirmDialog(true)}
-                      disabled={!ticket || !!ticket.isArchived}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-                      aria-label='Archive ticket'
-                      data-track-category='Support'
-                      data-track-name='ArchiveTicket'
-                    >
-                      <Archive size={16} />
-                    </button>
-                  </Tooltip>
-                  {emails.length > 0 &&
-                    channel?.type !== ChannelType.SLACK &&
-                    channel?.type !== ChannelType.APP && (
-                      <>
-                        <div className='w-px h-4 bg-border' />
-                        <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
-                          <button
-                            type='button'
-                            onClick={() => {
-                              if (!ticket?.id) return;
-                              void zero.mutate(
-                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
-                              );
-                              goBackToTicketList();
-                            }}
-                            className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                            aria-label='Mark as unread'
-                            data-track-category='Support'
-                            data-track-name='MarkTicketUnread'
-                          >
-                            <MailOpen size={16} />
-                          </button>
-                        </Tooltip>
-                      </>
-                    )}
-                  <div className='w-px h-4 bg-border' />
-
-                  <div className='flex items-center gap-1'>
+                {/* Prev/Next + Status pill + ··· overflow menu */}
+                <div className='flex items-center gap-1.5 min-w-0 shrink-0'>
+                  <div className='flex items-center gap-0.5'>
                     <Tooltip
                       side='bottom'
                       delayDuration={300}
@@ -4997,69 +4886,300 @@ export const SupportTicketDetail = ({
                       </button>
                     </Tooltip>
                   </div>
-                  {!isRightPanelOpen && (
-                    <>
-                      <div className='w-px h-4 bg-border' />
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        onClick={() => setIsRightPanelOpen(true)}
-                        data-track-category='Support'
-                        data-track-name='OpenThreadPanel'
-                      >
-                        Open Thread
-                      </Button>
-                    </>
+                  {/* Status pill */}
+                  {ticket && (
+                    <div className='border border-border rounded-md overflow-hidden shrink-0'>
+                      <StagePicker
+                        ticketId={ticket.id}
+                        stageName={ticket.stageName}
+                        stageLabel={ticket.stageName || 'To Do'}
+                        boardId={boardId}
+                      />
+                    </div>
                   )}
+
+                  {/* ··· overflow menu */}
+                  <DropdownMenu
+                    open={moreMenuOpen}
+                    onOpenChange={open => {
+                      setMoreMenuOpen(open);
+                      if (!open) setLabelPickerOpen(false);
+                    }}
+                  >
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type='button'
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                        aria-label='More actions'
+                        data-track-category='Support'
+                        data-track-name='MoreMenu'
+                      >
+                        <MoreHorizontal size={18} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end' className={labelPickerOpen ? 'w-64' : 'w-56'}>
+                      {conversationId && channelId && (
+                        <>
+                          {!labelPickerOpen ? (
+                            <DropdownMenuItem
+                              onSelect={e => {
+                                e.preventDefault();
+                                setLabelPickerOpen(true);
+                              }}
+                              data-track-category='Support'
+                              data-track-name='OpenLabelPicker'
+                            >
+                              <TagIcon size={14} className='shrink-0' />
+                              Add label
+                            </DropdownMenuItem>
+                          ) : (
+                            <div className='py-1'>
+                              <div className='flex items-center justify-between px-3 py-1 text-xs font-medium text-foreground border-b border-border mb-1'>
+                                <span>Labels</span>
+                                <button
+                                  type='button'
+                                  onClick={() => setLabelPickerOpen(false)}
+                                  className='text-muted-foreground hover:text-foreground transition-colors'
+                                  data-track-category='Support'
+                                  data-track-name='CloseLabelPicker'
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                              <ConversationLabels
+                                conversationId={conversationId}
+                                channelId={channelId}
+                                isMember={isMember}
+                                slot='inline-picker'
+                                appliedMappings={conversationLabelMappings ?? []}
+                              />
+                            </div>
+                          )}
+                        </>
+                      )}
+                      <DropdownMenuSeparator />
+                      {!isRightPanelOpen && (
+                        <DropdownMenuItem
+                          onSelect={() => setIsRightPanelOpen(true)}
+                          data-track-category='Support'
+                          data-track-name='OpenThreadPanel'
+                        >
+                          <PanelRight size={14} className='shrink-0' />
+                          Open Thread
+                        </DropdownMenuItem>
+                      )}
+                      {emailCollapseState.canToggleAll && (
+                        <DropdownMenuItem
+                          onSelect={emailCollapseState.toggleAll}
+                          data-track-category='Support'
+                          data-track-name={
+                            emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
+                          }
+                        >
+                          {emailCollapseState.anyExpanded ? (
+                            <ChevronsDownUp size={14} className='shrink-0' />
+                          ) : (
+                            <ChevronsUpDown size={14} className='shrink-0' />
+                          )}
+                          {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
+                        </DropdownMenuItem>
+                      )}
+                      {emails.length > 0 && (
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                              setShowEmailSummary(true);
+                              scrollThreadToTop();
+                              void fetchEmailSummary();
+                            } else if (emailSummaryState === 'done') {
+                              setShowEmailSummary(prev => {
+                                const next = !prev;
+                                if (next) scrollThreadToTop();
+                                return next;
+                              });
+                            }
+                          }}
+                          disabled={emailSummaryState === 'loading'}
+                          data-track-category='Support'
+                          data-track-name='SummarizeEmailThread'
+                        >
+                          {emailSummaryState === 'loading' ? (
+                            <Loader2 size={14} className='animate-spin shrink-0' />
+                          ) : (
+                            <Wand2 size={14} className='shrink-0' />
+                          )}
+                          Summarize thread
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          if (!channelId || !ticketIdParam) {
+                            toast.error('Cannot copy link');
+                            return;
+                          }
+                          const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
+                          void navigator.clipboard
+                            .writeText(url)
+                            .then(() => toast.success('Link copied'))
+                            .catch(() => toast.error('Failed to copy link'));
+                        }}
+                        data-track-category='Support'
+                        data-track-name='CopyTicketLink'
+                      >
+                        <LinkIcon size={14} className='shrink-0' />
+                        Copy link
+                      </DropdownMenuItem>
+                      {emails.length > 0 &&
+                        channel?.type !== ChannelType.SLACK &&
+                        channel?.type !== ChannelType.APP && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              if (!ticket?.id) return;
+                              void zero.mutate(
+                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                              );
+                              goBackToTicketList();
+                            }}
+                            data-track-category='Support'
+                            data-track-name='MarkTicketUnread'
+                          >
+                            <MailOpen size={14} className='shrink-0' />
+                            Mark as unread
+                          </DropdownMenuItem>
+                        )}
+                      {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
+                        <>
+                          {(mailboxOverlay?.state ?? MailboxState.INBOX) ===
+                            MailboxState.ARCHIVED && (
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                void zero
+                                  .mutate(
+                                    mutators.ticketMailbox.setState({
+                                      id: uuidv4(),
+                                      ticketId: mailboxTicketId,
+                                      channelId,
+                                      state: MailboxState.INBOX,
+                                      timestamp: Date.now(),
+                                    }),
+                                  )
+                                  .server.catch(() => toast.error('Failed to move mail'));
+                              }}
+                              data-track-category='Support'
+                              data-track-name='MailboxToInbox'
+                            >
+                              <Inbox size={14} className='shrink-0' />
+                              Move to Inbox
+                            </DropdownMenuItem>
+                          )}
+                          {(mailboxOverlay?.state ?? MailboxState.INBOX) !== MailboxState.SPAM && (
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                void zero
+                                  .mutate(
+                                    mutators.ticketMailbox.setState({
+                                      id: uuidv4(),
+                                      ticketId: mailboxTicketId,
+                                      channelId,
+                                      state: MailboxState.SPAM,
+                                      timestamp: Date.now(),
+                                    }),
+                                  )
+                                  .server.catch(() => toast.error('Failed to report spam'));
+                              }}
+                              data-track-category='Support'
+                              data-track-name='MailboxSpam'
+                            >
+                              <Ban size={14} className='shrink-0' />
+                              Report spam
+                            </DropdownMenuItem>
+                          )}
+                        </>
+                      )}
+                      {channel && (
+                        <DropdownMenuItem
+                          onSelect={e => e.preventDefault()}
+                          className='p-0 focus:bg-transparent'
+                        >
+                          <CloudAgentDock buttonBehavior='floating' />
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => setShowArchiveConfirmDialog(true)}
+                        disabled={!ticket || !!ticket.isArchived}
+                        data-track-category='Support'
+                        data-track-name='ArchiveTicket'
+                        className='text-destructive focus:text-destructive'
+                      >
+                        <Archive size={14} className='shrink-0' />
+                        Archive ticket
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               <div className='flex flex-col gap-1 flex-shrink-0'>
-                <div className='pl-9 flex items-center gap-3 flex-wrap'>
-                  <TicketMetaRow ticket={ticket} boardId={boardId} />
+                <div className='pl-9 flex items-center gap-0 flex-wrap'>
+                  <TicketMetaRow ticket={ticket} />
                   {initiator && (
                     <div
-                      className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground whitespace-nowrap h-[24px]'
+                      className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'
                       title={
                         initiator.email
                           ? `Initiated by ${initiator.name} <${initiator.email}>`
                           : `Initiated by ${initiator.name}`
                       }
-                      aria-label={`Initiated by ${initiator.name}`}
                     >
-                      <Mail size={12} className='shrink-0 text-muted-foreground' />
-                      <span className='truncate max-w-[160px]'>{initiator.name}</span>
+                      <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
+                        Requester
+                      </span>
+                      <div className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground whitespace-nowrap h-[24px]'>
+                        <Mail size={12} className='shrink-0 text-muted-foreground' />
+                        <span className='truncate max-w-[160px]'>{initiator.name}</span>
+                      </div>
                     </div>
                   )}
 
-                  {/* Pills only — the picker trigger and the move actions live in the
-                      row-1 icon cluster. This is the metadata strip, so what lands here
-                      is state you read (which labels, which mailbox), not buttons you
-                      hunt for. Both slots render null when they have nothing to show
-                      (archived has no chip, zero labels has no chips), so the leading
-                      divider is a `before:` pseudo on this box and `empty:hidden` drops
-                      the whole thing — a real sibling element would strand a divider
-                      with nothing after it. */}
-                  {channelId && (conversationId || mailboxTicketId) && (
-                    <div className="flex items-center gap-1.5 flex-wrap min-h-[24px] empty:hidden before:w-px before:h-4 before:shrink-0 before:bg-border before:content-['']">
-                      {channel?.type === ChannelType.EMAIL && mailboxTicketId && (
-                        <MailboxActions
-                          ticketId={mailboxTicketId}
-                          channelId={channelId}
-                          slot='chip'
-                          mailboxOverlay={mailboxOverlay}
-                        />
-                      )}
-                      {conversationId && (
-                        <ConversationLabels
-                          conversationId={conversationId}
-                          channelId={channelId}
-                          isMember={isMember}
-                          slot='chips'
-                          appliedMappings={conversationLabelMappings ?? []}
-                        />
-                      )}
-                    </div>
-                  )}
+                  {/* Mailbox chip + label chips.
+                      Only render the VIEW label row when there is at least one visible
+                      chip: MailboxActions returns null for ARCHIVED state, and
+                      ConversationLabels chips returns null when there are no labels. */}
+                  {channelId &&
+                    (() => {
+                      const mailboxState = mailboxOverlay?.state ?? MailboxState.INBOX;
+                      const hasMailboxChip =
+                        channel?.type === ChannelType.EMAIL &&
+                        !!mailboxTicketId &&
+                        mailboxState !== MailboxState.ARCHIVED;
+                      const hasLabelChips =
+                        !!conversationId && (conversationLabelMappings?.length ?? 0) > 0;
+                      if (!hasMailboxChip && !hasLabelChips) return null;
+                      return (
+                        <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
+                          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
+                            View
+                          </span>
+                          {hasMailboxChip && mailboxTicketId && (
+                            <MailboxActions
+                              ticketId={mailboxTicketId}
+                              channelId={channelId}
+                              slot='chip'
+                              mailboxOverlay={mailboxOverlay}
+                            />
+                          )}
+                          {hasLabelChips && conversationId && (
+                            <ConversationLabels
+                              conversationId={conversationId}
+                              channelId={channelId}
+                              isMember={isMember}
+                              slot='chips'
+                              appliedMappings={conversationLabelMappings ?? []}
+                            />
+                          )}
+                        </div>
+                      );
+                    })()}
                 </div>
                 {ticket && (
                   <div className='pl-9'>
@@ -5262,7 +5382,8 @@ export const SupportTicketDetail = ({
                 )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  {channel?.type === ChannelType.SLACK ||
+                  {isAppSourcedTicket ||
+                  channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
                     <SlackThread emails={emails} ticketId={ticket?.id} />
@@ -5291,7 +5412,20 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
-              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              {isAppSourcedTicket ? (
+                conversationId ? (
+                  <SlackComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
+                    variant='app'
+                    // The ticket is app-sourced whatever the desk type, so the
+                    // channel preference alone decides whether the reply reaches
+                    // the app — matching appDeskService's outbound gate.
+                    recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
+                  />
+                ) : null
+              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
@@ -5708,7 +5842,7 @@ const EmailThreadItem = ({
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
   const emailRouterState = useLocation().state as {
-    fromDeskList?: boolean;
+    shouldNavigateBack?: boolean;
     returnToUrl?: string | null;
   } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
@@ -5756,7 +5890,7 @@ const EmailThreadItem = ({
               conversationId: response.data.newTicket.conversationId,
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
-              ...(emailRouterState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(emailRouterState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
               ...(emailRouterState?.returnToUrl
                 ? { returnToUrl: emailRouterState.returnToUrl }
                 : {}),

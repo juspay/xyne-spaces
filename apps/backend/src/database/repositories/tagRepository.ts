@@ -177,19 +177,28 @@ export class TagRepository {
     });
   }
 
-  /**
-   * Returns all distinct (tagCategory, tag) pairs for a configKey (capped at 500).
-   * Used by the "AI Tags" filter submenu to list all tags that actually exist for a channel.
-   */
-  async findDistinctTagsByConfigKey(
+  async findDistinctTagCategoriesByConfigKey(
     configKey: string,
-  ): Promise<{ tagCategory: string; tag: string }[]> {
+  ): Promise<{ tagCategory: string }[]> {
     return this.client().tag.findMany({
       where: { configKey, sourceType: 'desk-email', isDeleted: false },
-      distinct: ['tagCategory', 'tag'],
-      select: { tagCategory: true, tag: true },
-      orderBy: [{ tagCategory: 'asc' }, { tag: 'asc' }],
-      take: 500,
+      distinct: ['tagCategory'],
+      select: { tagCategory: true },
+      orderBy: { tagCategory: 'asc' },
+      take: 200,
+    });
+  }
+
+  async findDistinctTagsByConfigKeyAndCategory(
+    configKey: string,
+    tagCategory: string,
+  ): Promise<{ tag: string }[]> {
+    return this.client().tag.findMany({
+      where: { configKey, tagCategory, sourceType: 'desk-email', isDeleted: false },
+      distinct: ['tag'],
+      select: { tag: true },
+      orderBy: { tag: 'asc' },
+      take: 2000,
     });
   }
 

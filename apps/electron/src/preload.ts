@@ -96,6 +96,7 @@ const electronAPI = {
     callerEmail: string;
     callType: 'AUDIO' | 'VIDEO';
     callerPicture?: string;
+    body?: string;
   }) => {
     ipcRenderer.send('show-call-notification', data);
   },

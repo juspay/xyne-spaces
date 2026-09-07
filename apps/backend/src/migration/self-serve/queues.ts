@@ -2,14 +2,18 @@ import Bull from 'bull';
 import { getBaseRedisOptions } from '@/services/redisFactory';
 import { QueueName } from './types';
 
-interface JobRef { migrationId: string; }
+interface JobRef { migrationId: string; conversationId?: string; }
 
-/** Two serial (concurrency 1) queues — one-at-a-time for accountability (§5.4). Resume position: `lifo`=front (admin-stopped), normal add=end (failure). */
+/**
+ * Collection + ingestion-planner run one-at-a-time (§5.4). A third queue, CONV_INGEST, is fanned out:
+ * the planner drops one job per conversation and every worker process drains it in parallel.
+ * Resume position: `lifo`=front (admin-stopped), normal add=end (failure).
+ */
 export class MigrationQueues {
   private readonly queues = new Map<QueueName, Bull.Queue<JobRef>>();
 
   constructor() {
-    for (const name of [QueueName.COLLECTION, QueueName.INGESTION]) {
+    for (const name of [QueueName.COLLECTION, QueueName.INGESTION, QueueName.CONV_INGEST]) {
       this.queues.set(
         name,
         new Bull<JobRef>(name, {
@@ -55,6 +59,25 @@ export class MigrationQueues {
 
   process(name: QueueName, handler: (migrationId: string) => Promise<void>): void {
     this.queue(name).process(1, (job) => handler(job.data.migrationId));
+  }
+
+  /**
+   * Fan-out enqueue: one job per conversation. jobId dedups, so re-running the planner (resume) is idempotent.
+   * attempts:3 lets a transient infra blip (Redis/DB) retry — safe because re-ingesting a conversation is idempotent
+   * (done-set skip + per-message dedup), so a retry only back-fills what's missing.
+   */
+  async enqueueConv(migrationId: string, conversationId: string): Promise<void> {
+    await this.queue(QueueName.CONV_INGEST).add(
+      { migrationId, conversationId },
+      { jobId: `${migrationId}:${conversationId}`, attempts: 3, backoff: { type: 'fixed', delay: 5000 } },
+    );
+  }
+
+  /** Drain conversation jobs `concurrency`-at-a-time in THIS process; run in every worker process for cross-process parallelism. */
+  processConv(concurrency: number, handler: (migrationId: string, conversationId: string) => Promise<void>): void {
+    this.queue(QueueName.CONV_INGEST).process(Math.max(1, concurrency), (job) =>
+      handler(job.data.migrationId, job.data.conversationId ?? ''),
+    );
   }
 
   pause(name: QueueName): Promise<void> { return this.queue(name).pause(); }

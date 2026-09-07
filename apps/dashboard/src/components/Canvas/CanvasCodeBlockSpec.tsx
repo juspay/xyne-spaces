@@ -2,7 +2,7 @@ import { defaultBlockSpecs } from '@blocknote/core';
 import { createReactBlockSpec } from '@blocknote/react';
 import hljs from 'highlight.js';
 import { useMemo, type ReactElement, type Ref } from 'react';
-import { MermaidBlock } from '../Markdown/MermaidBlock';
+import { CanvasMermaidWithSource } from './CanvasMermaidWithSource';
 
 const codeConfig = defaultBlockSpecs.codeBlock.config;
 
@@ -64,7 +64,7 @@ export const canvasCodeBlockSpec = createReactBlockSpec(
   codeConfig,
   {
     meta: { code: true, defining: true },
-    render: ({ block, contentRef }) => {
+    render: ({ block, editor, contentRef }) => {
       const language = String(block.props.language ?? 'text').toLocaleLowerCase();
       const chart = Array.isArray(block.content)
         ? block.content
@@ -84,10 +84,13 @@ export const canvasCodeBlockSpec = createReactBlockSpec(
       }
       return (
         <div className='w-full' data-wiki-mermaid='true'>
-          <MermaidBlock chart={chart} messageId={`canvas-${block.id}`} controlsOnHover />
-          <pre className='hidden' aria-hidden='true'>
-            <code ref={contentRef} spellCheck={false} />
-          </pre>
+          <CanvasMermaidWithSource
+            source={chart}
+            cacheKey={`canvas-${block.id}`}
+            contentRef={contentRef as Ref<HTMLElement>}
+            onRemove={() => editor.removeBlocks([block.id])}
+            editable={editor.isEditable}
+          />
         </div>
       );
     },
