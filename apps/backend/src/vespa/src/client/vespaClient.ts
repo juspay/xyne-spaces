@@ -6,8 +6,8 @@ import { cleanDocumentFields } from '../../../utils/vespaTextValidation';
 import type { InsertDocument, VespaSchema } from '../types';
 
 type VespaConfigValues = {
-  namespace?: string;
-  schema?: VespaSchema;
+  namespace: string;
+  schema: VespaSchema;
   cluster?: string;
   userId?: string;
 };
@@ -17,6 +17,10 @@ export interface BatchResult {
   success: boolean;
   error?: string;
 }
+
+// Vespa's Document V1 API addresses a doc by URL path: /document/v1/<namespace>/<schema>/docid/<docId>.
+// Every interpolated segment below is passed through encodeURIComponent so a value containing "/", "..",
+// "?", "#" or "%" can't escape its slot and rewrite the request path (path injection into the feed endpoint).
 
 class VespaClient {
   private maxRetries: number;
@@ -163,7 +167,7 @@ class VespaClient {
       // Clean document fields to remove Unicode replacement characters before insertion
       const cleanedDocument = cleanDocumentFields(document);
 
-      const url = `${this.feedEndpoint}/document/v1/${options.namespace}/${options.schema}/docid/${document.docId}`;
+      const url = `${this.feedEndpoint}/document/v1/${encodeURIComponent(options.namespace)}/${encodeURIComponent(options.schema)}/docid/${encodeURIComponent(document.docId)}`;
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: {
@@ -191,7 +195,7 @@ class VespaClient {
 
   async getDocument(options: VespaConfigValues & { docId: string }): Promise<any> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}/document/v1/${encodeURIComponent(namespace)}/${encodeURIComponent(schema)}/docid/${encodeURIComponent(docId)}`;
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'GET',
@@ -228,7 +232,7 @@ class VespaClient {
     const { docId, namespace, schema, create } = options;
     // create=true upserts: Vespa builds the doc from these assign ops when it
     // doesn't exist yet, instead of silently no-oping the partial update.
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}${
+    const url = `${this.feedEndpoint}/document/v1/${encodeURIComponent(namespace)}/${encodeURIComponent(schema)}/docid/${encodeURIComponent(docId)}${
       create ? '?create=true' : ''
     }`;
 
@@ -272,7 +276,7 @@ class VespaClient {
 
   async deleteDocument(options: VespaConfigValues & { docId: string }): Promise<void> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}/document/v1/${encodeURIComponent(namespace)}/${encodeURIComponent(schema)}/docid/${encodeURIComponent(docId)}`;
 
     try {
       const response = await this.fetchWithRetry(url, {

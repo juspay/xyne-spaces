@@ -8,7 +8,7 @@ import {
 } from './resultTransform';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { VALID_DOC_TYPES } from '@/utils/idValidator';
+import { VALID_DOC_TYPES, isSafeDocId } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
 
 
@@ -290,6 +290,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           success: false,
           error: 'includeChunkLevel=true requires a fileId (Vespa docId)',
         });
+        return;
+      }
+      if (!isSafeDocId(targetDocId)) {
+        logger.warn('Rejected unsafe fileId/targetDocId', { targetDocId, userId });
+        res.status(400).json({ success: false, error: 'Invalid fileId' });
         return;
       }
       const wantQuery = typeof q === 'string' && q.trim().length > 0;

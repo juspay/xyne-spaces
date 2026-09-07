@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { searchMemory, getMemoryById, updateMemory, deleteMemory, insertMemory } from '@/services/memoryService';
+import { isSafeDocId } from '@/utils/idValidator';
 import { vespaKnowledgeIngestionService } from '@/services/vespaKnowledgeIngestionService';
 import { VespaDocType, VespaMemoryDocument } from '@/vespa/src/types';
 import { DatabaseClient } from '@/database/client';
@@ -44,6 +45,12 @@ export class MemoryController {
           success: false,
           error: 'docId is required'
         });
+        return;
+      }
+
+      if (!isSafeDocId(document.docId)) {
+        logger.warn('Rejected unsafe docId', { docId: document.docId, userId });
+        res.status(400).json({ success: false, error: 'Invalid document ID' });
         return;
       }
 
@@ -173,6 +180,12 @@ export class MemoryController {
         return;
       }
 
+      if (!isSafeDocId(docId)) {
+        logger.warn('Rejected unsafe docId', { docId, userId: req.user?.id });
+        res.status(400).json({ success: false, error: 'Invalid document ID' });
+        return;
+      }
+
       logger.info('Getting memory document', { docId });
 
       const document = await getMemoryById(docId);
@@ -220,6 +233,12 @@ export class MemoryController {
           success: false,
           error: 'docId is required'
         });
+        return;
+      }
+
+      if (!isSafeDocId(docId)) {
+        logger.warn('Rejected unsafe docId', { docId, userId: req.user?.id });
+        res.status(400).json({ success: false, error: 'Invalid document ID' });
         return;
       }
 
@@ -280,6 +299,12 @@ export class MemoryController {
           success: false,
           error: 'docId is required'
         });
+        return;
+      }
+
+      if (!isSafeDocId(docId)) {
+        logger.warn('Rejected unsafe docId', { docId, userId: req.user?.id });
+        res.status(400).json({ success: false, error: 'Invalid document ID' });
         return;
       }
 
