@@ -78,6 +78,9 @@ export class PackConnection {
   readonly #pendingGot = new Map<string, { op: string; hash: string }[]>();
   /** Instances already marked hydrated (gotQueriesPatch is a diff — mark once). */
   readonly #got = new Set<string>();
+  /** Instances whose demux attribution maps have been rebuilt from their persisted snapshot
+   *  (once per instance) so a resume's del/update pokes attribute instead of dropping. */
+  readonly #seeded = new Set<string>();
 
   constructor(opts: PackConnectionOptions) {
     this.#opts = opts;
@@ -92,7 +95,32 @@ export class PackConnection {
     if (this.#desired.has(instanceKey)) return;
     this.#desired.set(instanceKey, { hash, args, partitionValue });
     this.#demux.addInstance(instanceKey, partitionValue);
-    if (this.#connected) this.#sendDesiredPatch([this.#putPatch(instanceKey)]);
+    // Seed the demux from the persisted snapshot BEFORE desiring the query to zero-cache, so
+    // the resume's del/update pokes can attribute. Pre-connect adds are seeded in start()/on
+    // connect; a live add seeds then desires.
+    if (this.#connected) void this.#seedThenDesire(instanceKey);
+  }
+
+  async #seedThenDesire(instanceKey: string): Promise<void> {
+    await this.#ensureSeeded([instanceKey]);
+    if (this.#connected && this.#desired.has(instanceKey)) {
+      this.#sendDesiredPatch([this.#putPatch(instanceKey)]);
+    }
+  }
+
+  /** Rebuild each instance's demux attribution from its persisted Redis snapshot (once). */
+  async #ensureSeeded(instanceKeys: readonly string[]): Promise<void> {
+    for (const instanceKey of instanceKeys) {
+      if (this.#seeded.has(instanceKey)) continue;
+      this.#seeded.add(instanceKey);
+      try {
+        const rows = await this.#opts.store.snapshot(instanceKey);
+        if (rows.length > 0) this.#demux.seedFromSnapshot(instanceKey, rows);
+      } catch (error) {
+        this.#seeded.delete(instanceKey); // let a later pass retry
+        logger.warn('sync_demux_seed_failed', { clientGroupID: this.#opts.clientGroupID, instanceKey, error });
+      }
+    }
   }
 
   removeInstance(instanceKey: string, partitionValue: string): void {
@@ -100,6 +128,7 @@ export class PackConnection {
     const { hash } = this.#desired.get(instanceKey)!;
     this.#desired.delete(instanceKey);
     this.#got.delete(instanceKey); // a re-add must re-observe gotQueriesPatch to re-hydrate
+    this.#seeded.delete(instanceKey); // a re-add must re-seed the demux (removeInstance cleared it)
     this.#demux.removeInstance(instanceKey, partitionValue);
     if (this.#connected) this.#sendDesiredPatch([{ op: 'del', hash }]);
   }
@@ -112,6 +141,8 @@ export class PackConnection {
     this.#closed = false;
     this.#stopped = false;
     this.#baseCookie = await this.#opts.store.loadCookie(this.#zeroClientGroupID);
+    // Seed the initial desired instances (the resume set) before the init header desires them.
+    await this.#ensureSeeded([...this.#desired.keys()]);
     this.#connect();
   }
 
@@ -219,8 +250,7 @@ export class PackConnection {
       case 'connected':
         this.#attempt = 0;
         this.#connected = true;
-        this.#reconcileDesired();
-        logger.info('sync_pack_connected', { clientGroupID: this.#opts.clientGroupID, instances: this.#demux.size() });
+        void this.#onConnected();
         break;
       case 'error':
         this.#onErrorFrame(body);
@@ -247,6 +277,14 @@ export class PackConnection {
       default:
         break;
     }
+  }
+
+  /** On connect: seed any desired instances added since start() (before their patch is sent),
+   *  then reconcile the desired set. Init-header instances were seeded in start(). */
+  async #onConnected(): Promise<void> {
+    await this.#ensureSeeded([...this.#desired.keys()]);
+    this.#reconcileDesired();
+    logger.info('sync_pack_connected', { clientGroupID: this.#opts.clientGroupID, instances: this.#demux.size() });
   }
 
   /** After (re)connect, sync the server's desired set to any adds/removes since the init header. */

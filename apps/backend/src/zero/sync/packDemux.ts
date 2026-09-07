@@ -1,4 +1,10 @@
-import { ChannelStreamState, rowKey, type RowPatchOp, type StreamDiff } from './streamState';
+import {
+  ChannelStreamState,
+  rowKey,
+  type CompactedRow,
+  type RowPatchOp,
+  type StreamDiff,
+} from './streamState';
 import type { QueryMeta } from './queryMeta';
 
 /**
@@ -40,6 +46,26 @@ export class PackDemux {
     this.#byPartition.delete(partitionValue);
     for (const [k, v] of this.#childIndex) if (v === instanceKey) this.#childIndex.delete(k);
     for (const [k, v] of this.#owner) if (v === instanceKey) this.#owner.delete(k);
+  }
+
+  /**
+   * Rebuild an instance's del/update attribution maps (`#owner`, `#childIndex`) from its
+   * persisted snapshot rows. `#owner`/`#childIndex` are otherwise only populated as `put`s
+   * arrive, so a tap that RESUMES with an empty demux (a restart, or an Option-B takeover)
+   * cannot attribute the resume's `del`/`update` pokes — which carry PK only — and silently
+   * DROPS them, leaking stale rows into the snapshot. Seeding from the snapshot closes that.
+   * (`#byPartition` needs no seed — it's set in `addInstance`; a fresh instance's snapshot is
+   * empty, so this is a no-op there.)
+   */
+  seedFromSnapshot(instanceKey: string, rows: readonly CompactedRow[]): void {
+    for (const { tableName, row } of rows) {
+      this.#owner.set(rowKey(tableName, row, this.#pkFields), instanceKey);
+      if (tableName === this.#meta.rootTable) {
+        for (const link of this.#meta.childLinks) {
+          this.#childIndex.set(`${link.parentColumn}:${String(row[link.parentColumn])}`, instanceKey);
+        }
+      }
+    }
   }
 
   size(): number {
