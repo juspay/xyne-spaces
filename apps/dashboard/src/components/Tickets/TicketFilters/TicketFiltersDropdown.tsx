@@ -258,6 +258,18 @@ export const TicketFiltersDropdown = ({
     onSourceChannelsOpenChange?.(activeSubmenu === 'sourceChannels');
   }, [activeSubmenu, onSourceChannelsOpenChange]);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Set when the pill arms exact mode on an empty box. The `""` reaches the field a render
+  // later (it round-trips through the URL params), so the caret can only be placed once the
+  // value has landed — a frame callback runs too early, and the browser then parks the caret
+  // after the closing quote.
+  const pendingCaretRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingCaretRef.current || searchValue !== '""') return;
+    pendingCaretRef.current = false;
+    inputRef.current?.focus();
+    inputRef.current?.setSelectionRange(1, 1);
+  }, [searchValue]);
   const navigate = useNavigate();
   const canViewAnalytics = useCanViewAnalytics();
   const { setActiveTab } = useSearchMetrics({ allChannels: [] });
@@ -1052,7 +1064,11 @@ export const TicketFiltersDropdown = ({
               <button
                 type='button'
                 onClick={() => {
-                  onExactSearchChange?.(!isExactSearch);
+                  const next = !isExactSearch;
+                  // Arming exact mode on an empty box inserts `""`; the caret belongs between
+                  // the quotes so what's typed next lands inside the phrase.
+                  pendingCaretRef.current = next && !(searchValue ?? '').trim();
+                  onExactSearchChange?.(next);
                   inputRef.current?.focus();
                 }}
                 aria-pressed={isExactSearch}

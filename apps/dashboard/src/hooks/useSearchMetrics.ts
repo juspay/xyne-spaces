@@ -33,6 +33,7 @@ import { affinityService } from '../services/affinityService';
 import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 import type { StructuredSearchFilters } from './useSearchResultsScreen';
 import { resolveDateKeyword } from '../search/filterModel';
+import { unwrapExactSearchQuery } from '../utils/exactSearch';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -194,7 +195,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // Parse filters early for UI visibility (typeFilter) and cleaned searchText
   const parsedFilters = useMemo(() => parseSearchFilters(text), [text]);
-  const { searchText: cleanedSearchText, type: typeFilter } = parsedFilters;
+  const { searchText: rawSearchText, type: typeFilter } = parsedFilters;
+  // A bare `""` is exact mode with nothing in it yet — the pill is on, the phrase is empty.
+  // It counts as no query, so every downstream "is there a query?" check stays honest and
+  // we do not fire a request whose `q` resolves to nothing (the backend answers "Query
+  // parameter q is required" and the palette falls back to People and Channels only).
+  const cleanedSearchText = unwrapExactSearchQuery(rawSearchText).trim() ? rawSearchText : '';
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
@@ -1285,7 +1291,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
     // Normalize text by trimming trailing spaces to avoid duplicate API calls
     // "sak" and "sak   " should trigger the same search
-    const normalizedText = text.trimEnd();
+    // A bare `""` is exact mode with nothing typed into it yet — the pill is on, the phrase
+    // is empty. It carries no query, so it is dispatched as an empty box: chips on their own
+    // still search, but we never send a `q` that resolves to nothing (the backend answers
+    // "Query parameter q is required" and the palette drops to People and Channels only).
+    const queryText = unwrapExactSearchQuery(text).trim() ? text : '';
+    const normalizedText = queryText.trimEnd();
 
     // Skip if text, tab, mentions, and includeBotMessages are all the same as last search
     // This prevents unnecessary API calls when typing only spaces
@@ -1333,7 +1344,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       void performSearch(
         seq,
         abortController,
-        text,
+        normalizedText,
         activeTab,
         selectedMentions,
         filteredLocalUsers,

@@ -624,8 +624,33 @@ export function MentionPlugin({
         const textContent = anchorNode.getTextContent();
         const cursorOffset = anchor.offset;
 
-        // Look for trigger patterns before cursor
+        // Look for trigger patterns before cursor.
         const textBeforeCursor = textContent.substring(0, cursorOffset);
+
+        // An odd number of quotes before the caret means it sits inside a quoted run, and
+        // everything in there is searched literally — a `from:` typed between the quotes is
+        // text the user wants matched, not a filter half-picked. So no trigger is detected,
+        // and a picker already open falls through to the "hide mention search" branch below,
+        // tearing down by the same path as any other dismissal. Outside the quotes the
+        // count is even and every trigger works normally, which is what keeps filters
+        // usable while exact mode is on.
+        const insideQuotes = (textBeforeCursor.match(/"/g) ?? []).length % 2 === 1;
+        if (insideQuotes) {
+          if (triggerType && !isInsertingMention.current) {
+            setSearchTerm('');
+            setSelectedMentionIndex?.(0);
+            mentionStartOffset.current = null;
+            triggerText.current = '';
+            setTriggerType(null);
+            onUserSearch?.(null);
+            onChannelSearch?.(null);
+            onPrioritySearch?.(null);
+            onDateSearch?.(null);
+            onBoardSearch?.(null);
+            onMentionsSearch?.(null);
+          }
+          return;
+        }
 
         // Check for "from:", "to:", "with:", or "@" (user triggers).
         const fromMatch = textBeforeCursor.match(/\bfrom:\s*(.*)$/i);

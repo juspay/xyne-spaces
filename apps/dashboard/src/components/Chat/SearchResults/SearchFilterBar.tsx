@@ -22,6 +22,11 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { type Channel } from '@xyne/shared';
 import { clearInapplicable, entriesFor } from '../../../search/filterRegistry';
 import {
+  hasExactSearchQuotes,
+  unwrapExactSearchQuery,
+  wrapExactSearchQuery,
+} from '../../../utils/exactSearch';
+import {
   useCmdkDefaultRankProfiles,
   cmdkTabKeyForDocType,
 } from '../../../hooks/useCmdkSearchConfig';
@@ -31,6 +36,13 @@ import { CHIP_ACTIVE, CHIP_BASE, MENU_ITEM, POPOVER_CONTENT } from './filters/st
 interface SearchFilterBarProps {
   filters: SearchResultsFilters;
   onFiltersChange: (filters: SearchResultsFilters) => void;
+  /**
+   * The committed query. Exact match lives in it as real quotes — the same characters the
+   * user can type by hand and the backend reads the mode off — so the pill needs the text,
+   * not a flag beside it.
+   */
+  query: string;
+  onQueryChange: (query: string) => void;
 }
 
 const TYPE_OPTIONS = [
@@ -247,7 +259,12 @@ function openOnArrowDown(open: boolean, setOpen: (v: boolean) => void) {
   };
 }
 
-export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarProps): ReactElement {
+export function SearchFilterBar({
+  filters,
+  onFiltersChange,
+  query,
+  onQueryChange,
+}: SearchFilterBarProps): ReactElement {
   const defaultRankProfileFor = useCmdkDefaultRankProfiles();
   const [typeOpen, setTypeOpen] = useState(false);
   const [fromOpen, setFromOpen] = useState(false);
@@ -662,13 +679,22 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
             registry, so `appliesTo` decides which are offered — `Bot` is message-only and
             drops off the Tickets tab on its own. */}
         {toggleEntries.map(entry => {
-          const isOn = entry.getValue?.(filters) === true;
+          // Exact match is the one toggle whose state is in the query rather than beside it,
+          // so it reads and writes the text; the rest are ordinary boolean filters.
+          const isExact = entry.id === 'exactMatch';
+          const isOn = isExact ? hasExactSearchQuotes(query) : entry.getValue?.(filters) === true;
           return (
             <Button
               key={entry.id}
               variant='outline'
               size='sm'
-              onClick={() => onFiltersChange({ ...filters, ...(entry.setValue?.(!isOn) ?? {}) })}
+              onClick={() =>
+                isExact
+                  ? onQueryChange(
+                      isOn ? unwrapExactSearchQuery(query) : wrapExactSearchQuery(query),
+                    )
+                  : onFiltersChange({ ...filters, ...(entry.setValue?.(!isOn) ?? {}) })
+              }
               aria-pressed={isOn}
               title={entry.label}
               className={cn(CHIP_BASE, isOn && CHIP_ACTIVE)}

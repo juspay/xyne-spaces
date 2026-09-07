@@ -169,8 +169,13 @@ export function SearchQueryInput({
       setValue(next);
       setActiveIndex(0);
       onLiveChange(next);
+      // Emptying the box commits straight away. Every other edit waits for Enter so the URL
+      // does not churn per keystroke, but there is nothing left to confirm here — and
+      // without this the results clear while `?query=` keeps the query that is no longer
+      // in the box, so a reload or a back/forward brings it back.
+      if (!next.trim()) onSubmit('');
     },
-    [onLiveChange],
+    [onLiveChange, onSubmit],
   );
 
   const handleKeyDown = useCallback(
@@ -289,6 +294,12 @@ export function SearchQueryInput({
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        // Leaving the box commits it, so the URL matches what is on screen without needing
+        // Enter. Safe to do on blur because the suggestion rows and the token remove buttons
+        // all preventDefault on mousedown — clicking those never blurs the input, so this
+        // cannot fire with a half-picked suggestion. `handleQuerySubmit` ignores a value
+        // equal to the committed query, so an unchanged box writes nothing.
+        onBlur={() => onSubmit(value.trim())}
         // The cold-start prompt only makes sense on an empty box; among applied tokens it
         // claims nothing is searched yet. The leading magnifier already says what this is,
         // so it shrinks rather than explains.

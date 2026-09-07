@@ -16,7 +16,12 @@ import { useAuthContextValues } from '../../../../hooks/useAuth';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { isDMChannel, resolveChannelLabel } from '../../ChatDirectory/ChatDirectory.utils';
-import { entriesFor, type FilterEntry } from '../../../../search/filterRegistry';
+import {
+  DATE_RANGE_OPTIONS,
+  entriesFor,
+  type FilterEntry,
+} from '../../../../search/filterRegistry';
+import { resolveDateKeyword } from '../../../../search/filterModel';
 import type { SearchResultsFilters } from '../../../../hooks/useSearchResultsScreen';
 
 export interface QuerySuggestion {
@@ -50,6 +55,13 @@ const addTo = (entry: FilterEntry, filters: SearchResultsFilters, id: string) =>
 
 const MAX = 8;
 
+/**
+ * The date filter is the one entry with three prefixes, so it can't be found by the single
+ * `entry.syntax` the others carry. Which one was typed decides where the picked date lands:
+ * `on:` is a one-day window, the other two set a single bound.
+ */
+const DATE_SYNTAXES = ['on:', 'after:', 'before:'] as const;
+
 export function useQuerySuggestions(
   value: string,
   filters: SearchResultsFilters,
@@ -62,13 +74,15 @@ export function useQuerySuggestions(
   const typedSyntax = match?.[2]?.toLowerCase() ?? '';
   const typedQuery = match?.[3] ?? '';
 
-  const entry = useMemo(
-    () =>
-      entriesFor(filters.docType).find(
-        e => e.syntax && e.control && e.syntax.toLowerCase() === typedSyntax,
-      ) ?? null,
-    [filters.docType, typedSyntax],
-  );
+  const entry = useMemo(() => {
+    const available = entriesFor(filters.docType);
+    if ((DATE_SYNTAXES as readonly string[]).includes(typedSyntax)) {
+      return available.find(e => e.id === 'date') ?? null;
+    }
+    return (
+      available.find(e => e.syntax && e.control && e.syntax.toLowerCase() === typedSyntax) ?? null
+    );
+  }, [filters.docType, typedSyntax]);
 
   const kind = entry?.control?.kind;
   // Hooks can't be conditional, so every source is subscribed and the unused ones are
@@ -195,10 +209,52 @@ export function useQuerySuggestions(
               apply: () => entry.setValue?.(option.value) ?? {},
             })),
         };
-      // `tags:`/dates take free text — there's no vocabulary to offer, and typing them
-      // already works, so no dropdown.
+      // Presets plus whatever's already been typed if it looks like a date, mirroring the
+      // palette's list. A preset carries its keyword rather than the dates it resolves to,
+      // so the window stays live; a typed date lands on the bound its prefix names.
+      case 'date': {
+        const dated = (value: string): Partial<SearchResultsFilters> =>
+          typedSyntax === 'on:'
+            ? { dateRange: '', after: value, before: value }
+            : typedSyntax === 'after:'
+              ? { dateRange: '', after: value }
+              : { dateRange: '', before: value };
+
+        const typedDate = /^\d{4}-\d{2}-\d{2}$/.test(searchTerm)
+          ? [
+              {
+                id: searchTerm,
+                label: searchTerm,
+                icon: { kind: 'value' as const },
+                apply: () => dated(searchTerm),
+              },
+            ]
+          : [];
+
+        return {
+          ...base,
+          suggestions: [
+            ...typedDate,
+            ...DATE_RANGE_OPTIONS.filter(
+              option =>
+                option.value &&
+                resolveDateKeyword(option.value) &&
+                (searchTerm ? option.label.toLowerCase().includes(searchTerm) : true),
+            ).map(option => ({
+              id: option.value,
+              label: option.label,
+              icon: { kind: 'value' as const },
+              // A preset is a window, not a bound — it replaces both, whichever prefix
+              // reached for it.
+              apply: () => ({ dateRange: option.value, after: '', before: '' }),
+            })),
+          ],
+        };
+      }
+      // `tags:` takes free text — there's no vocabulary to offer, and typing it already
+      // works, so no dropdown.
       default:
         return null;
     }
-  }, [match, entry, typedQuery, users, channels, boards, allUsers, currentUserId]);
+  }, [match, entry, typedQuery, typedSyntax, users, channels, boards, allUsers, currentUserId]);
 }

@@ -13,6 +13,8 @@ import {
   $isElementNode,
   LexicalNode,
   $createTextNode,
+  TextNode,
+  type ElementNode,
   $createParagraphNode,
   PASTE_COMMAND,
   COMMAND_PRIORITY_LOW,
@@ -79,6 +81,8 @@ interface LexicalSearchInputProps {
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
   onSetTextReady?: (setText: (text: string) => void) => void;
+  /** Imperative "put quotes around the free text, or take them off again". */
+  onToggleQuotesReady?: (toggleQuotes: () => void) => void;
   initialMention?: ChipData | null | undefined;
   initialQuery?: InitialQueryData | null | undefined;
   disableAutoFocus?: boolean;
@@ -322,6 +326,129 @@ function InsertTextPlugin({
   return null;
 }
 
+/**
+ * Rewrites the line as: every chip, then a single run of free text.
+ *
+ * Text typed on either side of a chip lives in separate nodes, so "the query" is scattered
+ * and a chip can sit in the middle of it. Collecting the text into one run — and pushing the
+ * chips left — gives both the quote pair and the reader one contiguous phrase, and is what
+ * keeps a filter from ending up inside the quotes.
+ *
+ * Returns the rebuilt text node, or null when there is no paragraph to work on.
+ * `transform` decides what the collected phrase becomes.
+ */
+function $regroupLine(transform: (phrase: string) => string): TextNode | null {
+  const root = $getRoot();
+  // An editor that has never been typed into can have no paragraph yet, so one is created
+  // rather than bailing — otherwise the exact-match pill would do nothing on an empty box.
+  const existing = root.getLastChild();
+  let paragraph: ElementNode;
+  if ($isElementNode(existing)) {
+    paragraph = existing;
+  } else {
+    paragraph = $createParagraphNode();
+    root.append(paragraph);
+  }
+
+  const children = paragraph.getChildren();
+  const chips = children.filter($isFilterChipContainerNode);
+  const phrase = children
+    .filter(node => !$isFilterChipContainerNode(node))
+    .map(node => node.getTextContent())
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  paragraph.clear();
+  chips.forEach(chip => paragraph.append(chip));
+  // A separator so the chips keep their own boundary and the phrase reads apart from them.
+  if (chips.length > 0) paragraph.append($createTextNode(' '));
+  const text = $createTextNode(transform(phrase));
+  paragraph.append(text);
+  return text;
+}
+
+/**
+ * Keeps chips grouped at the left as they are added, so the free text after them is always
+ * one contiguous phrase.
+ *
+ * It only rebuilds when the order is actually wrong — a chip sitting after text — which in
+ * practice means just after a chip is inserted mid-line. Reordering on every update would
+ * yank the caret to the end of the line while the user is still typing.
+ */
+function ChipOrderPlugin() {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(
+    () =>
+      editor.registerUpdateListener(({ editorState }) => {
+        const misordered = editorState.read(() => {
+          const paragraph = $getRoot().getLastChild();
+          if (!$isElementNode(paragraph)) return false;
+          let seenText = false;
+          for (const node of paragraph.getChildren()) {
+            if ($isFilterChipContainerNode(node)) {
+              if (seenText) return true;
+            } else if (node.getTextContent().trim().length > 0) {
+              seenText = true;
+            }
+          }
+          return false;
+        });
+        if (!misordered) return;
+        editor.update(() => {
+          $regroupLine(phrase => phrase)?.selectEnd();
+        });
+      }),
+    [editor],
+  );
+
+  return null;
+}
+
+/**
+ * Imperative "quote the free text, or unquote it" for the exact-match pill.
+ *
+ * The quotes are ordinary characters in the query, exactly as if they had been typed — the
+ * backend reads exactness off them (`isExactMatch` in the Vespa searchService), so the box
+ * and the search run the same string, and deleting one turns exact mode off by itself.
+ *
+ * Only free text is touched. `FilterChipNode` extends `TextNode`, so chips would otherwise
+ * be swept up by `getAllTextNodes()` and quoted along with the query; excluding them is
+ * what keeps `from:Nasim` a filter rather than part of the phrase.
+ */
+function ToggleQuotesPlugin({
+  onToggleQuotesReady,
+}: {
+  onToggleQuotesReady: (toggleQuotes: () => void) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const toggleQuotes = (): void => {
+      editor.update(() => {
+        let next = '';
+        const text = $regroupLine(phrase => {
+          const quoted = phrase.length >= 2 && phrase.startsWith('"') && phrase.endsWith('"');
+          const bare = quoted ? phrase.slice(1, -1).trim() : phrase;
+          // Off drops the quotes; on adds them, and an empty box gets an empty pair so the
+          // caret has somewhere to sit.
+          next = quoted ? bare : `"${bare}"`;
+          return next;
+        });
+        // Caret inside the quotes when they were just added, after the text otherwise.
+        if (!text) return;
+        if (next.endsWith('"')) text.select(next.length - 1, next.length - 1);
+        else text.selectEnd();
+      });
+    };
+
+    onToggleQuotesReady(toggleQuotes);
+  }, [editor, onToggleQuotesReady]);
+
+  return null;
+}
+
 // Imperative "replace the whole editor with plain text" (caret at end). Used by
 // the slash-command mode to seed `/call `/`/chat ` or clear a typed name fragment.
 function SetTextPlugin({
@@ -547,6 +674,7 @@ export function LexicalSearchInput({
   disableAutoFocus = false,
   currentUserID,
   hideSearchIcon = false,
+  onToggleQuotesReady,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const showLeadingIcon = !hideSearchIcon && !isMobile;
@@ -633,9 +761,11 @@ export function LexicalSearchInput({
           )}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
           {onSetTextReady && <SetTextPlugin onSetTextReady={onSetTextReady} />}
+          {onToggleQuotesReady && <ToggleQuotesPlugin onToggleQuotesReady={onToggleQuotesReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <SingleLinePastePlugin />
           <FilterChipPlugin />
+          <ChipOrderPlugin />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}

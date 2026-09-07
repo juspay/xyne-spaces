@@ -60,19 +60,15 @@ export const toSearchQuery = (value: string, exact: boolean): string => {
  * Client-side equivalent of the two search modes, for layouts that filter locally.
  * Exact: the phrase must appear verbatim. Loose: every word must appear, any order.
  *
- * `exact` is the toggle; the quote check covers a user who typed the quotes by hand,
- * which the backend honours either way, so the local filter has to as well.
+ * The mode is read off the query itself, exactly as the backend reads it, so there is no
+ * separate flag that could disagree with what the search box shows.
  */
-export const matchesTicketSearch = (
-  searchableText: string,
-  searchTerm: string,
-  exact: boolean,
-): boolean => {
+export const matchesTicketSearch = (searchableText: string, searchTerm: string): boolean => {
   const haystack = searchableText.toLowerCase();
   const phrase = unwrapExactSearchQuery(searchTerm).toLowerCase();
   if (!phrase) return true;
 
-  if (exact || isExactSearchQuery(searchTerm)) {
+  if (isExactSearchQuery(searchTerm)) {
     return haystack.includes(phrase);
   }
 

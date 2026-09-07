@@ -127,6 +127,7 @@ import { DATE_RANGE_OPTIONS } from '../../../search/filterRegistry';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { resolveDateKeyword } from '../../../search/filterModel';
+import { hasExactSearchQuotes } from '../../../utils/exactSearch';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
 import { toast } from 'sonner';
@@ -624,8 +625,6 @@ const ChannelCommandMenu = ({
     includeBotMessages,
     setIncludeBotMessages,
     onlyMyChannels,
-    exactMatch,
-    setExactMatch,
     setOnlyMyChannels,
     loadMoreRef,
     filteredLocalUsers,
@@ -746,6 +745,7 @@ const ChannelCommandMenu = ({
   >(null);
 
   const insertTextRef = useRef<((text: string) => void) | null>(null);
+  const toggleQuotesRef = useRef<(() => void) | null>(null);
 
   /**
    * The only three filters with no typed syntax: they're search *modes*, not values, so
@@ -771,10 +771,13 @@ const ChannelCommandMenu = ({
       id: 'exact',
       label: '"ab"',
       tooltip: 'Exact message match',
-      isOn: exactMatch,
-      // A mode, not text: the query is quoted when the request is built
-      // (buildVespaSearchParams), so the user never sees quotes in the box.
-      toggle: () => setExactMatch(value => !value),
+      // Derived, not stored: exact mode *is* the query being quoted. Delete either quote
+      // and the pill goes dark on its own, because there is no second place holding the
+      // mode that could disagree with what the box says.
+      isOn: hasExactSearchQuotes(searchText),
+      // Puts real quotes around the free text (chips excluded), the same characters the
+      // user could type by hand and the same ones the backend keys off.
+      toggle: () => toggleQuotesRef.current?.(),
     },
   ];
 
@@ -1087,7 +1090,6 @@ const ChannelCommandMenu = ({
       ...filtersFromChips(mentions as ResultsMention[]),
       onlyMyChannels,
       includeBotMessages,
-      exactMatch,
     };
     writeRegistryParams(filters, params);
 
@@ -2455,6 +2457,27 @@ const ChannelCommandMenu = ({
     // the ids it holds are what matters, and they only move when relevance does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relevantTabs, activeEnabledTabs, activeTab, hideTabs, inline]);
+
+  // When the filters narrow to a single tab, select it. Leaving the user on ALL with one
+  // lonely unselected tab reads as broken, and ALL and that tab return the same rows anyway
+  // — the query is already scoped by the same relevance map (getRelevantAppsParam).
+  //
+  // Keyed on the tab set rather than on `activeTab`, so this fires when relevance changes
+  // and not when the user acts: clicking the selected tab drops back to ALL, and re-running
+  // on that change would immediately re-select it and trap them.
+  const autoSelectedTabsRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (hideTabs) return;
+    const key = tabs.map(tab => tab.id).join(',');
+    if (autoSelectedTabsRef.current === key) return;
+    autoSelectedTabsRef.current = key;
+    const only = tabs.length === 1 ? tabs[0] : undefined;
+    if (!only || activeTab === only.id) return;
+    setActiveTab(only.id);
+    onTabChange?.(only.id);
+    // `tabs` carries icon elements and is rebuilt every render, so relevance stands in for it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relevantTabs, activeEnabledTabs, hideTabs]);
 
   const getCategoryLabel = (category: ChannelCategory): string => {
     switch (category) {
@@ -3893,6 +3916,9 @@ const ChannelCommandMenu = ({
               insertTextRef.current = insertText;
             }}
             onSetTextReady={onSetTextReady}
+            onToggleQuotesReady={fn => {
+              toggleQuotesRef.current = fn;
+            }}
             initialMention={initialMention}
             initialQuery={effectiveInitialQuery}
           />
