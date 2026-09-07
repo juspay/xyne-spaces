@@ -5,11 +5,7 @@ import type { AutomationStepConfig } from '../types/automation-config';
 import { StepCategory } from '../types/categories';
 
 export interface ControlFlowExecutionContext {
-  walkBranch(
-    steps: AutomationStepConfig[],
-    context: AutomationContext,
-    branchKey: string,
-  ): Promise<void>;
+  walkBranch(steps: AutomationStepConfig[], context: AutomationContext): Promise<void>;
 }
 
 export enum StepKind {
