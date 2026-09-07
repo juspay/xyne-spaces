@@ -26,6 +26,24 @@ import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationTo
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
+import {
+  BlobWriter,
+  Recorder,
+  RunStore,
+  emptyLatency,
+  emptyTokenUsage,
+  installStreamCapture,
+  readRun,
+  resolveCaptureLevel,
+  safeRunToken,
+  startCapture,
+  toV1Snapshot,
+  type CaptureLevel,
+  type LatencyMetrics,
+  type RunHeader,
+  type RunStatus,
+  type TokenUsage,
+} from "./debug/index.js";
 import { compactionExtension } from "./compaction-extension.js";
 import { installMidTurnCompaction } from "./mid-turn-compaction.js";
 import { createScopedToolMap } from "./scoped-tools.js";
@@ -133,13 +151,6 @@ const MCP_REQUEST_TIMEOUT_MS = 600_000;
 type SubagentExecResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 type CachedEntry = { promise: Promise<SubagentExecResult>; insertedAt: number };
 const subagentResultCache = new Map<string, Map<string, CachedEntry>>();
-type SubagentDebugEvent = {
-  seq: number;
-  at: string;
-  kind: string;
-  toolCallId?: string;
-  data: Record<string, unknown>;
-};
 
 function normalizeQuestion(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, " ");
@@ -428,6 +439,29 @@ export interface SubagentProgressCtx {
    *  loop settles. Absent (e.g. nested contexts) ⇒ `run_in_background` is not
    *  exposed and every call runs blocking, as before. */
   backgroundRegistry?: BackgroundSubagentRegistry;
+  /** The parent run's trace handles. Subagent tools are built (routes/run.ts)
+   *  before the parent opens its trace (agent.ts), so this is a slot the parent
+   *  fills in once its recorder exists — the same shared-object trick
+   *  backgroundRegistry uses. Absent (nested/A2A contexts) ⇒ the child still
+   *  records, it just can't be filed under the parent's run. */
+  parentDebug?: ParentDebugHandle;
+}
+
+/** Late-bound view of the parent run's trace, so a child can be written into
+ *  the same store and announce itself on the parent's timeline. */
+export interface ParentDebugHandle {
+  recorder?: Recorder;
+  /** The storeKey the parent's own run was written under. */
+  storeKey?: string;
+  runId?: string;
+  captureLevel?: CaptureLevel;
+  /** Whether the parent's capture has already been finished and uploaded.
+   *  Filled by agent.ts alongside `recorder`. A detached background subagent
+   *  can outlive the parent's finish, and anything appended to the parent's
+   *  run after that point is never re-uploaded — see recordSubagentEnd. Absent
+   *  (nested/A2A contexts, or a parent that never wired it) reads as
+   *  "still open", which is the pre-existing behaviour. */
+  isFinished?: () => boolean;
 }
 
 // ── Shared MCP loader helper ──────────────────────────────────────────────
@@ -728,37 +762,225 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         streamsCollected?: number;
         streamRateSamples?: Array<{ offsetMs: number; streamsPerSec: number; streamsCollected: number }>;
       } | null = null;
-      const debugEvents: SubagentDebugEvent[] = [];
-      let debugSeq = 0;
       let providerError: string | null = null;
+
+      // ── Debug capture ────────────────────────────────────────────────────
+      // The child gets a real run of its own, in the same append-only format
+      // the parent uses and inside the PARENT's debug tree — whoever can read
+      // the parent's trace already has its children. Opened before the child
+      // session exists, so a pod killed mid-subagent still leaves a "running"
+      // header instead of nothing at all.
+      // `debugCtx` is a const alias so the narrowing survives into the closures
+      // below; `progressCtx` is a parameter and re-widens inside them.
+      const debugCtx = progressCtx;
+      const parentDebug = debugCtx?.parentDebug;
+      const childRunId = `${execStartedAt}-${safeRunToken(def.name)}-${safeRunToken(_toolCallId)}`;
+      // Prefer the key the parent's own run was written under. Without the
+      // handle (nested / A2A contexts) fall back to the key the legacy child
+      // artifact has always used, so both land in one directory either way.
+      const childStoreKey =
+        parentDebug?.storeKey ?? debugCtx?.parentDebugSessionId ?? debugCtx?.parentSessionId;
+      const childCaptureLevel: CaptureLevel = parentDebug?.captureLevel ?? resolveCaptureLevel();
+      const childStore = childStoreKey
+        ? await RunStore.open({
+            storeKey: childStoreKey,
+            runId: childRunId,
+            captureLevel: childCaptureLevel,
+          }).catch((err: unknown) => {
+            log.warn(`[${def.name}] child debug store open failed: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+          })
+        : null;
+      const childBlobs = new BlobWriter({
+        appendLine: (line) => childStore?.appendBlobLine(line),
+        captureLevel: childCaptureLevel,
+      });
+      const recorder = new Recorder({
+        store: childStore,
+        blobs: childBlobs,
+        captureLevel: childCaptureLevel,
+        ...(debugCtx
+          ? {
+              live: {
+                push: (event: DebugEventRecord) =>
+                  pushDebugProgress(debugCtx.progressUrl, debugCtx.parentSessionId, event),
+              },
+            }
+          : {}),
+        // Stamped on every event, so no emission site repeats the parentage.
+        envelope: { parentToolCallId: _toolCallId, subagentName: def.name, childRunId },
+      });
+      const childStartedIso = new Date(execStartedAt).toISOString();
+      const childProvider = resolvedProvider?.provider ?? "litellm";
+      const childModelId = resolvedProvider?.config.model ?? "shared";
+      const childTokenUsage: TokenUsage = emptyTokenUsage();
+      let childTurns = 0;
+      let childToolMs = 0;
+      // parentRunId + parentToolCallId + subagentName are what let the
+      // retrieval route nest this run under its parent — no child-only format.
+      const childHeader: RunHeader = {
+        schemaVersion: 2,
+        runId: childRunId,
+        storeKey: childStoreKey ?? "unknown",
+        ...(debugCtx?.parentMeta?.conversationId ? { conversationId: debugCtx.parentMeta.conversationId } : {}),
+        ...(debugCtx?.parentSessionId ? { sessionId: debugCtx.parentSessionId } : {}),
+        ...(debugCtx?.parentMeta?.agentSlug ? { agentSlug: debugCtx.parentMeta.agentSlug } : {}),
+        ...(debugCtx?.parentMeta?.userId ? { userId: debugCtx.parentMeta.userId } : {}),
+        provider: childProvider,
+        model: childModelId,
+        captureLevel: childCaptureLevel,
+        startedAt: childStartedIso,
+        finishedAt: childStartedIso,
+        status: "running",
+        task: question,
+        ...(parentDebug?.runId ? { parentRunId: parentDebug.runId } : {}),
+        parentToolCallId: _toolCallId,
+        subagentName: def.name,
+        question,
+        counts: { events: 0, blobs: 0, messages: 0, toolCalls: 0 },
+        tokenUsage: emptyTokenUsage(),
+        latency: emptyLatency(),
+      };
+      // `materializeV1: false`: the child shares the PARENT's debug dir, and the
+      // v1 files (`debug-session.json` / `debug-events.json`) live at that dir's
+      // root — one per directory, not one per run. Letting a child write them
+      // overwrites the parent's own trace with the subagent's.
+      const childCapture = startCapture({
+        store: childStore,
+        recorder,
+        header: childHeader,
+        materializeV1: false,
+      });
+      // Delegation is first-class in the PARENT timeline: the parent's own
+      // trace says what it spawned and where that run landed, so a reader never
+      // has to correlate two files by tool call id to find the child.
+      parentDebug?.recorder?.record(
+        "subagent_start",
+        {
+          subagentName: def.name,
+          childRunId,
+          question,
+          questionChars: question.length,
+          provider: childProvider,
+          model: childModelId,
+          toolNames: (tools ?? []).map((t) => t.name),
+        },
+        { toolCallId: _toolCallId },
+      );
       const pushDebugEvent = (kind: string, data: Record<string, unknown> = {}, toolCallId?: string): void => {
-        const event = {
-          seq: ++debugSeq,
-          at: new Date().toISOString(),
-          kind,
-          ...(toolCallId ? { toolCallId } : {}),
-          data,
-        };
-        debugEvents.push(event);
-        if (progressCtx) {
-          pushDebugProgress(progressCtx.progressUrl, progressCtx.parentSessionId, {
-            ...event,
-            kind: kind as DebugEventRecord["kind"],
-            parentToolCallId: _toolCallId,
-            subagentName: def.name,
-          });
-        }
+        recorder.record(kind, data, toolCallId !== undefined ? { toolCallId } : undefined);
       };
       const pushLiveStreamRate = (streamsPerSec: number, active: boolean): void => {
-        if (!progressCtx) return;
-        pushDebugProgress(progressCtx.progressUrl, progressCtx.parentSessionId, {
-          seq: ++debugSeq,
-          at: new Date().toISOString(),
-          kind: "stream_rate",
-          parentToolCallId: _toolCallId,
-          subagentName: def.name,
-          data: { streamsPerSec, streamsCollected: turnStreamCount, active },
-        });
+        // Live-only: a once-per-second heartbeat must not consume sequence
+        // numbers, which is what used to punch holes in the persisted log.
+        recorder.recordLive("stream_rate", { streamsPerSec, streamsCollected: turnStreamCount, active });
+      };
+      /** What the child can actually vouch for: wall clock, turns, tool time.
+       *  The decode/wait split is owned by installLlmCallMetrics, which reports
+       *  to metrics rather than back into this scope. */
+      const childLatencyAt = (totalMs: number): LatencyMetrics => {
+        const stream = lastAssistantStreamSummary;
+        return {
+          ...emptyLatency(),
+          totalMs,
+          llmTurns: childTurns,
+          toolMs: childToolMs,
+          ...(stream?.streamChars !== undefined ? { streamChars: stream.streamChars } : {}),
+          ...(stream?.streamThinkingChars !== undefined ? { streamThinkingChars: stream.streamThinkingChars } : {}),
+          ...(stream?.streamTextChars !== undefined ? { streamTextChars: stream.streamTextChars } : {}),
+          ...(stream?.streamCharsPerSec !== undefined ? { streamCharsPerSec: stream.streamCharsPerSec } : {}),
+        };
+      };
+      const finishChildCapture = async (status: RunStatus, text: string, durationMs: number): Promise<void> => {
+        try {
+          await childCapture.finish(status, {
+            text,
+            tokenUsage: { ...childTokenUsage },
+            latency: childLatencyAt(durationMs),
+          });
+        } catch (err) {
+          // Never let a trace failure change what the subagent returns.
+          metric.count("debug_artifact_write", { result: "fail", stage: "subagent_finish" });
+          log.warn(`[${def.name}] child debug finish failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      };
+      /**
+       * Close the delegation out on BOTH timelines, child first.
+       *
+       * The child's own trace is the authoritative copy: it is still open here,
+       * whereas the parent's capture may already be done. A detached
+       * `run_in_background` subagent routinely finishes after the parent has
+       * uploaded — appending there writes into a run nobody will re-upload, so
+       * the event exists on the PVC only, which is exactly the copy eviction
+       * takes. We therefore record into the child unconditionally and mirror
+       * onto the parent's timeline only while that timeline is still being
+       * written. MUST be called before finishChildCapture, which closes the
+       * child's store.
+       */
+      const recordSubagentEnd = (data: Record<string, unknown>): void => {
+        const payload = { subagentName: def.name, childRunId, ...data };
+        pushDebugEvent("subagent_end", payload, _toolCallId);
+        if (parentDebug?.isFinished?.() === true) {
+          log.info(`[${def.name}] parent trace already finished — subagent_end kept in child run ${childRunId} only`);
+          return;
+        }
+        parentDebug?.recorder?.record("subagent_end", payload, { toolCallId: _toolCallId });
+      };
+      /** Legacy per-child artifact, kept for one release: a rolling deploy has
+       *  old pods still reading `subagents-<name>-<toolCallId>.json`. `def.name`
+       *  is operator-authored — unsanitized, a `/` in it wrote outside the
+       *  debug dir entirely. */
+      const writeLegacyChildSnapshot = async (
+        stage: "subagent_end" | "subagent_error",
+        body: Record<string, unknown>,
+      ): Promise<void> => {
+        const sessionKey = debugCtx?.parentDebugSessionId ?? debugCtx?.parentSessionId;
+        if (!sessionKey) return;
+        try {
+          const debugDir = await ensureSessionDebugDir(sessionKey);
+          const { writeFile } = await import("node:fs/promises");
+          const safeName = `${safeRunToken(def.name)}-${safeRunToken(_toolCallId)}`;
+          // Materialize the child's OWN run instead of dumping the recorder's
+          // in-memory window. Post-v2 those raw events carry `<field>Ref`
+          // pointers rather than content and no transcript at all — and
+          // routes/debug.ts PREFERS this file over the richer derived
+          // projection, so a raw dump makes the drawer strictly worse than it
+          // was before the refactor. Reading back is safe here: this runs after
+          // finishChildCapture, which has already written the final header and
+          // flushed events + blobs (close() only drains; it removes nothing).
+          const materialized = childStore ? await readRun(childStore.runDir) : null;
+          if (childStore && !materialized) {
+            log.warn(`[${def.name}] child run unreadable — legacy artifact falls back to raw events`);
+          }
+          const snapshot = {
+            // Spread first so the identity fields below always win: the reader
+            // keys subagent rows off parentSessionId/parentToolCallId/subagentName.
+            ...(materialized ? toV1Snapshot(materialized) : { events: recorder.snapshotEvents() }),
+            schemaVersion: 1,
+            runId: childRunId,
+            parentSessionId: debugCtx?.parentSessionId,
+            parentToolCallId: _toolCallId,
+            subagentName: def.name,
+            question,
+            provider: childProvider,
+            model: childModelId,
+            startedAt: childStartedIso,
+            finishedAt: new Date().toISOString(),
+            toolsUsed,
+            providerError,
+            ...body,
+          };
+          // Not pretty-printed: this now carries the child's full transcript and
+          // resolved tool results, and indenting a multi-MB trace burns CPU and PVC
+          // bytes for a file only ever read by a parser.
+          await writeFile(`${debugDir}/subagents-${safeName}.json`, JSON.stringify(snapshot), "utf8");
+          metric.count("debug_artifact_write", { result: "ok", stage });
+        } catch (err) {
+          // A silently lost artifact is indistinguishable from a run that never
+          // happened — the ambiguity that made child traces untrustworthy.
+          metric.count("debug_artifact_write", { result: "fail", stage });
+          log.warn(`[${def.name}] child debug artifact write failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       };
       const flushStreamRate = (active: boolean): void => {
         if (streamWindowStartedAt == null || firstDeltaAt == null) return;
@@ -782,14 +1004,6 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         streamRateTimer = null;
         flushStreamRate(false);
         streamWindowStartedAt = null;
-      };
-      const snapshotMessages = (): unknown[] => {
-        const messages = (sessionRef as { messages?: unknown[] } | null)?.messages ?? [];
-        try {
-          return JSON.parse(JSON.stringify(messages)) as unknown[];
-        } catch {
-          return messages;
-        }
       };
       const stickyTimer = progressCtx?.progressUrl
         ? setInterval(() => {
@@ -965,10 +1179,23 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // with "Cannot continue from message role: assistant". See mid-turn-compaction.ts.
         installMidTurnCompaction(session);
 
+        // The one hook that sees what the child model is ACTUALLY sent: pi's
+        // assembled system prompt, the resolved tool schemas, and the real
+        // transcript. That last part is why no emission below embeds messages
+        // any more — the transcript flows through here as append-only deltas.
+        installStreamCapture({
+          agent: session.agent as unknown as {
+            streamFn: (model: unknown, context: unknown, options?: unknown) => unknown;
+          },
+          recorder,
+          ...(resolvedProvider?.provider ? { provider: resolvedProvider.provider } : {}),
+        });
+
         pushDebugEvent("session_start", {
-          parentSessionId,
-          parentToolCallId: _toolCallId,
-          subagentName: def.name,
+          sessionId: parentSessionId,
+          provider: childProvider,
+          model: childModelId,
+          captureLevel: childCaptureLevel,
           question,
           questionChars: question.length,
         });
@@ -1103,6 +1330,8 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
               }
             }
             const started = childInflight.get(event.toolCallId);
+            const childToolDurationMs = started ? Date.now() - started.startedAt : undefined;
+            if (childToolDurationMs !== undefined) childToolMs += childToolDurationMs;
             turnStartedAt = Date.now();
             firstDeltaAt = null;
             pushDebugEvent("tool_execution_end", {
@@ -1119,7 +1348,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
                 }
               })(),
               isError: event.isError,
-              durationMs: started ? Date.now() - started.startedAt : undefined,
+              durationMs: childToolDurationMs,
             }, event.toolCallId);
             childInflight.delete(event.toolCallId);
           }
@@ -1145,18 +1374,30 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             }
           }
           if (event.type === "message_end") {
-            const msg = (event as { message?: { role?: string; usage?: unknown; stopReason?: string; errorMessage?: string } }).message;
+            const msg = (event as {
+              message?: {
+                role?: string;
+                usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+                stopReason?: string;
+                errorMessage?: string;
+              };
+            }).message;
             if (msg?.role === "assistant") {
               stopStreamRateTimer();
+              // The child's own header needs a real cost, not a zero — nothing
+              // else in this scope sees per-turn usage.
+              childTurns += 1;
+              if (msg.usage) {
+                childTokenUsage.input += msg.usage.input ?? 0;
+                childTokenUsage.output += msg.usage.output ?? 0;
+                childTokenUsage.cacheRead += msg.usage.cacheRead ?? 0;
+                childTokenUsage.cacheWrite += msg.usage.cacheWrite ?? 0;
+              }
               if (firstDeltaAt != null && turnStreamChars > 0) {
                 const elapsed = Math.max(0.001, (Date.now() - firstDeltaAt) / 1000);
                 lastStreamCharsPerSec = Math.round(turnStreamChars / elapsed);
               }
               pushDebugEvent("assistant_turn_end", {
-                message: (() => {
-                  try { return JSON.parse(JSON.stringify(msg)); }
-                  catch { return msg ?? {}; }
-                })(),
                 usage: (() => {
                   try { return JSON.parse(JSON.stringify(msg.usage ?? {})); }
                   catch { return msg?.usage ?? {}; }
@@ -1170,7 +1411,6 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
                 ...(lastStreamCharsPerSec != null ? { streamCharsPerSec: lastStreamCharsPerSec } : {}),
                 streamsCollected: turnStreamCount,
                 streamRateSamples: turnStreamRateSamples,
-                messages: snapshotMessages(),
               });
               lastAssistantStreamSummary = {
                 streamChars: turnStreamChars,
@@ -1231,8 +1471,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // bloat context and re-anchor the model. Send ONLY the new question.
         const promptText = followUpResumed ? `## Follow-up\n${question}` : childPrompt;
         pushDebugEvent("session_prompt", {
+          kind: followUpResumed ? "resume" : "fresh",
           prompt: promptText,
-          messages: snapshotMessages(),
+          messageCount: recorder.messageCount,
         });
         turnStartedAt = Date.now();
         firstDeltaAt = null;
@@ -1348,38 +1589,25 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         pushDebugEvent("session_end", {
           durationMs: execDurationMs,
           textLength: text.length,
+          toolCount: toolsUsed.length,
           toolsUsed,
           providerError,
+          tokenUsage: { ...childTokenUsage },
           ...(lastAssistantStreamSummary ?? {}),
         });
-        if (parentSessionId) {
-          try {
-            const debugDir = await ensureSessionDebugDir(progressCtx?.parentDebugSessionId ?? parentSessionId);
-            const { writeFile } = await import("node:fs/promises");
-            const safeToolCallId = _toolCallId.replace(/[^a-zA-Z0-9_-]/g, "-");
-            const safeName = `${def.name}-${safeToolCallId}`;
-            const childSnapshot = {
-              schemaVersion: 1,
-              parentSessionId,
-              parentToolCallId: _toolCallId,
-              subagentName: def.name,
-              question,
-              provider: resolvedProvider?.provider ?? "litellm",
-              model: resolvedProvider?.config.model ?? "shared",
-              startedAt: new Date(execStartedAt).toISOString(),
-              finishedAt: new Date().toISOString(),
-              text,
-              toolsUsed,
-              providerError,
-              messages: snapshotMessages(),
-              events: debugEvents,
-              ...(lastAssistantStreamSummary ?? {}),
-            };
-            await writeFile(`${debugDir}/subagents-${safeName}.json`, JSON.stringify(childSnapshot, null, 2), "utf8");
-          } catch (err) {
-            log.warn(`[${def.name}] Failed to write child debug artifact: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
+        recordSubagentEnd({
+          status: "completed",
+          durationMs: execDurationMs,
+          textLength: text.length,
+          providerError,
+          toolsUsed,
+        });
+        await finishChildCapture("completed", text, execDurationMs);
+        await writeLegacyChildSnapshot("subagent_end", {
+          status: "completed",
+          text,
+          ...(lastAssistantStreamSummary ?? {}),
+        });
         if (followUpEnabled && followUpHandle) {
           text += `\n\n---\n_Follow-up:_ to ask THIS \`${def.name}\` subagent another question WITH the full context of this run, call \`${def.name}\` again passing \`session_id: "${followUpHandle}"\`. Omit it to start fresh.`;
         }
@@ -1394,34 +1622,20 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         stopStreamRateTimer();
         const msg = err instanceof Error ? err.message : String(err);
         log.error(`[${def.name}] Failed:`, msg);
-        pushDebugEvent("session_error", { error: msg });
-        if (progressCtx?.parentSessionId) {
-          try {
-            const debugDir = await ensureSessionDebugDir(progressCtx.parentDebugSessionId ?? progressCtx.parentSessionId);
-            const { writeFile } = await import("node:fs/promises");
-            const safeToolCallId = _toolCallId.replace(/[^a-zA-Z0-9_-]/g, "-");
-            const safeName = `${def.name}-${safeToolCallId}`;
-            const childSnapshot = {
-              schemaVersion: 1,
-              parentSessionId: progressCtx.parentSessionId,
-              parentToolCallId: _toolCallId,
-              subagentName: def.name,
-              question,
-              provider: resolvedProvider?.provider ?? "litellm",
-              model: resolvedProvider?.config.model ?? "shared",
-              startedAt: new Date(execStartedAt).toISOString(),
-              finishedAt: new Date().toISOString(),
-              error: msg,
-              toolsUsed,
-              providerError,
-              messages: snapshotMessages(),
-              events: debugEvents,
-            };
-            await writeFile(`${debugDir}/subagents-${safeName}.json`, JSON.stringify(childSnapshot, null, 2), "utf8");
-          } catch {
-            // ignore
-          }
-        }
+        const failedDurationMs = Date.now() - execStartedAt;
+        // A parent-cancelled child is not a failure — it stopped on purpose,
+        // and a trace that calls it an error sends readers hunting a bug.
+        const failedStatus: RunStatus = debugCtx?.abortSignal?.aborted ? "cancelled" : "error";
+        pushDebugEvent("session_error", { error: msg, atMs: failedDurationMs });
+        recordSubagentEnd({
+          status: failedStatus,
+          durationMs: failedDurationMs,
+          providerError,
+          toolsUsed,
+          errorMessage: msg,
+        });
+        await finishChildCapture(failedStatus, msg, failedDurationMs);
+        await writeLegacyChildSnapshot("subagent_error", { status: failedStatus, error: msg });
         return { content: [{ type: "text" as const, text: `${def.name} subagent failed: ${msg}` }], details: {} };
       } finally {
         // Dispose the child session even on the error path — the success path

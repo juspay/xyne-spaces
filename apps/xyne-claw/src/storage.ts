@@ -33,6 +33,7 @@ import {
   type StorageService,
 } from "@xyne/storage";
 import { GCS, STORAGE } from "./config.js";
+import { indexPrefixFor } from "./debug/keys.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("gcs");
@@ -75,13 +76,28 @@ export interface SessionArchiveObject {
   updatedMs: number;
 }
 
-// Sticky: once we learn there are no usable credentials (local dev without
-// ADC), stop trying — mirrors the old metadata-server probe behavior.
+// Once we learn there are no usable credentials (local dev without ADC), stop
+// trying — mirrors the old metadata-server probe behavior. NOT permanently
+// sticky: a transient ADC hiccup during pod startup used to disable direct
+// storage for the whole process lifetime, which silently cost every later run
+// its GCS debug artifact. Re-probe after a cooldown instead.
 let credentialsUnavailable = false;
+let credentialsDisabledAt = 0;
+const CREDS_RETRY_MS = Number(process.env["STORAGE_CREDS_RETRY_MS"] ?? 300_000);
 let storage: StorageService | null = null;
 
 export function gcsDirectConfigured(): boolean {
+  if (credentialsUnavailable && Date.now() - credentialsDisabledAt >= CREDS_RETRY_MS) {
+    credentialsUnavailable = false;
+    log.info("[gcs] credential cooldown elapsed — re-enabling direct storage probe");
+  }
   return BUCKET.length > 0 && !credentialsUnavailable;
+}
+
+/** Test seam + explicit recovery hook: forget a past credential failure. */
+export function resetStorageCredentialProbe(): void {
+  credentialsUnavailable = false;
+  credentialsDisabledAt = 0;
 }
 
 function getStorage(): StorageService | null {
@@ -121,7 +137,8 @@ function noteIfCredsError(err: unknown): void {
   const msg = err instanceof Error ? err.message : String(err);
   if (/could not load the default credentials|unable to detect.*project|metadata|Could not load credentials/i.test(msg)) {
     credentialsUnavailable = true;
-    log.warn("[gcs] no application default credentials — direct storage disabled (using claw-auth fallback)");
+    credentialsDisabledAt = Date.now();
+    log.warn(`[gcs] no application default credentials — direct storage disabled for ${CREDS_RETRY_MS}ms (using claw-auth fallback)`);
   }
 }
 
@@ -216,12 +233,182 @@ export async function gcsUploadDebugRun(storeKey: string, fileName: string, data
 }
 
 /**
- * List per-run debug snapshot file names for a session (bare names, no
- * prefix). Returns null on error/disabled — caller falls back to local files.
+ * Upload a debug run with bounded retries.
+ *
+ * A single-attempt upload meant one transient 5xx cost the run its only
+ * off-pod artifact — and the PVC copy is exactly what gets evicted later, so
+ * the trace disappeared entirely. Three attempts with backoff turns a blip
+ * into a non-event; a real outage still degrades to PVC-only, which the
+ * retrieval path handles.
+ */
+export async function gcsUploadDebugRunWithRetries(
+  storeKey: string,
+  fileName: string,
+  data: Buffer,
+  attempts = 3,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (await gcsUploadDebugRun(storeKey, fileName, data)) {
+      if (attempt > 1) log.info(`[gcs] debug-run upload for ${storeKey}/${fileName} succeeded on attempt ${attempt}`);
+      return true;
+    }
+    // A credential failure is not retryable within this window — bail early
+    // rather than burning the backoff on a guaranteed miss.
+    if (!gcsDirectConfigured()) return false;
+    if (attempt < attempts) await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+  }
+  return false;
+}
+
+/**
+ * Write a run-discovery marker.
+ *
+ * The storeKey a run was written under is not derivable from the conversation
+ * id — branch keys, per-user twin keys and userId-prefixed agent-chat keys all
+ * exist, and every reader that GUESSED the shape eventually 404'd a run that
+ * was sitting right there. The marker encodes the real storeKey in its own
+ * object name, so discovery becomes a list instead of a guess.
+ */
+export async function gcsPutDebugIndex(indexRelPath: string): Promise<boolean> {
+  const client = getStorage();
+  if (!client) return false;
+  try {
+    await client.uploadFileV2(Buffer.alloc(0), {
+      path: `${DEBUG_RUN_PREFIX}/${indexRelPath}`,
+      contentType: "application/json",
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
+    return true;
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] debug index write failed for ${indexRelPath}:`, err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+/**
+ * List discovery markers for a conversation. Returns relative names under the
+ * debug-run prefix (i.e. `_index/<convId>/<runId>~<storeKey>.json`).
+ *
+ * null means "the listing FAILED" — the caller falls back to key guessing and
+ * tells the user the read was degraded. Storage being switched off is not a
+ * failure: a dev box with no bucket has no markers to find, and reporting that
+ * as degraded made every local debug read look broken, so it returns [].
+ */
+export async function gcsListDebugIndex(convId: string): Promise<string[] | null> {
+  const client = getStorage();
+  if (!client) return [];
+  const prefix = `${DEBUG_RUN_PREFIX}/${indexPrefixFor(convId)}`;
+  try {
+    const files = await client.listFiles(prefix);
+    return files.map((f) => f.name.slice(`${DEBUG_RUN_PREFIX}/`.length)).filter(Boolean);
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] debug index list failed for ${convId}:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
+ * Delete one storeKey's discovery markers for a conversation.
+ *
+ * `/clear` used to drop `claw-debug-runs/<storeKey>/*` and stop there, leaving
+ * the markers pointing at objects that no longer exist — discovery then listed
+ * phantom runs that 404'd on open. Markers are written under BOTH the raw
+ * conversation id and the session key, so the caller passes each id it might
+ * have been indexed under; the storeKey suffix in the marker NAME is what makes
+ * the match exact, so a conversation's OTHER store keys are never touched.
+ * Returns how many markers were removed.
+ */
+export async function gcsDeleteDebugIndex(convId: string, storeKey: string): Promise<number> {
+  const client = getStorage();
+  if (!client) return 0;
+  const prefix = `${DEBUG_RUN_PREFIX}/${indexPrefixFor(convId)}`;
+  const suffix = `~${storeKey}.json`;
+  try {
+    const files = await client.listFiles(prefix);
+    let deleted = 0;
+    for (const f of files) {
+      if (!f.name.endsWith(suffix)) continue;
+      try {
+        await client.deleteFile(f.name);
+        deleted++;
+      } catch {
+        // Best-effort: a stranded marker resolves to a missing run, which the
+        // read path already tolerates.
+      }
+    }
+    return deleted;
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] debug index delete failed for ${convId}/${storeKey}:`, err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+}
+
+/** Delete every debug object for a storeKey. Used when a session is cleared. */
+export async function gcsDeleteDebugRuns(storeKey: string): Promise<number> {
+  const client = getStorage();
+  if (!client) return 0;
+  const prefix = `${DEBUG_RUN_PREFIX}/${storeKey}/`;
+  try {
+    const files = await client.listFiles(prefix);
+    let deleted = 0;
+    for (const f of files) {
+      try {
+        await client.deleteFile(f.name);
+        deleted++;
+      } catch {
+        // Best-effort: a leftover object costs storage, not correctness.
+      }
+    }
+    return deleted;
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] debug-run delete failed for ${storeKey}:`, err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+}
+
+/** Download an arbitrary object under the debug-run prefix (index markers, packed runs). */
+export async function gcsDownloadDebugObject(relPath: string): Promise<Buffer | null> {
+  const client = getStorage();
+  if (!client) return null;
+  try {
+    return await client.getFileBuffer(`${DEBUG_RUN_PREFIX}/${relPath}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Upload an arbitrary object under the debug-run prefix (packed v2 runs). */
+export async function gcsUploadDebugObject(relPath: string, data: Buffer, contentType = "application/gzip"): Promise<boolean> {
+  const client = getStorage();
+  if (!client) return false;
+  try {
+    await client.uploadFileV2(data, {
+      path: `${DEBUG_RUN_PREFIX}/${relPath}`,
+      contentType,
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
+    return true;
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] debug object upload failed for ${relPath}:`, err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+/**
+ * List per-run debug snapshot file names for a session (bare names, no prefix).
+ *
+ * Same null-vs-[] contract as gcsListDebugIndex: null is a real listing
+ * failure (caller falls back to local files and reports a degraded read),
+ * [] is "storage is not configured, so there is nothing off-pod to find".
  */
 export async function gcsListDebugRuns(storeKey: string): Promise<string[] | null> {
   const client = getStorage();
-  if (!client) return null;
+  if (!client) return [];
   const prefix = `${DEBUG_RUN_PREFIX}/${storeKey}/`;
   try {
     const files = await client.listFiles(prefix);

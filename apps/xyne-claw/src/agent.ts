@@ -46,7 +46,36 @@ import {
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
-import { gcsUploadDebugRun } from "./storage.js";
+import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
+import {
+  BlobIndex,
+  BlobWriter,
+  Recorder,
+  RunStore,
+  startCapture,
+  installStreamCapture,
+  resolveCaptureLevel,
+  runIdFor,
+  runFileNameFor,
+  startingRunObjectName,
+  indexObjectName,
+  packedRunObjectName,
+  packRun,
+  readRun,
+  toV1Snapshot,
+  emptyLatency,
+  emptyTokenUsage,
+  type CaptureHandles,
+  type RunHeader,
+  type RunStatus,
+  type DebugEventKind,
+  type DebugEventRecord,
+  type DebugSessionSnapshot,
+  type DebugThinkingConfiguration,
+  type DebugSpeedConfiguration,
+  type StreamRateSample,
+} from "./debug/index.js";
+import { isSafeId } from "./safe-id.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
@@ -278,105 +307,17 @@ export class QuotaExhaustedError extends Error {
   }
 }
 
-type DebugEventKind =
-  | "session_start"
-  | "session_tools"
-  | "mode_switch"
-  | "session_prompt"
-  | "stream_rate"
-  | "thinking"
-  | "assistant_turn_end"
-  | "tool_execution_start"
-  | "tool_execution_end"
-  | "compaction_start"
-  | "compaction_end"
-  | "auto_retry_start"
-  | "auto_retry_end"
-  | "citation_reflection"
-  | "twin_deliver_reflection"
-  | "follow_up_generation_start"
-  | "follow_up_generation_end"
-  | "background_subagents_delivered"
-  | "session_end"
-  | "session_cancelled"
-  | "session_error";
-
-export interface DebugEventRecord {
-  seq: number;
-  at: string;
-  kind: DebugEventKind;
-  turn?: number;
-  llmCall?: number;
-  toolCallId?: string;
-  parentToolCallId?: string;
-  subagentName?: string;
-  data: Record<string, unknown>;
-}
-
-interface StreamRateSample {
-  offsetMs: number;
-  streamsPerSec: number;
-  streamsCollected: number;
-}
-
-interface DebugThinkingConfiguration {
-  /** Value selected by agent model settings / provider config / default policy. */
-  requestedLevel: string;
-  /** Pi's final value after capability clamping for the resolved model. */
-  effectiveLevel: string;
-  /** Where the requested setting came from, so precedence is inspectable. */
-  source: "agent_model_settings" | "provider_credential" | "codex_default" | "server_default" | "temperature_override";
-  /** Whether the resolved Pi model was registered as reasoning-capable. */
-  modelSupportsReasoning: boolean;
-  /** The provider request shape that disables/enables thinking for this model. */
-  wireMode: string;
-}
-
-/** Provider fast mode (modelSettings.speed) as it was resolved for this run —
- *  so a "why wasn't it faster?" report can be answered from the trace. */
-interface DebugSpeedConfiguration {
-  requested: ModelSpeed;
-  applied: boolean;
-  reason: string;
-}
-
-interface DebugSessionSnapshot {
-  schemaVersion: 1;
-  conversationId?: string;
-  sessionId?: string;
-  agentSlug?: string;
-  userId?: string;
-  userName?: string;
-  userEmail?: string;
-  provider?: string;
-  /** The model resolved for this particular run (not merely the agent default). */
-  model?: string;
-  /** Requested/effective thinking selection and its provider wire representation. */
-  thinking?: DebugThinkingConfiguration;
-  /** Requested/applied provider fast mode and the eligibility verdict. */
-  speed?: DebugSpeedConfiguration;
-  startedAt: string;
-  finishedAt: string;
-  task: string;
-  context?: string;
-  systemPromptOverride?: boolean;
-  /** True when the snapshot was captured via the fallback writer in runTask's
-   *  finally because the agent loop threw (cancel / transient provider error)
-   *  before the success-path write could run. Tools list + messages are
-   *  whatever state existed at throw time. UI can branch on this to mark the
-   *  debugger view as "partial". */
-  cancelled?: boolean;
-  /** True for the incremental snapshot written at each turn boundary while the
-   *  run is still in flight (so the debugger can show a PARTIAL trace instead of
-   *  404ing until completion). Overwritten by the final snapshot on completion. */
-  inProgress?: boolean;
-  messages: unknown[];
-  toolInvocations: ToolInvocation[];
-  tokenUsage: TokenUsage;
-  latency: LatencyMetrics;
-  lastAssistantText: string;
-  events: DebugEventRecord[];
-}
+// Debug trace types live in ./debug — one definition shared by the recorder,
+// the materializer and the retrieval route. Re-exported here because
+// routes/run.ts and subagent-tools.ts have always imported them from agent.js.
+export type {
+  DebugEventKind,
+  DebugEventRecord,
+  DebugSessionSnapshot,
+  DebugThinkingConfiguration,
+  DebugSpeedConfiguration,
+  StreamRateSample,
+} from "./debug/index.js";
 
 function cloneForDebug<T>(value: T): T {
   try {
@@ -1866,6 +1807,11 @@ export interface RunTaskOptions {
    *  runTask drains it, injecting each completed subagent result back into the
    *  session so the model can incorporate it before finishing. */
   backgroundRegistry?: import("./subagent-tools.js").BackgroundSubagentRegistry | undefined;
+  /** Slot the run fills in with its own trace handles, shared with the subagent
+   *  tools via SubagentProgressCtx. The tools are built before this run opens
+   *  its trace, so a child can only learn where to write itself — and which
+   *  recorder to announce itself on — through this object. */
+  parentDebug?: import("./subagent-tools.js").ParentDebugHandle | undefined;
   fastMode?: boolean | undefined;
   fastToolCatalogNames?: string[] | undefined;
   fastToolController?: FastToolRuntimeController | undefined;
@@ -1984,6 +1930,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     autoToolCitations,
     isRegenerate,
     backgroundRegistry,
+    parentDebug,
     fastMode,
     fastToolCatalogNames,
     fastToolController,
@@ -2575,14 +2522,12 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // instead of advancing to the configured fallback. See ProviderTerminalError.
   let lastTurnErrorDetail: string | null = null;
   let compactedThisRun = false;
-  const debugEvents: DebugEventRecord[] = [];
-  let debugSeq = 0;
-  // Set once the success-path debug write (near the end of the agent loop) has
-  // run. The inner finally below uses this as a guard so it only fires the
-  // fallback partial-state debug write when the success path didn't get there
-  // — i.e. the loop threw (RunCancelledError, ProviderStallError, etc.). The
-  // success path keeps producing the full snapshot exactly as it did before.
-  let debugWritten = false;
+  // The trace recorder owns event capture and persistence for this run. It is
+  // created a few lines below, once the store key and header are known; every
+  // pushDebugEvent call site funnels through it.
+  let recorder: Recorder | null = null;
+  let capture: CaptureHandles | null = null;
+  let debugRunStore: RunStore | null = null;
   let llmCallSeq = 0;
   let currentPromptText = "";
   let currentPromptKind: "fresh" | "resume" = "fresh";
@@ -2654,120 +2599,99 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     try { return JSON.stringify(result); } catch { return String(result); }
   };
 
+  // Every debug emission in this file goes through here. The recorder applies
+  // the per-field size policy from the event registry, interns large payloads
+  // into the run's blob log, appends to the on-disk event log and pushes the
+  // event live — and it can never throw, because this runs inside pi's event
+  // subscription where a throw would take the run down with it.
   const pushDebugEvent = (kind: DebugEventKind, data: Record<string, unknown> = {}, extras?: Partial<DebugEventRecord>): void => {
-    const event: DebugEventRecord = {
-      seq: ++debugSeq,
-      at: extras?.at ?? new Date().toISOString(),
-      kind,
-      ...(extras?.turn != null ? { turn: extras.turn } : {}),
-      ...(extras?.llmCall != null ? { llmCall: extras.llmCall } : {}),
-      ...(extras?.toolCallId ? { toolCallId: extras.toolCallId } : {}),
-      ...(extras?.parentToolCallId ? { parentToolCallId: extras.parentToolCallId } : {}),
-      ...(extras?.subagentName ? { subagentName: extras.subagentName } : {}),
-      data,
-    };
-    debugEvents.push(event);
-    pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event);
+    recorder?.record(kind, data, extras);
   };
 
-  // Incremental debug snapshot — written at assistant turn boundaries and tool
-  // lifecycle boundaries (NOT per token), so the debugger can serve a PARTIAL
-  // bundle mid-run and does not leave a completed tool displayed as running.
-  // Writes only debug-session.json + debug-events.json
-  // (never the immutable debug-run-*.json). `messages` is intentionally omitted
-  // (kept only in the final snapshot) to avoid O(turns) PVC growth — the drawer
-  // renders off `events`/`toolInvocations`. Skipped once the completion write
-  // has run (debugWritten). Best-effort: never throws into the run loop.
-  let partialDebugFlushing = false;
-  // Tracks the in-flight partial write so the completion/finally writers can
-  // await it before writing their FULL snapshot — otherwise the two race on the
-  // same debug-session.json path and can leave a torn/partial final trace.
-  let partialFlushPromise: Promise<void> | null = null;
-  const flushDebugPartial = async (): Promise<void> => {
-    if (!conversationId || debugWritten || partialDebugFlushing) return;
-    partialDebugFlushing = true;
+  /**
+   * The single terminal path for a run's trace. Idempotent — the success path
+   * and the fallback in `finally` both call it and only the first one lands.
+   *
+   * Order matters, and each stage is independently guarded: the append-only log
+   * is already durable, the header/materialize step makes it readable, and the
+   * GCS upload puts a copy somewhere the PVC eviction sweep can't reach. A pod
+   * that is out of disk still gets a complete off-pod artifact, which is the
+   * exact case that used to lose traces entirely.
+   */
+  const finishDebugCapture = async (status: RunStatus, finalText: string): Promise<void> => {
+    if (!capture || capture.finished) return;
+    const finalLatency: LatencyMetrics = {
+      totalMs: Date.now() - runStartedAt,
+      llmDecodeMs: latency.llmDecodeMs,
+      llmWaitMs: latency.llmWaitMs,
+      llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
+      llmTurns: latency.llmTurns,
+      llmRetries: latency.llmRetries,
+      ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
+      ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
+      ...(latency.llmDecodeMs > 0 && tokenUsage.output > 0
+        ? { tokensPerSec: Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000)) }
+        : {}),
+      ...(latency.streamCharsPerSec != null ? { streamCharsPerSec: latency.streamCharsPerSec } : {}),
+      ...(latency.streamChars ? { streamChars: latency.streamChars } : {}),
+      ...(latency.streamThinkingChars ? { streamThinkingChars: latency.streamThinkingChars } : {}),
+      ...(latency.streamTextChars ? { streamTextChars: latency.streamTextChars } : {}),
+      toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
+    };
     try {
-      const debugDir = await ensureSessionDebugDir(conversationId);
-      if (debugWritten) return; // completion writer won the race while we awaited
-      const { writeFile } = await import("node:fs/promises");
-      if (debugWritten) return;
-      // Strip the per-event full-transcript `messages` embeds (session_prompt /
-      // assistant_turn_end each carry a deep clone of the WHOLE session for that
-      // turn) — keeping them would make each partial file O(turns) and the
-      // rewrite-every-turn cadence O(turns²) bytes to the PVC. The drawer renders
-      // off event metadata + toolInvocations, not these mid-run message embeds.
-      const leanEvents = debugEvents.map((e) =>
-        e.data && (e.data as Record<string, unknown>)["messages"] !== undefined
-          ? { ...e, data: { ...(e.data as Record<string, unknown>), messages: undefined } }
-          : e,
-      );
-      const snapshot: DebugSessionSnapshot = {
-        schemaVersion: 1,
-        conversationId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
-        userId,
-        ...(userName ? { userName } : {}),
-        ...(userEmail ? { userEmail } : {}),
-        ...(provider ? { provider } : {}),
-        model: model.id,
-        thinking: debugThinking,
-        ...(debugSpeed ? { speed: debugSpeed } : {}),
-        inProgress: true,
-        startedAt: debugStartedIso,
-        finishedAt: new Date().toISOString(),
-        task,
-        ...(context ? { context } : {}),
-        ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
-        messages: [],
-        toolInvocations: cloneForDebug(toolInvocations),
-        tokenUsage: { ...tokenUsage },
-        latency: {
-          totalMs: Date.now() - runStartedAt,
-          llmDecodeMs: latency.llmDecodeMs,
-          llmWaitMs: latency.llmWaitMs,
-          llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
-          llmTurns: latency.llmTurns,
-          llmRetries: latency.llmRetries,
-          toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
-        },
-        lastAssistantText: streamedText,
-        events: leanEvents,
-      };
-      await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(snapshot), "utf8");
-      await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(leanEvents), "utf8");
+      await capture.finish(status, { text: finalText, tokenUsage: { ...tokenUsage }, latency: finalLatency });
     } catch (err) {
-      log.warn(`[agent] partial debug flush failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      partialDebugFlushing = false;
+      log.warn(`[agent] debug finish failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!debugRunStore || !debugStoreKey) return;
+    // Upload off-pod. The v1 snapshot keeps every existing reader working; the
+    // packed v2 run carries the full fidelity (blobs included) for the newer
+    // retrieval path. Both best-effort, neither on the run's critical path.
+    try {
+      const run = await readRun(debugRunStore.runDir);
+      if (run) {
+        const v1 = Buffer.from(JSON.stringify(toV1Snapshot(run)), "utf8");
+        const uploaded = await gcsUploadDebugRunWithRetries(debugStoreKey, runFileNameFor(debugRunId), v1);
+        const packed = await packRun(debugRunStore.runDir);
+        if (packed) {
+          await gcsUploadDebugObject(`${debugStoreKey}/${packedRunObjectName(debugRunId)}`, packed);
+        }
+        if (uploaded) {
+          await debugRunStore.markUploaded();
+        } else {
+          // GCS unreachable: keep the v1 snapshot on the PVC so the trace is
+          // still servable from this pod until the session is archived.
+          const debugDir = await ensureSessionDebugDir(debugStoreKey);
+          const { writeFile } = await import("node:fs/promises");
+          await writeFile(`${debugDir}/${runFileNameFor(debugRunId)}`, v1);
+        }
+      }
+    } catch (err) {
+      log.warn(`[agent] debug run upload failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  // Serialize partial snapshots. A plain `void flushDebugPartial()` can lose a
-  // tool-end update when a turn-boundary write is already in flight because
-  // flushDebugPartial deliberately skips concurrent writes. Chaining preserves
-  // every requested boundary and gives the final writer one promise to await.
+  // Mid-run durability is no longer a rewrite-the-whole-file affair: the
+  // recorder appends each event as it happens, so a partial trace is simply
+  // "whatever is on disk right now". flushHint() only asks the store to get its
+  // queued appends onto the fd sooner; it copies nothing and never blocks the
+  // run loop. (The old flushDebugPartial rewrote debug-session.json at every
+  // turn and tool boundary, which is what made a long run cost O(turns^2)
+  // bytes to the PVC.)
   const queueDebugPartialFlush = (): void => {
-    const previous = partialFlushPromise ?? Promise.resolve();
-    const next = previous
-      .catch(() => {})
-      .then(() => flushDebugPartial());
-    partialFlushPromise = next;
-    void next.finally(() => {
-      if (partialFlushPromise === next) partialFlushPromise = null;
-    });
+    recorder?.flushHint();
   };
 
+
+  // Stream rate is a live-only heartbeat (once per second while decoding). It
+  // is deliberately not persisted, and recordLive consumes no sequence number —
+  // burning one per tick used to leave holes in the persisted event log that
+  // looked like dropped events.
   const pushLiveStreamRate = (streamsPerSec: number, active: boolean): void => {
-    const event: DebugEventRecord = {
-      seq: ++debugSeq,
-      at: new Date().toISOString(),
-      kind: "stream_rate",
+    recorder?.recordLive("stream_rate", { streamsPerSec, streamsCollected: turnStreamCount, active }, {
       turn: latency.llmTurns + 1,
       ...(llmCallSeq ? { llmCall: llmCallSeq } : {}),
-      data: { streamsPerSec, streamsCollected: turnStreamCount, active },
-    };
-    pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event);
+    });
   };
 
   const flushStreamRate = (active: boolean): void => {
@@ -2793,11 +2717,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     streamRateTimer = null;
     flushStreamRate(false);
     streamWindowStartedAt = null;
-  };
-
-  const snapshotMessages = (): unknown[] => {
-    const messages = (session as unknown as { messages?: unknown[] }).messages ?? [];
-    return cloneForDebug(messages);
   };
 
   const repairDanglingToolUses = (reason: string): number => {
@@ -2842,6 +2761,120 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     currentPromptKind = kind;
     currentPromptImagesCount = imagesCount;
   };
+
+  // ── Debug capture ──────────────────────────────────────────────────────
+  // Opened BEFORE the model is ever called, and the header is written with
+  // status "running" immediately: any run that gets this far is discoverable
+  // on the PVC and (fire-and-forget) in GCS within about a second, so a pod
+  // killed mid-run still leaves a readable, correctly-labelled trace instead
+  // of nothing at all.
+  //
+  // The store key falls back to the sessionId when there is no conversationId —
+  // runs without one used to produce no artifact whatsoever.
+  const debugStoreKey = conversationId ?? (sessionId && isSafeId(sessionId) ? sessionId : undefined);
+  const debugRunId = runIdFor(runStartedAt, sessionId);
+  const debugCaptureLevel = resolveCaptureLevel();
+  if (debugStoreKey) {
+    debugRunStore = await RunStore.open({
+      storeKey: debugStoreKey,
+      runId: debugRunId,
+      captureLevel: debugCaptureLevel,
+    }).catch((err: unknown) => {
+      log.warn(`[agent] debug store open failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    });
+  }
+  const debugBlobs = new BlobWriter({
+    appendLine: (line) => debugRunStore?.appendBlobLine(line),
+    captureLevel: debugCaptureLevel,
+  });
+  recorder = new Recorder({
+    store: debugRunStore,
+    blobs: debugBlobs,
+    captureLevel: debugCaptureLevel,
+    ...(progressUrl
+      ? {
+          live: {
+            push: (event: DebugEventRecord) =>
+              pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event),
+          },
+        }
+      : {}),
+  });
+  const debugHeader: RunHeader = {
+    schemaVersion: 2,
+    runId: debugRunId,
+    storeKey: debugStoreKey ?? "unknown",
+    ...(conversationId ? { conversationId } : {}),
+    ...(progressMeta?.conversationId ? { rawConversationId: progressMeta.conversationId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
+    ...(userId ? { userId } : {}),
+    ...(userName ? { userName } : {}),
+    ...(userEmail ? { userEmail } : {}),
+    ...(provider ? { provider } : {}),
+    model: model.id,
+    thinking: debugThinking,
+    ...(debugSpeed ? { speed: debugSpeed } : {}),
+    captureLevel: debugCaptureLevel,
+    startedAt: debugStartedIso,
+    finishedAt: debugStartedIso,
+    status: "running",
+    task,
+    ...(context ? { context } : {}),
+    ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
+    mode: mode ?? "auto",
+    counts: { events: 0, blobs: 0, messages: 0, toolCalls: 0 },
+    tokenUsage: emptyTokenUsage(),
+    latency: emptyLatency(),
+  };
+  capture = startCapture({
+    store: debugRunStore,
+    recorder,
+    header: debugHeader,
+    // Off-pod discovery marker. Written at START, not at finish, and it carries
+    // the run's REAL store key in its own object name — which is what lets the
+    // retrieval path stop guessing key shapes (branch keys, per-user twin keys
+    // and userId-prefixed keys each used to defeat a different guesser).
+    onStart: (h) => {
+      if (!debugStoreKey) return;
+      // Index under every id a caller might ask by. The debugger asks with the
+      // RAW conversation id, while `conversationId` here is the session key —
+      // indexing only the latter made the whole discovery layer unreachable.
+      for (const id of new Set([h.rawConversationId, h.conversationId].filter((v): v is string => !!v))) {
+        void gcsPutDebugIndex(indexObjectName(id, h.runId, debugStoreKey));
+      }
+      // Deliberately NOT written under the final snapshot's object name: a
+      // header-only stub parked there would permanently shadow the complete
+      // trace if the finish-time upload later failed.
+      void gcsUploadDebugObject(
+        `${debugStoreKey}/${startingRunObjectName(h.runId)}`,
+        Buffer.from(JSON.stringify(toV1Snapshot({ header: h, events: [], blobs: BlobIndex.empty(), warnings: [] })), "utf8"),
+        "application/json",
+      );
+    },
+  });
+  // Subagent tools were constructed before this point; hand them the run they
+  // are children of, so their traces land in this run's store and their
+  // start/end shows up on this run's timeline.
+  if (parentDebug) {
+    parentDebug.recorder = recorder;
+    parentDebug.runId = debugRunId;
+    parentDebug.captureLevel = debugCaptureLevel;
+    if (debugStoreKey) parentDebug.storeKey = debugStoreKey;
+  }
+
+  // The one hook that sees what the model is ACTUALLY sent: pi's assembled
+  // system prompt (with its <available_skills> block), the resolved tool
+  // definitions including their JSON schemas, and the real transcript. Installed
+  // after installLlmCallMetrics so this wrapper sits outermost, and before
+  // session.subscribe below so the first turn is captured.
+  installStreamCapture({
+    agent: session.agent as unknown as { streamFn: (model: unknown, context: unknown, options?: unknown) => unknown },
+    recorder,
+    fastMode: fastMode === true,
+    ...(provider ? { provider } : {}),
+  });
 
   pushDebugEvent("session_start", {
     conversationId,
@@ -2903,8 +2936,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         kind: currentPromptKind,
         prompt: currentPromptText,
         imagesCount: currentPromptImagesCount,
-        messageCount: snapshotMessages().length,
-        messages: snapshotMessages(),
+        messageCount: recorder?.messageCount ?? 0,
         ...(personaSystemPrompt ? { systemPrompt: personaSystemPrompt } : {}),
         turnIndex: (event as { turnIndex?: number }).turnIndex,
         timestamp: (event as { timestamp?: string }).timestamp,
@@ -3165,7 +3197,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           });
         }
         pushDebugEvent("assistant_turn_end", {
-          message: cloneForDebug(msg),
           assistantText: session.getLastAssistantText() ?? "",
           usage: cloneForDebug(msg.usage),
           stopReason,
@@ -3176,7 +3207,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           streamCharsPerSec: latency.streamCharsPerSec,
           streamsCollected: turnStreamCount,
           streamRateSamples: turnStreamRateSamples,
-          messages: snapshotMessages(),
         }, {
           turn: latency.llmTurns,
           ...(llmCallSeq ? { llmCall: llmCallSeq } : {}),
@@ -3835,73 +3865,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     },
   });
 
-  if (conversationId) {
-    try {
-      // Let any in-flight incremental partial write finish before the full
-      // completion snapshot overwrites the same debug-session.json (no torn write).
-      await (partialFlushPromise ?? Promise.resolve()).catch(() => {});
-      const debugDir = await ensureSessionDebugDir(conversationId);
-      const { writeFile } = await import("node:fs/promises");
-      const debugSnapshot: DebugSessionSnapshot = {
-        schemaVersion: 1,
-        conversationId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
-        userId,
-        ...(userName ? { userName } : {}),
-        ...(userEmail ? { userEmail } : {}),
-        ...(provider ? { provider } : {}),
-        model: model.id,
-        thinking: debugThinking,
-        ...(debugSpeed ? { speed: debugSpeed } : {}),
-        startedAt: debugStartedIso,
-        finishedAt: new Date().toISOString(),
-        task,
-        ...(context ? { context } : {}),
-        ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
-        messages: cloneForDebug(sessionMessages ?? []),
-        toolInvocations: cloneForDebug(toolInvocations),
-        tokenUsage: { ...tokenUsage },
-        latency: {
-          totalMs: Date.now() - runStartedAt,
-          llmDecodeMs: latency.llmDecodeMs,
-          llmWaitMs: latency.llmWaitMs,
-          llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
-          llmTurns: latency.llmTurns,
-          llmRetries: latency.llmRetries,
-          ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
-          ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
-          ...(latency.llmDecodeMs > 0 && tokenUsage.output > 0 ? { tokensPerSec: Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000)) } : {}),
-          ...(latency.streamCharsPerSec != null ? { streamCharsPerSec: latency.streamCharsPerSec } : {}),
-          ...(latency.streamChars ? { streamChars: latency.streamChars } : {}),
-          ...(latency.streamThinkingChars ? { streamThinkingChars: latency.streamThinkingChars } : {}),
-          ...(latency.streamTextChars ? { streamTextChars: latency.streamTextChars } : {}),
-          toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
-        },
-        lastAssistantText: text,
-        events: cloneForDebug(debugEvents),
-      };
-      await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(debugSnapshot, null, 2), "utf8");
-      await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(debugEvents, null, 2), "utf8");
-      // Per-run snapshots go straight to GCS, NOT the PVC: each one embeds the
-      // full conversation so far, so keeping them on disk grows O(turns²) per
-      // conversation and the TTL sweep never reclaims an active thread (prod
-      // ENOSPC, 2026-06-12). The debug route reads them back from GCS. Local
-      // write only as a fallback (local dev / GCS down) so debugging still works.
-      const safeSessionId = (sessionId ?? "local").replace(/[^a-zA-Z0-9_-]/g, "-");
-      const runFile = `debug-run-${runStartedAt}-${safeSessionId}.json`;
-      const runSnapshot = Buffer.from(JSON.stringify(debugSnapshot), "utf8");
-      if (await gcsUploadDebugRun(conversationId, runFile, runSnapshot)) {
-        log.info(`[agent] Debug artifacts written: ${debugDir}/debug-session.json, gcs:${runFile}`);
-      } else {
-        await writeFile(`${debugDir}/${runFile}`, runSnapshot);
-        log.info(`[agent] Debug artifacts written: ${debugDir}/debug-session.json, ${debugDir}/${runFile} (GCS unavailable)`);
-      }
-      debugWritten = true;
-    } catch (err) {
-      log.warn(`[agent] Failed to write debug artifacts: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+  // Finish the trace: durable append-only data is already on disk, so this only
+  // stamps the final header and materializes the v1 compat artifacts every
+  // existing reader (drawer, webhook /debug, HTML export) still consumes.
+  await finishDebugCapture("completed", streamedText);
+
 
   // Log context usage for monitoring
   const contextUsage = session.getContextUsage?.();
@@ -3999,80 +3967,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       agent: progressMeta?.agentSlug ?? "unknown",
     });
 
-    // Fallback debug write — fires when the success-path block didn't run
-    // because the agent loop threw (cancel / transient provider error / any
-    // other error). Without this the debugger UI shows nothing for the run
-    // after a Stop click, even though we already have all session events,
-    // tool invocations, and partial assistant text in memory. The success
-    // path sets debugWritten=true above so we don't double-write.
-    if (!debugWritten && conversationId) {
-      try {
-        // Let any in-flight incremental partial write finish before the fallback
-        // snapshot overwrites the same debug-session.json (no torn write).
-        await (partialFlushPromise ?? Promise.resolve()).catch(() => {});
-        const debugDir = await ensureSessionDebugDir(conversationId);
-        const { writeFile } = await import("node:fs/promises");
-        let partialSessionMessages: Array<Record<string, unknown>> = [];
-        try {
-          partialSessionMessages = (session as unknown as { messages: Array<Record<string, unknown>> }).messages ?? [];
-        } catch { /* session may not be initialised yet */ }
-        const partialText = streamedText || (() => {
-          try { return session.getLastAssistantText() ?? ""; } catch { return ""; }
-        })();
-        const debugSnapshot: DebugSessionSnapshot = {
-          schemaVersion: 1,
-          conversationId,
-          ...(sessionId ? { sessionId } : {}),
-          ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
-          userId,
-          ...(userName ? { userName } : {}),
-          ...(userEmail ? { userEmail } : {}),
-          ...(provider ? { provider } : {}),
-          model: model.id,
-          thinking: debugThinking,
-          ...(debugSpeed ? { speed: debugSpeed } : {}),
-          cancelled: true,
-          startedAt: debugStartedIso,
-          finishedAt: new Date().toISOString(),
-          task,
-          ...(context ? { context } : {}),
-          ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
-          messages: cloneForDebug(partialSessionMessages),
-          toolInvocations: cloneForDebug(toolInvocations),
-          tokenUsage: { ...tokenUsage },
-          latency: {
-            totalMs: Date.now() - runStartedAt,
-            llmDecodeMs: latency.llmDecodeMs,
-            llmWaitMs: latency.llmWaitMs,
-            llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
-            llmTurns: latency.llmTurns,
-            llmRetries: latency.llmRetries,
-            ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
-            ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
-            ...(latency.streamCharsPerSec != null ? { streamCharsPerSec: latency.streamCharsPerSec } : {}),
-            ...(latency.streamChars ? { streamChars: latency.streamChars } : {}),
-            ...(latency.streamThinkingChars ? { streamThinkingChars: latency.streamThinkingChars } : {}),
-            ...(latency.streamTextChars ? { streamTextChars: latency.streamTextChars } : {}),
-            toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
-          },
-          lastAssistantText: partialText,
-          events: cloneForDebug(debugEvents),
-        };
-        await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(debugSnapshot, null, 2), "utf8");
-        await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(debugEvents, null, 2), "utf8");
-        const safeSessionId = (sessionId ?? "local").replace(/[^a-zA-Z0-9_-]/g, "-");
-        const runFile = `debug-run-${runStartedAt}-${safeSessionId}.json`;
-        const runSnapshot = Buffer.from(JSON.stringify(debugSnapshot), "utf8");
-        if (await gcsUploadDebugRun(conversationId, runFile, runSnapshot)) {
-          log.info(`[agent] Debug artifacts written (cancelled): ${debugDir}/debug-session.json, gcs:${runFile}`);
-        } else {
-          await writeFile(`${debugDir}/${runFile}`, runSnapshot);
-          log.info(`[agent] Debug artifacts written (cancelled): ${debugDir}/debug-session.json, ${debugDir}/${runFile} (GCS unavailable)`);
-        }
-        debugWritten = true;
-      } catch (err) {
-        log.warn(`[agent] Failed to write partial debug artifacts: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    // Fallback finish — fires when the success path didn't run because the loop
+    // threw (Stop, provider error, stall). The events are already durable on
+    // disk; this stamps the terminal status so the drawer shows the run as
+    // cancelled rather than leaving it looking like it is still in flight.
+    if (capture && !capture.finished) {
+      const partialText = streamedText || (() => {
+        try { return session.getLastAssistantText() ?? ""; } catch { return ""; }
+      })();
+      await finishDebugCapture("cancelled", partialText);
     }
   }
   } finally {

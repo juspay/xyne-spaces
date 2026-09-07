@@ -158,37 +158,74 @@ function shouldRedactRun(crossUser: boolean, runUserId: string | null | undefine
   return !isAgentOwnedRun(triggerSource);
 }
 
+/** Payload keys whose VALUE is withheld from a viewer who doesn't own the run. */
+const REDACTED_KEYS = new Set(["result"]);
+
+/**
+ * A v2 trace carries a large payload either inline (`result`) or interned into
+ * the blob log and referenced by the SIBLING key `resultRef`, whose `preview`
+ * holds the first ~200 chars of that SAME content. Redacting only the inline
+ * spelling would hand a viewer a preview of the body we just withheld, so a
+ * redacted key's `<key>Ref` sibling is redacted too. Deriving this from one set
+ * keeps the two spellings from drifting if the list ever grows.
+ */
+function isRedactedKey(key: string): boolean {
+  return REDACTED_KEYS.has(key) || (key.endsWith("Ref") && REDACTED_KEYS.has(key.slice(0, -"Ref".length)));
+}
+
 /**
  * Strip RESULT bodies from a run's tool invocations while preserving every
  * other field (name, args, isError, status, subagent nesting). Used when an
  * admin inspects a run they don't own.
  */
 function redactToolResults(invocations: unknown[]): unknown[] {
-  return invocations.map((inv) =>
-    inv && typeof inv === "object" && "result" in inv
-      ? { ...(inv as Record<string, unknown>), result: REDACTED_TOOL_RESULT }
-      : inv,
-  );
+  return invocations.map((inv) => {
+    if (!inv || typeof inv !== "object") return inv;
+    const record = inv as Record<string, unknown>;
+    const hits = Object.keys(record).filter(isRedactedKey);
+    if (hits.length === 0) return inv;
+    const out = { ...record };
+    for (const key of hits) out[key] = REDACTED_TOOL_RESULT;
+    return out;
+  });
 }
 
 /**
- * Deeply replace every `result` field's value with the placeholder, anywhere in
- * a debug-artifact tree, preserving all other keys (toolName, args, input,
- * userId, sessionId, timing). Shape-agnostic on purpose — xyne-claw's snapshot
- * structure isn't typed here, so we redact by key rather than by known path,
- * which fails safe if the shape changes. Used for the deep "Debug" drawer when
- * an admin inspects another user's (non-private) run.
+ * Deeply replace every redacted field's value (and its blob-ref sibling) with
+ * the placeholder, anywhere in a debug-artifact tree, preserving all other keys
+ * (toolName, args, input, userId, sessionId, timing). Shape-agnostic on purpose
+ * — xyne-claw's snapshot structure isn't typed here, so we redact by key rather
+ * than by known path, which fails safe if the shape changes. Used for the deep
+ * "Debug" drawer when an admin inspects another user's (non-private) run.
  */
 function redactResultKeysDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactResultKeysDeep);
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = k === "result" ? REDACTED_TOOL_RESULT : redactResultKeysDeep(v);
+      out[k] = isRedactedKey(k) ? REDACTED_TOOL_RESULT : redactResultKeysDeep(v);
     }
     return out;
   }
   return value;
+}
+
+/**
+ * Re-state claw's page counters after the per-user ACL dropped runs from the
+ * page. claw counts every run in the conversation; a viewer must not be told
+ * about runs the ACL just hid, so those come off the total — but the runs we
+ * never fetched (older pages) stay counted, since "there is more history" is
+ * exactly what the drawer's "showing N of M" line has to say.
+ */
+function paginationAfterAcl(
+  fetchedRuns: number,
+  visibleRuns: number,
+  totalRuns: number | undefined,
+  truncated: boolean | undefined,
+): { totalRuns: number; truncated: boolean } {
+  const total = totalRuns ?? fetchedRuns;
+  const notFetched = Math.max(0, total - fetchedRuns);
+  return { totalRuns: visibleRuns + notFetched, truncated: truncated === true };
 }
 
 // Debug artifacts are no longer read off the local filesystem — they live on
@@ -2680,15 +2717,27 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     // xyne-claw's S2S debug endpoint, which reads its own PVC and lazily
     // restores from the GCS archive if the session was evicted. Authz was
     // already enforced above.
+    // claw caps the run list (default 25) and pages it with `before` (a runId
+    // cursor). Forward both: without them a long thread's older runs were
+    // unreachable — the drawer could not even ask for them.
+    const rawLimit = req.query["limit"];
+    const limitParam = typeof rawLimit === "string" && /^\d+$/.test(rawLimit) ? rawLimit : "";
+    const rawBefore = req.query["before"];
+    const beforeParam = typeof rawBefore === "string" && rawBefore !== "" ? rawBefore : "";
     const upstreamUrl =
       `${CONFIG.xyneClawUrl}/internal/sessions/${encodeURIComponent(req.params.convId)}/debug` +
       `?agentSlug=${encodeURIComponent(req.params.slug)}` +
-      `${ownerId ? `&userId=${encodeURIComponent(ownerId)}` : ""}`;
+      `${ownerId ? `&userId=${encodeURIComponent(ownerId)}` : ""}` +
+      `${limitParam ? `&limit=${limitParam}` : ""}` +
+      `${beforeParam ? `&before=${encodeURIComponent(beforeParam)}` : ""}`;
     let upstream: globalThis.Response;
     try {
       upstream = await fetch(upstreamUrl, {
         headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
-        signal: AbortSignal.timeout(15_000),
+        // A long thread's bundle can take several seconds to assemble on claw's
+        // side once GCS runs are merged in. A 15s ceiling turned a slow-but-fine
+        // read into a 502 that looked to the user like "no debug data exists".
+        signal: AbortSignal.timeout(Number(process.env["DEBUG_PROXY_TIMEOUT_MS"] ?? 45_000)),
       });
     } catch (err) {
       log.error("[agent-chat] debug proxy fetch failed:", err instanceof Error ? err.message : err);
@@ -2705,6 +2754,10 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         debugEvents?: unknown[] | null;
         runs?: Array<{ fileName: string; data: { userId?: string; sessionId?: string; [k: string]: unknown } }>;
         subagents?: Array<{ fileName: string; data: { parentSessionId?: string } }>;
+        /** Runs in the whole conversation vs. runs on this page — claw caps the
+         *  page, so the drawer needs both to say "showing N of M". */
+        totalRuns?: number;
+        truncated?: boolean;
         followUpDiagnostics?: Array<{
           sessionId: string;
           startedAt: string;
@@ -2770,10 +2823,22 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
             },
           })),
           subagents: [],
+          // The synth bundle IS every run we can see, so nothing is paged out.
+          totalRuns: active.length,
+          truncated: false,
         },
       };
     } else if (!upstream.ok) {
-      res.status(502).json({ success: false, error: `Debug service error (${upstream.status})` });
+      // Forward claw's own reason instead of flattening every failure to a bare
+      // 502 — a rejected id and an unconfigured S2S key are different problems
+      // and the drawer can only say which if the code survives the hop.
+      const upstreamBody = (await upstream.json().catch(() => null)) as { error?: string; code?: string } | null;
+      res.status(502).json({
+        success: false,
+        error: upstreamBody?.error ?? `Debug service error (${upstream.status})`,
+        ...(upstreamBody?.code ? { code: upstreamBody.code } : {}),
+        upstreamStatus: upstream.status,
+      });
       return;
     } else {
       body = (await upstream.json()) as typeof body;
@@ -2796,6 +2861,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         debugEvents: ownSession ? d.debugEvents ?? [] : [],
         runs: ownRuns,
         subagents: (d.subagents ?? []).filter((s) => ownSessionIds.has(s.data?.parentSessionId ?? "")),
+        ...paginationAfterAcl((d.runs ?? []).length, ownRuns.length, d.totalRuns, d.truncated),
       };
     } else if (hasElevatedDebugAccess && body?.data) {
       // Elevated viewers see everything EXCEPT other users' runs that executed under a
@@ -2833,6 +2899,13 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       const d = body.data;
       const hideDebugSession = d.debugSession?.sessionId ? hiddenSessionIds.has(d.debugSession.sessionId) : false;
       const debugSessionOwned = readable(d.debugSession?.sessionId, d.debugSession?.userId);
+      const visibleRuns = (d.runs ?? [])
+        .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
+        .map((r) =>
+          readable(r.data?.sessionId, r.data?.userId)
+            ? r
+            : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
+        );
       body.data = {
         ...d,
         debugSession: hideDebugSession
@@ -2845,18 +2918,13 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
           : !d.debugSession || debugSessionOwned
             ? d.debugEvents ?? null
             : (redactResultKeysDeep(d.debugEvents ?? []) as unknown[]),
-        runs: (d.runs ?? [])
-          .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
-          .map((r) =>
-            readable(r.data?.sessionId, r.data?.userId)
-              ? r
-              : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
-          ),
+        runs: visibleRuns,
         subagents: (d.subagents ?? [])
           .filter((s) => !hiddenSessionIds.has(s.data?.parentSessionId ?? ""))
           .map((s) =>
             ownsSession(s.data?.parentSessionId) ? s : { ...s, data: redactResultKeysDeep(s.data) as typeof s.data },
           ),
+        ...paginationAfterAcl((d.runs ?? []).length, visibleRuns.length, d.totalRuns, d.truncated),
       };
     }
     if (body.data) {

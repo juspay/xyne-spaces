@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   Bot,
   Braces,
   BrainCircuit,
@@ -22,6 +23,7 @@ import {
   Quote,
   RefreshCw,
   RotateCcw,
+  Sparkles,
   User,
   Workflow,
   Wrench,
@@ -60,6 +62,90 @@ function asString(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return "";
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/**
+ * Palette diffs arrive under two spellings: a `tool_palette_change` event names
+ * them `added`/`removed`, while `paletteAdded`/`paletteRemoved` is what the
+ * materializer folds off an `llm_request` onto its `session_prompt`. Read both
+ * so a palette row renders its chips on either shape.
+ */
+function paletteList(data: Record<string, unknown>, folded: "paletteAdded" | "paletteRemoved", own: "added" | "removed"): string[] {
+  const foldedList = stringList(data[folded]);
+  return foldedList.length > 0 ? foldedList : stringList(data[own]);
+}
+
+/** A payload the v2 writer interned into the blob log instead of inlining. */
+type BlobRefLike = { hash: string; bytes?: number; originalBytes?: number; truncated?: boolean; preview?: string };
+
+function asBlobRef(value: unknown): BlobRefLike | null {
+  if (!isRecord(value) || typeof value.hash !== "string") return null;
+  return value as BlobRefLike;
+}
+
+type ResolvedField = {
+  text: string;
+  /** Bytes for a ref (what the writer stored), chars for an inline string. */
+  size: number;
+  truncated: boolean;
+  isRef: boolean;
+};
+
+/**
+ * Reads a payload field that may arrive inline OR as a blob ref — either in the
+ * field itself or in its `<field>Ref` sibling, which is what survives when the
+ * blob content could not be resolved. A ref renders its preview rather than an
+ * empty panel, so "captured but not inlined" never looks like "nothing here".
+ */
+function resolveFieldText(data: Record<string, unknown>, key: string): ResolvedField | null {
+  const inline = data[key];
+  if (typeof inline === "string") {
+    return inline ? { text: inline, size: inline.length, truncated: false, isRef: false } : null;
+  }
+  const ref = asBlobRef(inline) ?? asBlobRef(data[`${key}Ref`]);
+  if (!ref) return null;
+  const preview = typeof ref.preview === "string" ? ref.preview : "";
+  return {
+    text: preview,
+    size: typeof ref.bytes === "number" ? ref.bytes : preview.length,
+    truncated: ref.truncated === true || ref.originalBytes !== undefined || !preview,
+    isRef: true,
+  };
+}
+
+function fieldSizeLabel(field: ResolvedField): string {
+  return `${field.size} ${field.isRef ? "bytes" : "chars"}${field.truncated ? " · truncated" : ""}`;
+}
+
+/**
+ * What a ref-backed field is actually showing. On the LIVE channel a ref is
+ * always just its ~200-char preview — the payload stays in claw's blob log
+ * until the run finishes and the trace is materialized, and we deliberately
+ * don't push a 20 KB system prompt over the wire every turn. Say that, instead
+ * of letting a preview pass for the whole value.
+ */
+function refNote(field: ResolvedField, live = false): string {
+  const head = field.text ? "preview" : "not inlined";
+  const tail = live ? " · full content available when the run completes" : "";
+  return `${head} · ${field.size} bytes${field.truncated ? " · truncated" : ""}${tail}`;
+}
+
+/** Body for a resolved payload: the text plus, for refs, what is missing. */
+function FieldText({ field, className = "", live = false }: { field: ResolvedField; className?: string; live?: boolean }) {
+  return (
+    <>
+      <pre className={`max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary ${className}`}>
+        {field.text || "(payload not captured)"}
+      </pre>
+      {field.isRef && (
+        <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{refNote(field, live)}</p>
+      )}
+    </>
+  );
 }
 
 function formatTime(iso: string): string {
@@ -258,7 +344,19 @@ function JsonViewerModal({ value, title, onClose }: { value: unknown; title: str
   return createPortal(modal, document.body);
 }
 
-function JsonViewer({ value, title = "JSON", defaultExpandedDepth = 999 }: { value: unknown; title?: string; defaultExpandedDepth?: number }) {
+function JsonViewer({
+  value,
+  title = "JSON",
+  defaultExpandedDepth = 999,
+  scroll = true,
+}: {
+  value: unknown;
+  title?: string;
+  defaultExpandedDepth?: number;
+  /** Set false when an ancestor already scrolls: nesting a second scroller
+   *  swallows the wheel as soon as the pointer crosses this box. */
+  scroll?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const parsedValue = useMemo(() => parseJsonLike(value), [value]);
   return (
@@ -271,7 +369,7 @@ function JsonViewer({ value, title = "JSON", defaultExpandedDepth = 999 }: { val
           <CopyJsonButton value={parsedValue} />
           <button type="button" onClick={() => setExpanded(true)} className="rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary" title="Open expanded JSON viewer"><Maximize2 size={12} /></button>
         </div>
-        <div className="max-h-64 overflow-auto p-2">
+        <div className={`p-2 ${scroll ? "max-h-64 overflow-auto" : ""}`}>
           <JsonNode value={parsedValue} depth={0} defaultExpandedDepth={defaultExpandedDepth} />
         </div>
       </div>
@@ -473,17 +571,176 @@ function messageLabel(role: string): string {
 
 type TimelineEvent = Record<string, unknown> & { startedAt?: string };
 
-function compactTimeline(events: unknown[]): TimelineEvent[] {
+/**
+ * Kinds that never earn a timeline row: stream bookkeeping and transcript
+ * deltas (`message_append`). `llm_request`/`llm_response` are not listed —
+ * compactTimeline folds them onto their turn's `session_prompt` row instead.
+ */
+const HIDDEN_TIMELINE_KINDS = new Set(["message_update", "stream_rate", "message_append"]);
+
+/** Request fields the materializer lifts onto the turn's `session_prompt`;
+ *  mirrored here (with their blob-ref spellings) for the live fold below. */
+const FOLD_REQUEST_FIELDS = [
+  "systemPrompt",
+  "tools",
+  "toolNames",
+  "availableSkills",
+  "temperature",
+  "maxTokens",
+  "thinkingLevel",
+  "fastMode",
+  "model",
+  "provider",
+  "paletteAdded",
+  "paletteRemoved",
+] as const;
+
+/** `llm_response` fields the materializer renames onto the prompt row — what
+ *  RequestParamsStrip reads for stop reason, cache hit/miss and TTFT. */
+const FOLD_RESPONSE_FIELDS: ReadonlyArray<readonly [string, string]> = [
+  ["usage", "responseUsage"],
+  ["stopReason", "responseStopReason"],
+  ["ttftMs", "ttftMs"],
+];
+
+/**
+ * Merge one `llm_request` / `llm_response` onto its turn's prompt row, the way
+ * materialization does for a completed run. Ref spellings ride along: live
+ * events carry `systemPromptRef` where a materialized one carries the inlined
+ * `systemPrompt`, and the row renderer reads either.
+ */
+function foldLlmEvent(row: TimelineEvent, event: TimelineEvent): TimelineEvent {
+  const eventData = isRecord(event.data) ? event.data : {};
+  const merged: Record<string, unknown> = { ...(isRecord(row.data) ? row.data : {}) };
+  if (asString(event.kind) === "llm_request") {
+    for (const field of FOLD_REQUEST_FIELDS) {
+      const refKey = `${field}Ref`;
+      // The request's value REPLACES the prompt row's in EITHER spelling:
+      // session_prompt carries only the persona prompt, which must not shadow
+      // the true effective one just because it arrived inline and this didn't.
+      if (eventData[field] !== undefined) {
+        merged[field] = eventData[field];
+        delete merged[refKey];
+      } else if (eventData[refKey] !== undefined) {
+        merged[refKey] = eventData[refKey];
+        delete merged[field];
+      }
+    }
+  } else {
+    for (const [from, to] of FOLD_RESPONSE_FIELDS) {
+      if (eventData[from] !== undefined) merged[to] = eventData[from];
+    }
+  }
+  return { ...row, data: merged };
+}
+
+/**
+ * Fields the materializer emits once per run and back-references thereafter
+ * (`<field>UnchangedFromSeq`), because a 48-tool catalog and a 28 KB system
+ * prompt are identical on every call and re-sending them per turn doubled the
+ * bundle. Rehydrate here so every downstream renderer still sees a plain value.
+ */
+const DEDUPED_FOLD_FIELDS = ["systemPrompt", "tools", "toolNames", "availableSkills"] as const;
+
+function rehydrateRepeatedPayloads(events: unknown[]): unknown[] {
+  const bySeq = new Map<number, Record<string, unknown>>();
+  for (const value of events) {
+    if (!isRecord(value) || typeof value.seq !== "number") continue;
+    if (isRecord(value.data)) bySeq.set(value.seq, value.data);
+  }
+  let touched = false;
+  const out = events.map((value) => {
+    if (!isRecord(value) || !isRecord(value.data)) return value;
+    let data: Record<string, unknown> | null = null;
+    for (const field of DEDUPED_FOLD_FIELDS) {
+      const from = value.data[`${field}UnchangedFromSeq`];
+      if (typeof from !== "number") continue;
+      const source = bySeq.get(from)?.[field];
+      if (source === undefined) continue;
+      data ??= { ...value.data };
+      data[field] = source;
+    }
+    if (!data) return value;
+    touched = true;
+    return { ...value, data };
+  });
+  return touched ? out : events;
+}
+
+function compactTimeline(rawEvents: unknown[]): TimelineEvent[] {
+  const events = rehydrateRepeatedPayloads(rawEvents);
   const compacted: TimelineEvent[] = [];
   const pendingTools = new Map<string, number>();
+  // Prompt row per LLM call, so this turn's `llm_request` / `llm_response` fold
+  // onto it. Materialization does the same fold for a completed run; doing it
+  // here too keeps the LIVE timeline from showing a duplicate LLM row every
+  // turn, and gives the live prompt row the request's params.
+  const promptRows = new Map<number, number>();
+  // A call's prompt row and its request/response are produced by different
+  // hooks, so the request can arrive first. Knowing up front which calls DO get
+  // a prompt row lets us hold the fold instead of emitting a duplicate LLM row.
+  const promptCalls = new Set<number>();
+  for (const value of events) {
+    if (isRecord(value) && asString(value.kind) === "session_prompt" && typeof value.llmCall === "number") {
+      promptCalls.add(value.llmCall);
+    }
+  }
+  const deferredFolds = new Map<number, TimelineEvent[]>();
+  // Tool rows stay addressable after their end event lands, so a late
+  // `tool_invocation_update` (background task finishing) folds into the same
+  // row instead of appearing as an orphan event.
+  const toolRows = new Map<string, number>();
 
   for (const value of events) {
-    if (!isRecord(value) || ["message_update", "stream_rate"].includes(asString(value.kind))) continue;
+    if (!isRecord(value) || HIDDEN_TIMELINE_KINDS.has(asString(value.kind))) continue;
     const event = value as TimelineEvent;
     const kind = asString(event.kind);
+    const llmCall = typeof event.llmCall === "number" ? event.llmCall : undefined;
+    if (kind === "session_prompt") {
+      const rowIndex = compacted.length;
+      compacted.push(event);
+      if (llmCall === undefined) continue;
+      if (promptRows.has(llmCall)) continue;
+      promptRows.set(llmCall, rowIndex);
+      for (const held of deferredFolds.get(llmCall) ?? []) {
+        compacted[rowIndex] = foldLlmEvent(compacted[rowIndex]!, held);
+      }
+      deferredFolds.delete(llmCall);
+      continue;
+    }
+    if (kind === "llm_request" || kind === "llm_response") {
+      const rowIndex = llmCall !== undefined ? promptRows.get(llmCall) : undefined;
+      if (rowIndex !== undefined) {
+        compacted[rowIndex] = foldLlmEvent(compacted[rowIndex]!, event);
+        continue;
+      }
+      if (llmCall !== undefined && promptCalls.has(llmCall)) {
+        deferredFolds.set(llmCall, [...(deferredFolds.get(llmCall) ?? []), event]);
+        continue;
+      }
+      // No prompt row for this call (a compaction or follow-up call has none),
+      // so the request stands on its own — same fallback as materialization.
+      if (kind === "llm_request") compacted.push(event);
+      continue;
+    }
     const toolCallId = asString(event.toolCallId);
+    if (kind === "tool_invocation_update") {
+      const updateId = toolCallId || (isRecord(event.data) ? asString(event.data.toolCallId) : "");
+      const rowIndex = toolRows.get(updateId);
+      if (rowIndex === undefined) continue;
+      const row = compacted[rowIndex]!;
+      compacted[rowIndex] = {
+        ...row,
+        data: {
+          ...(isRecord(row.data) ? row.data : {}),
+          ...(isRecord(event.data) ? event.data : {}),
+        },
+      };
+      continue;
+    }
     if (kind === "tool_execution_start" && toolCallId) {
       pendingTools.set(toolCallId, compacted.length);
+      toolRows.set(toolCallId, compacted.length);
       compacted.push(event);
       continue;
     }
@@ -512,7 +769,13 @@ function eventTitle(kind: string, data: Record<string, unknown>): string {
     const name = asString(data.toolName);
     return name ? `Tool · ${name}` : "Tool call";
   }
-  if (kind === "session_prompt") return "LLM request";
+  if (kind === "session_prompt" || kind === "llm_request") return "LLM request";
+  if (kind === "tool_palette_change") return "Tool palette changed";
+  if (kind === "skill_loaded") return "Skill loaded";
+  if (kind === "subagent_start") return "Subagent started";
+  if (kind === "subagent_end") return "Subagent finished";
+  if (kind === "provider_fallback") return "Provider fallback";
+  if (kind === "delegation") return "Agent delegation";
   if (kind === "thinking") return "Thinking";
   if (kind === "assistant_turn_end") return "Assistant response";
   if (kind === "session_start") return "Session started";
@@ -554,7 +817,14 @@ function eventVisual(kind: string, isError: boolean): EventVisual {
   if (kind.startsWith("tool_execution")) return { Icon: Wrench, label: "TOOL", rail: "border-amber-500", chip: "bg-amber-500/10 text-amber-700 dark:text-amber-300" };
   switch (kind) {
     case "session_start": return { Icon: CirclePlay, label: "SESSION", rail: "border-sky-500", chip: "bg-sky-500/10 text-sky-700 dark:text-sky-300" };
-    case "session_prompt": return { Icon: BrainCircuit, label: "LLM", rail: "border-xyne-border-strong", chip: "text-xyne-fg-muted", quiet: true };
+    case "session_prompt":
+    case "llm_request": return { Icon: BrainCircuit, label: "LLM", rail: "border-xyne-border-strong", chip: "text-xyne-fg-muted", quiet: true };
+    case "tool_palette_change": return { Icon: Wrench, label: "PALETTE", rail: "border-amber-400", chip: "bg-amber-400/10 text-amber-700 dark:text-amber-300" };
+    case "skill_loaded": return { Icon: Sparkles, label: "SKILL", rail: "border-indigo-500", chip: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300" };
+    case "subagent_start":
+    case "subagent_end": return { Icon: Workflow, label: "SUB", rail: "border-cyan-500", chip: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" };
+    case "delegation": return { Icon: Workflow, label: "A2A", rail: "border-blue-500", chip: "bg-blue-500/10 text-blue-700 dark:text-blue-300" };
+    case "provider_fallback": return { Icon: RotateCcw, label: "FALLBACK", rail: "border-orange-500", chip: "bg-orange-500/10 text-orange-700 dark:text-orange-300" };
     case "thinking": return { Icon: Lightbulb, label: "THINK", rail: "border-violet-500", chip: "bg-violet-500/10 text-violet-700 dark:text-violet-300" };
     case "assistant_turn_end": return { Icon: MessageSquareText, label: "ASST", rail: "border-emerald-500", chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" };
     case "compaction_start":
@@ -583,6 +853,7 @@ function DebugTimelineSection({
   selectedEventKey,
   onSelectEvent,
   timeMode = "delta",
+  live = false,
 }: {
   title: string;
   data: Record<string, unknown> | null;
@@ -591,6 +862,8 @@ function DebugTimelineSection({
   selectedEventKey?: string | null;
   onSelectEvent?: (key: string) => void;
   timeMode?: "delta" | "abs";
+  /** These events are streaming in, not read back off a completed trace. */
+  live?: boolean;
 }) {
   const events = useMemo(() => {
     const raw = data?.events;
@@ -598,6 +871,11 @@ function DebugTimelineSection({
   }, [data]);
 
   const visibleEvents = useMemo(() => compactTimeline(events), [events]);
+
+  // The full transcript, carried ONCE on the snapshot. Each turn's panel is a
+  // prefix of it (`data.messagesTo`), so rows slice rather than each shipping
+  // its own copy — that copy was O(turns^2) on the wire.
+  const transcript = useMemo(() => (Array.isArray(data?.messages) ? data.messages : undefined), [data]);
 
   // Expand/collapse all timeline cards. The cards are native <details> elements
   // (no React state to lift), so we flip their `open` attribute through a ref.
@@ -610,16 +888,23 @@ function DebugTimelineSection({
     });
   };
 
-  // Earliest event time = the origin for Δ timestamps in this run/turn.
+  // Per-row timestamps. Δ is the GAP FROM THE PREVIOUS ROW — that is what
+  // answers "what was slow?", which is the whole reason to look at a timeline.
+  // Time-from-run-start is still useful for orientation, so it moves to the
+  // hover title rather than being the headline number.
+  const eventTimesMs = useMemo(
+    () =>
+      visibleEvents.map((e) => {
+        if (!isRecord(e)) return undefined;
+        const t = Date.parse(asString(e.at) || asString(e.startedAt));
+        return Number.isFinite(t) ? t : undefined;
+      }),
+    [visibleEvents],
+  );
   const originMs = useMemo(() => {
-    let min = Number.POSITIVE_INFINITY;
-    for (const e of visibleEvents) {
-      if (!isRecord(e)) continue;
-      const t = Date.parse(asString(e.at) || asString(e.startedAt));
-      if (Number.isFinite(t)) min = Math.min(min, t);
-    }
-    return Number.isFinite(min) ? min : undefined;
-  }, [visibleEvents]);
+    const known = eventTimesMs.filter((t): t is number => t !== undefined);
+    return known.length > 0 ? Math.min(...known) : undefined;
+  }, [eventTimesMs]);
 
   // Sub-steps (thinking / assistant / tool) indent under the spine; the LAST
   // assistant turn is the conclusion and stays flush.
@@ -649,7 +934,8 @@ function DebugTimelineSection({
   const thinkingConfig = isRecord(data?.thinking) ? data.thinking as Record<string, unknown> : null;
   const thinkingLevel = thinkingConfig ? asString(thinkingConfig.effectiveLevel) : "";
 
-  const headerMeta = [asString(data?.provider), asString(data?.model), thinkingLevel ? `thinking ${thinkingLevel}` : "", toolsUsed.length ? `${toolsUsed.length} tools` : "", `${visibleEvents.length} events`].filter(Boolean).join(" · ");
+  const runWarnings = stringList(data?.warnings);
+  const headerMeta = [asString(data?.provider), asString(data?.model), thinkingLevel ? `thinking ${thinkingLevel}` : "", toolsUsed.length ? `${toolsUsed.length} tools` : "", `${visibleEvents.length} events`, runWarnings.length ? "partial trace" : ""].filter(Boolean).join(" · ");
   const TurnIcon = data?.subagentName ? Workflow : MessageSquareText;
   const turnIconColor = data?.subagentName ? "text-cyan-600 dark:text-cyan-400" : "text-xyne-fg-tertiary";
   return (
@@ -666,6 +952,14 @@ function DebugTimelineSection({
       </summary>
 
       <div className="ml-1.5 border-l border-xyne-border-subtle pl-4 pb-3 pt-1 space-y-2">
+        {runWarnings.length > 0 && (
+          <div className="space-y-0.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+            {runWarnings.map((warning, index) => (
+              <p key={`${index}-${warning}`} className="break-words">{warning}</p>
+            ))}
+          </div>
+        )}
+
         {Boolean(data?.task || data?.question || data?.providerError) && (
           <p className={`text-[12px] leading-relaxed ${data?.providerError ? "text-red-600 dark:text-red-400" : "text-xyne-fg-secondary"}`}>
             {asString(data?.providerError) || asString(data?.question) || asString(data?.task)}
@@ -762,9 +1056,12 @@ function DebugTimelineSection({
                     selected={selectedEventKey === `${String(event.seq ?? idx)}`}
                     onSelect={onSelectEvent}
                     subagentTracesByParentToolCallId={subagentTracesByParentToolCallId}
+                    transcript={transcript}
                     originMs={originMs}
+                    prevMs={idx > 0 ? eventTimesMs[idx - 1] : undefined}
                     timeMode={timeMode}
                     indented={indented}
+                    live={live}
                   />
                 );
               })}
@@ -821,15 +1118,210 @@ function MessageSnapshot({ message }: { message: unknown }) {
   );
 }
 
+/**
+ * The system prompt with its `<available_skills>` block tinted. The block is the
+ * answer to "which skills could the model even see", and it is unfindable by eye
+ * inside a 20 KB prompt. Rendered as real nodes — never innerHTML — so prompt
+ * text that contains markup stays inert.
+ */
+function SystemPromptText({ text }: { text: string }) {
+  const parts = useMemo(() => {
+    const closed = /<available_skills>[\s\S]*?<\/available_skills>/.exec(text);
+    // A truncated prompt loses the closing tag; highlight to the end instead of
+    // silently giving up on the one region worth finding.
+    const start = closed ? closed.index : text.indexOf("<available_skills>");
+    if (start < 0) return null;
+    const end = closed ? closed.index + closed[0].length : text.length;
+    return { before: text.slice(0, start), block: text.slice(start, end), after: text.slice(end) };
+  }, [text]);
+
+  if (!parts) return <>{text}</>;
+  return (
+    <>
+      {parts.before}
+      <span className="rounded-sm bg-amber-400/20 text-xyne-fg-primary ring-1 ring-inset ring-amber-500/30">{parts.block}</span>
+      {parts.after}
+    </>
+  );
+}
+
+type SkillEntry = { name: string; description: string; location: string };
+
+function skillEntries(value: unknown): SkillEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const name = asString(item.name);
+    return name ? [{ name, description: asString(item.description), location: asString(item.location) }] : [];
+  });
+}
+
+function AvailableSkillsPanel({ skills }: { skills: SkillEntry[] }) {
+  if (skills.length === 0) return null;
+  return (
+    <details className="group/sk rounded-md bg-xyne-surface">
+      <summary className="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5">
+        <ChevronDown size={11} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sk:rotate-0" />
+        <Sparkles size={11} className="shrink-0 self-center text-xyne-fg-tertiary" />
+        <span className="text-[12px] font-semibold text-xyne-fg-secondary">Available skills</span>
+        <span className="ml-auto text-[11px] text-xyne-fg-muted">{skills.length} skill{skills.length === 1 ? "" : "s"}</span>
+      </summary>
+      <div className="max-h-72 overflow-y-auto overscroll-contain px-2 pb-2 pt-1">
+        {skills.map((skill) => (
+          <div key={skill.name} className="border-b border-xyne-border-subtle/40 py-1 last:border-b-0">
+            <p className="font-mono text-[11.5px] text-xyne-fg-primary">{skill.name}</p>
+            {skill.description && <p className="text-[11.5px] leading-relaxed text-xyne-fg-muted">{skill.description}</p>}
+            {skill.location && <p className="truncate font-mono text-[10px] text-xyne-fg-tertiary">{skill.location}</p>}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+type ToolEntry = { name: string; description: string; parameters: unknown };
+
+/** Full definitions when the trace has them, name-only rows when it only kept
+ *  `toolNames` — a shorter list is still the truth about what was offered. */
+function toolEntries(data: Record<string, unknown>): ToolEntry[] {
+  if (Array.isArray(data.tools)) {
+    return data.tools.flatMap((item) => {
+      if (!isRecord(item)) return [];
+      const name = asString(item.name);
+      return name ? [{ name, description: asString(item.description), parameters: item.parameters }] : [];
+    });
+  }
+  return stringList(data.toolNames).map((name) => ({ name, description: "", parameters: undefined }));
+}
+
+function ToolDefinitionsPanel({ tools }: { tools: ToolEntry[] }) {
+  if (tools.length === 0) return null;
+  return (
+    <details className="group/tools rounded-md bg-xyne-surface">
+      <summary className="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5">
+        <ChevronDown size={11} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/tools:rotate-0" />
+        <Wrench size={11} className="shrink-0 self-center text-xyne-fg-tertiary" />
+        <span className="text-[12px] font-semibold text-xyne-fg-secondary">Tools offered</span>
+        <span className="ml-auto text-[11px] text-xyne-fg-muted">{tools.length} tool{tools.length === 1 ? "" : "s"}</span>
+      </summary>
+      <div className="max-h-96 overflow-y-auto overscroll-contain px-2 pb-2 pt-1">
+        {tools.map((tool) => (
+          <details key={tool.name} className="group/tool border-b border-xyne-border-subtle/40 last:border-b-0">
+            <summary className="flex cursor-pointer list-none items-baseline gap-2 py-1">
+              <ChevronDown size={10} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/tool:rotate-0" />
+              <span className="shrink-0 font-mono text-[11.5px] text-xyne-fg-primary">{tool.name}</span>
+              {tool.description && <span className="min-w-0 truncate text-[11.5px] text-xyne-fg-muted">{tool.description}</span>}
+            </summary>
+            <div className="ml-1.5 border-l border-xyne-border-subtle pb-1 pl-3 pt-1 space-y-1">
+              {tool.description && <p className="text-[11.5px] leading-relaxed text-xyne-fg-secondary">{tool.description}</p>}
+              {tool.parameters !== undefined
+                ? <JsonViewer value={tool.parameters} title={`${tool.name} parameters`} defaultExpandedDepth={2} scroll={false} />
+                : <p className="text-[11px] text-xyne-fg-muted">No parameter schema captured for this tool.</p>}
+            </div>
+          </details>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/** The mid-run palette diff (load-tools / fast-mode), which otherwise only ever
+ *  showed up as a silent change in what the model could call. */
+function PaletteChips({ added, removed }: { added: string[]; removed: string[] }) {
+  if (added.length === 0 && removed.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 rounded-md bg-xyne-surface px-2 py-1.5">
+      <span className="mr-1 text-[11px] text-xyne-fg-muted">Tool palette</span>
+      {added.map((name) => (
+        <span key={`add-${name}`} className="rounded bg-emerald-500/10 px-1 font-mono text-[10.5px] text-emerald-700 dark:text-emerald-300">+{name}</span>
+      ))}
+      {removed.map((name) => (
+        <span key={`rm-${name}`} className="rounded bg-red-500/10 px-1 font-mono text-[10.5px] text-red-700 dark:text-red-300">−{name}</span>
+      ))}
+    </div>
+  );
+}
+
+function RequestParamsStrip({ data }: { data: Record<string, unknown> }) {
+  const items: Array<[string, string]> = [];
+  const push = (label: string, value: string) => { if (value) items.push([label, value]); };
+  push("Model", asString(data.model));
+  push("Provider", asString(data.provider));
+  if (typeof data.temperature === "number") push("Temp", String(data.temperature));
+  if (typeof data.maxTokens === "number") push("Max tokens", String(data.maxTokens));
+  push("Thinking", asString(data.thinkingLevel));
+  if (typeof data.fastMode === "boolean") push("Fast mode", data.fastMode ? "on" : "off");
+  push("Stop", asString(data.responseStopReason));
+
+  const usage = isRecord(data.responseUsage) ? data.responseUsage : null;
+  const cacheRead = typeof usage?.cacheRead === "number" ? usage.cacheRead : null;
+  const cacheWrite = typeof usage?.cacheWrite === "number" ? usage.cacheWrite : null;
+  if (cacheRead != null || cacheWrite != null) {
+    // Read tokens are the cache HIT: zero reads on a repeat turn is the tell for
+    // a prompt-cache miss, which is why the raw numbers stay visible.
+    push("Cache", `${cacheRead ?? 0} read / ${cacheWrite ?? 0} write · ${(cacheRead ?? 0) > 0 ? "hit" : "miss"}`);
+  }
+  if (typeof data.ttftMs === "number") push("TTFT", `${data.ttftMs}ms`);
+
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary">
+      {items.map(([label, value]) => (
+        <span key={label}><span className="text-xyne-fg-muted">{label}:</span> {value}</span>
+      ))}
+    </div>
+  );
+}
+
+/** Non-fatal read problems for the run(s) on screen. Without this a partial
+ *  artifact read is indistinguishable from an agent that simply did nothing. */
+function WarningsNotice({ warnings }: { warnings: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (warnings.length === 0) return null;
+  const shown = expanded ? warnings : warnings.slice(0, 3);
+  return (
+    <div className="flex shrink-0 gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-800 dark:text-amber-200">
+      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="font-semibold">Partial trace · {warnings.length} warning{warnings.length === 1 ? "" : "s"}</p>
+        {shown.map((warning, index) => (
+          <p key={`${index}-${warning}`} className="break-words leading-relaxed">{warning}</p>
+        ))}
+        {warnings.length > 3 && (
+          <button type="button" onClick={() => setExpanded((current) => !current)} className="underline underline-offset-2 hover:no-underline">
+            {expanded ? "Show less" : `Show ${warnings.length - 3} more`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function collectWarnings(bundle: DebugArtifactBundle | null): string[] {
+  if (!bundle) return [];
+  const sources: unknown[] = [
+    bundle.warnings,
+    bundle.debugSession?.warnings,
+    ...(bundle.runs ?? []).map((run) => run.data.warnings),
+    ...(bundle.subagents ?? []).map((sub) => sub.data.warnings),
+  ];
+  // Runs share most warnings (same blob log, same GCS miss) — dedupe or the
+  // strip turns into a wall of the same line.
+  return [...new Set(sources.flatMap((source) => stringList(source)))];
+}
+
 function DebugEventItem({
   event,
   eventKey,
   selected = false,
   onSelect,
   subagentTracesByParentToolCallId,
+  transcript,
   originMs,
+  prevMs,
   timeMode = "delta",
   indented = false,
+  live = false,
 }: {
   event: unknown;
   eventKey: string;
@@ -837,12 +1329,21 @@ function DebugEventItem({
   selected?: boolean;
   onSelect?: (key: string) => void;
   subagentTracesByParentToolCallId?: Map<string, SubagentTraceGroup[]>;
-  /** Run start (ms) used to compute Δ timestamps. */
+  /** The run's full transcript. A turn's panel is the prefix ending at this
+   *  event's `messagesTo`; absent on the live stream, where there is no
+   *  snapshot yet. */
+  transcript?: unknown[];
+  /** Earliest event in the run — used for the "into run" figure on hover. */
   originMs?: number;
+  /** Timestamp of the row above this one; Δ is measured against it. */
+  prevMs?: number;
   /** "delta" → +Xs from run start (default); "abs" → wall-clock time. */
   timeMode?: "delta" | "abs";
   /** Sub-steps of a turn (thinking / assistant / tool) indent under the spine. */
   indented?: boolean;
+  /** This row came off the LIVE stream, where every big payload is still just a
+   *  blob-ref preview. Changes what the ref affordances promise. */
+  live?: boolean;
 }) {
   if (!isRecord(event)) {
     return <JsonViewer value={event} title="Event" />;
@@ -862,10 +1363,41 @@ function DebugEventItem({
     ? subagentTracesByParentToolCallId.get(asString(data.toolCallId) || asString(event.toolCallId)) ?? []
     : [];
 
+  // session_prompt carries the folded llm_request: the TRUE system prompt (with
+  // its <available_skills> block), the tool schemas the model was handed, and
+  // the request params. Payloads may be inline strings or blob refs.
+  const isPromptEvent = kind === "session_prompt" || kind === "llm_request";
+  const systemPromptField = resolveFieldText(data, "systemPrompt");
+  const userPromptField = resolveFieldText(data, "prompt");
+  const availableSkills = isPromptEvent ? skillEntries(data.availableSkills) : [];
+  const offeredTools = isPromptEvent ? toolEntries(data) : [];
+  const paletteAdded = paletteList(data, "paletteAdded", "added");
+  const paletteRemoved = paletteList(data, "paletteRemoved", "removed");
+  // Only consulted when the lists came back empty — a palette diff big enough
+  // to be interned arrives as `addedRef`/`removedRef` with a preview.
+  const paletteAddedField = resolveFieldText(data, "added");
+  const paletteRemovedField = resolveFieldText(data, "removed");
+  const thinkingField = resolveFieldText(data, "text");
+  const assistantField = resolveFieldText(data, "assistantText");
+  const errorField = resolveFieldText(data, "error");
+  // A ref can sit in the field itself, so "present" is not the same as "inline".
+  const hasInlineResult = "result" in data && !asBlobRef(data.result);
+  const hasInlineArgs = "args" in data && !asBlobRef(data.args);
+  const resultField = hasInlineResult ? null : resolveFieldText(data, "result");
+  const argsField = hasInlineArgs ? null : resolveFieldText(data, "args");
+  // Older traces embedded the prefix per event; newer ones carry only the
+  // cursor. Accept both so a trace written before this change still renders.
+  const panelMessages = Array.isArray(data.messages)
+    ? data.messages
+    : transcript && typeof data.messagesTo === "number"
+      ? transcript.slice(0, Math.max(0, Math.min(data.messagesTo, transcript.length)))
+      : undefined;
+  const messagesField = panelMessages ? null : resolveFieldText(data, "messages");
+
   const summary = eventSummary(kind, data);
   // LLM request is low-signal: its msg count rides on the title, so suppress the
   // redundant "Sending N messages" preview.
-  const showSummary = Boolean(summary) && kind !== "session_prompt";
+  const showSummary = Boolean(summary) && !isPromptEvent;
   const timestamp = isTool ? (at || startedAt) : at;
   const visual = eventVisual(kind, isError);
   const VisualIcon = visual.Icon;
@@ -876,7 +1408,7 @@ function DebugEventItem({
   const isFinalAssistant = kind === "assistant_turn_end" && !indented;
   const titleText = isTool
     ? (asString(data.toolName) || "tool")
-    : kind === "session_prompt"
+    : isPromptEvent
       ? `LLM request${msgCount != null ? ` · ${msgCount} msgs` : ""}`
       : isFinalAssistant
         ? "Assistant response · final"
@@ -889,13 +1421,25 @@ function DebugEventItem({
         ? "font-mono font-medium text-xyne-fg-primary"
         : "font-semibold text-xyne-fg-primary";
 
-  // Time column: Δ-from-start by default (de-noises repeated wall-clock times),
-  // absolute on the abs toggle and always on hover.
+  // Time column: the gap since the previous row by default, absolute on the abs
+  // toggle. A run-start-relative column looks like a stopwatch and hides the one
+  // thing a timeline is read for — which step took the time.
   const eventMs = timestamp ? Date.parse(timestamp) : NaN;
   const absTime = timestamp ? formatTime(timestamp) : "";
-  const timeText = timeMode === "abs" || originMs == null || !Number.isFinite(eventMs)
+  const gapMs = prevMs != null && Number.isFinite(eventMs) ? eventMs - prevMs : undefined;
+  const timeText = timeMode === "abs" || !Number.isFinite(eventMs)
     ? absTime
-    : formatDelta(eventMs - originMs);
+    : gapMs === undefined
+      ? "+0.0s" // first row: nothing precedes it
+      : formatDelta(gapMs);
+  // Everything the column no longer shows, on hover.
+  const timeTitle = [
+    absTime,
+    originMs != null && Number.isFinite(eventMs) ? `${formatDelta(eventMs - originMs).replace(/^\+/, "")} into run` : "",
+    gapMs !== undefined ? `${formatDelta(gapMs).replace(/^\+/, "")} since previous` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <details className={`group/event border-l-2 ${visual.rail} ${indented ? "ml-4" : ""} ${selected ? "bg-xyne-surface-subtle/60" : "hover:bg-black/[0.015] dark:hover:bg-white/[0.025]"}`}>
@@ -916,7 +1460,7 @@ function DebugEventItem({
             <span className="shrink-0 text-[10px] text-cyan-600 dark:text-cyan-400">+{subagentTraces.length} sub</span>
           )}
           <span className="ml-auto flex shrink-0 items-center font-mono text-[10.5px] tabular-nums">
-            <span className="w-[50px] text-right text-xyne-fg-secondary" title={absTime}>{timeText}</span>
+            <span className="w-[50px] text-right text-xyne-fg-secondary" title={timeTitle}>{timeText}</span>
             <span className="w-[50px] text-right text-xyne-fg-muted">{isTool && duration ? `${duration}ms` : ""}</span>
             <span className="w-[58px] text-right">
               {isTool && (data.isError
@@ -935,46 +1479,68 @@ function DebugEventItem({
         )}
       </summary>
       <div className={`pl-[16px] pr-2 pb-3 pt-1 space-y-1.5 ${selected ? "bg-xyne-surface-subtle/60" : ""}`}>
-        {kind === "session_prompt" && (
+        {isPromptEvent && (
           <div className="space-y-1.5">
-            {typeof data.systemPrompt === "string" && data.systemPrompt && (
+            <RequestParamsStrip data={data} />
+            {systemPromptField && (
               <details className="group/sp rounded-md bg-xyne-surface">
                 <summary className="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5">
                   <ChevronDown size={11} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sp:rotate-0" />
                   <FileText size={11} className="shrink-0 self-center text-xyne-fg-tertiary" />
                   <span className="text-[12px] font-semibold text-xyne-fg-secondary">System prompt</span>
-                  <span className="ml-auto text-[11px] text-xyne-fg-muted">{data.systemPrompt.length} chars</span>
+                  <span className="ml-auto text-[11px] text-xyne-fg-muted">{fieldSizeLabel(systemPromptField)}</span>
                 </summary>
                 <div className="px-2 pb-2 pt-1">
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary">{data.systemPrompt}</pre>
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary">
+                    {systemPromptField.text ? <SystemPromptText text={systemPromptField.text} /> : "(payload not captured)"}
+                  </pre>
+                  {systemPromptField.isRef && (
+                    <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{refNote(systemPromptField, live)}</p>
+                  )}
                 </div>
               </details>
             )}
-            {Array.isArray(data.messages) && data.messages.length > 0 && (
+            <AvailableSkillsPanel skills={availableSkills} />
+            <ToolDefinitionsPanel tools={offeredTools} />
+            <PaletteChips added={paletteAdded} removed={paletteRemoved} />
+            {panelMessages && panelMessages.length > 0 && (
               <details className="group/im rounded-md bg-xyne-surface">
                 <summary className="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5">
                   <ChevronDown size={11} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/im:rotate-0" />
                   <MessagesSquare size={11} className="shrink-0 self-center text-xyne-fg-tertiary" />
                   <span className="text-[12px] font-semibold text-xyne-fg-secondary">Input messages</span>
-                  <span className="ml-auto text-[11px] text-xyne-fg-muted">{data.messages.length} message{data.messages.length === 1 ? "" : "s"}</span>
+                  <span className="ml-auto text-[11px] text-xyne-fg-muted">{panelMessages.length} message{panelMessages.length === 1 ? "" : "s"}</span>
                 </summary>
                 <div className="px-2 pb-2 pt-1">
-                  {data.messages.map((msg, idx) => (
+                  {panelMessages.map((msg, idx) => (
                     <MessageSnapshot key={`${seq}-msg-${idx}`} message={msg} />
                   ))}
                 </div>
               </details>
             )}
-            {typeof data.prompt === "string" && data.prompt && (
+            {messagesField && (
+              <details className="group/imr rounded-md bg-xyne-surface">
+                <summary className="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5">
+                  <ChevronDown size={11} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/imr:rotate-0" />
+                  <MessagesSquare size={11} className="shrink-0 self-center text-xyne-fg-tertiary" />
+                  <span className="text-[12px] font-semibold text-xyne-fg-secondary">Input messages</span>
+                  <span className="ml-auto text-[11px] text-xyne-fg-muted">{fieldSizeLabel(messagesField)}</span>
+                </summary>
+                <div className="px-2 pb-2 pt-1">
+                  <FieldText field={messagesField} live={live} />
+                </div>
+              </details>
+            )}
+            {userPromptField && (
               <details className="group/up rounded-md bg-xyne-surface">
                 <summary className="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1.5">
                   <ChevronDown size={11} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/up:rotate-0" />
                   <User size={11} className="shrink-0 self-center text-xyne-fg-tertiary" />
                   <span className="text-[12px] font-semibold text-xyne-fg-secondary">User prompt</span>
-                  <span className="ml-auto text-[11px] text-xyne-fg-muted">{data.prompt.length} chars</span>
+                  <span className="ml-auto text-[11px] text-xyne-fg-muted">{fieldSizeLabel(userPromptField)}</span>
                 </summary>
                 <div className="px-2 pb-2 pt-1">
-                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-xyne-fg-secondary">{data.prompt}</pre>
+                  <FieldText field={userPromptField} className="max-h-64" live={live} />
                 </div>
               </details>
             )}
@@ -987,19 +1553,31 @@ function DebugEventItem({
 
         {kind === "tool_execution_start" && (
           <div className="space-y-1.5">
-            {"args" in data && (
+            {hasInlineArgs && (
               <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
                 <p className="text-[12px] font-semibold text-xyne-fg-secondary">Arguments</p>
                 <JsonViewer value={data.args} title="Arguments" defaultExpandedDepth={999} />
               </div>
             )}
-            <SubagentTraceInline traces={subagentTraces} />
+            {argsField && (
+              <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
+                <p className="text-[12px] font-semibold text-xyne-fg-secondary">Arguments</p>
+                <FieldText field={argsField} live={live} />
+              </div>
+            )}
+            <SubagentTraceInline traces={subagentTraces} live={live} />
           </div>
         )}
 
         {kind === "tool_execution_end" && (
           <div className="space-y-1.5">
-            {"args" in data && (
+            {argsField && (
+              <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
+                <p className="text-[12px] font-semibold text-xyne-fg-secondary">Arguments</p>
+                <FieldText field={argsField} live={live} />
+              </div>
+            )}
+            {hasInlineArgs && (
               <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
                 <p className="text-[12px] font-semibold text-xyne-fg-secondary">Arguments</p>
                 <JsonViewer value={data.args} title="Arguments" defaultExpandedDepth={999} />
@@ -1030,29 +1608,41 @@ function DebugEventItem({
                 ))}
               </div>
             )}
-            {"result" in data && (
+            {hasInlineResult && (
               <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
                 <p className="text-[12px] font-semibold text-xyne-fg-secondary">Result</p>
                 <ToolResultView value={data.result} />
               </div>
             )}
-            <SubagentTraceInline traces={subagentTraces} />
+            {resultField && (
+              <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
+                <p className="text-[12px] font-semibold text-xyne-fg-secondary">Result</p>
+                <FieldText field={resultField} live={live} />
+              </div>
+            )}
+            <SubagentTraceInline traces={subagentTraces} live={live} />
           </div>
         )}
 
-        {kind === "thinking" && typeof data.text === "string" && (
+        {kind === "thinking" && thinkingField && (
           // Match the collapsed preview exactly (italic sans, secondary, aligned
           // under the title) so expanding just reveals the FULL text in place,
           // not a heavier card with a different font.
-          <p className="whitespace-pre-wrap pl-[58px] pr-6 text-[12px] italic leading-relaxed text-xyne-fg-secondary">{data.text}</p>
+          <p className="whitespace-pre-wrap pl-[58px] pr-6 text-[12px] italic leading-relaxed text-xyne-fg-secondary">
+            {thinkingField.text || "(payload not captured)"}
+            {thinkingField.isRef && <span className="not-italic text-amber-700 dark:text-amber-300"> · {refNote(thinkingField, live)}</span>}
+          </p>
         )}
 
         {kind === "assistant_turn_end" && (
           <div className="space-y-1.5">
-            {typeof data.assistantText === "string" && (
+            {assistantField && (
               // Same casual-expand treatment as thinking (non-italic, matches the
               // assistant preview). Usage stats stay below as a metadata row.
-              <p className="whitespace-pre-wrap pl-[58px] pr-6 text-[12px] leading-relaxed text-xyne-fg-secondary">{data.assistantText}</p>
+              <p className="whitespace-pre-wrap pl-[58px] pr-6 text-[12px] leading-relaxed text-xyne-fg-secondary">
+                {assistantField.text || "(payload not captured)"}
+                {assistantField.isRef && <span className="text-amber-700 dark:text-amber-300"> · {refNote(assistantField, live)}</span>}
+              </p>
             )}
             {(isRecord(data.usage) || typeof data.streamChars === "number" || typeof data.streamCharsPerSec === "number") && (
               <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-xyne-surface px-2 py-1.5 text-[11px] text-xyne-fg-secondary">
@@ -1068,8 +1658,34 @@ function DebugEventItem({
           </div>
         )}
 
-        {kind === "session_error" && typeof data.error === "string" && (
-          <pre className="whitespace-pre-wrap rounded-md bg-xyne-surface p-2 text-[12px] leading-relaxed text-red-700 dark:text-red-300">{data.error}</pre>
+        {kind === "session_error" && errorField && (
+          <pre className="whitespace-pre-wrap rounded-md bg-xyne-surface p-2 text-[12px] leading-relaxed text-red-700 dark:text-red-300">
+            {errorField.text || "(payload not captured)"}
+            {errorField.isRef ? ` · ${refNote(errorField, live)}` : ""}
+          </pre>
+        )}
+
+        {kind === "tool_palette_change" && (
+          paletteAdded.length > 0 || paletteRemoved.length > 0 ? (
+            <PaletteChips added={paletteAdded} removed={paletteRemoved} />
+          ) : (
+            // The `initial` palette event lists EVERY tool, which is big enough
+            // to get interned — show the ref's preview instead of an empty row.
+            <>
+              {paletteAddedField && (
+                <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
+                  <p className="text-[12px] font-semibold text-xyne-fg-secondary">Added</p>
+                  <FieldText field={paletteAddedField} live={live} />
+                </div>
+              )}
+              {paletteRemovedField && (
+                <div className="space-y-1 rounded-md bg-xyne-surface px-2 py-1.5">
+                  <p className="text-[12px] font-semibold text-xyne-fg-secondary">Removed</p>
+                  <FieldText field={paletteRemovedField} live={live} />
+                </div>
+              )}
+            </>
+          )
         )}
 
         {kind === "session_end" && (
@@ -1082,7 +1698,7 @@ function DebugEventItem({
           </div>
         )}
 
-        {!["session_prompt", "tool_execution_start", "tool_execution_end", "assistant_turn_end", "session_error", "session_end"].includes(kind) && (
+        {!["session_prompt", "llm_request", "tool_execution_start", "tool_execution_end", "assistant_turn_end", "session_error", "session_end"].includes(kind) && (
           <details className="rounded-md bg-xyne-surface">
             <summary className="cursor-pointer list-none px-2 py-1.5 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-secondary">Show raw event data</summary>
             <div className="px-2 pb-2 pt-1"><JsonViewer value={data} title="Event data" /></div>
@@ -1136,16 +1752,22 @@ function LiveDebugTrace({
     <div>
       {rootEvents.length > 0 && (
         <div>
-          {rootEvents.map((event, idx) => (
-            <DebugEventItem
-              key={`live-root-${event.seq}-${idx}`}
-              event={event}
-              eventKey={`live-root-${event.seq}-${idx}`}
-              selected={selectedEventKey === `live-root-${event.seq}-${idx}`}
-              onSelect={onSelectEvent}
-              subagentTracesByParentToolCallId={subagentTraceGroups}
-            />
-          ))}
+          {rootEvents.map((event, idx) => {
+            const prev = idx > 0 ? rootEvents[idx - 1] : undefined;
+            const prevAt = prev ? Date.parse(asString(prev.at) || asString(prev.startedAt)) : NaN;
+            return (
+              <DebugEventItem
+                key={`live-root-${event.seq}-${idx}`}
+                event={event}
+                eventKey={`live-root-${event.seq}-${idx}`}
+                selected={selectedEventKey === `live-root-${event.seq}-${idx}`}
+                onSelect={onSelectEvent}
+                subagentTracesByParentToolCallId={subagentTraceGroups}
+                {...(Number.isFinite(prevAt) ? { prevMs: prevAt } : {})}
+                live
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -1156,7 +1778,8 @@ function eventSummary(kind: string, data: Record<string, unknown>): string {
   switch (kind) {
     case "session_start":
       return asString(data.task);
-    case "session_prompt": {
+    case "session_prompt":
+    case "llm_request": {
       const count = typeof data.messageCount === "number" ? data.messageCount : 0;
       return count ? `Sending ${count} message${count === 1 ? "" : "s"} to the model` : "";
     }
@@ -1164,9 +1787,24 @@ function eventSummary(kind: string, data: Record<string, unknown>): string {
     case "tool_execution_end":
       return "";
     case "thinking":
-      return typeof data.text === "string" ? truncate(data.text, 240) : "";
+      return truncate(resolveFieldText(data, "text")?.text ?? "", 240);
     case "assistant_turn_end":
-      return typeof data.assistantText === "string" ? truncate(data.assistantText, 240) : "";
+      return truncate(resolveFieldText(data, "assistantText")?.text ?? "", 240);
+    case "tool_palette_change": {
+      const added = paletteList(data, "paletteAdded", "added").length;
+      const removed = paletteList(data, "paletteRemoved", "removed").length;
+      const parts = [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ");
+      return parts ? `Tool palette ${parts}` : "";
+    }
+    case "skill_loaded":
+      return asString(data.name) || asString(data.skill) || asString(data.location);
+    case "subagent_start":
+    case "subagent_end":
+      return asString(data.subagentName) || asString(data.task) || asString(data.question);
+    case "delegation":
+      return asString(data.targetAgent) || asString(data.task) || asString(data.question);
+    case "provider_fallback":
+      return asString(data.reason) || [asString(data.from), asString(data.to)].filter(Boolean).join(" → ");
     case "compaction_start":
       return "Conversation history is being condensed";
     case "compaction_end": {
@@ -1180,7 +1818,7 @@ function eventSummary(kind: string, data: Record<string, unknown>): string {
     case "auto_retry_start":
       return "Retrying after a transient error";
     case "session_error":
-      return asString(data.error);
+      return truncate(resolveFieldText(data, "error")?.text ?? "", 240);
     case "session_end":
       return "";
     case "citation_reflection": {
@@ -1220,7 +1858,7 @@ function groupSubagentTraces(traces: DebugArtifactBundle["subagents"]): Subagent
     .filter((item) => item.parentToolCallId);
 }
 
-function SubagentTraceInline({ traces }: { traces: SubagentTraceGroup[] }) {
+function SubagentTraceInline({ traces, live = false }: { traces: SubagentTraceGroup[]; live?: boolean }) {
   if (traces.length === 0) return null;
   return (
     <div className="mt-1 space-y-1.5">
@@ -1234,6 +1872,7 @@ function SubagentTraceInline({ traces }: { traces: SubagentTraceGroup[] }) {
             <DebugTimelineSection
               title={`${sub.subagentName}: ${truncate(asString(sub.trace.question) || "Subagent task", 80)}`}
               data={sub.trace}
+              live={live}
             />
           </div>
         ))}
@@ -1331,10 +1970,16 @@ function DebugSessionBody({
   bundle,
   selectedTurnIndex,
   selectedSessionId,
+  onLoadOlderRuns,
+  loadingOlderRuns = false,
 }: {
   bundle: DebugArtifactBundle;
   selectedTurnIndex?: number | null;
   selectedSessionId?: string | null;
+  /** Absent once the server-side page cap is reached — the older runs are then
+   *  only reachable by cursor, which this drawer doesn't drive. */
+  onLoadOlderRuns?: () => void;
+  loadingOlderRuns?: boolean;
 }) {
   const [selectedEventKey, setSelectedEventKey] = useState<string | null>(null);
   const [timeMode, setTimeMode] = useState<"delta" | "abs">("delta");
@@ -1383,6 +2028,29 @@ function DebugSessionBody({
           </p>
         </div>
       </div>
+
+      {/* The run list is a capped PAGE. Without this line a long thread just
+          stops at its 25th-newest run and looks like that is all there ever
+          was — the older runs exist, they were simply not fetched. */}
+      {bundle.truncated && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle px-2 py-1.5 text-[11px] text-xyne-fg-muted">
+          <span>
+            Showing {persistedRuns.length} of {bundle.totalRuns ?? persistedRuns.length} runs · older runs not loaded
+          </span>
+          {onLoadOlderRuns ? (
+            <button
+              type="button"
+              onClick={onLoadOlderRuns}
+              disabled={loadingOlderRuns}
+              className="rounded border border-xyne-border-subtle bg-xyne-surface px-1.5 py-0.5 font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loadingOlderRuns ? "Loading…" : "Load older runs"}
+            </button>
+          ) : (
+            <span>page limit reached</span>
+          )}
+        </div>
+      )}
 
       {legacyPairs.map((pair, index) => {
         // Hide legacy pairs entirely when a sessionId selector is active —
@@ -1470,16 +2138,28 @@ function DebugSessionBody({
   );
 }
 
+/** claw's own defaults for the run page (`DEFAULT_RUN_LIMIT` / `MAX_RUN_LIMIT`
+ *  in its debug route). Raising `limit` IS the paging UI here: one more click
+ *  fetches an older slab, up to the server's ceiling. */
+const RUN_PAGE_DEFAULT = 25;
+const RUN_PAGE_MAX = 100;
+
 export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline = false, width = 460, liveEvents = [], running = false, artifactsReadyVersion = 0, selectedTurnIndex = null, selectedTurnLive = false, selectedSessionId = null }: DebugDrawerProps) {
   const [bundle, setBundle] = useState<DebugArtifactBundle | null>(null);
   const [bundleHasCurrentRun, setBundleHasCurrentRun] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [runLimit, setRunLimit] = useState(RUN_PAGE_DEFAULT);
+  // A wider page refetches in the background (the current bundle stays on
+  // screen), so the button needs its own pending flag — `loading` only covers
+  // the first, bundle-less fetch.
+  const [olderRunsPending, setOlderRunsPending] = useState(false);
   const [showLiveTrace, setShowLiveTrace] = useState(false);
   const expectedRunRef = useRef<{ sessionId?: string; startedAt: number } | null>(null);
   const previousRunningRef = useRef(false);
   const previousArtifactsReadyVersionRef = useRef(artifactsReadyVersion);
+  const warnings = useMemo(() => collectWarnings(bundle), [bundle]);
   const currentLiveStream = useMemo(() => liveStreamStatus(liveEvents), [liveEvents]);
   const savedStream = useMemo(() => persistedStreamStatus(bundle), [bundle]);
   const streamStatus = running && currentLiveStream ? currentLiveStream : savedStream ?? currentLiveStream;
@@ -1522,6 +2202,8 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
     setBundle(null);
     setBundleHasCurrentRun(true);
     setError(null);
+    setRunLimit(RUN_PAGE_DEFAULT);
+    setOlderRunsPending(false);
     previousArtifactsReadyVersionRef.current = artifactsReadyVersion;
   }, [agentSlug, conversationId]);
 
@@ -1536,7 +2218,7 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
       if (inFlight) return false;
       inFlight = true;
       try {
-        const data = await fetchConversationDebugArtifacts(agentSlug, conversationId);
+        const data = await fetchConversationDebugArtifacts(agentSlug, conversationId, { limit: runLimit });
         if (cancelled) return false;
         setBundle(data);
         setError(null);
@@ -1580,7 +2262,11 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
     return () => {
       cancelled = true;
     };
-  }, [open, agentSlug, conversationId, artifactsReadyVersion, refreshVersion]);
+  }, [open, agentSlug, conversationId, artifactsReadyVersion, refreshVersion, runLimit]);
+
+  // Any bundle landing (wider page, refresh, or in-progress poll) answers the
+  // pending "load older" click.
+  useEffect(() => { setOlderRunsPending(false); }, [bundle]);
 
   // A VIEWER / reloaded tab has no driving stream (`running` is false), so the
   // fetch runs once. When the fetched bundle is a PARTIAL in-progress run
@@ -1603,7 +2289,7 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
     if (!open || running || !agentSlug || !conversationId || !bundleInProgress || livePollStopped) return;
     let cancelled = false;
     const id = window.setInterval(() => {
-      fetchConversationDebugArtifacts(agentSlug, conversationId)
+      fetchConversationDebugArtifacts(agentSlug, conversationId, { limit: runLimit })
         .then((data) => { if (!cancelled) setBundle(data); }) // a completed bundle flips bundleInProgress → effect tears down
         .catch(() => { if (!cancelled) setLivePollStopped(true); });
     }, 4000);
@@ -1611,7 +2297,7 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [open, running, agentSlug, conversationId, bundleInProgress, livePollStopped]);
+  }, [open, running, agentSlug, conversationId, bundleInProgress, livePollStopped, runLimit]);
 
   if (!open) return null;
 
@@ -1652,6 +2338,7 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
           <X size={16} />
         </button>
       </div>
+      <WarningsNotice warnings={warnings} />
       {streamStatus && <StreamRateStatus rate={streamStatus.rate} collected={streamStatus.collected} live={running && streamStatus.live} />}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
@@ -1708,7 +2395,20 @@ export function DebugDrawer({ open, agentSlug, conversationId, onClose, inline =
             })()}
             <div className={`transition-all duration-300 ease-out ${bundle ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 pointer-events-none"}`}>
               {bundle ? (
-                <DebugSessionBody bundle={bundle} selectedTurnIndex={selectedTurnIndex} selectedSessionId={selectedSessionId} />
+                <DebugSessionBody
+                  bundle={bundle}
+                  selectedTurnIndex={selectedTurnIndex}
+                  selectedSessionId={selectedSessionId}
+                  loadingOlderRuns={olderRunsPending}
+                  {...(runLimit < RUN_PAGE_MAX
+                    ? {
+                        onLoadOlderRuns: () => {
+                          setOlderRunsPending(true);
+                          setRunLimit((limit) => Math.min(RUN_PAGE_MAX, limit + RUN_PAGE_DEFAULT));
+                        },
+                      }
+                    : {})}
+                />
               ) : (
                 <p className="py-6 text-[13px] text-xyne-fg-muted">
                   No debugger artifacts found for this conversation.

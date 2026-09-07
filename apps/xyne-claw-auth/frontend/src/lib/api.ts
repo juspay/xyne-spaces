@@ -2910,6 +2910,61 @@ export interface PlanTodo {
   status: PlanTodoStatus;
 }
 
+/** A payload interned into the v2 blob log and referenced by hash. Large fields
+ *  (system prompt, tool result, transcript) arrive as one of these instead of a
+ *  string whenever the blob content could not be inlined — capture level
+ *  `metadata`, or a blob log that lost its tail. `preview` is the first ~200
+ *  chars so a reader always has something to show. */
+export interface DebugBlobRef {
+  hash: string;
+  bytes: number;
+  originalBytes?: number;
+  truncated?: true;
+  preview?: string;
+}
+
+export interface DebugSkillRef {
+  name: string;
+  description?: string;
+  location?: string;
+}
+
+export interface DebugToolDefinition {
+  name: string;
+  description?: string;
+  /** JSON Schema the model was given for this tool's arguments. */
+  parameters?: unknown;
+}
+
+/**
+ * Event payload. Every field is optional and must be guarded at the read site:
+ * older runs predate them, capture level can drop them, and the big ones may
+ * come through as a `DebugBlobRef`. The index signature stays because readers
+ * (the debug drawer, the trace exporter) treat data as an open bag.
+ */
+export interface DebugEventData {
+  [key: string]: unknown;
+  /** On `session_prompt`, the TRUE prompt pi sent — persona plus the
+   *  `<available_skills>` block — not just the persona prompt. */
+  systemPrompt?: string | DebugBlobRef;
+  availableSkills?: DebugSkillRef[];
+  tools?: DebugToolDefinition[];
+  toolNames?: string[];
+  /** Mid-run tool-palette diff (load-tools / fast-mode). */
+  paletteAdded?: string[];
+  paletteRemoved?: string[];
+  temperature?: number;
+  maxTokens?: number;
+  thinkingLevel?: string;
+  fastMode?: boolean;
+  model?: string;
+  provider?: string;
+  /** `cacheRead`/`cacheWrite` are the prompt-cache hit/miss signal. */
+  responseUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+  responseStopReason?: string;
+  ttftMs?: number;
+}
+
 export interface DebugEventRecord {
   seq: number;
   at: string;
@@ -2919,7 +2974,9 @@ export interface DebugEventRecord {
   toolCallId?: string;
   parentToolCallId?: string;
   subagentName?: string;
-  data: Record<string, unknown>;
+  /** Run id of the child trace a `subagent_start` / `delegation` event spawned. */
+  childRunId?: string;
+  data: DebugEventData;
 }
 
 export interface StreamCallbacks {
@@ -3444,13 +3501,31 @@ export interface DebugArtifactBundle {
   debugEvents: Record<string, unknown>[] | null;
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
+  /** Non-fatal problems hit while reading these artifacts (dropped torn line,
+   *  unreadable blob log, GCS miss). Surfaced in the drawer so a partial trace
+   *  never reads as "no data". Individual runs carry their own `data.warnings`. */
+  warnings?: string[];
+  /** Runs this viewer may see in the whole conversation. `runs` is one capped
+   *  page of them; without these a long thread silently loses its older runs. */
+  totalRuns?: number;
+  /** True when runs older than this page exist — ask again with a bigger
+   *  `limit`, or with `before` set to the oldest runId on this page. */
+  truncated?: boolean;
 }
 
-export async function fetchConversationDebugArtifacts(slug: string, conversationId: string): Promise<DebugArtifactBundle> {
+export async function fetchConversationDebugArtifacts(
+  slug: string,
+  conversationId: string,
+  opts?: { limit?: number; before?: string },
+): Promise<DebugArtifactBundle> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.before !== undefined) params.set("before", opts.before);
+  const query = params.toString();
   const data = await request<{
     success: boolean;
     data: DebugArtifactBundle;
-  }>(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/debug`);
+  }>(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/debug${query ? `?${query}` : ""}`);
   return data.data;
 }
 

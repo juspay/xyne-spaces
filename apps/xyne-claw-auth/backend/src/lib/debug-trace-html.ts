@@ -32,6 +32,8 @@ export const DEBUG_TRACE_MAX_BYTES = 2_000_000;
 
 const SECRET_RE = /(bearer\s+\S+|sk-[A-Za-z0-9]{8,}|token"?\s*[:=]\s*"?\S+)/gi;
 const THINKING_MAX = 600;
+const SYSTEM_PROMPT_MAX = 4000;
+const TOOLS_MAX = 4000;
 const ARG_SUMMARY_MAX = 80;
 
 const TOOL_LABELS = new Map<string, string>(
@@ -124,10 +126,193 @@ function toolLabel(toolName: string): string {
   return TOOL_LABELS.get(toolName) ?? "";
 }
 
+/**
+ * A payload the recorder interned into the blob log instead of inlining it.
+ * The hash and byte count outlive the content (a `metadata` capture keeps the
+ * ref and drops the bytes), so a row can still say what existed and how big it
+ * was — which is the whole reason these must not render as `[object Object]`.
+ */
+interface BlobRefLike {
+  hash: string;
+  bytes: number;
+  originalBytes?: number;
+  truncated?: true;
+  preview?: string;
+}
+
+function isBlobRefLike(value: unknown): value is BlobRefLike {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { hash?: unknown }).hash === "string" &&
+    typeof (value as { bytes?: unknown }).bytes === "number"
+  );
+}
+
+interface Payload {
+  value: unknown;
+  ref: BlobRefLike | null;
+}
+
+/**
+ * Read a field that may be inline, a BlobRef standing in for the value, or a
+ * sibling `<field>Ref` — the form materialization leaves behind when the blob
+ * content could not be resolved.
+ */
+function payload(data: Record<string, unknown>, field: string): Payload {
+  const inline = data[field];
+  if (isBlobRefLike(inline)) return { value: undefined, ref: inline };
+  const sibling = data[`${field}Ref`];
+  return { value: inline, ref: isBlobRefLike(sibling) ? sibling : null };
+}
+
+function refNote(ref: BlobRefLike): string {
+  const bytes = ref.originalBytes ?? ref.bytes;
+  return `[${ref.truncated || ref.preview ? "truncated" : "not captured"} — ${bytes} bytes]`;
+}
+
+function jsonText(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? "";
+  } catch {
+    return String(value);
+  }
+}
+
+function payloadBlock(p: Payload, max: number): string {
+  if (p.value !== undefined && p.value !== null) {
+    const body = cleanBlock(jsonText(p.value), max);
+    return p.ref ? `${body}\n${escapeHtml(refNote(p.ref))}` : body;
+  }
+  if (!p.ref) return "";
+  const preview = p.ref.preview ? cleanBlock(p.ref.preview, max) : "";
+  return preview ? `${preview}\n${escapeHtml(refNote(p.ref))}` : escapeHtml(refNote(p.ref));
+}
+
+function payloadSize(p: Payload): number | null {
+  if (typeof p.value === "string") return p.value.length;
+  if (p.ref) return p.ref.originalBytes ?? p.ref.bytes;
+  return null;
+}
+
+function payloadCount(p: Payload): number | null {
+  return Array.isArray(p.value) ? p.value.length : null;
+}
+
+/** Names out of a list of strings, of `{ name }` objects, or of a bare ref. */
+function nameList(p: Payload, max: number): string {
+  if (Array.isArray(p.value)) {
+    const names = p.value
+      .map((item) => (typeof item === "string" ? item : str(rec(item)["name"]) ?? ""))
+      .filter((n) => n.length > 0);
+    return names.length > 0 ? clean(names.join(", "), max) : "";
+  }
+  return p.ref?.preview ? clean(p.ref.preview, max) : "";
+}
+
+function collapsed(label: string, body: string): string {
+  return body ? `<details><summary>${escapeHtml(label)}</summary><pre>${body}</pre></details>` : "";
+}
+
+/**
+ * Providers disagree on usage key names (`input` / `inputTokens` /
+ * `cache_read_input_tokens`), and `llm_response` carries the provider's raw
+ * object, so read whichever spelling arrived.
+ */
+function usageParts(usage: Record<string, unknown>): string {
+  const pick = (...keys: string[]): number | null => {
+    for (const key of keys) {
+      const value = num(usage[key]);
+      if (value !== null) return value;
+    }
+    return null;
+  };
+  return [
+    ["in", pick("input", "inputTokens", "input_tokens", "promptTokens", "prompt_tokens")],
+    ["out", pick("output", "outputTokens", "output_tokens", "completionTokens", "completion_tokens")],
+    ["cacheR", pick("cacheRead", "cacheReadTokens", "cachedInputTokens", "cache_read_input_tokens")],
+    ["cacheW", pick("cacheWrite", "cacheWriteTokens", "cache_creation_input_tokens")],
+  ]
+    .filter(([, value]) => value !== null)
+    .map(([label, value]) => `${String(label)} ${String(value)}`)
+    .join(" · ");
+}
+
+/** Request params, shared by `llm_request` and the `session_prompt` row that
+ *  materialization folds a request into. */
+function requestMeta(data: Record<string, unknown>): string[] {
+  const toolCount = num(data["toolCount"]) ?? payloadCount(payload(data, "tools"));
+  const added = payloadCount(payload(data, "paletteAdded")) ?? 0;
+  const removed = payloadCount(payload(data, "paletteRemoved")) ?? 0;
+  return [
+    toolCount !== null ? `${toolCount} tools` : "",
+    data["thinkingLevel"] ? `thinking ${clean(data["thinkingLevel"], 20)}` : "",
+    num(data["temperature"]) !== null ? `temp ${num(data["temperature"])}` : "",
+    num(data["maxTokens"]) !== null ? `maxTokens ${num(data["maxTokens"])}` : "",
+    data["fastMode"] === true ? "fast mode" : "",
+    added > 0 || removed > 0 ? `palette +${added}/−${removed}` : "",
+  ].filter(Boolean);
+}
+
+/**
+ * The effective system prompt (the one pi actually sent, `<available_skills>`
+ * included), the tool definitions with their schemas, and the skill list — all
+ * collapsed, because each is kilobytes and none of it is what a reader scans a
+ * timeline for.
+ */
+function requestBody(data: Record<string, unknown>): string {
+  const system = payload(data, "systemPrompt");
+  const tools = payload(data, "tools");
+  const skills = payload(data, "availableSkills");
+  const systemSize = payloadSize(system);
+  const toolCount = num(data["toolCount"]) ?? payloadCount(tools);
+  const skillNames = nameList(skills, 300);
+  return (
+    collapsed(
+      `system prompt${systemSize !== null ? ` (${systemSize} chars)` : ""}`,
+      payloadBlock(system, SYSTEM_PROMPT_MAX),
+    ) +
+    collapsed(`tools${toolCount !== null ? ` (${toolCount})` : ""}`, payloadBlock(tools, TOOLS_MAX)) +
+    (skillNames ? `<div class="meta">skills — ${skillNames}</div>` : "")
+  );
+}
+
+/** Emitted once per run and back-referenced thereafter — see the materializer's
+ *  `dedupeRepeatedPayloads`. An exported trace must still show them on every
+ *  call, so resolve the references before rendering. */
+const DEDUPED_FOLD_FIELDS = ["systemPrompt", "tools", "toolNames", "availableSkills"] as const;
+
+function rehydrateRepeatedPayloads(list: DebugTraceEvent[]): DebugTraceEvent[] {
+  const bySeq = new Map<number, Record<string, unknown>>();
+  for (const event of list) {
+    const seq = num(event.seq);
+    const data = event.data;
+    if (seq !== null && seq !== undefined && data && typeof data === "object") {
+      bySeq.set(seq, data as Record<string, unknown>);
+    }
+  }
+  return list.map((event) => {
+    if (!event.data || typeof event.data !== "object") return event;
+    const data = event.data as Record<string, unknown>;
+    let next: Record<string, unknown> | null = null;
+    for (const field of DEDUPED_FOLD_FIELDS) {
+      const from = data[`${field}UnchangedFromSeq`];
+      if (typeof from !== "number") continue;
+      const source = bySeq.get(from)?.[field];
+      if (source === undefined) continue;
+      next ??= { ...data };
+      next[field] = source;
+    }
+    return next ? { ...event, data: next } : event;
+  });
+}
+
 function events(run: DebugTraceRun): DebugTraceEvent[] {
   if (!Array.isArray(run.events)) return [];
   const list = run.events.filter((e): e is DebugTraceEvent => Boolean(e) && typeof e === "object");
-  return [...list].sort((a, b) => (num(a.seq) ?? 0) - (num(b.seq) ?? 0));
+  const sorted = [...list].sort((a, b) => (num(a.seq) ?? 0) - (num(b.seq) ?? 0));
+  return rehydrateRepeatedPayloads(sorted);
 }
 
 interface ToolStat {
@@ -194,7 +379,9 @@ export function renderDebugTraceHtml(run: DebugTraceRun): string {
 
   for (const event of all) {
     const kind = event.kind ?? "";
-    if (kind === "tool_execution_end") continue;
+    // tool_execution_end is folded into its start row; message_append is
+    // transcript bookkeeping and would add one empty row per turn.
+    if (kind === "tool_execution_end" || kind === "message_append") continue;
     const at = str(event.at);
     const off = offset(at, startBase);
     const data = rec(event.data);
@@ -231,6 +418,8 @@ export function renderDebugTraceHtml(run: DebugTraceRun): string {
         meta: clean(data["reason"], 60),
       });
     } else if (kind === "session_prompt") {
+      // Materialization folds the turn's llm_request into this row, so the
+      // request params and prompt/tool payloads may live here.
       rendered = row({
         offset: off,
         badge: "llm",
@@ -240,6 +429,113 @@ export function renderDebugTraceHtml(run: DebugTraceRun): string {
           data["kind"] ? clean(data["kind"], 20) : "",
           `${num(data["messageCount"]) ?? 0} messages`,
           num(data["imagesCount"]) ? `${num(data["imagesCount"])} images` : "",
+          ...requestMeta(data),
+        ].filter(Boolean).join(" · "),
+        body: requestBody(data),
+      });
+    } else if (kind === "llm_request") {
+      rendered = row({
+        offset: off,
+        badge: "request",
+        kindClass: "k-prompt",
+        title:
+          `LLM request #${num(event.llmCall) ?? 0} — ` +
+          `${clean(data["provider"], 30) || clean(run.provider, 30) || "?"}/` +
+          `${clean(data["model"], 60) || clean(run.model, 60) || "?"}`,
+        meta: requestMeta(data).join(" · "),
+        body: requestBody(data),
+      });
+    } else if (kind === "llm_response") {
+      rendered = row({
+        offset: off,
+        badge: "response",
+        kindClass: "k-llm",
+        title: `LLM response #${num(event.llmCall) ?? 0}${data["stopReason"] ? ` — stop ${clean(data["stopReason"], 40)}` : ""}`,
+        meta: [
+          num(data["ttftMs"]) !== null ? `ttft ${ms(data["ttftMs"])}` : "",
+          num(data["totalMs"]) !== null ? `total ${ms(data["totalMs"])}` : "",
+          usageParts(rec(data["usage"])),
+          data["errorMessage"] ? `error ${clean(data["errorMessage"], 120)}` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "tool_palette_change") {
+      const added = payload(data, "added");
+      const removed = payload(data, "removed");
+      const addedNames = nameList(added, 160);
+      const removedNames = nameList(removed, 160);
+      rendered = row({
+        offset: off,
+        badge: "tools",
+        kindClass: "k-session",
+        title: `Tool palette ${clean(data["source"], 24) || "change"} — +${payloadCount(added) ?? 0} / −${payloadCount(removed) ?? 0}`,
+        meta: [
+          addedNames ? `added ${addedNames}` : "",
+          removedNames ? `removed ${removedNames}` : "",
+          num(data["activeCount"]) !== null ? `${num(data["activeCount"])} active` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "skill_loaded") {
+      rendered = row({
+        offset: off,
+        badge: "skill",
+        kindClass: "k-sub",
+        title: `Skill loaded — ${clean(data["slug"], 60) || "(unnamed)"}`,
+        meta: [
+          clean(data["path"], 140),
+          data["viaToolCallId"] ? `via ${clean(data["viaToolCallId"], 40)}` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "subagent_start") {
+      rendered = row({
+        offset: off,
+        badge: "subagent",
+        kindClass: "k-sub",
+        title: `Subagent start — ${clean(data["subagentName"] ?? event.subagentName, 40) || "(unnamed)"}`,
+        meta: [
+          `${clean(data["provider"], 30) || "?"}/${clean(data["model"], 60) || "?"}`,
+          num(data["questionChars"]) !== null ? `question ${num(data["questionChars"])} chars` : "",
+          payloadCount(payload(data, "toolNames")) !== null
+            ? `${payloadCount(payload(data, "toolNames"))} tools`
+            : "",
+          data["childRunId"] ? `run ${clean(data["childRunId"], 40)}` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "subagent_end") {
+      rendered = row({
+        offset: off,
+        badge: "subagent",
+        kindClass: data["status"] === "error" ? "k-retry" : "k-sub",
+        title: `Subagent end — ${clean(data["subagentName"] ?? event.subagentName, 40) || "(unnamed)"}${data["status"] ? ` (${clean(data["status"], 20)})` : ""}`,
+        meta: [
+          num(data["durationMs"]) !== null ? ms(data["durationMs"]) : "",
+          num(data["textLength"]) !== null ? `${num(data["textLength"])} chars` : "",
+          nameList(payload(data, "toolsUsed"), 160) ? `tools ${nameList(payload(data, "toolsUsed"), 160)}` : "",
+          data["providerError"] ? `error ${clean(data["providerError"], 120)}` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "provider_fallback") {
+      rendered = row({
+        offset: off,
+        badge: "fallback",
+        kindClass: "k-retry",
+        title: `Provider fallback ${clean(data["fromProvider"], 30) || "?"} → ${clean(data["toProvider"], 30) || "?"}`,
+        meta: [
+          num(data["attempt"]) !== null ? `attempt ${num(data["attempt"])}` : "",
+          data["reason"] ? `reason ${clean(data["reason"], 120)}` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "delegation") {
+      const detail = payload(data, "detail");
+      const detailText = typeof detail.value === "string" ? detail.value : detail.ref?.preview ?? "";
+      rendered = row({
+        offset: off,
+        badge: "delegation",
+        kindClass: "k-sub",
+        title: `Delegation ${clean(data["kind"], 24) || ""} — ${clean(data["caller"], 40) || "?"} → ${clean(data["callee"], 40) || "?"}`,
+        meta: [
+          num(data["depth"]) !== null ? `depth ${num(data["depth"])}` : "",
+          data["reason"] ? `reason ${clean(data["reason"], 80)}` : "",
+          clean(detailText, 120),
         ].filter(Boolean).join(" · "),
       });
     } else if (kind === "thinking") {
@@ -260,12 +556,7 @@ export function renderDebugTraceHtml(run: DebugTraceRun): string {
         promptAt && at && !Number.isNaN(Date.parse(promptAt)) && !Number.isNaN(Date.parse(at))
           ? Date.parse(at) - Date.parse(promptAt)
           : null;
-      const tokenParts = [
-        num(usage["input"]) !== null ? `in ${num(usage["input"])}` : "",
-        num(usage["output"]) !== null ? `out ${num(usage["output"])}` : "",
-        num(usage["cacheRead"]) !== null ? `cacheR ${num(usage["cacheRead"])}` : "",
-        num(usage["cacheWrite"]) !== null ? `cacheW ${num(usage["cacheWrite"])}` : "",
-      ].filter(Boolean).join(" · ");
+      const tokenParts = usageParts(usage);
       rendered = row({
         offset: off,
         badge: "llm",
