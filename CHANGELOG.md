@@ -1,3 +1,10 @@
+## [1.279.0](https://github.com/juspay/xyne-spaces/compare/v1.278.6...v1.279.0) (2026-09-07)
+
+
+### Features
+
+* add playback speed control to audio player ([#1575](https://github.com/juspay/xyne-spaces/issues/1575)) ([caad243](https://github.com/juspay/xyne-spaces/commit/caad243413979cf8ca907c1f740827a61618e9c4))
+
 ## [1.278.6](https://github.com/juspay/xyne-spaces/compare/v1.278.5...v1.278.6) (2026-09-07)
 
 
