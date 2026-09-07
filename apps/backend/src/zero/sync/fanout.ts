@@ -108,11 +108,25 @@ export class Fanout {
     if (!this.#cursors.has(key)) this.#cursors.set(key, await this.#store.head(instanceKey));
   }
 
-  /** Re-evaluate the gate for one client and admit (send snapshot) / revoke as needed. */
-  async #regate(client: ClientSub): Promise<void> {
+  /**
+   * Re-evaluate the gate for one client and admit (send snapshot) / revoke as needed.
+   *
+   * `cache` (keyed by grant instanceKey) hoists the grant-snapshot reads out of the
+   * per-client loop: every client on a channel shares the same grant instances, so a
+   * grant delta would otherwise re-read the identical snapshot N times (N×M HGETALLs).
+   * A caller that re-gates many clients for one delta passes a single cache → M reads,
+   * and all clients gate against one point-in-time view. Callers re-gating a lone client
+   * (subscribe) pass none and read fresh.
+   */
+  async #regate(client: ClientSub, cache?: Map<string, Record<string, unknown>[]>): Promise<void> {
     const grantRows = new Map<string, Record<string, unknown>[]>();
     for (const [table, grantKey] of client.grantByTable) {
-      grantRows.set(table, await this.#store.snapshot(grantKey).then((r) => r.map((c) => c.row)));
+      let rows = cache?.get(grantKey);
+      if (!rows) {
+        rows = (await this.#store.snapshot(grantKey)).map((c) => c.row);
+        cache?.set(grantKey, rows);
+      }
+      grantRows.set(table, rows);
     }
     let admitted: boolean;
     try {
@@ -267,12 +281,15 @@ export class Fanout {
 
     const affected = this.#grantToData.get(instanceKey);
     if (affected) {
+      // One cache for the whole grant delta: grant instanceKeys are globally unique, so
+      // sharing it across every affected data instance and client reads each snapshot once.
+      const grantCache = new Map<string, Record<string, unknown>[]>();
       for (const dataKey of affected) {
         const subs = this.#dataSubs.get(dataKey);
         if (!subs) continue;
         for (const client of subs) {
           try {
-            await this.#regate(client);
+            await this.#regate(client, grantCache);
           } catch (error) {
             // One client's transient re-gate failure (e.g. a snapshot read blip) must not
             // abort re-gating the rest — a dropped revoke is a leak. Log and continue; the
