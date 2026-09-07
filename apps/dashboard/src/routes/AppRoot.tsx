@@ -87,7 +87,10 @@ import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOver
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
-import { ElectronUpdateNudge } from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
+import {
+  ElectronUpdateNudge,
+  ELECTRON_UPDATE_NUDGE_ENABLED,
+} from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { SlashCommandArtifactBanner } from '../components/Chat/SlashCommandArtifactBanner';
 import { SlashCommandArtifactSideEffectProvider } from '../components/Chat/SlashCommandArtifactSideEffects';
@@ -962,7 +965,7 @@ const AppRoot = (): ReactElement => {
                           <GlobalUploadProgress />
                           <NotificationHandler />
                           <ElectronBadgeSync />
-                          <ElectronUpdateNudge />
+                          {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
                           <SosAlertBanner />
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />

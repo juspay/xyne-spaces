@@ -8,7 +8,7 @@ import { roomActor } from '../../machines/roomMachine';
 // Kill switch for the Electron auto-update nudge. While false the component is
 // fully inert: no event listener is registered and nothing is rendered.
 // Flip to true to re-enable the feature (dashboard-only change, no Electron release needed).
-const ELECTRON_UPDATE_NUDGE_ENABLED = false;
+export const ELECTRON_UPDATE_NUDGE_ENABLED = false;
 
 const NUDGE_STORAGE_KEY = 'xyne:electron-update-nudge';
 const UPDATE_ATTEMPT_STORAGE_KEY = 'xyne:electron-update-attempt';
@@ -204,12 +204,23 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
     // Fully inert while the feature is off: no observer, no listeners, no layout reads.
     if (!ELECTRON_UPDATE_NUDGE_ENABLED) return undefined;
 
-    const isSlotVisible = (slot: HTMLElement): boolean =>
-      // checkVisibility folds display:none / visibility:hidden / zero-box into one
-      // read; it replaces getComputedStyle + getClientRects (two forced reflows).
-      typeof slot.checkVisibility === 'function'
-        ? slot.checkVisibility({ visibilityProperty: true })
-        : slot.getClientRects().length > 0;
+    const isSlotVisible = (slot: HTMLElement): boolean => {
+      // checkVisibility replaces getComputedStyle + getClientRects (two forced
+      // reflows) with one read. Pass BOTH option spellings: checkVisibilityCSS is
+      // the pre-Chromium-121 name and visibilityProperty the current one; an
+      // unknown key is silently ignored, so on older engines the wrong-named
+      // option would let visibility:hidden slip through. (A rendered zero-size box
+      // still counts as visible here, which matches the slot's usage.)
+      if (typeof slot.checkVisibility === 'function') {
+        return slot.checkVisibility({ visibilityProperty: true, checkVisibilityCSS: true });
+      }
+      const style = window.getComputedStyle(slot);
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        slot.getClientRects().length > 0
+      );
+    };
 
     const findVisibleSlot = (): HTMLElement | null => {
       const slots = Array.from(document.querySelectorAll<HTMLElement>(UPDATE_NUDGE_SLOT_SELECTOR));
@@ -224,8 +235,23 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
 
     // Coalesce DOM-churn bursts (hover, tooltips, virtualizer rows) into at most
     // one visibility read per frame instead of a synchronous reflow per mutation.
+    // Caveat: while the document is not visible the renderer may stop issuing
+    // frames, so a queued rAF could never run and leave updateNudgeSlot pointing
+    // at a detached node. That state gates the auto-update countdown, so sync
+    // synchronously whenever we are not visible.
     let frame: number | null = null;
+    const cancelFrame = (): void => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+    };
     const scheduleSync = (): void => {
+      if (document.visibilityState !== 'visible') {
+        cancelFrame();
+        syncSlot();
+        return;
+      }
       if (frame !== null) return;
       frame = window.requestAnimationFrame(() => {
         frame = null;
@@ -238,11 +264,13 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
     const observer = new MutationObserver(scheduleSync);
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('resize', scheduleSync);
+    document.addEventListener('visibilitychange', scheduleSync);
 
     return (): void => {
       observer.disconnect();
       window.removeEventListener('resize', scheduleSync);
-      if (frame !== null) window.cancelAnimationFrame(frame);
+      document.removeEventListener('visibilitychange', scheduleSync);
+      cancelFrame();
     };
   }, []);
 
@@ -355,6 +383,9 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
       if (
         !nudge ||
         activationBlocked ||
+        // Re-check slot liveness at fire time: the countdown may have started while
+        // the slot was live, but the node can be detached by the time we apply.
+        !updateNudgeSlot?.isConnected ||
         isTypingNow() ||
         isCallBlockingNow() ||
         applyingRef.current
@@ -371,7 +402,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
       writeStorage(UPDATE_ATTEMPT_STORAGE_KEY, attempt);
       window.electronAPI?.applyAppUpdate();
     },
-    [activationBlocked, isTypingNow, nudge],
+    [activationBlocked, isTypingNow, nudge, updateNudgeSlot],
   );
 
   useEffect(() => {
