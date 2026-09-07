@@ -1,4 +1,3 @@
-import type { Workflow } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
@@ -12,9 +11,32 @@ import {
 } from '../types/workflow-adapter';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
-import { triggerRegistry } from '../triggers/trigger-registry';
 import type { AutomationEvent } from '../types/automation-events';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
+
+// Wire payload carries only ticketId, so the scope ids come off the ticket row.
+const TICKET_SCOPED_EVENTS: ReadonlySet<string> = new Set([
+  'TICKET_CREATED',
+  'TICKET_UPDATED',
+  'TICKET_COMMENTED',
+]);
+
+// Read for every active automation in the workspace on every event — only the columns used here.
+const CANDIDATE_SELECT = {
+  id: true,
+  workspaceId: true,
+  workflowType: true,
+  context: true,
+  metadata: true,
+} as const;
+
+type WorkflowCandidate = {
+  id: string;
+  workspaceId: string;
+  workflowType: string | null;
+  context: string | null;
+  metadata: string | null;
+};
 
 // Filter keys this event's matcher honours as scope, mapped to the id the event carries. A key
 // the matcher ignores must never appear — judging it would drop runs that should have fired.
@@ -152,7 +174,7 @@ class EventRouter {
   private async scopeMismatches(
     eventType: string,
     payload: Record<string, unknown>,
-    candidates: Workflow[],
+    candidates: WorkflowCandidate[],
     workspaceId: string,
   ): Promise<Set<string>> {
     const skip = new Set<string>();
@@ -173,15 +195,22 @@ class EventRouter {
     if (scoped.length === 0) return skip; // nothing to judge — never hydrate
 
     let scope = eventScope(eventType, payload);
-    // Ticket events are exactly the events carrying boardIds, and the only ones whose wire
-    // payload lacks the ids — everything else is judged on wire data and never hydrates.
-    if (scope && 'boardIds' in scope) {
-      const impl = triggerRegistry.has(eventType) ? triggerRegistry.get(eventType) : null;
-      const hydrate = impl?.hydratePayload?.bind(impl);
-      if (!hydrate) return skip;
+    // Three columns, not the trigger's hydratePayload — that fans out to board/project/channel/
+    // user lookups the worker repeats anyway. TICKET_COMMENTED's hydration also falls back to the
+    // conversation's channelId; here a null stays null, so nothing is skipped and the worker decides.
+    if (scope && TICKET_SCOPED_EVENTS.has(eventType)) {
+      const ticketId = payload['ticketId'];
+      if (typeof ticketId !== 'string' || !ticketId) return skip;
       // Same tenant scope the worker hydrates under, so both see the same rows.
-      const hydrated = await runAsServiceActor('automation', workspaceId, () => hydrate(payload));
-      scope = eventScope(eventType, hydrated);
+      const ticket = await runAsServiceActor('automation', workspaceId, () =>
+        db.ticket
+          .findUnique({
+            where: { id: ticketId },
+            select: { boardId: true, projectId: true, channelId: true },
+          })
+          .catch(() => null),
+      );
+      scope = eventScope(eventType, { ...payload, ticket: ticket ?? {} });
     }
     if (!scope) return skip;
 
@@ -194,7 +223,7 @@ class EventRouter {
   private async findCandidates(
     event: AutomationEvent,
     workspaceId: string,
-  ): Promise<Workflow[]> {
+  ): Promise<WorkflowCandidate[]> {
     const mappedEventType = triggerTypeToEventType(event.type);
     const baseWhere = {
       eventType: mappedEventType,
@@ -208,6 +237,7 @@ class EventRouter {
           workflowType: AUTOMATION_WORKFLOW_TYPE,
           ...baseWhere,
         },
+        select: CANDIDATE_SELECT,
       });
     }
 
@@ -217,6 +247,7 @@ class EventRouter {
           workflowType: AUTOMATION_WORKFLOW_TYPE,
           ...baseWhere,
         },
+        select: CANDIDATE_SELECT,
       }),
       db.deskAutoLabelRuleReference.findMany({
         where: {
@@ -227,7 +258,7 @@ class EventRouter {
             ...baseWhere,
           },
         },
-        include: { workflow: true },
+        select: { workflow: { select: CANDIDATE_SELECT } },
       }),
     ]);
 
