@@ -11,7 +11,7 @@ import type { AutomationStepConfig } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import type { TriggerType } from '../types/trigger-types';
 import type { StepType } from '../types/step-types';
-import { CONTROL_FLOW_STEP_TYPES } from '../types/known-types';
+import { CONTROL_FLOW_STEP_TYPES, ControlFlowStepType } from '../types/known-types';
 import type { StepRegistry } from '../steps/step-registry';
 import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
 import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
@@ -74,14 +74,12 @@ function parseStepIndexFromName(name: string): number | null {
 }
 
 function resolveBranchSteps(
-  step: AutomationStepConfig,
+  config: Record<string, unknown>,
   branchKey: string,
 ): AutomationStepConfig[] | null {
-  const config = step.config as Record<string, unknown>;
-
   if (branchKey === 'if_true') return (config['if_true'] as AutomationStepConfig[]) ?? null;
-  if (branchKey === 'if_false') return (config['if_false'] as AutomationStepConfig[]) ?? [];
-  if (branchKey === 'default') return (config['default'] as AutomationStepConfig[]) ?? [];
+  if (branchKey === 'if_false') return (config['if_false'] as AutomationStepConfig[]) ?? null;
+  if (branchKey === 'default') return (config['default'] as AutomationStepConfig[]) ?? null;
 
   const caseMatch = /^case_(\d+)$/.exec(branchKey);
   if (caseMatch) {
@@ -637,7 +635,10 @@ export class AutomationExecutor {
 
       if (callCtx.isResuming && callCtx.resumeBranchPath && callCtx.resumeBranchPath.length > 0) {
         const [segment, ...deeper] = callCtx.resumeBranchPath;
-        const branchSteps = resolveBranchSteps(step, segment!.branchKey);
+        const branchSteps = resolveBranchSteps(
+          safeResult.data as Record<string, unknown>,
+          segment!.branchKey,
+        );
         if (!branchSteps) {
           throw new Error(
             `Step "${step.id}" (${step.type}) cannot resume: branch "${segment!.branchKey}" no longer exists in the automation.`,
@@ -654,6 +655,18 @@ export class AutomationExecutor {
           segment!.branchKey,
           [segment!, ...deeper],
         );
+        context.steps[step.id] = {
+          type: step.type,
+          output:
+            step.type === ControlFlowStepType.SWITCH
+              ? {
+                  matchedIndex:
+                    segment!.branchKey === 'default'
+                      ? -1
+                      : Number.parseInt(segment!.branchKey.slice('case_'.length), 10),
+                }
+              : { result: segment!.branchKey === 'if_true' },
+        };
         logger.info(
           `[automations] step OK    id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0}`,
         );
