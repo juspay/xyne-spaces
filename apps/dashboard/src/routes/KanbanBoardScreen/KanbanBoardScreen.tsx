@@ -70,7 +70,6 @@ import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
-import { withTicketChannelScope } from './ticketChannelScope';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
@@ -1681,17 +1680,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // CENTRALIZED TICKET QUERY - fetch only tickets relevant to the current context.
   // Dynamic field filtering is done CLIENT-SIDE via applyTicketFilters.
   // When fevFieldIds is non-empty, formEntityValues are fetched as a related query.
+  // NOTE: We intentionally do NOT pass channelId to the query.
+  // The channel ticket tab should show tickets from ALL accessible channels
+  // (public + private where user is member), not just tickets from this channel.
+  // The boardId/projectId already scopes the results appropriately.
+  // Passing channelId would cause the ACL to use scalarChannelBody which
+  // restricts tickets to only that specific channel.
   const ticketsQueryParams = useMemo(() => {
     const params: FlowStepVisibilityOptions & {
       viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
-      channelId?: string;
       projectId?: string;
       boardId?: string;
       boardIds?: string[];
       userId?: string;
       groupId?: string;
       formEntityValueFieldIds?: string[];
-    } = withTicketChannelScope({ viewMode: queryViewMode }, channelId);
+    } = { viewMode: queryViewMode };
 
     // Always pass boardId if it exists (from URL param)
     // Board ID implicitly scopes to project, so no need for projectId in this case
@@ -1750,7 +1754,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
-    channelId,
   ]);
 
   const [allProjectTickets, ticketsDetails] = useCachedQuery(
