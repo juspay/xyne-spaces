@@ -177,7 +177,14 @@ export class InstanceManager {
     }
     instance.subscribers.add(subscriberId);
 
-    if (this.#multiPod) void this.#ownership.addInterest(instanceKey);
+    if (this.#multiPod) {
+      // Stamp interest BEFORE announcing the descriptor: the owner treats a registry entry with no
+      // live interest as dead and prunes it, so the entry must never be visible before its interest.
+      void (async () => {
+        await this.#ownership.addInterest(instanceKey);
+        await this.#store.registerInstance(clientGroupID, instanceKey, JSON.stringify({ args: queryArgs, partitionValue }));
+      })().catch((error) => logger.error('sync_register_instance_failed', { instanceKey, error }));
+    }
     void this.#ensureMaterialized(group);
     return instanceKey;
   }
@@ -297,32 +304,80 @@ export class InstanceManager {
     }
     try {
       await this.#store.teardownInstance(instanceKey, guard);
-      if (group && group.connection && group.connection.size() === 0) {
-        group.connection.stop();
-        this.#groups.delete(instance.groupKey);
-        await this.#store.teardownGroup(instance.groupKey, guard);
-        if (this.#multiPod && group.owned) await this.#ownership.releaseGroup(group.clientGroupID);
-        logger.info('sync_group_closed', { clientGroupID: instance.groupKey });
-        obsEmit('tap', { action: 'group-close', clientGroupID: instance.groupKey });
-      }
+      if (this.#multiPod) await this.#store.deregisterInstance(instance.groupKey, instanceKey, guard);
+      if (group) await this.#closeGroupIfEmpty(group);
     } catch (error) {
       logger.error('sync_instance_teardown_failed', { instanceKey, error });
     }
   }
 
+  /** Stop + drop a group whose connection has no instances left: release the lease and drop the
+   *  resume cursor + registry (fenced). Owner-only Redis effects; no-op while still materializing. */
+  async #closeGroupIfEmpty(group: Group): Promise<void> {
+    if (!group.connection || group.connection.size() > 0) return;
+    group.connection.stop();
+    this.#groups.delete(group.clientGroupID);
+    await this.#store.teardownGroup(group.clientGroupID, this.#guardFor(group));
+    if (this.#multiPod && group.owned) await this.#ownership.releaseGroup(group.clientGroupID);
+    logger.info('sync_group_closed', { clientGroupID: group.clientGroupID });
+    obsEmit('tap', { action: 'group-close', clientGroupID: group.clientGroupID });
+  }
+
   /**
-   * Owner heartbeat (multi-pod). Keep owned leases alive and re-stamp interest for every locally
-   * wanted instance; demote a group whose lease we lost; and (re)acquire a group we want but don't
-   * own — a minimal self-heal after a transient stall drops a lease. Cross-pod takeover of OTHER
-   * pods' dead leases + materializing remote-only interest is the item-3 reconcile loop.
+   * Owner-side reconcile of a group against the fleet subscription registry (`sync:ginst`). The
+   * owner serves the WHOLE group, so it must materialize every registered instance with live
+   * interest — including ones only a REMOTE pod subscribed to, that never hit this pod's subscribe
+   * — and tear down (fenced) + deregister those whose interest has drained (the parked-owner sweep
+   * the local grace-timer can't reach once its last local subscriber is gone). Owner-only.
+   */
+  async #reconcileOwned(group: Group): Promise<void> {
+    const conn = group.connection;
+    const guard = this.#guardFor(group);
+    if (!conn || !guard) return;
+    const registry = await this.#store.groupInstances(group.clientGroupID);
+    for (const [ik, descJSON] of Object.entries(registry)) {
+      let desc: { args: readonly unknown[]; partitionValue: string };
+      try {
+        desc = JSON.parse(descJSON) as { args: readonly unknown[]; partitionValue: string };
+      } catch {
+        continue;
+      }
+      if ((await this.#ownership.liveInterest(ik)) > 0) {
+        conn.addInstance(ik, desc.args, ik, desc.partitionValue); // idempotent; covers remote-only
+      } else {
+        conn.removeInstance(ik, desc.partitionValue);
+        await this.#store.teardownInstance(ik, guard);
+        await this.#store.deregisterInstance(group.clientGroupID, ik, guard);
+        const local = this.#instances.get(ik); // drop any parked local record + its grace timer
+        if (local?.idleTimer) clearTimeout(local.idleTimer);
+        this.#instances.delete(ik);
+        group.members.delete(ik);
+        obsEmit('tap', { action: 'instance-close', instanceKey: ik, clientGroupID: group.clientGroupID });
+      }
+    }
+    await this.#closeGroupIfEmpty(group);
+  }
+
+  /**
+   * Owner heartbeat + reconcile (multi-pod, every ~2s). For each group: if owned, refresh the
+   * lease (demote on loss) then reconcile its materialized set against the fleet registry
+   * (materialize remote-only interest, sweep drained instances); if not owned but wanted, try to
+   * (re)acquire — this is also the cross-pod TAKEOVER path: once a dead owner's lease TTL-expires,
+   * a pod with members here wins the SET NX and materializes. Finally re-stamp interest for
+   * instances a local subscriber still wants.
    */
   async #onHeartbeat(): Promise<void> {
     for (const group of this.#groups.values()) {
       try {
         if (group.owned) {
-          if (!(await this.#ownership.refreshGroup(group.clientGroupID))) this.#demoteGroup(group);
+          if (!(await this.#ownership.refreshGroup(group.clientGroupID))) {
+            this.#demoteGroup(group);
+          } else {
+            await this.#reconcileOwned(group);
+          }
+        } else if (group.members.size > 0) {
+          void this.#ensureMaterialized(group);
         }
-        if (!group.owned && group.members.size > 0) void this.#ensureMaterialized(group);
       } catch (error) {
         // A Redis blip on one group's refresh must not abort the others or spray unhandled
         // rejections from setInterval; log and retry next cycle (a truly lost lease re-demotes).

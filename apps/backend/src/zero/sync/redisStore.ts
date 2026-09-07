@@ -13,6 +13,9 @@ const PREFIX = 'sync';
 const snapKey = (instanceKey: string): string => `${PREFIX}:snap:${instanceKey}`;
 const streamKey = (instanceKey: string): string => `${PREFIX}:stream:${instanceKey}`;
 const cookieKey = (clientGroupID: string): string => `${PREFIX}:cookie:${clientGroupID}`;
+/** Per-GROUP subscription registry: instanceKey → descriptor, so a group's owner can materialize
+ *  every subscribed instance — including ones only a REMOTE pod wants — that it never saw locally. */
+const registryKey = (clientGroupID: string): string => `${PREFIX}:ginst:${clientGroupID}`;
 
 const STREAM_MAXLEN = 10_000;
 const CLEAR_DIFF = JSON.stringify({ upserts: [], deletes: [], cleared: true });
@@ -106,14 +109,20 @@ const TEARDOWN_INSTANCE = `${FENCE_GATE}
 redis.call('DEL', KEYS[2], KEYS[3])
 return 'OK'`;
 
-/** teardownGroup, fenced. KEYS=[fence, cookie]  ARGV=[token] */
+/** teardownGroup, fenced. Drops the resume cursor AND the subscription registry. KEYS=[fence,
+ *  cookie, registry]  ARGV=[token] */
 const TEARDOWN_GROUP = `${FENCE_GATE}
-redis.call('DEL', KEYS[2])
+redis.call('DEL', KEYS[2], KEYS[3])
 return 'OK'`;
 
 /** saveCookie, fenced. KEYS=[fence, cookie]  ARGV=[token, cookie] */
 const SAVE_COOKIE = `${FENCE_GATE}
 redis.call('SET', KEYS[2], ARGV[2])
+return 'OK'`;
+
+/** deregisterInstance, fenced (owner-only prune). KEYS=[fence, registry]  ARGV=[token, instanceKey] */
+const DEREGISTER = `${FENCE_GATE}
+redis.call('HDEL', KEYS[2], ARGV[2])
 return 'OK'`;
 
 /** XRANGE returns fields as a flat [f, v, f, v, …] array — collapse to an object. */
@@ -342,11 +351,34 @@ export class RedisStreamStore {
     if (guard) {
       return this.#fenced(
         TEARDOWN_GROUP,
-        [fenceKey(guard.groupKey), cookieKey(clientGroupID)],
+        [fenceKey(guard.groupKey), cookieKey(clientGroupID), registryKey(clientGroupID)],
         [String(guard.token)],
       );
     }
-    await redisService.getClient().del(cookieKey(clientGroupID));
+    await redisService.getClient().del(cookieKey(clientGroupID), registryKey(clientGroupID));
+    return 'applied';
+  }
+
+  /**
+   * Register (or refresh) a subscribed instance in its group's registry so the group's OWNER —
+   * which may be a different pod that never saw this subscribe — can materialize it. Additive and
+   * unfenced: any pod may announce a subscription; the owner prunes it (fenced) when interest dies.
+   */
+  async registerInstance(clientGroupID: string, instanceKey: string, descriptor: string): Promise<void> {
+    await redisService.getClient().hset(registryKey(clientGroupID), instanceKey, descriptor);
+  }
+
+  /** Every subscribed instance in a group: instanceKey → descriptor JSON (the owner's work-list). */
+  async groupInstances(clientGroupID: string): Promise<Record<string, string>> {
+    return redisService.getClient().hgetall(registryKey(clientGroupID));
+  }
+
+  /** Owner-only prune of a registry entry once its instance has no live interest (fenced). */
+  async deregisterInstance(clientGroupID: string, instanceKey: string, guard?: FenceGuard): Promise<FenceOutcome> {
+    if (guard) {
+      return this.#fenced(DEREGISTER, [fenceKey(guard.groupKey), registryKey(clientGroupID)], [String(guard.token), instanceKey]);
+    }
+    await redisService.getClient().hdel(registryKey(clientGroupID), instanceKey);
     return 'applied';
   }
 }

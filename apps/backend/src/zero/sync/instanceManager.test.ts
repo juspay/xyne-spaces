@@ -13,11 +13,13 @@ type Mod = typeof import('./instanceManager');
 let InstanceManager: Mod['InstanceManager'] | undefined;
 let ownership: (typeof import('./ownership'))['ownership'] | undefined;
 let Ownership: (typeof import('./ownership'))['Ownership'] | undefined;
+let RedisStreamStore: (typeof import('./redisStore'))['RedisStreamStore'] | undefined;
 let redisService: (typeof import('@/services/redisService'))['redisService'] | undefined;
 let reason = '';
 try {
   ({ InstanceManager } = await import('./instanceManager.js'));
   ({ ownership, Ownership } = await import('./ownership.js'));
+  ({ RedisStreamStore } = await import('./redisStore.js'));
   ({ redisService } = await import('@/services/redisService'));
   await redisService.getClient().ping();
 } catch (e) {
@@ -168,6 +170,47 @@ test('InstanceManager two pods: exactly one owns; non-owner never reclaims; inte
     mgrA.stopAll();
     mgrB.stopAll();
     await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`);
+  }
+});
+
+test('InstanceManager owner reconcile: materialize remote-only interest, sweep on drain', { skip }, async () => {
+  const own = ownership!;
+  const client = redisService!.getClient();
+  const store = new RedisStreamStore!();
+  const rnd = Math.floor(Math.random() * 1e9);
+  const created: Rec[] = [];
+  const mgr = new InstanceManager!('http://zero', {
+    multiPod: true,
+    ownership: own,
+    assertRedisSafe: async () => {},
+    heartbeatMs: 20,
+    graceMs: 60_000,
+    createConnection: fakeFactory(created),
+  });
+  // This pod subscribes to X → owns the group. A REMOTE pod subscribes to a different instance I2
+  // in the same group: it announces the descriptor + stamps interest under its own podId. The
+  // owner's reconcile must materialize I2 even though no local subscriber ever asked for it.
+  const ikX = mgr.subscribe(QUERY, argsFor('own-' + rnd), 'subX')!;
+  await sleep(60);
+  const G = created[0].opts.clientGroupID;
+  const remote = new Ownership!(`podFar-${rnd}`);
+  const i2 = `remoteinst-${rnd}`;
+  try {
+    assert.equal(await own.ownsGroup(G), true);
+    await remote.addInterest(i2);
+    await store.registerInstance(G, i2, JSON.stringify({ args: [{ channelId: 'chY', limit: 25 }], partitionValue: 'chY' }));
+    await sleep(60); // owner reconcile picks it up from the registry
+    assert.ok(created[0].added.includes(i2), 'owner materialized the remote-only instance');
+
+    // Remote drops interest → owner sweeps it: removeInstance + fenced teardown + deregister.
+    await remote.removeInterest(i2);
+    await sleep(60);
+    assert.ok(created[0].removed.includes(i2), 'owner removed the drained remote instance');
+    assert.equal((await store.groupInstances(G))[i2], undefined, 'registry entry deregistered');
+    assert.ok(created[0].added.includes(ikX) && !created[0].removed.includes(ikX), 'local instance untouched');
+  } finally {
+    mgr.stopAll();
+    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:ginst:${G}`, `sync:cookie:${G}`, `sync:interest:${ikX}`, `sync:interest:${i2}`, `sync:snap:${ikX}`, `sync:stream:${ikX}`, `sync:snap:${i2}`, `sync:stream:${i2}`);
   }
 });
 
