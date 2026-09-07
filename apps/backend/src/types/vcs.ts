@@ -62,3 +62,10 @@ export interface CommitInfo {
   message: string; // FULL commit message (for Co-authored-by parsing)
   committedAt: Date;
 }
+
+// Commit analysis status for tracking bot attribution analysis progress
+export enum CommitAnalysisStatus {
+  PENDING = 'PENDING',     // Analysis queued but not started
+  COMPLETED = 'COMPLETED', // Analysis finished successfully
+  FAILED = 'FAILED',       // Analysis encountered an error
+}

@@ -1,4 +1,5 @@
 
+
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -1297,13 +1298,11 @@ model PullRequests {
 
 /// Individual commits within a PR, with bot attribution parsed from Co-authored-by trailers
 model Commit {
-  workspaceId     String
   id              String   @id @default(cuid())
 
   // Commit identifiers
   commitSha       String
   pullRequestId   String
-  repositoryUrl   String
 
   // Bot attribution (parsed from xyne-bot-author trailer in commit message)
   agentSlug       String?  // Single bot slug or null
@@ -1311,19 +1310,14 @@ model Commit {
   // Git metadata from VCS API
   authorName      String
   authorEmail     String
-  messageHeadline String   // First line of commit message
-  messageBody     String?  @db.Text // Full commit message (for Co-authored-by parsing)
   committedAt     DateTime
 
-  createdAt       DateTime @default(now())
+  createdAt       DateTime
 
   // Relations
   pullRequest PullRequests @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
 
   @@unique([pullRequestId, commitSha])
-  @@index([pullRequestId])
-  @@index([workspaceId])
-  @@index([workspaceId, repositoryUrl, committedAt(sort: Desc)])
   @@map("commits")
   @@schema("public")
 }

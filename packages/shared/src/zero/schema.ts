@@ -684,16 +684,12 @@ export const pullRequestsTable = table('pull_requests')
 
 export const commitTable = table('commits')
   .columns({
-    workspaceId: string(),
     id: string(),
     commitSha: string(),
     pullRequestId: string(),
-    repositoryUrl: string(),
     agentSlug: string().optional(),
     authorName: string(),
     authorEmail: string(),
-    messageHeadline: string(),
-    messageBody: string().optional(),
     committedAt: number(),
     createdAt: number(),
   })

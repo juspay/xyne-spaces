@@ -1,6 +1,13 @@
-import { VcsClient, CommitInfo } from '@/types/vcs';
+import { VcsClient, CommitInfo, CommitAnalysisStatus } from '@/types/vcs';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+
+/**
+ * Git trailer for bot attribution
+ * Format: "xyne-bot-author: <agent-slug>"
+ * Example: "xyne-bot-author: claw-v2"
+ */
+const BOT_AUTHOR_TRAILER = 'xyne-bot-author';
 
 export interface CommitAnalysisInput {
   prId: number;
@@ -15,7 +22,7 @@ export interface CommitAnalysisResult {
   totalCommits: number;
   botCommits: number; // Commits with at least one bot
   humanCommits: number; // Commits with no bots
-  status: 'COMPLETED' | 'FAILED';
+  status: CommitAnalysisStatus;
   error: string | null;
 }
 
@@ -29,7 +36,7 @@ export class PrCommitAnalysisService {
    * Called from async worker after PR merge.
    *
    * Attribution logic:
-   * - Parse xyne-bot-author trailer from commit messages
+   * - Parse bot author trailer from commit messages
    * - Extract single bot slug per commit (or null for human commits)
    * - Store in Commit table with agentSlug field
    */
@@ -38,7 +45,7 @@ export class PrCommitAnalysisService {
       totalCommits: 0,
       botCommits: 0,
       humanCommits: 0,
-      status: 'COMPLETED',
+      status: CommitAnalysisStatus.COMPLETED,
       error: null,
     };
 
@@ -61,8 +68,6 @@ export class PrCommitAnalysisService {
       const { botCommitCount, humanCommitCount } = await this.processCommits(
         commits,
         input.prInternalId,
-        input.workspaceId,
-        input.repositoryUrl,
       );
 
       result.botCommits = botCommitCount;
@@ -76,7 +81,7 @@ export class PrCommitAnalysisService {
       return result;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      result.status = 'FAILED';
+      result.status = CommitAnalysisStatus.FAILED;
       result.error = errorMsg;
       logger.error(`[PRCommitAnalysis] Failed to analyze PR #${input.prId}: ${errorMsg}`, error);
       return result;
@@ -84,12 +89,12 @@ export class PrCommitAnalysisService {
   }
 
   /**
-   * Parse xyne-bot-author trailer from commit message
+   * Parse bot author trailer from commit message
    * Format: "xyne-bot-author: <slug>"
    * Returns: string (bot slug) or null (not a bot commit)
    */
   private parseBotAuthor(message: string): string | null {
-    const regex = /xyne-bot-author:\s*(.+?)$/m;
+    const regex = new RegExp(`${BOT_AUTHOR_TRAILER}:\\s*(.+?)$`, 'm');
     const match = message.match(regex);
     return match ? match[1].trim() : null;
   }
@@ -100,8 +105,6 @@ export class PrCommitAnalysisService {
   private async processCommits(
     commits: CommitInfo[],
     pullRequestId: string,
-    workspaceId: string,
-    repositoryUrl: string,
   ): Promise<{ botCommitCount: number; humanCommitCount: number }> {
     let botCommitCount = 0;
     let humanCommitCount = 0;
@@ -124,21 +127,17 @@ export class PrCommitAnalysisService {
           },
         },
         create: {
-          workspaceId,
           pullRequestId,
           commitSha: commit.sha,
-          repositoryUrl,
           agentSlug: botSlug, // Single bot slug or null
           authorName: commit.authorName,
           authorEmail: commit.authorEmail,
-          messageHeadline: commit.message.split('\n')[0].substring(0, 300),
-          messageBody: commit.message,
           committedAt: commit.committedAt,
+          createdAt: new Date(),
         },
         update: {
           // Update if commit was force-pushed
           agentSlug: botSlug,
-          messageBody: commit.message,
         },
       });
     }
