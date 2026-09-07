@@ -1,3 +1,10 @@
+## [1.278.4](https://github.com/juspay/xyne-spaces/compare/v1.278.3...v1.278.4) (2026-09-07)
+
+
+### Bug Fixes
+
+* dismiss, filters and tuning for radar ([#1570](https://github.com/juspay/xyne-spaces/issues/1570)) ([2b8ebf0](https://github.com/juspay/xyne-spaces/commit/2b8ebf0c7bac52228dad9f758c5c042335d791ec))
+
 ## [1.278.3](https://github.com/juspay/xyne-spaces/compare/v1.278.2...v1.278.3) (2026-09-06)
 
 
