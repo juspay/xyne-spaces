@@ -62,6 +62,10 @@ export class Fanout {
    *  user whose admission a delta on it can change → re-gate only U; a PER-SCOPE grant (channels[C])
    *  has no user → re-gate all of the scope's subscribers. */
   readonly #grantMeta = new Map<string, { userId?: string }>();
+  /** Grant instances whose stream has a non-cleared (materialized) tail — safe to gate against.
+   *  Admission DEFERS while a client's grant is absent here (cold at session start, or mid-clear
+   *  rehydration): a NOT-EXISTS arm would fail OPEN on an empty cold snapshot. */
+  readonly #grantHydrated = new Set<string>();
   readonly #cursors = new Map<string, string>();
   // Serialize dispatch per stream so grant deltas (join/leave) re-gate in stream order;
   // a `void #dispatch` let a later entry overtake an earlier one → stale admit survived
@@ -101,6 +105,9 @@ export class Fanout {
         this.#grantMeta.set(grantKey, perUserTables.has(table) ? { userId: client.userId } : {});
       }
       await this.#ensureCursorHead(grantKey);
+      // Seed hydration state so an already-warm grant (a co-subscriber materialized it) admits
+      // immediately; a cold one defers until its hydration delta arrives (tracked in #dispatch).
+      if (await this.#store.isHydrated(grantKey)) this.#grantHydrated.add(grantKey);
     }
     // Serialize the initial regate onto the data instance's queue so a subscribe-time
     // admit can't interleave a stale grant view against a concurrent grant dispatch for
@@ -171,6 +178,14 @@ export class Fanout {
     // re-gate or hydrate a client no longer subscribed — else the subscribe-time regate
     // could flip `admitted` and emit a stray snapshot for a released instance.
     if (!this.#dataSubs.get(client.dataInstanceKey)?.has(client)) return;
+    // Cold-defer (MANDATORY): never gate against a not-yet-hydrated grant instance. Per-user
+    // grants are cold at session start, and a NOT-EXISTS arm fails OPEN on an empty cold snapshot.
+    // Returning here defers a not-yet-admitted client AND pins an already-admitted one through a
+    // grant's mid-clear rehydration (no false revoke); the grant's hydration delta re-gates. Data
+    // hydration is concurrent — both taps are subscribed up-front in addClient.
+    for (const grantKey of client.grantByTable.values()) {
+      if (!this.#grantHydrated.has(grantKey)) return;
+    }
     const grantRows = new Map<string, Record<string, unknown>[]>();
     for (const [table, grantKey] of client.grantByTable) {
       let rows = cache?.get(grantKey);
@@ -355,6 +370,11 @@ export class Fanout {
       // flip always uses a view ≥ every delta. It also orders regates against that
       // instance's data-delta dispatches (same key), so the emit-time recheck sees settled
       // flags. Distinct channels stay parallel.
+      // Track hydration for cold-defer: a `cleared` (reset) makes the grant unusable for gating
+      // until it re-materializes; any non-cleared entry marks it hydrated. Updated BEFORE the
+      // re-gate is enqueued so the job sees the current state.
+      if (diff?.cleared) this.#grantHydrated.delete(instanceKey);
+      else this.#grantHydrated.add(instanceKey);
       // A PER-USER grant delta (`channel_participants{userId:U}`) can only change U's admission —
       // the instance IS the user, so re-gate only U on each affected data instance (O(subs_U)).
       // A PER-SCOPE grant delta (channels[C] visibility flip) affects everyone → re-gate all.
