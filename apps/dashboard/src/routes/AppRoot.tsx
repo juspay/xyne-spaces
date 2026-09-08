@@ -87,7 +87,10 @@ import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOver
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
-import { ElectronUpdateNudge } from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
+import {
+  ElectronUpdateNudge,
+  ELECTRON_UPDATE_NUDGE_ENABLED,
+} from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { SlashCommandArtifactBanner } from '../components/Chat/SlashCommandArtifactBanner';
 import { SlashCommandArtifactSideEffectProvider } from '../components/Chat/SlashCommandArtifactSideEffects';
@@ -217,6 +220,7 @@ import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScree
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { WorkflowScreen } from './WorkflowScreen';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
@@ -962,7 +966,7 @@ const AppRoot = (): ReactElement => {
                           <GlobalUploadProgress />
                           <NotificationHandler />
                           <ElectronBadgeSync />
-                          <ElectronUpdateNudge />
+                          {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
                           <SosAlertBanner />
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
@@ -1082,6 +1086,10 @@ const AppRoot = (): ReactElement => {
 /** Real screen in the SDLC bundle; the framed placeholder in the main one. */
 const SdlcRouteElement = (): ReactElement =>
   isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
+
+/** A ticket page, but still inside the hub's frame so its history stays in one router. */
+const SdlcTicketRouteElement = (): ReactElement =>
+  isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1449,6 +1457,16 @@ export const router = createBrowserRouter(
                   element: <SearchResults />,
                 },
                 {
+                  // Splat: @xyne/workflow-ui owns every screen below /workflows and
+                  // routes between them itself, handing the sub-path back via onNavigate.
+                  path: 'workflows/*',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
+                      <WorkflowScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
                   path: 'product-insights',
                   element: (
                     <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
@@ -1619,6 +1637,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:channelId/tickets/:ticketId',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcTicketRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },

@@ -25,7 +25,6 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { Tooltip } from '../ui/Tooltip';
-import { Button } from '../ui/Button/Button';
 
 // Random greetings for the recap header
 const RECAP_GREETINGS = [
@@ -540,8 +539,7 @@ const RecapPanel = (): ReactElement => {
                 </Tooltip>
               )}
               {!isHistoricalView && (
-                <Button
-                  variant='ghost'
+                <button
                   onClick={() => void handleToggleRead(card.channelId, isRead)}
                   className={`flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border ${
                     isRead
@@ -550,7 +548,9 @@ const RecapPanel = (): ReactElement => {
                   }`}
                   data-track-category='RECAP_PANEL'
                   data-track-name={isRead ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'}
-                  trackId={isRead ? 'mark_recap_unread' : 'mark_recap_read'}
+                  data-ph-capture-attribute-track-id={
+                    isRead ? 'mark_recap_unread' : 'mark_recap_read'
+                  }
                 >
                   {isRead ? (
                     <>
@@ -563,7 +563,7 @@ const RecapPanel = (): ReactElement => {
                       <span>Mark as read</span>
                     </>
                   )}
-                </Button>
+                </button>
               )}
             </div>
           </div>
@@ -617,18 +617,17 @@ const RecapPanel = (): ReactElement => {
                   </span>
                 </div>
                 {!isHistoricalView && (
-                  <Button
-                    variant='ghost'
+                  <button
                     onClick={handleMarkAllAsRead}
                     className='flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-600 bg-green-500/10 hover:bg-green-500/20 rounded-md border border-green-500/30 transition-colors'
                     title='Mark all as read'
                     data-track-category='RECAP_PANEL'
                     data-track-name='MARK_ALL_AS_READ'
-                    trackId='mark_all_recap_read'
+                    data-ph-capture-attribute-track-id='mark_all_recap_read'
                   >
                     <CheckCheck size={12} />
                     <span>Mark all as read</span>
-                  </Button>
+                  </button>
                 )}
               </div>
               {unreadCards.map(card => (

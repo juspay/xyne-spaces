@@ -463,17 +463,16 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
               />
 
               {isEditingMode && (
-                <Button
-                  variant='ghost'
+                <button
                   onClick={handleClearStatus}
-                  trackId='clear_user_status'
+                  data-ph-capture-attribute-track-id='clear_user_status'
                   className='h-auto p-0 flex-shrink-0 flex items-center gap-1 text-muted-foreground hover:text-muted-foreground hover:bg-transparent'
                   data-track-category='Update_User_Status_Modal'
                   data-track-name='Clear_Status_In_Modal'
                 >
                   <span className='text-xs opacity-60'>(Clear status)</span>
                   <X className='size-4' />
-                </Button>
+                </button>
               )}
             </div>
 

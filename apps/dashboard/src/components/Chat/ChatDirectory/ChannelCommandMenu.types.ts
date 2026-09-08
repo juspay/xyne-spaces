@@ -1,6 +1,7 @@
 // Types for ChannelCommandMenu component (using const objects due to erasableSyntaxOnly)
 import type { Channel } from '@xyne/shared';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
+import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
 import type { ContextItem } from '../ThreadContextPanel/ThreadContextPanel.types';
 import type { InitialQueryData } from './LexicalSearchInput';
 import { parseSearchFilters, parseTypeFilter } from '../../../utils/searchFilterParser';
@@ -145,25 +146,59 @@ export const VespaDocTypes = {
 
 export type VespaDocTypes = (typeof VespaDocTypes)[keyof typeof VespaDocTypes];
 
-export const MentionType = {
+/**
+ * What a search-filter chip stands for. Named for the chip, not for "mentions": most of
+ * these aren't mentions at all — a priority, a date bound and a board are value filters,
+ * and MENTIONS is a typeahead mode rather than a chip type.
+ *
+ * The string values are persisted (URL params, saved searches), so they must not change
+ * even when the identifiers do.
+ */
+export const ChipType = {
   USER: 'user',
   CHANNEL: 'channel',
   // Value filter (not an entity): the exclusive priority chip. `id` holds the
   // canonical TicketPriority value (e.g. 'HIGH'), `name` the display label.
   PRIORITY: 'priority',
+  // Value filter: a date bound. `id` holds the YYYY-MM-DD; the prefix says which
+  // edge of the window it is (`on:` for a single day).
+  DATE: 'date',
+  // A palette *search mode* only, never the type on a chip: the `mentions:` typeahead
+  // lists people and channels together, and the picked candidate's own USER/CHANNEL type
+  // is what lands on the chip.
+  MENTIONS: 'mentions',
+  // Value filter: a board. `id` is the boardId the backend matches on, `name` the label —
+  // typing a board's name would match nothing, so it has to be picked.
+  BOARD: 'board',
 } as const;
 
-export type MentionType = (typeof MentionType)[keyof typeof MentionType];
+export type ChipType = (typeof ChipType)[keyof typeof ChipType];
 
 /**
  * Picked entity + filter metadata for a mention/filter chip (cmd+K search,
- * GlobalCommandMenu). `type` mirrors the MentionType values above.
+ * GlobalCommandMenu). `type` mirrors the ChipType values above.
  */
-export interface MentionData {
+/**
+ * The palette's two scope toggles. They shape which documents a search can match, so they
+ * travel with the query wherever it's handed off or restored.
+ */
+export interface SearchScopeToggles {
+  onlyMyChannels: boolean;
+  includeBotMessages: boolean;
+}
+
+/**
+ * A whole restorable palette search: the query text, its chips, and the scope it ran at.
+ * Stored on the palette's history entry and rebuilt from the results page's parked params.
+ */
+export type PaletteRestore = InitialQueryData & { toggles?: SearchScopeToggles };
+
+export interface ChipData {
   id: string;
   name: string;
-  type: 'user' | 'channel' | 'priority';
-  prefix?: 'from:' | 'to:' | 'with:' | 'in:' | 'assignee:' | 'priority:';
+  // Was a hand-written copy of ChipType's values; use the enum so they can't drift.
+  type: ChipType;
+  prefix?: ChipPrefix;
   email?: string;
   photoLink?: string;
 }
@@ -193,12 +228,24 @@ export interface ChannelCommandMenuProps {
   /** Called when user confirms selection ("Add to Thread") */
   onContextSelectionConfirm?: () => void;
   /** Pre-populated mention filter (e.g., from Cmd+F for current channel) */
-  initialMention?: MentionData | null;
+  initialMention?: ChipData | null;
   /**
    * Pre-populated full query (mention chips + trailing text) used to restore
    * the previous search when reopening the overlay from the results-page header.
    */
   initialQuery?: InitialQueryData | null;
+  /**
+   * Scope toggles to open with, restored alongside `initialQuery`. Without these a
+   * reopened palette would silently re-run the search at a different scope than the
+   * results page it came from.
+   */
+  initialToggles?: SearchScopeToggles | null;
+  /**
+   * Supplies the search the results page was last showing, for a back-navigation. The
+   * palette's own history payload froze at hand-off, so it can't include filters set on
+   * the page; when this returns something it wins.
+   */
+  restoreFromLastSearch?: (() => PaletteRestore | null) | undefined;
   /**
    * Controls which tabs are visible. When omitted, defaults to all
    * pre-existing tabs (users, channels, messages, desk, tickets, attachments).
@@ -346,28 +393,37 @@ type FilterChip = { type: string; prefix?: string };
  * attach to USER chips, in: only to CHANNEL — enforced at chip creation in MentionPlugin), so
  * the bare-@/# type checks below are reached only by prefix-less chips.
  */
+
+const PREFIX_TO_KIND: Record<ChipPrefix, FilterKind> = {
+  'from:': 'from',
+  'to:': 'to',
+  'with:': 'with',
+  // Routed by chip type in filterChipToKind — people and channels share this prefix.
+  'mentions:': 'mention',
+  'in:': 'in',
+  'assignee:': 'assignee',
+  'priority:': 'priority',
+  'board:': 'board',
+  'on:': 'date',
+  'after:': 'date',
+  'before:': 'date',
+};
+
 export function filterChipToKind(chip: FilterChip): FilterKind | null {
-  switch (chip.prefix) {
-    case 'from:':
-      return 'from';
-    case 'to:':
-      return 'to';
-    case 'with:':
-      return 'with';
-    case 'in:':
-      return 'in';
-    case 'assignee:':
-      return 'assignee';
-    case 'priority:':
-      return 'priority';
-    default:
-      break;
+  // Record<ChipPrefix, …> rather than a switch: adding a prefix is then a compile error
+  // here until it's mapped, instead of silently falling through to the bare-chip checks.
+  // `chip.prefix` is loosely typed (callers hand us `string`), so it's narrowed rather
+  // than cast — an unrecognised prefix falls through to the bare-chip checks as before.
+  // `mentions:` is the one prefix two chip types share, so it's routed by type first.
+  if (chip.prefix === 'mentions:') {
+    return chip.type === ChipType.CHANNEL ? 'channelMention' : 'mention';
   }
+  if (chip.prefix && isChipPrefix(chip.prefix)) return PREFIX_TO_KIND[chip.prefix];
   // Priority chip carries type 'priority' even without a prefix.
-  if (chip.type === MentionType.PRIORITY) return 'priority';
+  if (chip.type === ChipType.PRIORITY) return 'priority';
   // Bare @user / #channel chips (no prefix) scope to message content.
-  if (chip.type === MentionType.USER) return 'mention';
-  if (chip.type === MentionType.CHANNEL) return 'channelMention';
+  if (chip.type === ChipType.USER) return 'mention';
+  if (chip.type === ChipType.CHANNEL) return 'channelMention';
   return null;
 }
 

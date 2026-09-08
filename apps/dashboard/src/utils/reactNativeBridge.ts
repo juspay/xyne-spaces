@@ -200,6 +200,10 @@ export interface NativeGoogleSignInResultPayload {
   name?: string;
   picture?: string;
   userExistsButRemoved?: boolean;
+  domainConflictError?: string;
+  publicEmailDomainError?: string;
+  enterpriseJoinOrgName?: string;
+  enterpriseJoinWorkspaces?: string;
 }
 
 export interface NativeMicrosoftSignInResultPayload {
@@ -210,6 +214,10 @@ export interface NativeMicrosoftSignInResultPayload {
   name?: string;
   error?: string;
   errorMessage?: string;
+  domainConflictError?: string;
+  publicEmailDomainError?: string;
+  enterpriseJoinOrgName?: string;
+  enterpriseJoinWorkspaces?: string;
   workspaces?: { id: string; name: string; role: string }[];
   picture?: string;
   userExistsButRemoved?: boolean;

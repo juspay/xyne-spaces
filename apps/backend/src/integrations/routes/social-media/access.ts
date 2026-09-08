@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { ChannelType, ChannelVisibility } from '@xyne/shared';
+import { ChannelRole, ChannelType, ChannelVisibility } from '@xyne/shared';
 import { db } from '@/database/client';
 
 export async function canAccessSocialMediaChannel(
@@ -41,6 +41,14 @@ export async function authorizeSocialMediaManager(
   });
   if (preference?.ownerUserId === userId) return true;
 
-  res.status(403).json({ error: 'Only the desk owner can manage this integration' });
+  const participant = await db.channelParticipant.findUnique({
+    where: { channelId_userId: { channelId, userId } },
+    select: { role: true },
+  });
+  if (participant?.role === ChannelRole.ADMIN) return true;
+
+  res
+    .status(403)
+    .json({ error: 'Only the desk owner or a channel admin can manage this integration' });
   return false;
 }

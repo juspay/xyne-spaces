@@ -67,6 +67,7 @@ export interface HoverActionsToolbarProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
+  showSubscription?: boolean;
   onCreateTicket?: () => void;
   onCreateSubTicket?: () => void;
   onEditMessage?: () => void;
@@ -125,6 +126,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
+  showSubscription,
   onCreateTicket,
   onCreateSubTicket,
   onEditMessage,
@@ -187,7 +189,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
     onRemindMeOption ||
     onForwardMessage ||
     (messageShortcuts && messageShortcuts.length > 0) ||
-    (onReplyInThread && conversationId);
+    (showSubscription && conversationId);
 
   // Keep toolbar visible if dropdown is open, even if parent says to hide
   if (!isVisible && !isDropdownOpen) return null;
@@ -384,7 +386,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             {(() => {
               const hasEditSection = (showEditAction && onEditMessage) || onSendToChannel;
               const hasSubscriptionSection =
-                (onReplyInThread && conversationId) ||
+                (showSubscription && conversationId) ||
                 onMarkAsUnread ||
                 onBookmark ||
                 onRemindMeOption ||
@@ -430,7 +432,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {hasEditSection && hasSubscriptionSection && <DropdownMenuSeparator />}
 
                   {/* Conversation Subscription */}
-                  {isDropdownOpen && onReplyInThread && conversationId && (
+                  {isDropdownOpen && showSubscription && conversationId && (
                     <DropdownMenuItem asChild>
                       <ConversationSubscription
                         conversationId={conversationId}

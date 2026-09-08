@@ -494,6 +494,8 @@ export const workflowTable = table('workflows')
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1082,6 +1084,7 @@ export const activityTable = table('activities')
     conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
+    trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
     actorId: string(),

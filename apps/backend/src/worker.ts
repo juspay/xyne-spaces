@@ -40,6 +40,7 @@ import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
+import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
@@ -54,6 +55,7 @@ import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
+import { workflowsWorker } from '@/workers/workflowsWorker';
 config()
 
 process.on('unhandledRejection', reason => {
@@ -100,6 +102,7 @@ class WorkerService {
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
@@ -193,6 +196,11 @@ class WorkerService {
         await emailClassificationQueue.initialize();
         logger.info('Starting social media review sync worker...');
         socialMediaSyncWorker.start();
+      }
+
+      if (workflowsEnabled) {
+        logger.info('Starting workflows worker...');
+        await workflowsWorker.start();
       }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
@@ -302,6 +310,9 @@ class WorkerService {
 
         logger.info('Starting Microsoft Calendar sync worker...');
         await microsoftCalendarSyncQueue.startProcessing();
+
+        logger.info('Starting call calendar push worker...');
+        await callCalendarPushQueue.startProcessing();
       } else {
         logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
       }
@@ -441,6 +452,7 @@ class WorkerService {
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
@@ -502,6 +514,10 @@ class WorkerService {
         await messageClassificationQueue.shutdown()
       }
 
+      if (workflowsEnabled) {
+        await workflowsWorker.stop()
+      }
+
       if (appConfig.enableWorkflowStepGcsSync) {
         logger.info('Closing workflow step GCS sync queue...');
         await workflowStepGcsSyncQueue.close();
@@ -530,6 +546,7 @@ class WorkerService {
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();
         await microsoftCalendarSyncQueue.close();
+        await callCalendarPushQueue.close();
       }
 
       if (appConfig.enableTeamIntelligenceWorker) {
