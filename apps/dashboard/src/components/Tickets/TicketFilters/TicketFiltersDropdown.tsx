@@ -32,6 +32,8 @@ import {
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { Button } from '../../ui/Button';
+import { Tooltip } from '../../ui/Tooltip';
+import { TURN_OFF_EXACT_SEARCH, TURN_ON_EXACT_SEARCH } from '../../../utils/exactSearch';
 import {
   PrioritySubmenu,
   UserSubmenu,
@@ -122,6 +124,8 @@ export const TicketFiltersDropdown = ({
   formMappings,
   searchValue,
   onSearchChange,
+  isExactSearch = false,
+  onExactSearchChange,
   selectedBoardName,
   onBoardDropdownOpenChange,
   onSourceChannelsOpenChange,
@@ -137,6 +141,8 @@ export const TicketFiltersDropdown = ({
 }: TicketFiltersProps & {
   searchValue?: string;
   onSearchChange?: (searchTerm: string) => void;
+  isExactSearch?: boolean;
+  onExactSearchChange?: (exact: boolean) => void;
   leadingControl?: ReactElement;
   trailingControl?: ReactElement | undefined;
 }): ReactElement => {
@@ -252,6 +258,18 @@ export const TicketFiltersDropdown = ({
     onSourceChannelsOpenChange?.(activeSubmenu === 'sourceChannels');
   }, [activeSubmenu, onSourceChannelsOpenChange]);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Set when the pill arms exact mode on an empty box. The `""` reaches the field a render
+  // later (it round-trips through the URL params), so the caret can only be placed once the
+  // value has landed — a frame callback runs too early, and the browser then parks the caret
+  // after the closing quote.
+  const pendingCaretRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingCaretRef.current || searchValue !== '""') return;
+    pendingCaretRef.current = false;
+    inputRef.current?.focus();
+    inputRef.current?.setSelectionRange(1, 1);
+  }, [searchValue]);
   const navigate = useNavigate();
   const canViewAnalytics = useCanViewAnalytics();
   const { setActiveTab } = useSearchMetrics({ allChannels: [] });
@@ -1023,25 +1041,51 @@ export const TicketFiltersDropdown = ({
         </div>
 
         {/* ticket search */}
-        <div className=' w-full max-w-56'>
-          <div className='relative'>
-            <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
+        <div className='flex items-center w-full max-w-[18.75rem]'>
+          {/* The box keeps its normal border in both modes. The lit `"ab"` button already
+              says exact match is on, and colouring the whole field for it reads as focus
+              or as an error rather than as a mode. */}
+          <div className='relative w-full rounded-lg border border-border bg-background'>
+            <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
             <input
               ref={inputRef}
               type='text'
               placeholder='Search Tickets'
               autoFocus={!isMobile}
               value={searchValue ?? ''}
-              onChange={e => {
-                if (onSearchChange) {
-                  onSearchChange(e.target.value);
-                }
-              }}
-              className='w-full text-sm bg-background border border-border text-foreground rounded-lg pl-10 pr-3 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500'
+              onChange={e => onSearchChange?.(e.target.value)}
+              className='w-full h-8 text-sm bg-transparent text-foreground rounded-lg pl-10 pr-[52px] focus:outline-none'
               aria-label='Search Tickets'
               data-track-category='Tickets'
               data-track-name='SearchTickets'
             />
+            <Tooltip content={isExactSearch ? TURN_OFF_EXACT_SEARCH : TURN_ON_EXACT_SEARCH}>
+              <button
+                type='button'
+                onClick={() => {
+                  const next = !isExactSearch;
+                  // Arming exact mode on an empty box inserts `""`; the caret belongs between
+                  // the quotes so what's typed next lands inside the phrase.
+                  pendingCaretRef.current = next && !(searchValue ?? '').trim();
+                  onExactSearchChange?.(next);
+                  inputRef.current?.focus();
+                }}
+                aria-pressed={isExactSearch}
+                aria-label={isExactSearch ? TURN_OFF_EXACT_SEARCH : TURN_ON_EXACT_SEARCH}
+                className={cn(
+                  'absolute right-1.5 top-1/2 -translate-y-1/2 whitespace-nowrap',
+                  'rounded-md border px-[7px] py-[3px] text-[13px] font-semibold transition-colors',
+                  isExactSearch
+                    ? 'bg-[var(--desk-accent-badge-bg)] text-[var(--ticket-accent)] border-[var(--desk-accent-subtle)]'
+                    : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+                )}
+                data-track-category='Tickets'
+                data-track-name='ToggleExactTicketSearch'
+                data-track-metadata={JSON.stringify({ exact: !isExactSearch })}
+              >
+                &quot;ab&quot;
+              </button>
+            </Tooltip>
           </div>
         </div>
 

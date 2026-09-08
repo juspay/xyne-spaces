@@ -48,8 +48,8 @@ export interface EncryptionProvider {
   revokeSessionKey(sessionId: string): Promise<void>;
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
   decryptBatch(values: string[]): Promise<string[]>;
-  encryptResponse<T>(body: T, sessionId: string, userId: string): Promise<T>;
-  decryptRequest<T>(body: T, sessionId: string, userId: string): Promise<T>;
+  encryptResponse<T>(body: T, sessionId: string): Promise<T>;
+  decryptRequest<T>(body: T, sessionId: string): Promise<T>;
   initializeOrg(orgId: string): Promise<void>;
   provisionEntity(input: ProvisionEntityInput): Promise<void>;
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;

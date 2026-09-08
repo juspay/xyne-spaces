@@ -1699,6 +1699,8 @@ MANDATORY OUTPUT CONTRACT:
         callStartedAt
       );
 
+      await this.linkDetailedSummaryCanvasToCall(callId, updatedCanvasId);
+
       return {
         canvasId: updatedCanvasId,
         version: existingCanvas.version + 1,
@@ -1719,10 +1721,41 @@ MANDATORY OUTPUT CONTRACT:
       workspaceIdOverride
     );
 
+    await this.linkDetailedSummaryCanvasToCall(callId, canvasId);
+
     return {
       canvasId,
       version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
     };
+  }
+
+  /**
+   * Put the summary canvas id on the Call row, so the summary can be found from the call alone
+   */
+  private async linkDetailedSummaryCanvasToCall(
+    callExternalId: string,
+    canvasId: string | null
+  ): Promise<void> {
+    if (!canvasId) return;
+    try {
+      const call = await repositories.calls.findByExternalId(callExternalId);
+      if (!call) return;
+      const metadata =
+        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+          ? (call.metadata as Record<string, unknown>)
+          : {};
+      if (typeof metadata['detailedSummaryCanvasId'] === 'string') return;
+      await repositories.calls.update(call.id, {
+        metadata: { ...metadata, detailedSummaryCanvasId: canvasId },
+      });
+    } catch (error) {
+      // A missing pointer degrades sharing and deep links, it does not invalidate
+      // the summary that was just written. Never fail generation over it.
+      logger.error(
+        `[CallDocumentService] Failed to link detailed summary canvas ${canvasId} to call ${callExternalId}:`,
+        error
+      );
+    }
   }
 
   /**
@@ -2371,6 +2404,7 @@ A comprehensive detailed summary has been generated from this call.
             });
 
           newCanvasId = canvasId;
+          await this.linkDetailedSummaryCanvasToCall(callId, canvasId);
           renderedMarkdown = firstMarkdown;
           canvasUrl = getCanvasUrl(canvasId);
           postedCanvasTitle = buildCanvasTitle(resolvedCallTitle);

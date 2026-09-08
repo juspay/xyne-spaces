@@ -1,6 +1,7 @@
 import { apiInstance } from './clients/apiClient';
 import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
 import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
+import { toSearchQuery } from '../utils/exactSearch';
 /**
  * Sanitizes search query by removing potentially harmful characters
  */
@@ -63,6 +64,8 @@ export class SearchService {
       }
 
       const data = response.data.data;
+      // Whether anything ranked these results — a filter-only search has no query text.
+      const hasQuery = Boolean(sanitizedFilters.query?.trim());
 
       // Handle grouped results - flatten them for backward compatibility
       let vespaResult: VespaSearchResult;
@@ -73,7 +76,11 @@ export class SearchService {
         }
 
         vespaResult = {
-          results: flattenedResults.filter(result => result.relevanceScore > 0),
+          // Zero-score rows are only noise when a query ranked them. A filter-only search
+          // (`q=` empty, filterOnly=true) has nothing to rank against, so Vespa scores every
+          // match 0 — dropping them here threw away the entire result set for a chip-only
+          // search like `from:@someone` or a date range.
+          results: flattenedResults.filter(result => !hasQuery || result.relevanceScore > 0),
           totalCount: data.totalCount,
           offset: data.offset,
           limit: data.limit,
@@ -112,8 +119,12 @@ export class SearchService {
    * Build query parameters for Vespa search request
    */
   private buildVespaSearchParams(filters: VespaSearchFilters): Record<string, string> {
+    // Exact match is expressed by quoting the query, which is what the backend's phrase
+    // grammar keys off. Done here rather than in the box so the user never sees the quotes.
+    // Same helper the ticket search uses, so the two surfaces can't drift on what "exact"
+    // means or on where the mode stops being a flag and becomes text.
     const params: Record<string, string> = {
-      q: filters.query,
+      q: toSearchQuery(filters.query, filters.exactMatch === true),
     };
 
     if (filters.apps) {
