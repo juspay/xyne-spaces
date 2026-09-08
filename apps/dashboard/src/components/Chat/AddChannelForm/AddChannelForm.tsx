@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ReactElement, useMemo } from 'react';
+import React, { useState, useEffect, useRef, ReactElement, useMemo } from 'react';
 import { ANDROID_PACKAGE_NAME_PATTERN, normalizeChannelName } from '@xyne/shared';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
@@ -438,12 +438,17 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     return null;
   })();
 
-  // Auto-select the first project by default (previous behavior) for all modes.
-  // Native channels can still switch to the "None (no project)" option; desk/promote
-  // keep it required.
+  // Auto-select the first project ONCE, when projects first load (previous default
+  // behavior). Guarded by a ref so a later projects-view re-emit does NOT overwrite an
+  // explicit "None (no project)" ('') selection the user made afterwards.
+  const didAutoSelectProjectRef = useRef(false);
   useEffect(() => {
-    if (!form.getFieldValue('projectId') && projects && projects.length > 0) {
-      form.setFieldValue('projectId', projects[0]!.id);
+    if (didAutoSelectProjectRef.current) return;
+    if (projects && projects.length > 0) {
+      didAutoSelectProjectRef.current = true;
+      if (!form.getFieldValue('projectId')) {
+        form.setFieldValue('projectId', projects[0]!.id);
+      }
     }
   }, [projects, form]);
 

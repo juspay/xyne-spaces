@@ -354,8 +354,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async checkDuplicateName(name: string, workspaceId: string): Promise<boolean> {
+    // Filter on the denormalized workspaceId, not the project relation — projectless
+    // channels (projectId nullable, decoupling) would otherwise escape the uniqueness check.
     const existingChannel = await this.db.channel.findFirst({
-      where: { name, project: { workspaceId } }
+      where: { name, workspaceId }
     });
     return !!existingChannel;
   }
