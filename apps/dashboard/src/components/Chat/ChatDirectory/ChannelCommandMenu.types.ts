@@ -23,6 +23,7 @@ export const SearchableTypes = {
   TRANSCRIPT: 'transcript',
   RCA: 'rca',
   EMAILS: 'emails',
+  AI_CHATS: 'ai-chats',
 } as const;
 /**
  * Type suggestions for the type: filter autocomplete
@@ -40,6 +41,7 @@ export const TYPE_SUGGESTIONS = [
   { id: SearchableTypes.TRANSCRIPT, name: SearchableTypes.TRANSCRIPT, subApp: 'transcript' },
   { id: SearchableTypes.RCA, name: SearchableTypes.RCA, subApp: 'RCA' },
   { id: SearchableTypes.EMAILS, name: SearchableTypes.EMAILS },
+  { id: SearchableTypes.AI_CHATS, name: SearchableTypes.AI_CHATS },
 ] as const;
 export const TabType = {
   ALL: 'all',
@@ -52,6 +54,7 @@ export const TabType = {
   CALL: 'call',
   RECORDING: 'recording',
   DESK: 'desk',
+  AI_CHATS: 'ai-chats',
 } as const;
 
 export type TabType = (typeof TabType)[keyof typeof TabType];
@@ -151,6 +154,10 @@ export const MentionType = {
   // Value filter (not an entity): the exclusive priority chip. `id` holds the
   // canonical TicketPriority value (e.g. 'HIGH'), `name` the display label.
   PRIORITY: 'priority',
+  // Value filter for a typed operator (date filters on the AI Chats tab):
+  // `prefix` is before:/after:/on:/range:, `id`/`name` hold the value. Rendered
+  // as a chip like the others; excluded from the query text, carried in mentions.
+  FILTER: 'filter',
 } as const;
 
 export type MentionType = (typeof MentionType)[keyof typeof MentionType];
@@ -162,8 +169,18 @@ export type MentionType = (typeof MentionType)[keyof typeof MentionType];
 export interface MentionData {
   id: string;
   name: string;
-  type: 'user' | 'channel' | 'priority';
-  prefix?: 'from:' | 'to:' | 'with:' | 'in:' | 'assignee:' | 'priority:';
+  type: 'user' | 'channel' | 'priority' | 'filter';
+  prefix?:
+    | 'from:'
+    | 'to:'
+    | 'with:'
+    | 'in:'
+    | 'assignee:'
+    | 'priority:'
+    | 'before:'
+    | 'after:'
+    | 'on:'
+    | 'range:';
   email?: string;
   photoLink?: string;
 }
@@ -263,7 +280,9 @@ export const FILTER_RELEVANCE: Record<FilterKind, TabType[]> = {
   // Content authored by / sent from the user (messages, desk email, tickets & files created).
   from: [TabType.MESSAGES, TabType.DESK, TabType.TICKETS, TabType.ATTACHMENTS],
   to: [TabType.DESK],
-  with: [TabType.MESSAGES],
+  // Context-sensitive: `with:` scopes messages to a person AND AI chats to an
+  // agent (which entity it resolves depends on the active tab — see MentionPlugin).
+  with: [TabType.MESSAGES, TabType.AI_CHATS],
   // Content scoped to a channel/DM — NOT the channel itself.
   in: [
     TabType.MESSAGES,
@@ -288,6 +307,7 @@ export const FILTER_RELEVANCE: Record<FilterKind, TabType[]> = {
     TabType.CANVAS,
     TabType.CALL,
     TabType.RECORDING,
+    TabType.AI_CHATS,
   ],
   // @user / #channel is a mention/channelMention filter (Vespa `mentions`/`channelMentions`, messages-only)
   // ONLY when text precedes it ("deploy @alice") or another chip exists; a lone @/# navigates to the
@@ -296,8 +316,13 @@ export const FILTER_RELEVANCE: Record<FilterKind, TabType[]> = {
   channelMention: [TabType.MESSAGES], // #channel → `channelMentions` filter (else channel quick-switch)
 };
 
-/** Tabs with no Vespa app: ALL (no scoping) + client-side USERS/CHANNELS (see LOCAL_TYPES). */
-type ClientSideTab = typeof TabType.ALL | typeof TabType.USERS | typeof TabType.CHANNELS;
+/** Tabs with no Vespa app: ALL (no scoping) + client-side USERS/CHANNELS/AI_CHATS
+ *  (see LOCAL_TYPES). AI chats live in claw-auth, not Vespa — matched client-side. */
+type ClientSideTab =
+  | typeof TabType.ALL
+  | typeof TabType.USERS
+  | typeof TabType.CHANNELS
+  | typeof TabType.AI_CHATS;
 
 /**
  * Category tab → its backing Vespa app (many-to-one; Attachments/Canvas/Call/Recording all
@@ -331,6 +356,7 @@ const SEARCHABLE_TYPE_TO_TAB: Record<string, TabType> = {
   [SearchableTypes.TRANSCRIPT]: TabType.CALL,
   [SearchableTypes.RCA]: TabType.ATTACHMENTS,
   [SearchableTypes.EMAILS]: TabType.DESK,
+  [SearchableTypes.AI_CHATS]: TabType.AI_CHATS,
 };
 
 /** Minimal shape of a filter chip needed to classify it (tolerant of both call sites). */
@@ -360,6 +386,11 @@ export function filterChipToKind(chip: FilterChip): FilterKind | null {
       return 'assignee';
     case 'priority:':
       return 'priority';
+    case 'before:':
+    case 'after:':
+    case 'on:':
+    case 'range:':
+      return 'date';
     default:
       break;
   }

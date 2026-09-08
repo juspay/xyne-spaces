@@ -6,8 +6,8 @@
  * so the sidebar can switch between versions seamlessly.
  */
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchV2Conversations } from '../services/XyneAI/XyneAISessionsV2Service';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchAllV2Conversations, fetchV2Conversations } from '../services/XyneAI/XyneAISessionsV2Service';
 
 // ============================================================================
 // Query Keys
@@ -15,6 +15,10 @@ import { fetchV2Conversations } from '../services/XyneAI/XyneAISessionsV2Service
 
 const V2_SESSIONS_KEY = (agentSlug?: string | null): readonly string[] =>
   agentSlug ? ['xyne-ai-v2-sessions', agentSlug] : ['xyne-ai-v2-sessions'];
+/** Consolidated cross-agent recents. Shares the 'xyne-ai-v2-sessions' prefix so
+ *  the existing invalidator (which invalidates by prefix) also refreshes it. */
+const V2_ALL_SESSIONS_KEY = ['xyne-ai-v2-sessions', '__all__'] as const;
+const ALL_SESSIONS_PAGE_SIZE = 30;
 const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readonly string[] =>
   agentSlug
     ? ['xyne-ai-v2-session', convId, 'messages', agentSlug]
@@ -38,6 +42,23 @@ export function useV2SessionsList(agentSlug?: string | null, enabled = true) {
 }
 
 /**
+ * Consolidated recents: ALL of the user's conversations across every agent,
+ * newest first, independent of the composer's selected agent. Paginated via
+ * infinite scroll (offset cursor from the backend's `nextOffset`).
+ */
+export function useV2AllSessionsList(enabled = true) {
+  return useInfiniteQuery({
+    queryKey: V2_ALL_SESSIONS_KEY,
+    queryFn: ({ pageParam }) =>
+      fetchAllV2Conversations({ limit: ALL_SESSIONS_PAGE_SIZE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: lastPage => lastPage.nextOffset ?? undefined,
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
+/**
  * Invalidate v2 session lists (call after new chat, etc.)
  * Passing a prefix key invalidates all variations (with or without agentSlug).
  */
@@ -46,6 +67,12 @@ export function useV2SessionInvalidator() {
 
   const invalidateSessions = (agentSlug?: string | null) => {
     void queryClient.invalidateQueries({ queryKey: V2_SESSIONS_KEY(agentSlug) });
+    // The consolidated cross-agent list must refresh too. A prefix-only
+    // invalidation (no agentSlug) already covers it, but an agent-scoped one
+    // (['xyne-ai-v2-sessions', slug]) does not — invalidate __all__ explicitly.
+    if (agentSlug) {
+      void queryClient.invalidateQueries({ queryKey: V2_ALL_SESSIONS_KEY });
+    }
   };
 
   const invalidateMessages = (convId: string, agentSlug?: string | null) => {

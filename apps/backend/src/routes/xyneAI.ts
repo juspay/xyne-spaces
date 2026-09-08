@@ -74,6 +74,11 @@ router.post(
 // GET /api/xyne-ai/v2/conversations - List user's AI conversations from claw
 router.get('/v2/conversations', authMiddleware.authenticate, xyneAIControllerV2.listConversations);
 
+// GET /api/xyne-ai/v2/conversations/all - Consolidated cross-agent conversation
+// list for the current user (all agents). Registered before the /:convId routes;
+// a literal /all can't be captured by them. Query: limit, offset, q.
+router.get('/v2/conversations/all', authMiddleware.authenticate, xyneAIControllerV2.listAllConversations);
+
 // GET /api/xyne-ai/v2/conversations/:convId/messages - Get conversation messages from claw
 router.get('/v2/conversations/:convId/messages', authMiddleware.authenticate, xyneAIControllerV2.getConversationMessages);
 router.get('/v2/conversations/:convId/debug', authMiddleware.authenticate, xyneAIControllerV2.getConversationDebug);

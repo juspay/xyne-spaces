@@ -179,6 +179,10 @@ export interface ClawConversationSummary {
   title: string;
   messageCount: number;
   lastMessageAt: string;
+  /** Which agent this conversation belongs to. Absent on the per-agent list
+   *  (the slug is fixed by the URL there); present on the consolidated
+   *  cross-agent list, where each row can be a different agent. */
+  agentSlug?: string;
 }
 
 export interface ClawMessagesResponse {
@@ -1150,6 +1154,45 @@ export async function listClawConversations(
   }
 
   return (await response.json()) as { success: boolean; data: ClawConversationSummary[] };
+}
+
+/**
+ * Consolidated cross-agent conversation list for the current user — every AI
+ * chat across all agents, newest first. Proxies claw-auth's
+ * GET /agent-chat/conversations (no slug). Each row carries its own agentSlug.
+ * `q` is a server-side title search (first-user-message ILIKE); offset/limit
+ * paginate, and `nextOffset` is null when the list is exhausted.
+ */
+export async function listAllClawConversations(
+  req: { headers?: { cookie?: string }; userId: string },
+  opts?: { limit?: number; offset?: number; q?: string; agentSlugs?: string[] }
+): Promise<{ success: boolean; data: ClawConversationSummary[]; nextOffset: number | null }> {
+  const params = new URLSearchParams({ userId: req.userId });
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
+  if (opts?.q) params.set('q', opts.q);
+  if (opts?.agentSlugs && opts.agentSlugs.length > 0) {
+    params.set('agentSlug', opts.agentSlugs.join(','));
+  }
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/conversations?${params.toString()}`;
+  const response = await fetch(url, {
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] listAllConversations failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to fetch conversations');
+  }
+
+  return (await response.json()) as {
+    success: boolean;
+    data: ClawConversationSummary[];
+    nextOffset: number | null;
+  };
 }
 
 export async function getClawConversationMessages(

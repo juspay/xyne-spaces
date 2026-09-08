@@ -1,4 +1,11 @@
-import { useState, type ComponentType, type SVGProps, type ReactElement } from 'react';
+import {
+  useMemo,
+  useState,
+  type ComponentType,
+  type SVGProps,
+  type ReactElement,
+  type UIEvent,
+} from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import {
   BuildingApartmentTwo,
@@ -15,14 +22,16 @@ import {
   UserTwo,
   File02Ai,
 } from '@xyne/icons';
-import { X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
 import { useClawOrgManageAccess } from '../../hooks/useClawOrganization';
 import { useAuth } from '../../hooks/useAuth';
 import { useDailyBriefEnabled } from '../../hooks/useDailyBriefEnabled';
-import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
+import { useV2AllSessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
+import { useAccessibleClawAgents } from '../../hooks/useAccessibleClawAgents';
 import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
+import type { AccessibleClawAgent } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { Popover } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog/Dialog';
@@ -30,6 +39,8 @@ import { Button } from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
 import AppNavigator from '../AppNavigator/AppNavigator';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import { AgentChip } from './AgentChip';
+import { invokeShortcut } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 
 const NAV_ITEM_CLASS =
@@ -146,8 +157,12 @@ function SidebarNavItem({
 interface SessionHistoryProps {
   sessions: ConversationHistoryType[];
   activeSessionId?: string | undefined;
-  onSelect: (sessionId: string) => void;
-  onDelete: (sessionId: string) => Promise<void>;
+  /** Carries the row's agent so the parent can switch agent context on click. */
+  onSelect: (sessionId: string, agentSlug?: string) => void;
+  /** Deletion is per-agent in claw, so the row's agent must be passed through. */
+  onDelete: (sessionId: string, agentSlug?: string) => Promise<void>;
+  /** slug → agent, for rendering the per-row agent chip. */
+  agentBySlug: Map<string, AccessibleClawAgent>;
 }
 
 function SessionHistory({
@@ -155,6 +170,7 @@ function SessionHistory({
   activeSessionId,
   onSelect,
   onDelete,
+  agentBySlug,
 }: SessionHistoryProps): ReactElement {
   // Rename + star intentionally omitted: claw-auth (the v2 backing store) has
   // no title override or starred field, so those actions can't be implemented
@@ -176,7 +192,7 @@ function SessionHistory({
     if (!pendingDeleteId) return;
     setIsDeleting(true);
     try {
-      await onDelete(pendingDeleteId);
+      await onDelete(pendingDeleteId, pendingSession?.agentSlug);
       setPendingDeleteId(null);
     } finally {
       setIsDeleting(false);
@@ -216,12 +232,15 @@ function SessionHistory({
                     pulls the row's old left inset inside the hit area too. */}
                 <button
                   type='button'
-                  onClick={() => onSelect(session.sessionId)}
-                  className='flex min-w-0 flex-1 items-center self-stretch pl-3 pr-1 text-left text-sm'
+                  onClick={() => onSelect(session.sessionId, session.agentSlug)}
+                  className='flex min-w-0 flex-1 items-center gap-1.5 self-stretch pl-3 pr-1 text-left text-sm'
                   data-track-category='XyneAI'
                   data-track-name='SELECT_SESSION'
                 >
                   <span className='min-w-0 flex-1 truncate'>{session.title}</span>
+                  {session.agentSlug && session.agentSlug !== 'ask-ai' && (
+                    <AgentChip slug={session.agentSlug} agent={agentBySlug.get(session.agentSlug)} />
+                  )}
                 </button>
                 <Popover
                   open={openDropdownId === session.sessionId}
@@ -357,14 +376,39 @@ export function AISidebar({
   );
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 
-  const { selectedAgentSlug } = useSelectedAgent();
-  const effectiveAgentSlug = selectedAgentSlug;
-  const { data: sessions = [] } = useV2SessionsList(effectiveAgentSlug, true);
+  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
+
+  // Consolidated recents: ALL agents' conversations, independent of the
+  // composer's selected agent.
+  const {
+    data: allSessionsData,
+    isLoading: sessionsLoading,
+    isError: sessionsError,
+    refetch: refetchSessions,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useV2AllSessionsList(true);
+  const sessions = useMemo(
+    () => allSessionsData?.pages.flatMap(p => p.conversations) ?? [],
+    [allSessionsData],
+  );
+  const { agentBySlug } = useAccessibleClawAgents();
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
-  const handleDeleteSession = async (sessionId: string): Promise<void> => {
+  // Clicking a recents row must switch the composer's agent to the row's agent:
+  // the conversation's messages endpoint (and the next turn) are agent-scoped,
+  // so opening a chat from another agent while a different one is selected would
+  // load the wrong transcript.
+  const handleSelectSession = (sessionId: string, agentSlug?: string): void => {
+    if (agentSlug !== undefined) setSelectedAgentSlug(agentSlug);
+    onSelectSession(sessionId);
+  };
+
+  const handleDeleteSession = async (sessionId: string, agentSlug?: string): Promise<void> => {
+    const slug = agentSlug ?? selectedAgentSlug;
     try {
-      await deleteV2Conversation(sessionId, effectiveAgentSlug);
+      await deleteV2Conversation(sessionId, slug);
       // If the user just deleted the conversation they're viewing, bounce
       // back to the new-chat landing so the thread pane isn't stuck on a
       // stale session id.
@@ -372,7 +416,16 @@ export function AISidebar({
         onCreateChat();
       }
     } finally {
-      invalidateV2Sessions(effectiveAgentSlug);
+      invalidateV2Sessions(slug);
+    }
+  };
+
+  // Infinite scroll: fetch the next page as the recents list nears the bottom.
+  const handleRecentsScroll = (e: UIEvent<HTMLDivElement>): void => {
+    if (!hasNextPage || isFetchingNextPage) return;
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
+      void fetchNextPage();
     }
   };
 
@@ -440,32 +493,80 @@ export function AISidebar({
                   aria-hidden
                 />
               </button>
-              <Tooltip content='New chat' side='top' sideOffset={0} delayDuration={500}>
-                <button
-                  type='button'
-                  onClick={onCreateChat}
-                  aria-label='New chat'
-                  className='group/child mr-0.5 rounded-md p-1 text-sidebar-foreground opacity-100 transition-opacity duration-300 ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100 md:opacity-0'
-                  data-track-category='XyneAI'
-                  data-track-name='NEW_CHAT_FROM_RECENTS'
-                >
-                  <PencilEditBox
-                    size={12}
-                    className='text-sidebar-foreground transition-colors group-hover/child:text-sidebar-primary'
-                    aria-hidden
-                  />
-                </button>
-              </Tooltip>
+              <div className='flex shrink-0 items-center'>
+                <Tooltip content='Search chats' side='top' sideOffset={0} delayDuration={500}>
+                  <button
+                    type='button'
+                    onClick={() => invokeShortcut('mod+k')}
+                    aria-label='Search chats'
+                    className='rounded-md p-1 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                    data-track-category='XyneAI'
+                    data-track-name='OPEN_CHAT_SEARCH'
+                  >
+                    <Search size={13} aria-hidden />
+                  </button>
+                </Tooltip>
+                <Tooltip content='New chat' side='top' sideOffset={0} delayDuration={500}>
+                  <button
+                    type='button'
+                    onClick={onCreateChat}
+                    aria-label='New chat'
+                    className='group/child mr-0.5 rounded-md p-1 text-sidebar-foreground opacity-100 transition-opacity duration-300 ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100 md:opacity-0'
+                    data-track-category='XyneAI'
+                    data-track-name='NEW_CHAT_FROM_RECENTS'
+                  >
+                    <PencilEditBox
+                      size={12}
+                      className='text-sidebar-foreground transition-colors group-hover/child:text-sidebar-primary'
+                      aria-hidden
+                    />
+                  </button>
+                </Tooltip>
+              </div>
             </div>
 
             {recentsOpen && (
-              <div className='min-h-0 flex-1 overflow-y-auto no-scrollbar'>
-                <SessionHistory
-                  sessions={sessions}
-                  activeSessionId={activeSessionId}
-                  onSelect={onSelectSession}
-                  onDelete={handleDeleteSession}
-                />
+              <div
+                className='min-h-0 flex-1 overflow-y-auto no-scrollbar'
+                onScroll={handleRecentsScroll}
+              >
+                {sessionsLoading && sessions.length === 0 ? (
+                  <ul className='flex flex-col gap-px px-3 pt-1' aria-hidden>
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <li key={i} className='h-9'>
+                        <div className='h-4 w-full max-w-[80%] animate-pulse rounded bg-sidebar-accent' />
+                      </li>
+                    ))}
+                  </ul>
+                ) : sessionsError ? (
+                  <div className='px-3 pt-8 text-center'>
+                    <p className='text-sm text-sidebar-accent-foreground'>
+                      Couldn&apos;t load your chats
+                    </p>
+                    <button
+                      type='button'
+                      onClick={() => void refetchSessions()}
+                      className='mt-2 text-xs font-medium text-sidebar-primary hover:underline'
+                      data-track-category='XyneAI'
+                      data-track-name='RETRY_RECENTS'
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <SessionHistory
+                      sessions={sessions}
+                      activeSessionId={activeSessionId}
+                      onSelect={handleSelectSession}
+                      onDelete={handleDeleteSession}
+                      agentBySlug={agentBySlug}
+                    />
+                    {isFetchingNextPage && (
+                      <p className='py-2 text-center text-xs text-sidebar-foreground'>Loading…</p>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </div>

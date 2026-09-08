@@ -2996,6 +2996,60 @@ router.delete("/:slug/chat/:convId", async (req: Request<{ slug: string; convId:
   }
 });
 
+// GET /agent-chat/conversations — consolidated cross-agent conversation list for
+// the authenticated user (the "all my AI chats" view). Registered before
+// /:slug/conversations; a single-segment path can't be shadowed by the
+// two-segment slug route. Same privacy model: identity is the session, never the
+// ?userId query param (admins excepted).
+router.get("/conversations", async (req: Request, res: Response) => {
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const requestedUserId = req.query["userId"] as string | undefined;
+    let userId = requesterId;
+    if (requestedUserId && requestedUserId !== requesterId) {
+      if (!(await isClawAdmin(requesterId))) {
+        res.status(403).json({ success: false, error: "Cannot list another user's conversations" });
+        return;
+      }
+      userId = requestedUserId;
+    }
+
+    const limit = Math.min(Math.max(parseInt(String(req.query["limit"] ?? "30"), 10) || 30, 1), 100);
+    const offset = Math.max(parseInt(String(req.query["offset"] ?? "0"), 10) || 0, 0);
+    const q = typeof req.query["q"] === "string" ? (req.query["q"] as string) : undefined;
+    // `agentSlug` is the `with:` filter — comma-separated for OR semantics.
+    const agentSlugs =
+      typeof req.query["agentSlug"] === "string"
+        ? (req.query["agentSlug"] as string).split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+
+    // The repo fetches limit+1 rows so we can report a further page without a
+    // second COUNT query.
+    const rows = await chatMessageRepository.listUserConversations(userId, {
+      limit,
+      offset,
+      ...(q !== undefined ? { q } : {}),
+      ...(agentSlugs && agentSlugs.length > 0 ? { agentSlugs } : {}),
+    });
+    const hasMore = rows.length > limit;
+    const data = (hasMore ? rows.slice(0, limit) : rows).map((r) => ({
+      conversationId: r.conversationId,
+      title: r.title,
+      agentSlug: r.agentSlug,
+      messageCount: r.messageCount,
+      lastMessageAt: r.lastMessageAt,
+    }));
+    res.json({ success: true, data, nextOffset: hasMore ? offset + limit : null });
+  } catch (err) {
+    log.error("[agent-chat] all conversations error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 // GET /agents/:slug/conversations — list user's conversations with summaries
 router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: Response) => {
   try {

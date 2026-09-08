@@ -842,6 +842,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         setIsSearching(false);
         pendingSearchCountRef.current -= 1;
         return;
+      } else if (activeTab === TabType.AI_CHATS) {
+        // AI Chats is a client-side source (rendered from useV2AllSessionsList in
+        // the command menu, matched with Fuse) — never query Vespa for it.
+        setSearchResults([]);
+        setPaginationState(prev => ({
+          ...prev,
+          [activeTab]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+        }));
       } else if (searchText || hasFilters) {
         setIsSearching(true);
         setSearchError(null);

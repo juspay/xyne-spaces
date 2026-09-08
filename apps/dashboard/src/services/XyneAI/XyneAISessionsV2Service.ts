@@ -25,11 +25,26 @@ interface ClawConversationSummary {
   title: string;
   messageCount: number;
   lastMessageAt: string;
+  /** Present on the consolidated cross-agent list; absent on the per-agent one. */
+  agentSlug?: string;
 }
 
 interface ClawConversationListResponse {
   success: boolean;
   data: ClawConversationSummary[];
+}
+
+interface ClawAllConversationListResponse {
+  success: boolean;
+  data: ClawConversationSummary[];
+  /** Offset to pass for the next page, or null when the list is exhausted. */
+  nextOffset: number | null;
+}
+
+/** One page of the consolidated cross-agent conversation list. */
+export interface AllConversationsPage {
+  conversations: ConversationHistoryType[];
+  nextOffset: number | null;
 }
 
 interface ClawChatMessage {
@@ -108,6 +123,50 @@ export async function fetchV2Conversations(
     createdAt: new Date(conv.lastMessageAt),
     messages: [],
   }));
+}
+
+/**
+ * Fetch one page of the user's consolidated conversation list across ALL agents
+ * (the "all my AI chats" view). Unlike fetchV2Conversations, each row preserves
+ * its `agentSlug` (and `messageCount`) so the sidebar can show an agent chip and
+ * switch agent context on click. Backed by GET /xyne-ai/v2/conversations/all.
+ */
+export async function fetchAllV2Conversations(opts?: {
+  limit?: number;
+  offset?: number;
+  q?: string;
+  /** `with:` filter — OR semantics, sent comma-separated. */
+  agentSlugs?: string[];
+}): Promise<AllConversationsPage> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
+  if (opts?.q) params.set('q', opts.q);
+  if (opts?.agentSlugs && opts.agentSlugs.length > 0) {
+    params.set('agentSlug', opts.agentSlugs.join(','));
+  }
+  const qs = params.toString();
+  const url = `/xyne-ai/v2/conversations/all${qs ? `?${qs}` : ''}`;
+  const response = await apiInstance.get<ClawAllConversationListResponse>(url);
+
+  if (!response.data.success || !response.data.data) {
+    return { conversations: [], nextOffset: null };
+  }
+
+  const conversations = response.data.data.map(conv => ({
+    id: conv.conversationId,
+    sessionId: conv.conversationId,
+    title: conv.title || 'New Chat',
+    channelId: '',
+    isStarred: false,
+    lastUpdated: new Date(conv.lastMessageAt),
+    createdAt: new Date(conv.lastMessageAt),
+    messages: [],
+    ...(conv.agentSlug ? { agentSlug: conv.agentSlug } : {}),
+    messageCount: conv.messageCount,
+  }));
+
+  return { conversations, nextOffset: response.data.nextOffset ?? null };
 }
 
 /**

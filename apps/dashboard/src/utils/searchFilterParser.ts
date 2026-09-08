@@ -144,7 +144,7 @@ export function parseSearchFilters(text: string) {
 }
 
 // Types handled locally (no backend call needed)
-const LOCAL_TYPES = ['users', 'people', 'channels'];
+const LOCAL_TYPES = ['users', 'people', 'channels', 'ai-chats'];
 
 // Types handled by backend (sent to Vespa)
 const BACKEND_TYPES = [

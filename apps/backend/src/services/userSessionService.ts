@@ -65,11 +65,30 @@ export class UserSessionService {
       if (!sessionUser) {
         throw new Error(`workspaceId required: user ${sessionData.userId} not found`);
       }
-      const session = await this.prisma.userSession.create({
-        data: {
+      // refreshToken is @unique. OAuth providers (e.g. Google) hand back the same
+      // refresh token across the /exchange auto-login and the subsequent
+      // /login-workspace call, so a plain create() would hit a P2002 unique
+      // violation on the second call. Upsert keyed on refreshToken makes session
+      // creation idempotent: the same token reuses (and refreshes) its row.
+      const session = await this.prisma.userSession.upsert({
+        where: { refreshToken: sessionData.refreshToken },
+        create: {
           userId: sessionData.userId,
           workspaceId: sessionUser.workspaceId,
           refreshToken: sessionData.refreshToken,
+          refreshTokenExpiry: sessionData.refreshTokenExpiry,
+          accessToken: sessionData.accessToken,
+          accessTokenExpiry: sessionData.accessTokenExpiry,
+          deviceInfo: sessionData.deviceInfo,
+          deviceId: sessionData.deviceId,
+          fcmToken: sessionData.fcmToken,
+          ipAddress: sessionData.ipAddress,
+          status: SessionStatus.ACTIVE,
+          lastActivity: new Date(),
+        },
+        update: {
+          userId: sessionData.userId,
+          workspaceId: sessionUser.workspaceId,
           refreshTokenExpiry: sessionData.refreshTokenExpiry,
           accessToken: sessionData.accessToken,
           accessTokenExpiry: sessionData.accessTokenExpiry,

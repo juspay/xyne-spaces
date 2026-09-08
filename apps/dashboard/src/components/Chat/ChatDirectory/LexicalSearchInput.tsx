@@ -27,6 +27,7 @@ import {
   $createFilterChip,
 } from './FilterChipNode';
 import { FilterChipPlugin } from './FilterChipPlugin';
+import { AiChatFilterChipPlugin } from './AiChatFilterChipPlugin';
 import {
   MentionPlugin,
   UserTriggerType,
@@ -77,6 +78,9 @@ interface LexicalSearchInputProps {
   // Hide the leading search magnifier. The command menu passes this; other consumers
   // (e.g. call-history search) keep the icon by default.
   hideSearchIcon?: boolean;
+  // When true (AI Chats tab), typed date filters (before:/after:/on:/range:) are
+  // promoted to colored chips. Off everywhere else — they stay plain text.
+  promoteDateChips?: boolean;
 }
 
 export interface InitialQueryData {
@@ -515,6 +519,7 @@ export function LexicalSearchInput({
   disableAutoFocus = false,
   currentUserID,
   hideSearchIcon = false,
+  promoteDateChips = false,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const showLeadingIcon = !hideSearchIcon && !isMobile;
@@ -604,6 +609,7 @@ export function LexicalSearchInput({
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <SingleLinePastePlugin />
           <FilterChipPlugin />
+          <AiChatFilterChipPlugin enabled={promoteDateChips} />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}

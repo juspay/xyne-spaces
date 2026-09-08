@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 
 export const chatMessageRepository = {
@@ -97,6 +97,105 @@ export const chatMessageRepository = {
 
   findByUserAndAgent: (userId: string, agentSlug: string) =>
     prisma.chatMessage.findMany({ where: { userId, agentSlug }, orderBy: { createdAt: "asc" } }),
+
+  /**
+   * Cross-agent conversation summaries for ONE user, newest first — the
+   * consolidated "all my AI chats" list. Unlike findByUserAndAgent (which loads
+   * every message for a single agent and groups in JS), this aggregates in the
+   * DB so it stays cheap across the user's entire history.
+   *
+   * A "conversation" has no table — it's the set of chat_messages sharing a
+   * conversationId. We group by (conversationId, agentSlug) because a thread can
+   * be shared across agents (e.g. a mentioned user's digital twin runs under the
+   * same conversationId, different agentSlug); each (conversation, agent) pair is
+   * one row, matching what the union of the per-agent lists would show and
+   * keeping the agent chip + click→load-messages unambiguous.
+   *
+   * title      = first user message content, truncated to 80 (same as the
+   *              per-agent handler); there is no title column.
+   * messageCount = COUNT(*) in the group; lastMessageAt = MAX(createdAt).
+   * q          = case-insensitive substring match on that title (P1 server
+   *              search); matches the first user message only, not full content.
+   * agentSlugs = restrict to these agents (the `with:` filter; OR semantics).
+   *
+   * Artifact-app threads (id prefix "app_") are excluded, same as the per-agent
+   * handler. Pagination is limit/offset (per-user counts are in the 100s).
+   */
+  listUserConversations: async (
+    userId: string,
+    opts?: { limit?: number; offset?: number; q?: string; agentSlugs?: string[] },
+  ): Promise<
+    Array<{
+      conversationId: string;
+      agentSlug: string;
+      title: string;
+      messageCount: number;
+      lastMessageAt: Date;
+    }>
+  > => {
+    const limit = Math.min(Math.max(opts?.limit ?? 30, 1), 100);
+    const offset = Math.max(opts?.offset ?? 0, 0);
+    // Whitespace-robust search: trim the query and collapse any run of whitespace
+    // (incl. tabs/newlines/non-breaking spaces the user may paste) to a single
+    // space, and do the same to the title in SQL — so "daily   brief" matches
+    // "daily brief" regardless of stray spacing on either side. `[[:space:]]` (POSIX)
+    // is used instead of `\s` because a tagged-template `\s` cooks to a literal "s".
+    const q = opts?.q?.trim().replace(/\s+/g, " ");
+    const qFilter = q
+      ? Prisma.sql`AND regexp_replace(t.title, '[[:space:]]+', ' ', 'g') ILIKE ${"%" + q + "%"}`
+      : Prisma.empty;
+    const agentSlugs = opts?.agentSlugs?.filter(Boolean);
+    const agentFilter =
+      agentSlugs && agentSlugs.length > 0
+        ? Prisma.sql`AND g."agentSlug" = ANY(${agentSlugs})`
+        : Prisma.empty;
+
+    // Fetch limit+1 to tell the caller whether another page exists.
+    const rows = await prisma.$queryRaw<
+      Array<{
+        conversationId: string;
+        agentSlug: string;
+        title: string | null;
+        messageCount: bigint;
+        lastMessageAt: Date;
+      }>
+    >`
+      WITH grouped AS (
+        SELECT "conversationId", "agentSlug",
+               MAX("createdAt") AS "lastMessageAt",
+               COUNT(*)         AS "messageCount"
+        FROM "chat_messages"
+        WHERE "userId" = ${userId}
+          AND left("conversationId", 4) <> 'app_'
+        GROUP BY "conversationId", "agentSlug"
+      ),
+      titles AS (
+        SELECT DISTINCT ON ("conversationId", "agentSlug")
+               "conversationId", "agentSlug", "content" AS title
+        FROM "chat_messages"
+        WHERE "userId" = ${userId}
+          AND role = 'user'
+          AND left("conversationId", 4) <> 'app_'
+        ORDER BY "conversationId", "agentSlug", "createdAt" ASC
+      )
+      SELECT g."conversationId", g."agentSlug", g."lastMessageAt", g."messageCount",
+             LEFT(t.title, 80) AS title
+      FROM grouped g
+      LEFT JOIN titles t
+        ON t."conversationId" = g."conversationId" AND t."agentSlug" = g."agentSlug"
+      WHERE TRUE ${qFilter} ${agentFilter}
+      ORDER BY g."lastMessageAt" DESC, g."conversationId" DESC
+      LIMIT ${limit + 1} OFFSET ${offset}
+    `;
+
+    return rows.map((r) => ({
+      conversationId: r.conversationId,
+      agentSlug: r.agentSlug,
+      title: r.title ?? "",
+      messageCount: Number(r.messageCount),
+      lastMessageAt: r.lastMessageAt,
+    }));
+  },
 
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat

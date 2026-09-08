@@ -1,0 +1,26 @@
+-- chat_messages (userId, createdAt) index for the consolidated cross-agent
+-- conversation list.
+--
+-- GET /agent-chat/conversations (chatMessageRepository.listUserConversations)
+-- aggregates a user's whole chat history in one grouped query filtered by
+-- userId alone and ordered by createdAt. The existing @@index([userId,
+-- agentSlug]) puts agentSlug BETWEEN the equality and the ordering, so a
+-- cross-agent (no agentSlug) scan sorts the user's entire history. This index
+-- lets the grouping/ordering ride an index range instead.
+--
+-- ⚠ PROD APPLY NOTE: migrations are applied MANUALLY in SQL studio (no
+-- _prisma_migrations baseline). Plain CREATE INDEX takes a write lock on
+-- chat_messages for the build duration — on the live table, run the
+-- CONCURRENTLY variant instead (it cannot run inside a transaction; execute as
+-- a single standalone statement):
+--
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS
+--     "chat_messages_userId_createdAt_idx" ON "chat_messages" ("userId", "createdAt");
+--
+-- The non-concurrent statement below is for fresh/dev databases where
+-- `prisma migrate` runs this file inside a transaction (CONCURRENTLY is illegal
+-- there). It is guarded — IF NOT EXISTS makes a re-run a no-op — and the index
+-- name matches what Prisma derives from @@index([userId, createdAt]) so drift
+-- checks stay clean.
+
+CREATE INDEX IF NOT EXISTS "chat_messages_userId_createdAt_idx" ON "chat_messages" ("userId", "createdAt");

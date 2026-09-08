@@ -113,6 +113,10 @@ const GlobalCommandMenu = ({
         const pathParts = location.pathname.split('/').filter(Boolean);
         if (pathParts.includes('support')) {
           setInternalContextualTab(TabType.DESK);
+        } else if (pathParts.includes('ai')) {
+          // On the AI screen, ⌘K (and the sidebar magnifier, which invokes the
+          // same shortcut) opens seeded to the AI Chats tab (PRD 4.2).
+          setInternalContextualTab(TabType.AI_CHATS);
         }
       }
       onOpenChange(newOpen);

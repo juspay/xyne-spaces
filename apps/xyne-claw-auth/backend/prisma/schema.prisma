@@ -1145,6 +1145,10 @@ model ChatMessage {
 
   @@index([conversationId, createdAt])
   @@index([userId, agentSlug])
+  // Backs the cross-agent consolidated list (listUserConversations), which
+  // filters by userId alone and orders by createdAt — uncovered by the
+  // [userId, agentSlug] index above.
+  @@index([userId, createdAt])
   @@index([orgId])
   @@map("chat_messages")
 }

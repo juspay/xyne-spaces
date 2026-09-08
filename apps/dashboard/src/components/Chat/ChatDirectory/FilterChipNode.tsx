@@ -32,7 +32,7 @@ import {
   type Spread,
 } from 'lexical';
 import { SignalHigh } from 'lucide-react';
-import { Hashtag, UserTwo, Lock02Close } from '@xyne/icons';
+import { Hashtag, UserTwo, Lock02Close, CalendarDefault } from '@xyne/icons';
 import { ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -210,6 +210,10 @@ function ChipIcon({ mentionData }: { mentionData: MentionData }): React.JSX.Elem
   // calls `useChannel`). Glyph tinted by severity; pill stays blue.
   if (mentionData.type === MentionType.PRIORITY) {
     return <SignalHigh className={`${ICON_CLASS} ${PRIORITY_ICON_COLOR[mentionData.id] ?? ''}`} />;
+  }
+  // Date value filter (before:/after:/on:/range: on the AI Chats tab) — calendar glyph.
+  if (mentionData.type === MentionType.FILTER) {
+    return <CalendarDefault className={ICON_CLASS} />;
   }
   // User filters show the picked person's photo (the design's 16px avatar, rounded-sm = 4px);
   // `Avatar` resolves the user from the id and falls back to initials, so MentionData stays

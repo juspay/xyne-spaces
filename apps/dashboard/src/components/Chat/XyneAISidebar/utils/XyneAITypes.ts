@@ -282,6 +282,13 @@ export interface ConversationHistory {
   isStarred?: boolean;
   branchSelections?: Record<string, string>; // parentId → selected childId for branching
   lastInputContext?: LastInputContext;
+  /** Owning agent — set only on the consolidated cross-agent list (recents +
+   *  search), where rows span agents. Absent on per-agent lists (the slug is
+   *  implied by the fetch). Drives the recents agent chip and the click →
+   *  setSelectedAgentSlug context switch. */
+  agentSlug?: string;
+  /** Number of messages in the conversation, from the consolidated list. */
+  messageCount?: number;
 }
 
 // ============================================================================

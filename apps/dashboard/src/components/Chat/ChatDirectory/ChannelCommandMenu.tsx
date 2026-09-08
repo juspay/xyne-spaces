@@ -24,6 +24,7 @@ import {
   SearchDefault,
   CheckTickSingle,
   FilterFunnel,
+  File02Ai,
 } from '@xyne/icons';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Popover from '@radix-ui/react-popover';
@@ -89,14 +90,34 @@ import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDispla
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
-import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
+import {
+  filterChannelsBySearchableNames,
+  rankUsersWithMfu,
+  filterAiChatsBySearchableNames,
+  type AiChatDoc,
+} from '../../../utils/rankingUtils';
+// AI Chats source (claw-auth backed, client-side matched like users/channels).
+import { useQuery } from '@tanstack/react-query';
+import { useV2AllSessionsList } from '../../../hooks/useAskAISessionsV2';
+import { fetchAllV2Conversations } from '../../../services/XyneAI/XyneAISessionsV2Service';
+import { useAccessibleClawAgents } from '../../../hooks/useAccessibleClawAgents';
+import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import { useAIChatHandoff } from '../../../routes/AIScreen/useAIChatHandoff';
+import { computeDateBounds } from '../../AIScreen/aiChatFilters';
+import { AgentChip } from '../../AIScreen/AgentChip';
+import { formatRelativeTime } from '../../../utils/dateUtils';
+import type { ConversationHistory as ConversationHistoryType } from '../XyneAISidebar/utils/XyneAITypes';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useSearchMode } from '../../../hooks/useSearchMode';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
-import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
+import {
+  TYPE_AUTOCOMPLETE_REGEX,
+  parseTypeFilter,
+  parseSearchFilters,
+} from '../../../utils/searchFilterParser';
 import { TicketPreviewPanel } from './TicketPreviewPanel';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { apiInstance } from '../../../services/clients/apiClient';
@@ -195,6 +216,7 @@ const DEFAULT_ENABLED_TABS: TabType[] = [
   TabType.ATTACHMENTS,
   TabType.TICKETS,
   TabType.DESK,
+  TabType.AI_CHATS,
 ];
 
 // A backend result group belongs to the active tab (ALL shows all; Files shows every
@@ -582,6 +604,130 @@ const ChannelCommandMenu = ({
   const hasDeskChannelFilter = selectedMentions.some(
     m => m.prefix === 'in:' && m.type === MentionType.CHANNEL,
   );
+
+  // ── AI Chats source (client-side, claw-auth backed) ─────────────────────────
+  // A per-user, cross-agent conversation list matched client-side (like the
+  // users/channels sources). Not blended into ALL — only the AI Chats tab shows
+  // it (PRD 3.6). Empty query = consolidated recents; typing narrows by title.
+  const AI_CHATS_MAX_EAGER_PAGES = 5;
+  const { setSelectedAgentSlug } = useSelectedAgent();
+  const { onSelectSession: aiOnSelectSession } = useAIChatHandoff();
+  const { agents: aiAgents, agentBySlug: aiAgentBySlug } = useAccessibleClawAgents();
+  const aiChatsEnabled = activeEnabledTabs.includes(TabType.AI_CHATS);
+
+  const {
+    data: aiChatData,
+    isLoading: aiChatsLoading,
+    isError: aiChatsError,
+    refetch: aiChatsRefetch,
+    fetchNextPage: aiChatsFetchNext,
+    hasNextPage: aiChatsHasNext,
+    isFetchingNextPage: aiChatsFetchingNext,
+  } = useV2AllSessionsList(open && aiChatsEnabled);
+
+  const aiPagesLoaded = aiChatData?.pages.length ?? 0;
+  useEffect(() => {
+    if (
+      open &&
+      aiChatsEnabled &&
+      aiChatsHasNext &&
+      !aiChatsFetchingNext &&
+      aiPagesLoaded < AI_CHATS_MAX_EAGER_PAGES
+    ) {
+      void aiChatsFetchNext();
+    }
+  }, [open, aiChatsEnabled, aiChatsHasNext, aiChatsFetchingNext, aiPagesLoaded, aiChatsFetchNext]);
+
+  const aiConversations = useMemo(
+    () => aiChatData?.pages.flatMap(p => p.conversations) ?? [],
+    [aiChatData],
+  );
+
+  // `with:` chips are context-sensitive: on the AI Chats tab they carry agent
+  // slugs (see MentionPlugin). OR semantics across chips.
+  const withAgentSlugs = useMemo(
+    () => selectedMentions.filter(m => m.prefix === 'with:').map(m => m.id),
+    [selectedMentions],
+  );
+
+  // Date filters (before/after/on/range) applied to lastMessageAt. On the AI Chats
+  // tab these become FILTER chips (excluded from searchText, carried in mentions),
+  // so read them from selectedMentions; also honor any still-typed, not-yet-chipped
+  // token from the raw text.
+  const aiDateBounds = useMemo(() => {
+    const p = parseSearchFilters(searchText);
+    const chip: Record<'before' | 'after' | 'on' | 'range', string | undefined> = {
+      before: undefined,
+      after: undefined,
+      on: undefined,
+      range: undefined,
+    };
+    for (const m of selectedMentions) {
+      if (m.type !== MentionType.FILTER || !m.prefix) continue;
+      const key = m.prefix.replace(':', '') as 'before' | 'after' | 'on' | 'range';
+      if (key in chip) chip[key] = m.id;
+    }
+    return computeDateBounds({
+      before: chip.before ?? p.before,
+      after: chip.after ?? p.after,
+      on: chip.on ?? p.on,
+      range: chip.range ?? p.range,
+    });
+  }, [searchText, selectedMentions]);
+
+  // P1: above the eager-load cap, switch to a debounced server ?q=/agentSlug= search.
+  const aiListTruncated = aiChatsHasNext && aiPagesLoaded >= AI_CHATS_MAX_EAGER_PAGES;
+  const aiUseServer =
+    aiChatsEnabled &&
+    aiListTruncated &&
+    (cleanedSearchText.trim().length > 0 || withAgentSlugs.length > 0);
+  const aiServerSearch = useQuery({
+    queryKey: ['xyne-ai-v2-sessions', '__search__', cleanedSearchText.trim(), withAgentSlugs.join(',')],
+    queryFn: () =>
+      fetchAllV2Conversations({
+        ...(cleanedSearchText.trim() ? { q: cleanedSearchText.trim() } : {}),
+        ...(withAgentSlugs.length > 0 ? { agentSlugs: withAgentSlugs } : {}),
+        limit: 50,
+      }),
+    enabled: open && aiUseServer,
+    staleTime: 30_000,
+  });
+
+  const aiAgentName = (slug: string | undefined): string =>
+    slug ? (aiAgentBySlug.get(slug)?.name ?? (slug === 'ask-ai' ? 'Ask AI' : slug)) : '';
+
+  const filteredAiChats = useMemo(() => {
+    const source = aiUseServer ? (aiServerSearch.data?.conversations ?? []) : aiConversations;
+    const agentSet = new Set(withAgentSlugs);
+    const filtered = source.filter(c => {
+      if (agentSet.size > 0 && !(c.agentSlug && agentSet.has(c.agentSlug))) return false;
+      const ts = new Date(c.lastUpdated).getTime();
+      if (aiDateBounds.fromMs !== null && ts < aiDateBounds.fromMs) return false;
+      if (aiDateBounds.toMs !== null && ts >= aiDateBounds.toMs) return false;
+      return true;
+    });
+    if (aiUseServer) return filtered;
+    const bySession = new Map(filtered.map(c => [c.sessionId, c]));
+    const docs: AiChatDoc[] = filtered.map(c => ({
+      sessionId: c.sessionId,
+      title: c.title,
+      agentName: aiAgentName(c.agentSlug),
+    }));
+    const ordered = filterAiChatsBySearchableNames(docs, cleanedSearchText);
+    return ordered.flatMap(d => {
+      const conv = bySession.get(d.sessionId);
+      return conv ? [conv] : [];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiUseServer, aiServerSearch.data, aiConversations, withAgentSlugs, aiDateBounds, cleanedSearchText, aiAgentBySlug]);
+
+  // Row select: switch the composer's agent to the row's agent, then navigate
+  // (the conversation's messages endpoint is agent-scoped) and close the palette.
+  const handleAiChatSelect = (conv: ConversationHistoryType): void => {
+    if (conv.agentSlug !== undefined) setSelectedAgentSlug(conv.agentSlug);
+    aiOnSelectSession(conv.sessionId);
+    onOpenChange(false);
+  };
 
   // Shared Cmd+K user rank for the plain-search USERS section. Hoisted so the
   // strong-match check below and the rendered section use the exact same order.
@@ -1438,6 +1584,16 @@ const ChannelCommandMenu = ({
   const availableUsers = useMemo<
     Array<{ id: string; name: string; status?: string; email?: string }>
   >(() => {
+    // Context-sensitive `with:`: on the AI Chats tab it resolves AGENTS (chip id =
+    // agent slug), not people. Everywhere else `with:` keeps its people behaviour.
+    if (activeTab === TabType.AI_CHATS && userTrigger === 'with:') {
+      const q = mentionSearchQuery.trim().toLowerCase();
+      return aiAgents
+        .filter(a => !q || a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q))
+        .slice(0, CMDK_USER_LIMIT)
+        .map(a => ({ id: a.slug, name: a.name }));
+    }
+
     if (isDeskPeopleTrigger) {
       const raw = mentionSearchQuery.trim();
       const q = raw.toLowerCase();
@@ -1496,6 +1652,8 @@ const ChannelCommandMenu = ({
     mentionSearchType,
     channelTrigger,
     dmContactRecency,
+    activeTab,
+    aiAgents,
   ]);
 
   // Filter mention results for channels.
@@ -2181,6 +2339,7 @@ const ChannelCommandMenu = ({
     { id: TabType.CALL, label: 'Calls', icon: <Phone size={iconSize} /> },
     { id: TabType.RECORDING, label: 'Recordings', icon: <MicOn size={iconSize} /> },
     { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
+    { id: TabType.AI_CHATS, label: 'AI Chats', icon: <File02Ai size={iconSize} /> },
   ];
 
   const tabs = allTabDefinitions.filter(t => activeEnabledTabs.includes(t.id));
@@ -2236,7 +2395,10 @@ const ChannelCommandMenu = ({
       filteredLocalUsers.length > 0) ||
     (activeTab !== TabType.CHANNELS && activeTab !== TabType.USERS && backendResults.length > 0);
 
-  const showEmptyState = searchText.trim() && !isLoading && !hasResults;
+  // AI Chats owns its own empty/loading states (renderAiChatsSection), so exclude
+  // it from the generic backend empty state.
+  const showEmptyState =
+    searchText.trim() && !isLoading && !hasResults && activeTab !== TabType.AI_CHATS;
 
   // Auto-select first result when search results change. Reset the
   // navigation flag when either the free-text query OR the active filter
@@ -2544,6 +2706,77 @@ const ChannelCommandMenu = ({
 
   // Render the plain-search USERS section. Extracted so it can be rendered
   // above the "Show results for" row when there is a strong user match.
+  // AI Chats tab body: recents-first (empty query) / fuzzy-narrowed list, with a
+  // per-row agent chip + relative time. Isolated from the backend/local sections.
+  const renderAiChatsSection = (): ReactElement => {
+    if (aiChatsLoading && aiConversations.length === 0) {
+      return (
+        <div className='py-6 text-center text-sm text-muted-foreground'>Loading chats…</div>
+      );
+    }
+    if (aiChatsError) {
+      return (
+        <div className='py-6 text-center'>
+          <p className='text-sm text-foreground'>Couldn&apos;t load your chats</p>
+          <button
+            type='button'
+            onClick={() => void aiChatsRefetch()}
+            className='mt-2 text-xs font-medium text-primary hover:underline'
+            data-track-category='SEARCH'
+            data-track-name='RETRY_AI_CHATS'
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    if (aiConversations.length === 0) {
+      return (
+        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+          No conversations yet
+        </Command.Empty>
+      );
+    }
+    if (filteredAiChats.length === 0) {
+      return (
+        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+          {aiUseServer && aiServerSearch.isFetching ? 'Searching…' : 'No conversations match'}
+        </Command.Empty>
+      );
+    }
+    return (
+      <Command.Group
+        heading={`AI Chats (${filteredAiChats.length})`}
+        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+      >
+        {filteredAiChats.map(conv => (
+          <Command.Item
+            key={conv.sessionId}
+            value={`ai-chat-${conv.sessionId}`}
+            onSelect={() => handleAiChatSelect(conv)}
+            onMouseDown={handleItemMouseDown}
+            className='flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer aria-selected:cmdk-active-row'
+          >
+            <div className='flex min-w-0 flex-1 items-center gap-1.5'>
+              <span className='min-w-0 flex-1 truncate text-[15px] leading-[1.2] text-foreground'>
+                {conv.title}
+              </span>
+              {conv.agentSlug && conv.agentSlug !== 'ask-ai' && (
+                <AgentChip slug={conv.agentSlug} agent={aiAgentBySlug.get(conv.agentSlug)} />
+              )}
+            </div>
+            <span className='shrink-0 text-xs text-muted-foreground'>
+              {formatRelativeTime(conv.lastUpdated)}
+            </span>
+          </Command.Item>
+        ))}
+        {aiChatsFetchingNext && (
+          <div className='py-2 text-center text-xs text-muted-foreground'>Loading…</div>
+        )}
+      </Command.Group>
+    );
+  };
+
   const renderSearchUsersSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.USERS) &&
     showGroupedUsers &&
@@ -3546,6 +3779,7 @@ const ChannelCommandMenu = ({
           </button>
           <LexicalSearchInput
             value={searchText}
+            promoteDateChips={activeTab === TabType.AI_CHATS}
             placeholder={
               openTargetLabel
                 ? `${openTargetLabel} – Open`
@@ -3926,10 +4160,16 @@ const ChannelCommandMenu = ({
               <SlashCommandPalette command={slash} onItemMouseDown={handleItemMouseDown} />
             ) : (
               <>
+                {/* AI Chats is a self-contained client-side source — it renders ONLY
+                    its own list (not blended with Vespa/local results, PRD 3.6), and
+                    the "Show results for" backend row is suppressed for it. The
+                    mention typeahead below still renders (for with:<agent>). */}
+                {activeTab === TabType.AI_CHATS && !mentionSearchType && renderAiChatsSection()}
+
                 {/* Popup palette: the row is pinned here, directly under the tabs, so it
                     sits in the same place no matter what matched. It is skipped by the
                     first-row auto-select, so the top result keeps the Enter target. */}
-                {!isScreenPalette && showResultsForRow}
+                {!isScreenPalette && activeTab !== TabType.AI_CHATS && showResultsForRow}
 
                 {/* Best local matches pinned to the top of the list — both popup and
                     screen. Starred leads; the strong-matched user/channel then becomes
@@ -3941,7 +4181,7 @@ const ChannelCommandMenu = ({
 
                 {/* Screen palette: the row stays below the hoisted best matches, which
                     own the Enter target there. */}
-                {isScreenPalette && showResultsForRow}
+                {isScreenPalette && activeTab !== TabType.AI_CHATS && showResultsForRow}
 
                 {/* Mention Suggestions - Show when mention search is active */}
                 {mentionSearchType && (
@@ -4462,7 +4702,7 @@ const ChannelCommandMenu = ({
                     error notice itself is rendered after the local results below. */}
                 {error && <div className='p-3 text-sm text-destructive'>{error}</div>}
 
-                {!showEmptyState && !mentionSearchType && (
+                {!showEmptyState && !mentionSearchType && activeTab !== TabType.AI_CHATS && (
                   <>
                     {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
                     {/* When a from:/in: chip is active, backend results appear first. Local sections

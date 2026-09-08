@@ -15,6 +15,7 @@ import {
   runClawAgentStream,
   cancelClawAgentRun,
   listClawConversations,
+  listAllClawConversations,
   getClawConversationMessages,
   rateClawRun,
   streamClawConversationLive,
@@ -913,6 +914,46 @@ export class XyneAIControllerV2 {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] listConversations error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  /**
+   * GET /api/xyne-ai/v2/conversations/all
+   * Consolidated cross-agent conversation list for the current user.
+   * Query params: limit, offset (pagination), q (title search). Each row
+   * carries its own agentSlug.
+   */
+  listAllConversations = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const limitRaw = parseInt(String(req.query.limit ?? ''), 10);
+    const offsetRaw = parseInt(String(req.query.offset ?? ''), 10);
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    // `agentSlug` is the `with:` filter — comma-separated for OR semantics.
+    const agentSlugs =
+      typeof req.query.agentSlug === 'string'
+        ? req.query.agentSlug.split(',').map(s => s.trim()).filter(Boolean)
+        : undefined;
+
+    try {
+      const result = await listAllClawConversations(
+        { headers: req.headers, userId },
+        {
+          ...(Number.isFinite(limitRaw) ? { limit: limitRaw } : {}),
+          ...(Number.isFinite(offsetRaw) ? { offset: offsetRaw } : {}),
+          ...(q !== undefined ? { q } : {}),
+          ...(agentSlugs && agentSlugs.length > 0 ? { agentSlugs } : {}),
+        }
+      );
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] listAllConversations error:', error);
       res.status(503).json({ success: false, error: message });
     }
   };

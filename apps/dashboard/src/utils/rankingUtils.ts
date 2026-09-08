@@ -317,3 +317,43 @@ export function filterChannelsBySearchableNames<
 
   return [...matchedDms, ...matchedRegular];
 }
+
+// ── AI chat (conversation) fuzzy title search ────────────────────────────────
+// Client-side matching for the dedicated AI-chat search modal. Mirrors the DM
+// pattern: ONE memoized Fuse index over the consolidated conversation list,
+// reused across keystrokes and rebuilt only when the list changes.
+
+/** One indexed conversation: id + fuzzy keys (title primary, agent secondary). */
+export type AiChatDoc = { sessionId: string; title: string; agentName: string };
+
+const AI_CHAT_FUSE_OPTIONS = {
+  threshold: 0.35,
+  includeScore: true,
+  ignoreLocation: true,
+  minMatchCharLength: 1,
+  keys: [
+    { name: 'title', weight: 0.7 },
+    { name: 'agentName', weight: 0.3 },
+  ],
+};
+
+let _aiChatFuse: { sig: string; fuse: Fuse<AiChatDoc> } | null = null;
+
+/**
+ * Fuzzy-match the consolidated AI-chat list by title (and agent name as a
+ * secondary key). Empty query returns the docs unchanged (recency order, as the
+ * caller supplied). Otherwise returns the matching docs ordered by Fuse score.
+ * The index is memoized on a lightweight signature so it rebuilds only when the
+ * list grows (e.g. a new page loads), not on every keystroke.
+ */
+export function filterAiChatsBySearchableNames(docs: AiChatDoc[], query: string): AiChatDoc[] {
+  const q = query.trim();
+  if (!q) return docs;
+  if (docs.length === 0) return [];
+
+  const sig = `${docs.length}\x1f${docs[0]?.sessionId ?? ''}\x1f${docs[docs.length - 1]?.sessionId ?? ''}`;
+  if (!_aiChatFuse || _aiChatFuse.sig !== sig) {
+    _aiChatFuse = { sig, fuse: new Fuse(docs, AI_CHAT_FUSE_OPTIONS) };
+  }
+  return _aiChatFuse.fuse.search(q).map(r => r.item);
+}
