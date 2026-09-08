@@ -1,44 +1,79 @@
-// Prometheus metrics. Cache hit/miss per rule is only known to nginx, so the
-// nginx access log is shipped over local syslog (UDP) into this process and
-// counted here; the resolver and origin count their own traffic directly.
+// OpenTelemetry metrics. Cache hit/miss per rule is only known to nginx, so
+// the nginx access log is shipped over local syslog (UDP) into this process
+// and counted here; the resolver and origin count their own traffic directly.
+// Everything is exported to the collector by telemetry.ts.
 import { createSocket, type Socket } from 'node:dgram';
-import { Counter, Gauge, Registry } from 'prom-client';
+import {
+  type Attributes,
+  type Counter,
+  type Meter,
+  metrics as otelMetrics,
+} from '@opentelemetry/api';
 
 import { log } from './log.js';
 
-export const registry = new Registry();
+const METER_NAME = 'xyne-spaces-dashboard-edge';
+
+interface Instruments {
+  requests: Counter;
+  upstreamErrors: Counter;
+  resolves: Counter;
+  originRequests: Counter;
+}
+
+// Instruments are created on first use, after telemetry.ts has registered the
+// global meter provider; created earlier they would bind to the no-op provider.
+let instruments: Instruments | null = null;
+const ruleHealth = new Map<string, number>();
+
+function getInstruments(): Instruments {
+  if (instruments) {
+    return instruments;
+  }
+  const meter: Meter = otelMetrics.getMeter(METER_NAME);
+  instruments = {
+    requests: meter.createCounter('edge_requests_total', {
+      description: 'Client requests by rule, nginx cache status and HTTP status',
+    }),
+    upstreamErrors: meter.createCounter('edge_upstream_errors_total', {
+      description: 'Origin responses with a 5xx status, by rule',
+    }),
+    resolves: meter.createCounter('edge_resolve_total', {
+      description: 'Rule resolutions by outcome (rule id, none, not_ready, bad_request)',
+    }),
+    originRequests: meter.createCounter('edge_origin_requests_total', {
+      description: 'Object fetches from the storage origin by result',
+    }),
+  };
+  meter
+    .createObservableGauge('edge_rule_healthy', {
+      description: '1 when the rule bundle exists at the origin, 0 otherwise',
+    })
+    .addCallback((result) => {
+      for (const [rule, value] of ruleHealth) {
+        result.observe(value, { rule });
+      }
+    });
+  return instruments;
+}
+
+function counter(name: keyof Instruments): { inc: (attributes?: Attributes) => void } {
+  return {
+    inc: (attributes: Attributes = {}): void => {
+      getInstruments()[name].add(1, attributes);
+    },
+  };
+}
 
 export const metrics = {
-  requests: new Counter({
-    name: 'edge_requests_total',
-    help: 'Client requests by rule, nginx cache status and HTTP status',
-    labelNames: ['rule', 'cache', 'status'] as const,
-    registers: [registry],
-  }),
-  upstreamErrors: new Counter({
-    name: 'edge_upstream_errors_total',
-    help: 'Origin responses with a 5xx status, by rule',
-    labelNames: ['rule'] as const,
-    registers: [registry],
-  }),
-  resolves: new Counter({
-    name: 'edge_resolve_total',
-    help: 'Rule resolutions by outcome (rule id, none, not_ready)',
-    labelNames: ['rule'] as const,
-    registers: [registry],
-  }),
-  originRequests: new Counter({
-    name: 'edge_origin_requests_total',
-    help: 'Object fetches from the storage origin by result',
-    labelNames: ['result'] as const,
-    registers: [registry],
-  }),
-  ruleHealthy: new Gauge({
-    name: 'edge_rule_healthy',
-    help: '1 when the rule bundle exists at the origin, 0 otherwise',
-    labelNames: ['rule'] as const,
-    registers: [registry],
-  }),
+  requests: counter('requests'),
+  upstreamErrors: counter('upstreamErrors'),
+  resolves: counter('resolves'),
+  originRequests: counter('originRequests'),
+  setRuleHealth(rule: string, healthy: boolean): void {
+    getInstruments();
+    ruleHealth.set(rule, healthy ? 1 : 0);
+  },
 };
 
 interface AccessLine {

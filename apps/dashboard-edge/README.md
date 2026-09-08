@@ -144,11 +144,28 @@ Other settings: `EDGE_RULES_FILE` (default `/etc/edge/rules/rules.json`),
 | `/_edge/healthz` | Liveness: the app is up. |
 | `/_edge/ready` | Readiness: rules loaded and the default rule healthy. |
 | `/_edge/status` | JSON: every rule with its resolved bundle, version, fingerprint, cache mode, health and last error; storage description; last reload and health check. |
-| `/_edge/metrics` | Prometheus: `edge_requests_total{rule,cache,status}` (from nginx's access log, shipped over local syslog), `edge_upstream_errors_total{rule}`, `edge_resolve_total{rule}`, `edge_origin_requests_total{result}`, `edge_rule_healthy{rule}`. |
 
 nginx refuses these for requests carrying `x-original-host`, which the
 VirtualService sets on external traffic, so they are only reachable inside
 the cluster or via `kubectl port-forward`.
+
+## Metrics
+
+Metrics are pushed, not scraped: the app runs the OpenTelemetry NodeSDK with
+a periodic OTLP/HTTP exporter, the same setup as the backend, controlled by
+the same variables (`ENABLE_OTEL_METRICS`, default `true`; `OTEL_BASE_URL`,
+default `http://localhost:4318`; `OTEL_SERVICE_NAME`, default
+`xyne-spaces-dashboard-edge`; `OTEL_EXPORT_INTERVAL_MS`, default 60000). In
+the cluster `OTEL_BASE_URL` points at the collector in the `monitoring`
+namespace. Instruments:
+
+| Metric | Attributes | Source |
+|---|---|---|
+| `edge_requests_total` | `rule`, `cache` (nginx cache status), `status` | nginx's JSON access log, shipped over local syslog into the app |
+| `edge_upstream_errors_total` | `rule` | same, origin responses with a 5xx status |
+| `edge_resolve_total` | `rule` (or `none`, `not_ready`, `bad_request`) | the resolver |
+| `edge_origin_requests_total` | `result` (`ok`, `not_found`, `not_modified`, `error`) | the objects endpoint |
+| `edge_rule_healthy` | `rule` | gauge, 1 when the rule's bundle exists at the origin |
 
 Every response carries `X-Edge-Rule`, `X-Edge-Bundle`, `X-Edge-Version`
 (the cache key's version and fingerprint), `X-Edge-Object`, `X-Edge-Cache`
@@ -271,7 +288,8 @@ src/rules/match.ts         pure matcher: rules x request -> bundle + object + ke
 src/rules/store.ts         load, validate, health-check, fingerprint, hot-reload
 src/origin/                storage (gcs/s3/azure via @xyne/storage), http
 src/http/                  /resolve, /objects, /_edge handlers and router
-src/metrics.ts             Prometheus registry + syslog listener for nginx access lines
+src/telemetry.ts           OpenTelemetry NodeSDK + OTLP/HTTP metric exporter
+src/metrics.ts             OTel instruments + syslog listener for nginx access lines
 src/contentType.ts         Content-Type and Cache-Control policy
 k8s/                       ServiceAccount, ConfigMap, Deployment, Service
 local/                     compose harness with fake-gcs-server and MinIO

@@ -50,6 +50,15 @@ services:
       minio:
         condition: service_healthy
 
+  # Receives the edges' OTLP metrics and prints them (docker compose logs otel).
+  otel:
+    image: otel/opentelemetry-collector:0.116.1
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4318:4318"
+
   edge:
     build:
       context: ../../..
@@ -60,6 +69,8 @@ services:
       STORAGE_ENDPOINT: http://fake-gcs:4443
       STORAGE_AUTH: none
       EDGE_RELOAD_INTERVAL: "2"
+      OTEL_BASE_URL: http://otel:4318
+      OTEL_EXPORT_INTERVAL_MS: "5000"
       LOG_LEVEL: info
     volumes:
       - ./rules.json:/etc/edge/rules/rules.json:ro
@@ -84,6 +95,8 @@ services:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       EDGE_RELOAD_INTERVAL: "2"
+      OTEL_BASE_URL: http://otel:4318
+      OTEL_EXPORT_INTERVAL_MS: "5000"
       LOG_LEVEL: info
     volumes:
       - ./rules.json:/etc/edge/rules/rules.json:ro

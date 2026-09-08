@@ -19,6 +19,11 @@ const envSchema = z.object({
   EDGE_APP_PORT: z.coerce.number().int().positive().default(9101),
   EDGE_SYSLOG_PORT: z.coerce.number().int().positive().default(9102),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  /** Same names and defaults as the backend: metrics pushed over OTLP/HTTP to the collector. */
+  ENABLE_OTEL_METRICS: z.enum(['true', 'false', '1', '0']).default('true'),
+  OTEL_BASE_URL: z.string().default('http://localhost:4318'),
+  OTEL_SERVICE_NAME: z.string().default('xyne-spaces-dashboard-edge'),
+  OTEL_EXPORT_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 export type StorageBackend = 'gcs' | 's3' | 'azure' | 'http';
@@ -42,6 +47,12 @@ export interface Config {
   listen: { addr: string; port: number };
   syslogPort: number;
   logLevel: string;
+  otel: {
+    metricsEnabled: boolean;
+    baseUrl: string;
+    serviceName: string;
+    exportIntervalMs: number;
+  };
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -77,5 +88,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     listen: { addr: e.EDGE_APP_ADDR, port: e.EDGE_APP_PORT },
     syslogPort: e.EDGE_SYSLOG_PORT,
     logLevel: e.LOG_LEVEL,
+    otel: {
+      metricsEnabled: e.ENABLE_OTEL_METRICS === 'true' || e.ENABLE_OTEL_METRICS === '1',
+      baseUrl: e.OTEL_BASE_URL.replace(/\/+$/, ''),
+      serviceName: e.OTEL_SERVICE_NAME,
+      exportIntervalMs: e.OTEL_EXPORT_INTERVAL_MS,
+    },
   };
 }
