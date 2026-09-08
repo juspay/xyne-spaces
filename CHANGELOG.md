@@ -1,3 +1,17 @@
+## [1.287.0](https://github.com/juspay/xyne-spaces/compare/v1.286.0...v1.287.0) (2026-09-08)
+
+
+### Features
+
+* google docs and email ([#1512](https://github.com/juspay/xyne-spaces/issues/1512)) ([dba698e](https://github.com/juspay/xyne-spaces/commit/dba698e32908528eac5fd2c854ab2c7134db4b37))
+* inside participant picker filter ([#1628](https://github.com/juspay/xyne-spaces/issues/1628)) ([444fd1c](https://github.com/juspay/xyne-spaces/commit/444fd1ca5afeaaf5162c9f887bf2eed9cad4ca64))
+* persist radar filter selection in localStorage ([#1620](https://github.com/juspay/xyne-spaces/issues/1620)) ([d1705aa](https://github.com/juspay/xyne-spaces/commit/d1705aac093ea56cf2d0360d570f18c6bc44cd8b))
+
+
+### Reverts
+
+* Revert "fix: XYNE-55782 allow pausing steps inside control-flow branches (#477)" (#1608) ([754f4a0](https://github.com/juspay/xyne-spaces/commit/754f4a070bf75d9e9545369e19a1dc0cd64013f7)), closes [#477](https://github.com/juspay/xyne-spaces/issues/477) [#1608](https://github.com/juspay/xyne-spaces/issues/1608)
+
 ## [1.286.0](https://github.com/juspay/xyne-spaces/compare/v1.285.1...v1.286.0) (2026-09-07)
 
 
