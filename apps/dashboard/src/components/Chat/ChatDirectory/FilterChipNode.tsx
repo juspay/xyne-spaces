@@ -31,7 +31,7 @@ import {
   type SerializedTextNode,
   type Spread,
 } from 'lexical';
-import { CalendarDays, LayoutGrid, SignalHigh } from 'lucide-react';
+import { Building2, CalendarDays, LayoutGrid, SignalHigh } from 'lucide-react';
 import { Hashtag, UserTwo, Lock02Close } from '@xyne/icons';
 import { ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
@@ -98,6 +98,10 @@ export function chipLabelText(mentionData: ChipData): string {
   // Date chips read as the bare date; the prefix already says which edge it is.
   if (mentionData.type === ChipType.DATE) {
     return mentionData.id;
+  }
+  // Entity chips read as the bare name ("Big Basket") — the `entity:` prefix carries the rest.
+  if (mentionData.type === ChipType.ENTITY) {
+    return mentionData.name;
   }
   // A mention filter reads the way a mention is written — `mentions: @alice` — because the
   // `@` is the thing being searched for, not a type marker. The avatar beside it doesn't
@@ -267,6 +271,11 @@ export function ChipIcon({ mentionData }: { mentionData: ChipData }): React.JSX.
   // call useChannel with a board id.
   if (mentionData.type === ChipType.BOARD) {
     return <LayoutGrid className={ICON_CLASS} />;
+  }
+  // Entity — a value filter like board, glyph rather than an avatar. Also checked before
+  // the channel branch, which would otherwise call useChannel with an entity name.
+  if (mentionData.type === ChipType.ENTITY) {
+    return <Building2 className={ICON_CLASS} />;
   }
   // User filters show the picked person's photo (the design's 16px avatar, rounded-sm = 4px);
   // `Avatar` resolves the user from the id and falls back to initials, so ChipData stays
