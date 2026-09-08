@@ -149,3 +149,26 @@ test('real allowlisted ACLs derive without over-rejecting', () => {
   assert.doesNotThrow(() => deriveAclGate('conversations'));
   assert.doesNotThrow(() => deriveAclGate('message_attachments'));
 });
+
+// ---- P1(a): per-user vs per-scope grant classification (drives the two-plane partition) ----
+
+test('conversations: channel_participants is PER-USER (bound on userId); channels is PER-SCOPE', () => {
+  const gate = deriveAclGate('conversations');
+  const byTable = new Map(gate.grantSources.map((s) => [s.table, s]));
+  const parts = byTable.get('channel_participants');
+  assert.equal(parts?.kind, 'per-user');
+  assert.equal(parts?.boundColumn, 'userId', 'partition key is the SENTINEL_USER-bound column');
+  assert.equal(parts?.scopeColumn, 'channelId', 'scoped to the channel at eval');
+  const channels = byTable.get('channels');
+  assert.equal(channels?.kind, 'per-scope', 'the visibility/workspace root row is shared per scope');
+  assert.equal(channels?.boundColumn, undefined);
+});
+
+test('message_attachments: the userId-binding leaf is PER-USER, structural hops PER-SCOPE', () => {
+  const gate = deriveAclGate('message_attachments');
+  const byTable = new Map(gate.grantSources.map((s) => [s.table, s]));
+  assert.equal(byTable.get('channel_participants')?.kind, 'per-user');
+  assert.equal(byTable.get('channel_participants')?.boundColumn, 'userId');
+  assert.equal(byTable.get('channels')?.kind, 'per-scope');
+  assert.equal(byTable.get('conversations')?.kind, 'per-scope', 'the conversation→channel hop is structural, not user-bound');
+});

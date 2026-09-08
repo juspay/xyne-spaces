@@ -48,10 +48,21 @@ interface ExistsCond {
 }
 export type Cond = SimpleCond | BoolCond | ExistsCond;
 
-/** A grant table the gate reads + the column its instance is scoped by (from the ACL correlation). */
+/**
+ * A grant table the gate reads, classified for the two-plane partition (final plan):
+ *  - `per-user`: the ACL binds a leaf column to SENTINEL_USER (e.g. `channel_participants.userId`),
+ *    so the instance partitions PER USER (`__grant__<table>{<boundColumn>: U}` = all of U's rows).
+ *    A membership delta arrives pre-keyed to U → O(subs_U) targeted recompute, no del-enrichment.
+ *  - `per-scope`: a uniform scope-root row (visibility/workspace) or a structure table with no
+ *    direct subscriber binding — materialized per SCOPE and shared (a flip re-gates the scope).
+ * `scopeColumn` is the correlation's childField — how the instance is filtered to the query's scope.
+ */
 export interface GrantSource {
   table: string;
   scopeColumn: string;
+  kind: 'per-user' | 'per-scope';
+  /** per-user only: the leaf column bound to SENTINEL_USER — the partition key. */
+  boundColumn?: string;
 }
 
 export interface AclGate {
@@ -119,25 +130,68 @@ export function validateGateAst(cond: Cond): void {
   }
 }
 
-/** Walk the ACL's correlatedSubqueries → each grant table + the column its standalone instance is keyed by. */
+/**
+ * The column a whereExists subquery binds to SENTINEL_USER, or null if it does not pin the row to
+ * the subscriber. `and` binds if ANY conjunct does (the row then pertains to the subscriber); `or`
+ * binds ONLY if EVERY arm binds on the SAME column (a non-binding arm would grant regardless of the
+ * subscriber ⇒ not per-user); a nested correlatedSubquery's binding belongs to ITS table, not this.
+ */
+function boundColumnOf(where: Cond | undefined): string | null {
+  if (!where) return null;
+  switch (where.type) {
+    case 'simple':
+      return (where.op === '=' || where.op === 'IS') && where.right.value === SENTINEL_USER
+        ? where.left.name
+        : null;
+    case 'and': {
+      for (const c of where.conditions) {
+        const b = boundColumnOf(c);
+        if (b) return b;
+      }
+      return null;
+    }
+    case 'or': {
+      let col: string | null = null;
+      for (const c of where.conditions) {
+        const b = boundColumnOf(c);
+        if (!b) return null;
+        if (col && col !== b) return null;
+        col = b;
+      }
+      return col;
+    }
+    case 'correlatedSubquery':
+      return null;
+  }
+}
+
+/**
+ * Walk the ACL's correlatedSubqueries → each grant table (deduped by table:scopeColumn),
+ * classified per-user (binds SENTINEL_USER on a consistent column) vs per-scope. A table that
+ * appears with INCONSISTENT binding across arms is downgraded to per-scope (conservative: a
+ * user-targeted partition would miss the unbound arm's grants).
+ */
 function collectGrantSources(root: Cond): GrantSource[] {
-  const sources: GrantSource[] = [];
-  const seen = new Set<string>();
+  const byKey = new Map<string, { table: string; scopeColumn: string; boundColumn: string | null; conflict: boolean }>();
   const walk = (cond: Cond): void => {
     if (cond.type === 'and' || cond.type === 'or') cond.conditions.forEach(walk);
     else if (cond.type === 'correlatedSubquery') {
       const table = cond.related.subquery.table;
       const scopeColumn = cond.related.correlation.childField[0];
       const key = `${table}:${scopeColumn}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        sources.push({ table, scopeColumn });
-      }
+      const boundColumn = boundColumnOf(cond.related.subquery.where);
+      const existing = byKey.get(key);
+      if (!existing) byKey.set(key, { table, scopeColumn, boundColumn, conflict: false });
+      else if (existing.boundColumn !== boundColumn) existing.conflict = true;
       if (cond.related.subquery.where) walk(cond.related.subquery.where);
     }
   };
   walk(root);
-  return sources;
+  return [...byKey.values()].map((e) =>
+    e.boundColumn !== null && !e.conflict
+      ? { table: e.table, scopeColumn: e.scopeColumn, kind: 'per-user' as const, boundColumn: e.boundColumn }
+      : { table: e.table, scopeColumn: e.scopeColumn, kind: 'per-scope' as const },
+  );
 }
 
 interface Bindings {
