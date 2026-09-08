@@ -63,6 +63,7 @@ import { formatTypingMessage, resolveCommandTextFromHtml } from './InputBox.util
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
+import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -408,6 +409,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useScope('composer', isFocused && !disabled && !isSending);
 
+    const isEventFromThisComposer = useCallback(
+      (event: KeyboardEvent): boolean => isEventFromInput(event, id),
+      [id],
+    );
+
     useShortcutById(
       'composer.attach',
       () => {
@@ -416,6 +422,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       {
         enabled: Boolean(features.fileAttachments) && !disabled && !isSending,
+        when: isEventFromThisComposer,
       },
     );
 
