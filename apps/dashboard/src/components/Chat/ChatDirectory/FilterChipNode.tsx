@@ -33,7 +33,7 @@ import {
 } from 'lexical';
 import { CalendarDays, LayoutGrid, SignalHigh } from 'lucide-react';
 import { Hashtag, UserTwo, Lock02Close } from '@xyne/icons';
-import { ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
+import { type Channel, ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
 import Avatar from '../../ui/Avatar/Avatar';
 import { ChipType, type ChipData } from './ChannelCommandMenu.types';
@@ -233,6 +233,16 @@ export function ChannelChipIcon({
   size?: number;
 }): React.JSX.Element {
   const channel = useChannel(id);
+  return <ChannelChipGlyph channel={channel} size={size} />;
+}
+
+export function ChannelChipGlyph({
+  channel,
+  size = ICON_SIZE,
+}: {
+  channel: Channel | null | undefined;
+  size?: number;
+}): React.JSX.Element {
   if (!channel) {
     return <Hashtag size={size} />;
   }
