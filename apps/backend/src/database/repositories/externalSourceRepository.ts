@@ -9,6 +9,7 @@ import { buildChannelAppSourceName, resolveAppDeskInstalledAppId } from '@/integ
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import type { ExternalSource } from '@prisma/client';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 export type CalendarProvider = 'GOOGLE' | 'MICROSOFT';
 
@@ -67,7 +68,7 @@ export class ExternalSourceRepository {
   // source name (e.g. after a manual DB fix or in production where user_id is returned).
   async findInstagramByExternalIdentifier(externalIdentifier: string) {
     return await this.db.externalSource.findFirst({
-      where: { sourceType: 'instagram', externalIdentifier, isActive: true },
+      where: { sourceType: ExternalSourcePlatform.INSTAGRAM, externalIdentifier, isActive: true },
     });
   }
 

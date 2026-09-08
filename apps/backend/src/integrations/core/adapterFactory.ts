@@ -43,4 +43,29 @@ export class AdapterFactory {
     adapterRegistry.register(platform, adapter);
     return adapter;
   }
+
+  static createPolling(
+    platform: ExternalSourcePlatform,
+    transformer: BaseTransformer<any, any>,
+    flow?: BaseFlow,
+    postprocessor?: BasePostprocessor,
+    interactionReplySender?: BaseInteractionReplySender,
+  ): ExternalSourceAdapter {
+    const adapter: ExternalSourceAdapter = {
+      name: platform,
+      authenticate: async () => ({ authenticated: true }),
+      transform: transformer.transform.bind(transformer),
+      postprocess:
+        postprocessor?.process.bind(postprocessor) ||
+        transformer.postprocess?.bind(transformer),
+      preprocess: flow?.preprocess?.bind(flow),
+      getSourceNameFromDB: flow?.getSourceNameFromDB?.bind(flow),
+      isTestPayload: flow?.isTestPayload?.bind(flow),
+      isTestQueryParam: flow?.isTestQueryParam?.bind(flow),
+      sendInteractionReply: interactionReplySender?.sendReply.bind(interactionReplySender),
+    };
+
+    adapterRegistry.register(platform, adapter);
+    return adapter;
+  }
 }

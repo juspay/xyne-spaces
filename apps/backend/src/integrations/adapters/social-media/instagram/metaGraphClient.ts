@@ -35,16 +35,18 @@ export interface ExchangeTokenResult {
 }
 
 export const metaGraphClient = {
-  // Send a DM from the business IG account (igUserId) to a customer (recipientIgsid).
-  // IG Login approach: POST /{igUserId}/messages with Bearer token.
+  // Send a DM from the business IG account to a customer.
+  // IG Login approach: POST /{senderIgsid}/messages with Bearer token.
+  // senderIgsid must be the app-scoped IGSID (from GET /me as `id`), NOT the real igUserId —
+  // Meta rejects the real user ID on this endpoint.
   async sendDM(
     accessToken: string,
-    igUserId: string,
+    senderIgsid: string,
     recipientIgsid: string,
     text: string,
   ): Promise<SendDMResult> {
     const response = await axios.post<SendDMResult>(
-      `${IG_BASE_URL}/${igUserId}/messages`,
+      `${IG_BASE_URL}/${senderIgsid}/messages`,
       {
         recipient: { id: recipientIgsid },
         message: { text },
@@ -122,17 +124,23 @@ export const metaGraphClient = {
     }
     const igsid = id;                  // always app-scoped; use for API calls
     const igUserId = user_id || id;    // real user ID when present; defensive fallback to igsid
-    logger.info('[metaGraphClient] getMe result', { igsid, igUserId, username });
+    logger.debug('[metaGraphClient] getMe result', { igsid, igUserId, username });
     return { igUserId, igsid, username: username ?? '' };
   },
 
-  // Fetch a message by mid — needed when webhook only delivers message_edit (num_edit=0).
+  // Fetch a message by mid — needed when webhook only delivers message_edit (num_edit>0).
+  // mid format from Meta is alphanumeric with underscores/hyphens (e.g. "mid.GabcXYZ1234567").
+  // Validate before use to prevent path traversal in the URL.
   async getMessage(accessToken: string, mid: string): Promise<{
     id: string;
     message?: string;
     from?: { id: string; username?: string };
     to?: { data: Array<{ id: string }> };
   } | null> {
+    if (!/^[a-zA-Z0-9._-]{1,128}$/.test(mid)) {
+      logger.warn('[IG getMessage] Rejecting mid with unexpected format', { mid });
+      return null;
+    }
     try {
       const response = await axios.get(
         `${IG_BASE_URL}/${mid}`,
@@ -162,21 +170,30 @@ export const metaGraphClient = {
   },
 
   // In-process cache so we don't call Meta's profile API on every single DM.
-  // Key: `${igUserId}:${igsid}`, value: { username, expiresAt }. Capped at 500 entries (LRU eviction).
+  // Key: `${businessIgsid}:${senderIgsid}`, value: { username, expiresAt }. Capped at 500 entries.
+  // Eviction is approximate LRU: Map preserves insertion order; on a cache hit we
+  // delete + re-insert so the entry moves to the tail (most-recently-used). On overflow
+  // we delete the head (least-recently-used).
   // TTL is 24h so a username change is picked up on the next DM after expiry.
   _usernameCache: new Map<string, { username: string; expiresAt: number }>(),
   _usernameCacheMaxSize: 500,
   _usernameCacheTtlMs: 24 * 60 * 60 * 1000,
 
-  async getSenderUsername(accessToken: string, businessIgUserId: string, senderIgsid: string): Promise<string | null> {
-    const cacheKey = `${businessIgUserId}:${senderIgsid}`;
+  async getSenderUsername(accessToken: string, businessIgsid: string, senderIgsid: string): Promise<string | null> {
+    const cacheKey = `${businessIgsid}:${senderIgsid}`;
     const cached = this._usernameCache.get(cacheKey);
-    if (cached !== undefined && cached.expiresAt > Date.now()) return cached.username;
+    if (cached !== undefined && cached.expiresAt > Date.now()) {
+      // Refresh LRU position: move to tail so this entry is the last evicted.
+      this._usernameCache.delete(cacheKey);
+      this._usernameCache.set(cacheKey, cached);
+      return cached.username;
+    }
     try {
       const profile = await this.getUserProfile(accessToken, senderIgsid);
       const username = profile.username ?? null;
       if (username) {
         if (this._usernameCache.size >= this._usernameCacheMaxSize) {
+          // Evict least-recently-used (head of Map iteration order).
           const firstKey = this._usernameCache.keys().next().value;
           if (firstKey !== undefined) this._usernameCache.delete(firstKey);
         }
@@ -190,9 +207,10 @@ export const metaGraphClient = {
 
   // Subscribe the IG account to receive DM webhook events.
   // Requires the app-level webhook to be configured in Meta App Dashboard first.
-  async subscribeToWebhook(accessToken: string, igUserId: string): Promise<void> {
+  // igsid must be the app-scoped IGSID (not the real igUserId — Meta rejects it here).
+  async subscribeToWebhook(accessToken: string, igsid: string): Promise<void> {
     await axios.post(
-      `${IG_BASE_URL}/${igUserId}/subscribed_apps`,
+      `${IG_BASE_URL}/${igsid}/subscribed_apps`,
       null,
       {
         params: { subscribed_fields: 'messages,message_edits' },
@@ -213,9 +231,10 @@ export const metaGraphClient = {
 
   // Verify which app(s) the IG account is subscribed to.
   // After subscribeToWebhook, call this to confirm our app is the active subscriber.
-  async getSubscribedApps(accessToken: string, igUserId: string): Promise<unknown> {
+  // igsid must be the app-scoped IGSID (not the real igUserId — Meta rejects it here).
+  async getSubscribedApps(accessToken: string, igsid: string): Promise<unknown> {
     const response = await axios.get(
-      `${IG_BASE_URL}/${igUserId}/subscribed_apps`,
+      `${IG_BASE_URL}/${igsid}/subscribed_apps`,
       { headers: { Authorization: `Bearer ${accessToken}` }, timeout: IG_REQUEST_TIMEOUT_MS },
     );
     return response.data;

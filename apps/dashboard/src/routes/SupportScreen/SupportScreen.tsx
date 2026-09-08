@@ -2007,6 +2007,10 @@ const SupportScreen = (): ReactElement => {
   );
   const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
   const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
+  const selectedChannelIntegration = useChannelIntegrationInfo(
+    isSocialMediaDesk && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : null,
+  );
+  const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
   // currently available from Google; email desks open the range picker.
@@ -3244,6 +3248,7 @@ const SupportScreen = (): ReactElement => {
                         )}
                       {canRefetch &&
                         isSelectedChannelJoined &&
+                        !isInstagramDesk &&
                         (isDlDesk ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -6152,12 +6157,6 @@ export const SupportTicketDetail = ({
                     <SlackThread
                       emails={emails}
                       ticketId={ticket?.id}
-                      lastEmailAt={ticket?.lastEmailAt}
-                      emailReads={
-                        ticket?.emailReads as
-                          | Array<{ userId: string; lastReadEmailAt: number }>
-                          | undefined
-                      }
                     />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
@@ -6323,185 +6322,29 @@ export const SupportTicketDetail = ({
                 data-thread-citation-host
               >
                 {conversationId && channelId ? (
-
-                  <Tabs.Root
-                    value={activeTab}
-                    onValueChange={value => setActiveTab(value as TabType)}
-                    className='flex-1 flex flex-col h-full overflow-hidden'
-                  >
-                    {/* Tabs Header */}
-                    <div className='w-full p-4 pb-0 bg-background flex-shrink-0'>
-                      <div className='border-b border-border flex items-center justify-between'>
-                        <Tabs.List className='flex items-center justify-start'>
-                          <Tabs.Trigger asChild value='messages'>
-                            <button
-                              className={cn(
-                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                activeTab === 'messages'
-                                  ? 'border-b-2 border-primary'
-                                  : 'border-b-2 border-transparent',
-                              )}
-                            >
-                              <span
-                                className={`${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                <MessageCircle size={12} />
-                              </span>
-                              <span
-                                className={`text-sm font-medium ${activeTab === 'messages' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                Messages
-                              </span>
-                            </button>
-                          </Tabs.Trigger>
-                          <Tabs.Trigger asChild value='details'>
-                            <button
-                              className={cn(
-                                'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                activeTab === 'details'
-                                  ? 'border-b-2 border-primary'
-                                  : 'border-b-2 border-transparent',
-                              )}
-                            >
-                              <span
-                                className={`${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                <FileText size={12} />
-                              </span>
-                              <span
-                                className={`text-sm font-medium ${activeTab === 'details' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                Details
-                              </span>
-                            </button>
-                          </Tabs.Trigger>
-                          {draftHasCitations && (
-                            <Tabs.Trigger asChild value='sources'>
-                              <button
-                                className={cn(
-                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                  activeTab === 'sources'
-                                    ? 'border-b-2 border-primary'
-                                    : 'border-b-2 border-transparent',
-                                )}
-                                data-track-category='Support'
-                                data-track-name='OpenSourcesTab'
-                              >
-                                <span
-                                  className={`${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  <Sparkles size={12} />
-                                </span>
-                                <span
-                                  className={`text-sm font-medium ${activeTab === 'sources' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  Sources
-                                </span>
-                                <span
-                                  className={cn(
-                                    'inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold',
-                                    activeTab === 'sources'
-                                      ? 'bg-primary/10 text-primary'
-                                      : 'bg-muted text-muted-foreground',
-                                  )}
-                                >
-                                  {sourcesHydrating && visibleAutoDraftCitations.length === 0 ? (
-                                    <Loader2 size={10} className='animate-spin' />
-                                  ) : (
-                                    visibleAutoDraftCitations.length
-                                  )}
-                                </span>
-                              </button>
-                            </Tabs.Trigger>
-                          )}
-                          {hasAutoDraftReasoning && (
-                            <Tabs.Trigger asChild value='reasoning'>
-                              <button
-                                className={cn(
-                                  'px-3 py-2 flex items-center justify-start gap-2 transition-all duration-100 cursor-pointer',
-                                  activeTab === 'reasoning'
-                                    ? 'border-b-2 border-primary'
-                                    : 'border-b-2 border-transparent',
-                                )}
-                                data-track-category='Support'
-                                data-track-name='OpenReasoningTab'
-                              >
-                                <span
-                                  className={`${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  <Brain size={12} />
-                                </span>
-                                <span
-                                  className={`text-sm font-medium ${activeTab === 'reasoning' ? 'text-primary' : 'text-muted-foreground'}`}
-                                >
-                                  Reasoning
-                                </span>
-                              </button>
-                            </Tabs.Trigger>
-                          )}
-                        </Tabs.List>
-                        <div className='flex items-center gap-2 shrink-0'>
-                          {/* Initiate Call Button */}
-                          {conversationId && (
-                            <ThreadCallButton
-                              onStartCall={() => setShowParticipantsModal(true)}
-                              onScheduleCall={() => setIsScheduleCallModalOpen(true)}
-                              hasActiveCall={hasActiveCallForConversation}
-                              testId='support-initiate-call-button'
-                            />
-                          )}
-                          <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
-                            <button
-                              type='button'
-                              onClick={() => {
-                                if (isAIPanelOpen) {
-                                  xyneAIActor.send({ type: 'CLOSE' });
-                                } else {
-                                  void openDraftAgentSession();
-                                }
-                              }}
-                              className={cn(
-                                'h-8 w-8 flex items-center justify-center rounded-lg border border-border transition-colors',
-                                isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
-                              )}
-                              aria-label='Toggle Ask AI panel'
-                              aria-pressed={isAIPanelOpen}
-                              data-track-category='Support'
-                              data-track-name='ToggleAIPanel'
-                              data-track-metadata={JSON.stringify({ source: 'right-panel-header' })}
-                            >
-                              <span className='inline-flex animate-ai-pop'>
-                                <XyneAIStar size={14} />
-                              </span>
-                            </button>
-                          </Tooltip>
-                          <button
-                            onClick={() => setIsRightPanelOpen(false)}
-                            className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
-                            aria-label='Close panel'
-                            title='Close panel'
-                            data-track-category='Support'
-                            data-track-name='CloseRightPanel'
-                          >
-                            <X size={16} className='text-muted-foreground' />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Messages Tab Content */}
-                    <Tabs.Content
-                      value='messages'
-                      className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
-                    >
-                      <ThreadList
+                  <>
+                    <ThreadMessages
+                      channelId={channelId}
+                      conversationId={conversationId}
+                      ticketId={ticket?.id ?? null}
+                      matchedMessageId={targetMessageId}
+                      skipInputAutoFocus
+                      onClose={() => setIsRightPanelOpen(false)}
+                      onAskAI={() => {
+                        if (isAIPanelOpen) {
+                          xyneAIActor.send({ type: 'CLOSE' });
+                        } else {
+                          void openDraftAgentSession();
+                        }
+                      }}
+                    />
+                    {channel?.type === ChannelType.SOCIAL_MEDIA && (
+                      <InstagramCustomerHistory
                         channelId={channelId}
                         conversationId={conversationId}
-                        threadMessages={messages}
-                        initialScrollOffset={0}
-                        isTicketThread={false}
-                        conversation={conversation}
-                        channelScopeType={channel?.scopeType}
+                        onTicketClick={xyneId => {
+                          void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                        }}
                       />
                       {isUserMember ? (
                         <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
@@ -6570,7 +6413,7 @@ export const SupportTicketDetail = ({
                         />
                       </Tabs.Content>
                     )}
-                  </Tabs.Root>
+                  </>
                 ) : (
                   <div className='h-full flex items-center justify-center'>
                     <div className='text-lg font-semibold text-muted-foreground'>

@@ -12,7 +12,7 @@ type BetterOmit<T, K extends string | number | symbol> = {
   [P in keyof T as P extends K ? never : P]: T[P];
 };
 
-interface OAuthStateService<TState> {
+export interface OAuthStateService<TState> {
   create(input: BetterOmit<TState, 'purpose' | 'codeVerifier' | 'createdAt'>): Promise<{ state: string; codeChallenge: string }>;
   consume(state: string): Promise<TState | null>;
 }

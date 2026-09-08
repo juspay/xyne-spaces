@@ -25,14 +25,12 @@ export class InstagramReplySender extends BaseInteractionReplySender {
       throw new InteractionReplyValidationError('Instagram source is not bound to a channel');
     }
 
-    // Enforce 24h reply window — Meta hard rule for DMs
-    const lastInbound = await db.email.findFirst({
-      where: {
-        externalThreadId,
-        channelId: source.channelId,
-        workspaceId: source.workspaceId ?? undefined,
-        type: EmailType.DEFAULT,
-      },
+    // Enforce 24h reply window — Meta hard rule for DMs.
+    // Query externalMessage (not email) because externalMessage.createdAt is set to the
+    // Meta event timestamp by core.ts, giving us the real Instagram message time.
+    // email.createdAt is DB insertion time and must not be used here.
+    const lastInbound = await db.externalMessage.findFirst({
+      where: { externalSourceId: source.id, externalThreadId, direction: 'INCOMING' },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true },
     });

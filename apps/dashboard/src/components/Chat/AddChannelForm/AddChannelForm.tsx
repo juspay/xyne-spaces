@@ -25,6 +25,7 @@ import {
   Trash2,
 } from 'lucide-react';
 
+import { SiInstagram } from 'react-icons/si';
 import { Button } from '../../ui/Button';
 import { Tooltip } from '../../ui/Tooltip';
 import {

@@ -98,6 +98,11 @@ export interface NormalizedData {
     type?: EmailType;
     sentByUserId?: string;
     skipBlockingCheck?: boolean;
+    rating?: number;
+    clientVersionName?: string;
+    clientVersionCode?: string;
+    updateExisting?: boolean;
+    syncTicketOnUpdate?: boolean;
   };
 
   ticketCustomFields?: Array<{
@@ -192,6 +197,9 @@ export interface TestPayloadResult {
 export interface ExternalSourceAdapter {
   /** Platform name (e.g., "zoho", "slack") */
   name: string;
+
+  /** True when the adapter is ingested by a scheduled provider poll. */
+  supportsPolling?: boolean;
 
   /** Authenticate incoming request (JWT, HMAC, etc.) and check if processing should be skipped */
   authenticate(
