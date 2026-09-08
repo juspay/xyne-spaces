@@ -4879,8 +4879,9 @@ const spacesReadCanvas: ToolDef = {
     "Returns the canvas title and markdown body. " +
     "The body MAY arrive with a short label like [b1a2b3c] on each paragraph. " +
     "Those labels identify paragraphs and must be preserved exactly when you " +
-    "write the document back with spaces-edit-canvas — follow the rules included " +
-    "in the response.",
+    "write the document back — with spaces-edit-canvas, or with " +
+    "spaces-sdlc-mutate-artifact when updating an SDLC artifact. Follow the rules " +
+    "included in the response.",
   inputSchema: {
     type: "object",
     properties: {
