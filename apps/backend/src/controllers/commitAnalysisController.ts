@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { conversationService } from '@/services/conversationService';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import { buildWorkspaceCanvasUrl } from '@/services/canvasService';
 import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core/';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas, type CommitAnalysisRepoSlice } from '@/utils/commitAnalysisCanvas';
@@ -614,14 +615,16 @@ export class CommitAnalysisController {
       });
 
       // The canvas updates in place, so a hotfix sync posts an activity line (via the
-      // canonical helper, for the right SYSTEM/isTicketActivity invariants) pointing at
-      // it. The workspace prefix is required — a bare /chat/canvas/:id route 404s.
+      // canonical helper, for the right SYSTEM/isTicketActivity invariants) pointing at it.
       if (hotfixSync) {
         try {
-          const frontendBaseUrl = (config.slackFrontendUrl ?? '').replace(/\/+$/, '');
+          const canvasLink =
+            canvasId && config.slackFrontendUrl
+              ? buildWorkspaceCanvasUrl(params.workspaceId, canvasId)
+              : null;
           let content: string;
-          if (canvasId && frontendBaseUrl) {
-            content = `Hotfix synced — release analysis canvas updated ${frontendBaseUrl}/${params.workspaceId}/chat/canvas/${canvasId}`;
+          if (canvasLink) {
+            content = `Hotfix synced — release analysis canvas updated ${canvasLink}`;
           } else if (canvasId) {
             content = 'Hotfix synced — release analysis canvas updated. No link available: the frontend URL is not configured.';
           } else if (viewResults.length === 0) {
@@ -636,7 +639,6 @@ export class CommitAnalysisController {
               content,
               activityType: 'RELEASE_SYNC',
               workspaceId: params.workspaceId,
-              // bot-authored
               isAutomation: true,
             },
           });

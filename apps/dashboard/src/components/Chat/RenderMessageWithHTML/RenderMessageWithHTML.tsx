@@ -275,8 +275,8 @@ const CanvasLink = ({
         // Open as overlay in current channel
         void navigate(`${location.pathname}#canvas=${canvasId}`);
       } else {
-        // Fallback to full page navigation
-        void navigate(url.pathname);
+        // Fallback to full page navigation, keeping any query/hash the link carries
+        void navigate(`${url.pathname}${url.search}${url.hash}`);
       }
     }
 

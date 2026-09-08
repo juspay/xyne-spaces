@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -307,6 +308,16 @@ export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
     ? `/${workspaceId}/chat/canvas/${canvasId}`
     : `/chat/canvas/${canvasId}`;
   return `${frontendUrl}${path}`;
+}
+
+/**
+ * Workspace-scoped canvas deep link on the Slack-facing frontend base URL. The
+ * workspace prefix is required — the bare `/chat/canvas/:id` route 404s on a
+ * hard load.
+ */
+export function buildWorkspaceCanvasUrl(workspaceId: string, canvasId: string): string {
+  const frontendUrl = (config.slackFrontendUrl ?? '').replace(/\/+$/, '');
+  return `${frontendUrl}/${workspaceId}/chat/canvas/${canvasId}`;
 }
 
 type LooseInline = { type?: string; text?: string; props?: Record<string, unknown>; styles?: unknown };
