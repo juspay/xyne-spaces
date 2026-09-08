@@ -20,6 +20,9 @@ export const FILTER_LABELS: Record<RecentCallFilter, string> = {
   missed: 'Missed Calls',
 };
 
+/** Calls V2's Recents segmented-tab filter — its own value set, own labels (rendered inline). */
+export type RecentCallFilterV2 = 'all' | 'missed' | 'recurring';
+
 export type CallParticipant = QueryResultType<typeof queries.callParticipantsByCallId>[number];
 export type CallParticipants = readonly CallParticipant[] | undefined;
 export type Call = Omit<
@@ -165,6 +168,24 @@ export function getParticipantDisplayData(
   });
 
   return { userIds, displayNames };
+}
+
+// "Prerna, Samit & 2 others" — untitled-call title fallback, shared by CallCard.tsx
+// (Recents) and UpcomingCallRowV2.tsx (Upcoming) so both format it identically.
+export function buildParticipantSummary(
+  displayNames: string[],
+  otherParticipantCount: number,
+): string {
+  const [firstParticipantName, secondParticipantName] = displayNames;
+  if (!firstParticipantName || otherParticipantCount <= 1) {
+    return firstParticipantName || 'Unknown';
+  }
+  if (otherParticipantCount === 2) {
+    return `${firstParticipantName}, ${secondParticipantName}`;
+  }
+  return `${firstParticipantName}, ${secondParticipantName} & ${otherParticipantCount - 2} other${
+    otherParticipantCount - 2 > 1 ? 's' : ''
+  }`;
 }
 
 export function getCallParticipantCount(call: {
