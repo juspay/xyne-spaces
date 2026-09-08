@@ -1,6 +1,7 @@
 import { type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { entityAccessService } from '@/services/entityAccessService';
+import { isRecording } from '@/utils/callTypeUtils';
 import { CallVisibility, ShareableEntityType } from '@xyne/shared';
 
 /**
@@ -26,6 +27,15 @@ export class CallShareService {
   async canView(call: Call, userId: string, workspaceId: string): Promise<boolean> {
     if (call.workspaceId !== workspaceId) return false;
     if (call.createdByUserId === userId) return true;
+    if (!isRecording(call)) {
+      if (await this.isCallAudience(call, userId)) return true;
+      return entityAccessService.hasActiveShare({
+        workspaceId,
+        shareableEntityType: ShareableEntityType.CALL,
+        entityId: call.id,
+        userId,
+      });
+    }
     if (call.visibility === CallVisibility.PUBLIC) return true;
     return entityAccessService.hasActiveShare({
       workspaceId,
