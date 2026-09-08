@@ -204,6 +204,7 @@ export const InternalXyneLink = ({
         <CanvasLink
           href={href}
           canvasId={parsedLink.canvasId}
+          linkWorkspaceId={parsedLink.workspaceId}
           className={linkClassName}
           onClick={onClick}
           {...props}
@@ -246,15 +247,17 @@ export const InternalXyneLink = ({
 const CanvasLink = ({
   href,
   canvasId,
+  linkWorkspaceId,
   children,
   ...props
 }: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
   canvasId?: string | undefined;
+  linkWorkspaceId?: string | undefined;
 }): JSX.Element => {
   const resolvedHref = href ?? '';
   const navigate = useNavigate();
   const location = useLocation();
-  const { channelId } = useParams<{ channelId: string }>();
+  const { channelId, workspaceId } = useParams<{ channelId: string; workspaceId: string }>();
   const { isMobile } = usePlatform();
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
@@ -269,15 +272,27 @@ const CanvasLink = ({
       return;
     }
 
-    if (url.origin === window.location.origin) {
+    // A link into another workspace is left to the browser: both branches below
+    // resolve through the router, which scopes paths to the workspace already
+    // open, so intercepting would either look the canvas up in the wrong
+    // workspace (overlay) or double the prefix (fallback). A bare link carries
+    // no workspace and always belongs to the current one.
+    const isSameWorkspace = !linkWorkspaceId || linkWorkspaceId === workspaceId;
+
+    if (url.origin === window.location.origin && isSameWorkspace) {
       event.preventDefault();
 
       if (canvasId && channelId) {
         // Open as overlay in current channel
         void navigate(`${location.pathname}#canvas=${canvasId}`);
       } else {
-        // Fallback to full page navigation, keeping any query/hash the link carries
-        void navigate(`${url.pathname}${url.search}${url.hash}`);
+        // Fallback to full page navigation, keeping any query/hash the link
+        // carries. The router re-adds the workspace, so hand it the path
+        // without one.
+        const routerPath = linkWorkspaceId
+          ? url.pathname.slice(`/${linkWorkspaceId}`.length)
+          : url.pathname;
+        void navigate(`${routerPath}${url.search}${url.hash}`);
       }
     }
 
