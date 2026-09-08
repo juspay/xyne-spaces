@@ -145,9 +145,9 @@ test('redisStore: applyPoke writes all instances + cookie atomically (fenced + u
     const token = (await own.acquireGroup(G)) as number;
     const guard = { groupKey: G, token };
 
-    // One atomic poke: A + B diffs, E as a newlyGot empty instance, cookie 'c1'.
+    // One atomic poke: A + B diffs, E as a newlyGot empty instance, resync markers on A + E, cookie 'c1'.
     assert.equal(
-      await store.applyPoke({ clientGroupID: CG, cookie: 'c1', diffs: new Map([[A, diffA], [B, diffB]]), newlyGot: [E] }, guard),
+      await store.applyPoke({ clientGroupID: CG, cookie: 'c1', diffs: new Map([[A, diffA], [B, diffB]]), newlyGot: [E], resyncMarkers: [A, E] }, guard),
       'applied',
     );
     assert.deepEqual(await store.snapshot(A), [{ tableName: 'tbl', row: { id: '1', txt: 'a' } }]);
@@ -155,6 +155,12 @@ test('redisStore: applyPoke writes all instances + cookie atomically (fenced + u
     assert.equal(await client.get(`sync:cookie:${CG}`), 'c1', 'cookie set in the same write');
     assert.equal(await store.isHydrated(E), true, 'empty newlyGot instance got its hydration marker');
     assert.equal(await store.isHydrated(A), true, 'non-empty instance hydrated by its own entry');
+    // Resync marker is the LAST stream entry for A (after its row entry) and for E.
+    const lastDiff = async (i: string) =>
+      JSON.parse((await client.xrevrange(`sync:stream:${i}`, '+', '-', 'COUNT', 1))[0][1][3] as string);
+    assert.equal((await lastDiff(A)).resynced, true, 'A tail is the resync marker, after its row entry');
+    assert.equal((await lastDiff(E)).resynced, true, 'E tail is the resync marker');
+    assert.equal((await lastDiff(B)).resynced, undefined, 'B (no resync marker) tail is its data entry');
 
     // Byte-parity: A via applyPoke == the unfenced applyDiff path for the same data.
     assert.equal(await store.applyDiff(Ap, 'c1', diffA), 'applied');

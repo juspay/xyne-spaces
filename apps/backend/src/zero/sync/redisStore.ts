@@ -24,6 +24,11 @@ const zgroupKey = (clientGroupID: string): string => `${PREFIX}:zgroup:${clientG
 const STREAM_MAXLEN = 10_000;
 const CLEAR_DIFF = JSON.stringify({ upserts: [], deletes: [], cleared: true });
 const EMPTY_DIFF = JSON.stringify({ upserts: [], deletes: [] });
+/** Deterministic "instance fully (re)materialized" boundary — emitted at the got-transition for
+ *  grant instances so the fan-out marks it usable-for-gating only when COMPLETE (not on a partial
+ *  mid-rehydration entry). Appended AFTER the poke's row entries, so it is the last thing on the
+ *  stream for that instance this poke. */
+const RESYNC_DIFF = JSON.stringify({ upserts: [], deletes: [], resynced: true });
 
 /**
  * Multi-pod fencing token, carried from `ownership.acquireGroup`. When a mutating write is
@@ -170,6 +175,9 @@ export interface PokeWrite {
   diffs: Map<string, StreamDiff>;
   /** Instances that transitioned to `got` this poke (hydration markers); ones already in `diffs` are skipped. */
   newlyGot: readonly string[];
+  /** Grant instances to stamp with a `{resynced:true}` marker this poke (their got-transition) — the
+   *  deterministic complete-boundary the fan-out gates cold-defer on. Appended after row entries. */
+  resyncMarkers?: readonly string[];
 }
 
 /** XRANGE returns fields as a flat [f, v, f, v, …] array — collapse to an object. */
@@ -256,6 +264,11 @@ export class RedisStreamStore {
     for (const instanceKey of w.newlyGot) {
       if (seen.has(instanceKey)) continue;
       out.push({ s: snapKey(instanceKey), x: streamKey(instanceKey), c: '0', u: [], d: [], j: EMPTY_DIFF });
+    }
+    // Resync markers LAST (after every row entry above), so the marker is the final stream entry
+    // for the instance this poke — the fan-out sees it only once the snapshot is complete.
+    for (const instanceKey of w.resyncMarkers ?? []) {
+      out.push({ s: snapKey(instanceKey), x: streamKey(instanceKey), c: '0', u: [], d: [], j: RESYNC_DIFF });
     }
     return out;
   }

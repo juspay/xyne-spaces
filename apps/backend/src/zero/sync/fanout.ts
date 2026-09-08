@@ -370,11 +370,18 @@ export class Fanout {
       // flip always uses a view ≥ every delta. It also orders regates against that
       // instance's data-delta dispatches (same key), so the emit-time recheck sees settled
       // flags. Distinct channels stay parallel.
-      // Track hydration for cold-defer: a `cleared` (reset) makes the grant unusable for gating
-      // until it re-materializes; any non-cleared entry marks it hydrated. Updated BEFORE the
-      // re-gate is enqueued so the job sees the current state.
-      if (diff?.cleared) this.#grantHydrated.delete(instanceKey);
-      else this.#grantHydrated.add(instanceKey);
+      // Hydration lifecycle (cold-defer + zero-blip): a `cleared` reset makes the grant unusable
+      // for gating → drop it and PIN (don't re-gate; the cold-defer guard keeps admitted clients
+      // admitted). The deterministic complete-boundary is the tap's `{resynced:true}` marker,
+      // emitted at the got-transition AFTER every row — only THEN is the snapshot whole. Rebuild
+      // entries arriving before it are partial → ignore (re-gating on them could mis-gate a member
+      // whose row hasn't landed). A normal membership delta on an already-hydrated grant re-gates.
+      if (diff?.cleared) {
+        this.#grantHydrated.delete(instanceKey);
+        return;
+      }
+      if (diff?.resynced) this.#grantHydrated.add(instanceKey);
+      else if (!this.#grantHydrated.has(instanceKey)) return; // partial rebuild before resync
       // A PER-USER grant delta (`channel_participants{userId:U}`) can only change U's admission —
       // the instance IS the user, so re-gate only U on each affected data instance (O(subs_U)).
       // A PER-SCOPE grant delta (channels[C] visibility flip) affects everyone → re-gate all.

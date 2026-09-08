@@ -6,6 +6,7 @@ import { PackDemux } from './packDemux';
 import type { RowPatchOp, StreamDiff } from './streamState';
 import type { RedisStreamStore, FenceGuard } from './redisStore';
 import { SerialQueue } from './serialQueue';
+import { isGrantQuery } from './grantQueries';
 import type { ClientSchema } from './clientSchema';
 import type { QueryMeta } from './queryMeta';
 import { mintSecProtocolToken, buildCookieHeader, SYNC_SERVICE_SUB } from './serviceIdentity';
@@ -112,12 +113,17 @@ export class PackConnection {
    *  (once per instance) so a resume's del/update pokes attribute instead of dropping. */
   readonly #seeded = new Set<string>();
 
+  /** Grant groups emit a `{resynced:true}` marker at each instance's got-transition (P1(d)) so the
+   *  fan-out only trusts a grant snapshot once it is COMPLETE, never a partial mid-rehydration entry. */
+  readonly #isGrantGroup: boolean;
+
   constructor(opts: PackConnectionOptions) {
     this.#opts = opts;
     this.#demux = new PackDemux(opts.meta, opts.pkFields);
     this.#zeroClientGroupID = opts.clientGroupID;
     this.#clientID = `${opts.clientGroupID}-c-${randomUUID()}`;
     this.#profileID = `${opts.clientGroupID}-p`;
+    this.#isGrantGroup = isGrantQuery(opts.queryName);
   }
 
   /** Add a query-instance to this group. Registers it live if already connected. */
@@ -535,7 +541,15 @@ export class PackConnection {
     if (epoch !== this.#persistEpoch) return;
     try {
       const outcome = await this.#opts.store.applyPoke(
-        { clientGroupID: this.#zeroClientGroupID, cookie, diffs, newlyGot },
+        {
+          clientGroupID: this.#zeroClientGroupID,
+          cookie,
+          diffs,
+          newlyGot,
+          // Grant instances get the complete-boundary marker at their got-transition; data
+          // instances don't need it (clients hydrate off the data snapshot directly).
+          resyncMarkers: this.#isGrantGroup ? newlyGot : undefined,
+        },
         this.#opts.guard,
       );
       if (outcome === 'stale') return this.#demoteFenceLost(); // fence loss is epoch-independent — handle first
