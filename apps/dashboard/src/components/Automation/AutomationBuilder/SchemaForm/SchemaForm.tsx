@@ -441,6 +441,7 @@ function Field({
           <ChipArrayField
             value={arrayValue}
             onChange={next => onChange(next)}
+            mode={isTokenChipField(fieldKey) ? 'token' : 'phrase'}
             placeholder={
               fieldKey === 'fromDomains'
                 ? 'e.g. acme.com — Enter to add'
@@ -526,6 +527,12 @@ function Field({
       />
       {hasError && <FieldError message={errorMessage} />}
     </div>
+  );
+}
+
+function isTokenChipField(fieldKey: string): boolean {
+  return (
+    /email|domain|address|recipient|url|ids?$/i.test(fieldKey) || /^(to|cc|bcc)$/i.test(fieldKey)
   );
 }
 
