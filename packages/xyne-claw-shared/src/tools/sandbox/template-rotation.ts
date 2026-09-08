@@ -57,21 +57,32 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "agent-workspace-gvisor-template-e",
     "agent-workspace-gvisor-template-f",
   ],
-  // euler: 2-way (not 4). It storms the most of any pool — 5 times between
-  // 2026-08-11 and 2026-08-18, every one a RESOURCE_OPERATION_RATE_EXCEEDED on
-  // whatever single snapshot it was pointed at (v8 -> v12). It also has the
-  // LARGEST clones in the cluster (200Gi vs xyne-spaces' 100Gi), so each extra
-  // variant costs real snapshot storage; a/b halves the per-snapshot restore
-  // rate, which is the cheapest thing that actually breaks the cycle. Add c/d
-  // if it still throttles.
+  // euler: 4-way (a-d), widened from 2 on 2026-09-08 — the previous comment said
+  // "add c/d if it still throttles", and it did. On 2026-09-08 euler had 46 of
+  // the cluster's 64 queued claims, both rot-a and rot-b (21 days old) throttled,
+  // and every claim cold-cloning because the warm pools had been scaled to 0.
+  // Earlier history: 5 storms between 2026-08-11 and 2026-08-18, every one a
+  // RESOURCE_OPERATION_RATE_EXCEEDED on whatever single snapshot it pointed at.
+  //
+  // ⚠️ euler has the LARGEST clones in the cluster (200Gi vs xyne-spaces' 100Gi),
+  // so each variant costs real snapshot storage. 4 is a deliberate stopping
+  // point: past that, prefer fixing the retry behaviour over buying sources.
+  //
+  // WARM POOLS MATTER MORE THAN VARIANTS HERE. A claim that adopts a warm pod
+  // reuses an existing PVC and performs NO restore. A claim with no warm pod to
+  // adopt clones from the snapshot. Euler's 2026-09-08 storm was not caused by
+  // claim volume alone — it was 46 claims against pools sitting at replicas=0,
+  // so every single one became a restore. Never leave these pools at 0.
   //
   // Infra side is created by:
   //   BASE_TEMPLATE=euler-workspace-template BASE_WARMPOOL=euler-warmpool \
   //   GOLDEN_PVC=euler-golden-pvc SNAP_PREFIX=euler-golden-snap-rot \
-  //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  //   VARIANTS="a b c d" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
   "euler-workspace-template": [
     "euler-workspace-template-a",
     "euler-workspace-template-b",
+    "euler-workspace-template-c",
+    "euler-workspace-template-d",
   ],
   // upi: 4-way. Its load is BURSTY rather than steady — newton-doctor fans out
   // ~30 concurrent threads, and on 2026-08-11 that single burst stormed the one
