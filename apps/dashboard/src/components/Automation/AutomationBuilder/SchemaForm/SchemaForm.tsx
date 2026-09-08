@@ -532,7 +532,9 @@ function Field({
 
 function isTokenChipField(fieldKey: string): boolean {
   return (
-    /email|domain|address|recipient|url|ids?$/i.test(fieldKey) || /^(to|cc|bcc)$/i.test(fieldKey)
+    /email|domain|address|recipient|url/i.test(fieldKey) ||
+    /ids?$/i.test(fieldKey) ||
+    /^(to|cc|bcc)$/i.test(fieldKey)
   );
 }
 
