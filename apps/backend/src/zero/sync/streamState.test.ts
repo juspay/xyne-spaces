@@ -37,6 +37,38 @@ test('sliding latest-N window: put(new) + del(bumped-out) in one poke', () => {
   assert.deepEqual(diff.deletes, ['conversations:a']);
 });
 
+// ---- C3: per-key last-op-wins compaction (a key lands in EXACTLY one list) ----
+
+test('C3: del(K) then put(K) in one poke → K is an UPSERT, not a delete (row not lost)', () => {
+  const s = new ChannelStreamState(pk);
+  const diff = s.applyPoke('v2', [del('a'), put('a', { title: 'back' })]);
+  assert.deepEqual(diff.deletes, [], 'del must not survive a later put of the same key');
+  assert.deepEqual(diff.upserts.map((u) => u.key), ['conversations:a']);
+  assert.equal(diff.upserts[0].row.title, 'back');
+});
+
+test('C3: put(K) then del(K) in one poke → K is a DELETE only', () => {
+  const s = new ChannelStreamState(pk);
+  const diff = s.applyPoke('v2', [put('a'), del('a')]);
+  assert.deepEqual(diff.upserts, []);
+  assert.deepEqual(diff.deletes, ['conversations:a']);
+});
+
+test('C3: repeated put(K) dedupes to one upsert with the last value', () => {
+  const s = new ChannelStreamState(pk);
+  const diff = s.applyPoke('v2', [put('a', { n: 1 }), put('a', { n: 2 })]);
+  assert.equal(diff.upserts.length, 1);
+  assert.equal(diff.upserts[0].row.n, 2);
+});
+
+test('C3: clear then put(K) → cleared with the post-clear upsert only', () => {
+  const s = new ChannelStreamState(pk);
+  const diff = s.applyPoke('v2', [put('a'), { op: 'clear' }, put('b')]);
+  assert.equal(diff.cleared, true);
+  assert.deepEqual(diff.upserts.map((u) => u.key), ['conversations:b']);
+  assert.deepEqual(diff.deletes, []);
+});
+
 test('stateless: each diff reflects only its own poke (no retained rows)', () => {
   const s = new ChannelStreamState(pk);
   s.applyPoke('v1', [put('a'), put('b')]);

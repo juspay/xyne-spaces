@@ -72,33 +72,39 @@ export class ChannelStreamState {
    * net diff (the Redis store mirrors this; the op-stream appends it).
    */
   applyPoke(version: string, rowsPatch: readonly RowPatchOp[]): StreamDiff {
-    const diff: StreamDiff = { upserts: [], deletes: [], cleared: false };
+    // Compact per key, LAST-OP-WINS. A poke can carry both del(K) and put(K) (a row that
+    // left and re-entered the view within one advancement); emitting K in BOTH lists let the
+    // store's HSET-then-HDEL apply the delete regardless of intra-poke order → the row was
+    // silently lost until next touched. Collapsing to one op per key in arrival order fixes
+    // that, dedupes repeated puts (smaller stream entries), and guarantees each key lands in
+    // exactly one list (no client-side apply-order ambiguity).
+    let cleared = false;
+    const byKey = new Map<string, { tableName: string; row: Row } | null>(); // null = delete
     for (const op of rowsPatch) {
       switch (op.op) {
         case 'put':
-          diff.upserts.push({
-            key: this.#keyFromRow(op.tableName, op.value),
-            tableName: op.tableName,
-            row: op.value,
-          });
+          byKey.set(this.#keyFromRow(op.tableName, op.value), { tableName: op.tableName, row: op.value });
           break;
         case 'del':
-          diff.deletes.push(this.#keyFromRow(op.tableName, op.id));
+          byKey.set(this.#keyFromRow(op.tableName, op.id), null);
           break;
         case 'update':
           // Should never happen (makeRowPatch is put/del-only). We can't merge without the
           // prior row, so RESET the instance (re-hydrate) — never skip → never leave stale.
           // The tap logs the unexpected op loudly (this module stays pure/logger-free).
-          diff.cleared = true;
-          diff.upserts.length = 0;
-          diff.deletes.length = 0;
+          cleared = true;
+          byKey.clear(); // drop everything before the reset; ops after it re-populate
           break;
         case 'clear':
-          diff.cleared = true;
-          diff.upserts.length = 0;
-          diff.deletes.length = 0;
+          cleared = true;
+          byKey.clear();
           break;
       }
+    }
+    const diff: StreamDiff = { upserts: [], deletes: [], cleared };
+    for (const [key, value] of byKey) {
+      if (value) diff.upserts.push({ key, tableName: value.tableName, row: value.row });
+      else diff.deletes.push(key);
     }
     this.#cookie = version;
     return diff;
