@@ -15,8 +15,14 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { callLabelService } from '@/services/callLabelService';
-import { TagMethod, EntityUserAccess, NotificationType, ActivityClassification } from '@xyne/shared';
+import {
+  TagMethod,
+  EntityUserAccess,
+  NotificationType,
+  ActivityClassification,
+} from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
+import { isRecording } from '@/utils/callTypeUtils';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import {
@@ -280,20 +286,23 @@ class NoteTakerTranscriptService {
    * independently and its errors are logged and swallowed.
    */
   private async notifySummaryReady(call: Call): Promise<void> {
+    const actionUrl = isRecording(call)
+      ? `/recordings/${call.externalId}`
+      : `/calls/${call.id}/detail`;
     try {
       if (!call.workspaceId) return;
       // The AI title may have landed after our `call` snapshot was taken —
       // re-read so the notification names the recording the way the UI does.
       const currentTitle =
         (await repositories.calls.findByExternalId(call.externalId))?.title ?? call.title;
-      const recordingName = currentTitle || 'your recording';
+      const recordingName = currentTitle || (isRecording(call) ? 'your recording' : 'your call');
       await notificationService.createNotification(call.createdByUserId, {
         type: NotificationType.RECORDING_SUMMARY_READY,
         title: 'Summary ready',
         message: `The summary for "${recordingName}" is ready to view`,
         relatedEntityType: 'call',
         relatedEntityId: call.externalId,
-        actionUrl: `/recordings/${call.externalId}`,
+        actionUrl,
         workspaceId: call.workspaceId,
         metadata: { callExternalId: call.externalId },
       });
