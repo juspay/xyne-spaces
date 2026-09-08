@@ -1917,39 +1917,133 @@ const ChannelCommandMenu = ({
     ];
   }, [mentionSearchType, mentionSearchQuery]);
 
+  // ── Mention typeahead: ONE flat, ordered list of the rows selectable right now. The render,
+  // Enter/Tab accept (acceptHighlightedMention) and the ghost label all read this, so what's
+  // highlighted, what Enter picks and what the ghost previews can never disagree. Plain const,
+  // not useMemo: the inputs change on nearly every keystroke, so a memo would only ever miss.
+  // Order MUST match the render (esp. `in:` = channels then DMs) — it's the flat highlight index.
+  const activeMentionCandidates: Array<{
+    section: string;
+    name: string;
+    accept: () => void;
+    channel?: Channel;
+    user?: { id: string; name: string; status?: string; email?: string };
+    value?: { id: string; name: string };
+    target?: { id: string; name: string; type: ChipType };
+  }> = [];
+  const addChannelMentionRows = (
+    list: Array<{ channel: Channel; displayName: string }>,
+    section: string,
+  ) =>
+    list.forEach(({ channel, displayName }) =>
+      activeMentionCandidates.push({
+        section,
+        name: displayName,
+        channel,
+        accept: () =>
+          void handleMentionSelect({ id: channel.id, name: displayName, type: ChipType.CHANNEL }),
+      }),
+    );
+  if (mentionSearchType) {
+    if (channelTrigger === 'in:') {
+      addChannelMentionRows(availableRegularChannels, 'Channels');
+      addChannelMentionRows(availableDMs, 'DMs');
+    } else if (channelTrigger === 'in:#') {
+      addChannelMentionRows(availableRegularChannels, 'Channels');
+    } else if (channelTrigger === 'in:@') {
+      addChannelMentionRows(availableDMs, 'DMs');
+    } else if (channelTrigger === '#') {
+      addChannelMentionRows(availableChannels, 'Channels');
+    } else if (mentionSearchType === ChipType.USER) {
+      availableUsers.forEach(user =>
+        activeMentionCandidates.push({
+          section: 'Users',
+          name: getUserDisplayName(user),
+          user,
+          accept: () =>
+            void handleMentionSelect({
+              id: user.id,
+              name: getUserDisplayName(user),
+              type: ChipType.USER,
+              ...(user.email ? { email: user.email } : {}),
+            }),
+        }),
+      );
+    } else if (mentionSearchType === ChipType.BOARD) {
+      availableBoards.forEach(board =>
+        activeMentionCandidates.push({
+          section: 'Board',
+          name: board.name,
+          value: board,
+          accept: () =>
+            void handleMentionSelect({ id: board.id, name: board.name, type: ChipType.BOARD }),
+        }),
+      );
+    } else if (mentionSearchType === ChipType.PRIORITY) {
+      availablePriorities.forEach(priority =>
+        activeMentionCandidates.push({
+          section: 'Priority',
+          name: priority.name,
+          value: priority,
+          accept: () =>
+            void handleMentionSelect({
+              id: priority.id,
+              name: priority.name,
+              type: ChipType.PRIORITY,
+            }),
+        }),
+      );
+    } else if (mentionSearchType === ChipType.DATE) {
+      availableDates.forEach(option =>
+        activeMentionCandidates.push({
+          section: 'Date',
+          name: option.name,
+          value: option,
+          accept: () => selectDate(option),
+        }),
+      );
+    } else if (mentionSearchType === ChipType.MENTIONS) {
+      availableMentionTargets.forEach(target =>
+        activeMentionCandidates.push({
+          section: target.type === ChipType.USER ? 'People' : 'Channels',
+          name: target.name,
+          target,
+          accept: () =>
+            void handleMentionSelect({ id: target.id, name: target.name, type: target.type }),
+        }),
+      );
+    }
+  }
+
   // The highlighted candidate in the open mention popup — the exact row Enter/click selects.
-  // Reads the same arrays the Enter handler indexes, so the ghost never disagrees with Enter.
-  const mentionActiveLabel = useMemo<string | null>(() => {
-    if (mentionSearchType === ChipType.USER) {
-      const user = availableUsers[selectedMentionIndex];
-      return user ? getUserDisplayName(user) : null;
-    }
-    if (mentionSearchType === ChipType.CHANNEL) {
-      return availableChannels[selectedMentionIndex]?.displayName ?? null;
-    }
-    if (mentionSearchType === ChipType.DATE) {
-      return availableDates[selectedMentionIndex]?.name ?? null;
-    }
-    if (mentionSearchType === ChipType.BOARD) {
-      return availableBoards[selectedMentionIndex]?.name ?? null;
-    }
-    if (mentionSearchType === ChipType.PRIORITY) {
-      return availablePriorities[selectedMentionIndex]?.name ?? null;
-    }
-    if (mentionSearchType === ChipType.MENTIONS) {
-      return availableMentionTargets[selectedMentionIndex]?.name ?? null;
-    }
-    return null;
-  }, [
-    mentionSearchType,
-    availableUsers,
-    availableChannels,
-    availablePriorities,
-    availableDates,
-    availableBoards,
-    availableMentionTargets,
-    selectedMentionIndex,
-  ]);
+  const mentionActiveLabel = activeMentionCandidates[selectedMentionIndex]?.name ?? null;
+
+  // CHANNEL/USER render from these candidates, grouped by consecutive section (`startIndex` is the
+  // flat highlight index of a group's first row). BOARD/DATE/PRIORITY/MENTIONS keep their own
+  // bespoke render below — their candidates above feed only accept + the ghost label, not this.
+  const mentionSectionGroups: Array<{
+    section: string;
+    startIndex: number;
+    rows: typeof activeMentionCandidates;
+  }> = [];
+  activeMentionCandidates.forEach((candidate, index) => {
+    const current = mentionSectionGroups[mentionSectionGroups.length - 1];
+    if (current && current.section === candidate.section) current.rows.push(candidate);
+    else
+      mentionSectionGroups.push({
+        section: candidate.section,
+        startIndex: index,
+        rows: [candidate],
+      });
+  });
+  const mentionEmptyText =
+    channelTrigger === 'in:@'
+      ? 'No DMs found'
+      : channelTrigger === 'in:#' || channelTrigger === '#'
+        ? 'No channels found'
+        : mentionSearchType === ChipType.USER
+          ? 'No users found'
+          : 'No results found';
 
   // Ghost suffix for an OPEN filter typeahead: previews the highlighted candidate + the action
   // Enter triggers - " - Select" for the filter prefixes (from/to/with/assignee/in/priority),
@@ -3270,122 +3364,9 @@ const ChannelCommandMenu = ({
   // and by Tab/ArrowRight so `from:ar` + Tab completes the mention the same way Enter would,
   // instead of falling through to tab-cycling or the ticket-preview shortcut.
   const acceptHighlightedMention = (): void => {
-    // Handle 'in:' trigger - Channels + DMs (NO Users)
-    if (channelTrigger === 'in:') {
-      const regularChannelCount = availableRegularChannels.length;
-
-      if (selectedMentionIndex < regularChannelCount) {
-        // Selecting a regular channel
-        const channelIndex = selectedMentionIndex;
-        if (availableRegularChannels[channelIndex]) {
-          const { channel, displayName } = availableRegularChannels[channelIndex];
-          void handleMentionSelect({
-            id: channel.id,
-            name: displayName,
-            type: ChipType.CHANNEL,
-          });
-        }
-      } else {
-        // Selecting a DM
-        const dmIndex = selectedMentionIndex - regularChannelCount;
-        if (availableDMs[dmIndex]) {
-          const { channel, displayName } = availableDMs[dmIndex];
-          void handleMentionSelect({
-            id: channel.id,
-            name: displayName,
-            type: ChipType.CHANNEL,
-          });
-        }
-      }
-      return;
-    }
-
-    // Handle 'in:#' trigger - Channels only (NO DMs)
-    if (channelTrigger === 'in:#') {
-      if (availableRegularChannels[selectedMentionIndex]) {
-        const { channel, displayName } = availableRegularChannels[selectedMentionIndex];
-        void handleMentionSelect({
-          id: channel.id,
-          name: displayName,
-          type: ChipType.CHANNEL,
-        });
-      }
-      return;
-    }
-
-    // Handle 'in:@' trigger - DMs only (NOT Users!)
-    if (channelTrigger === 'in:@') {
-      if (availableDMs[selectedMentionIndex]) {
-        const { channel, displayName } = availableDMs[selectedMentionIndex];
-        void handleMentionSelect({
-          id: channel.id,
-          name: displayName,
-          type: ChipType.CHANNEL,
-        });
-      }
-      return;
-    }
-
-    // Handle '#' trigger - only Channels (legacy combined list)
-    if (channelTrigger === '#' && availableChannels[selectedMentionIndex]) {
-      const { channel, displayName } = availableChannels[selectedMentionIndex];
-      void handleMentionSelect({
-        id: channel.id,
-        name: displayName,
-        type: ChipType.CHANNEL,
-      });
-      return;
-    }
-
-    // Board value selection (candidate list from Zero, no backend lookup).
-    if (mentionSearchType === ChipType.BOARD && availableBoards[selectedMentionIndex]) {
-      const board = availableBoards[selectedMentionIndex];
-      void handleMentionSelect({ id: board.id, name: board.name, type: ChipType.BOARD });
-      return;
-    }
-
-    // Date value selection. Goes through `selectDate` rather than handleMentionSelect: a
-    // range has two bounds, which one chip can't hold, so it lands as two chips.
-    if (mentionSearchType === ChipType.DATE && availableDates[selectedMentionIndex]) {
-      selectDate(availableDates[selectedMentionIndex]);
-      return;
-    }
-
-    // `mentions:` value selection — one list, two kinds; the candidate carries its type.
-    if (mentionSearchType === ChipType.MENTIONS && availableMentionTargets[selectedMentionIndex]) {
-      const target = availableMentionTargets[selectedMentionIndex];
-      void handleMentionSelect({ id: target.id, name: target.name, type: target.type });
-      return;
-    }
-
-    // Handle priority value selection (closed enum, no backend)
-    if (mentionSearchType === ChipType.PRIORITY && availablePriorities[selectedMentionIndex]) {
-      const priority = availablePriorities[selectedMentionIndex];
-      void handleMentionSelect({
-        id: priority.id,
-        name: priority.name,
-        type: ChipType.PRIORITY,
-      });
-      return;
-    }
-
-    // Handle regular user mention search (@, from:, with:, assignee:)
-    if (mentionSearchType === ChipType.USER && availableUsers[selectedMentionIndex]) {
-      const user = availableUsers[selectedMentionIndex];
-      void handleMentionSelect({
-        id: user.id,
-        name: getUserDisplayName(user),
-        type: ChipType.USER,
-        ...(user.email ? { email: user.email } : {}),
-      });
-    } else if (mentionSearchType === ChipType.CHANNEL && availableChannels[selectedMentionIndex]) {
-      const { channel, displayName } = availableChannels[selectedMentionIndex];
-      void handleMentionSelect({
-        id: channel.id,
-        name: displayName,
-        type: ChipType.CHANNEL,
-      });
-    }
+    // Enter/Tab accept the highlighted mention row — one lookup into the shared flat list
+    // (built above), so it always matches what's rendered and what the ghost previews.
+    activeMentionCandidates[selectedMentionIndex]?.accept();
   };
 
   const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
@@ -4095,243 +4076,52 @@ const ChannelCommandMenu = ({
                 {/* Mention Suggestions - Show when mention search is active */}
                 {mentionSearchType && (
                   <>
-                    {/* 'in:' trigger - Show Channels + DMs (NO Users) */}
-                    {channelTrigger === 'in:' && (
+                    {(mentionSearchType === ChipType.CHANNEL ||
+                      mentionSearchType === ChipType.USER) && (
                       <>
-                        {/* 1. Channels Section */}
-                        {availableRegularChannels.length > 0 && (
-                          <CommandSection heading='Channels'>
-                            {availableRegularChannels.map(({ channel, displayName }, index) => (
-                              <ChannelRow
-                                key={channel.id}
-                                value={`mention-channel-${channel.id}`}
-                                label={displayName}
-                                channel={channel}
-                                isActive={index === selectedMentionIndex}
-                                onMouseEnter={() => selectMention(index)}
-                                onSelect={() => {
-                                  void handleMentionSelect({
-                                    id: channel.id,
-                                    name: displayName,
-                                    type: ChipType.CHANNEL,
-                                  });
-                                }}
-                              />
-                            ))}
-                          </CommandSection>
-                        )}
-                        {/* 2. DMs Section (includes Group DMs) */}
-                        {availableDMs.length > 0 && (
-                          <CommandSection heading='DMs'>
-                            {availableDMs.map(({ channel, displayName }, index) => {
-                              // DMs render after channels in one list, so offset the highlight index.
-                              const adjustedIndex = availableRegularChannels.length + index;
-                              return (
-                                <ChannelRow
-                                  key={channel.id}
-                                  value={`mention-dm-${channel.id}`}
-                                  label={displayName}
-                                  channel={channel}
-                                  isActive={adjustedIndex === selectedMentionIndex}
-                                  onMouseEnter={() => selectMention(adjustedIndex)}
-                                  onSelect={() => {
-                                    void handleMentionSelect({
-                                      id: channel.id,
-                                      name: displayName,
-                                      type: ChipType.CHANNEL,
-                                    });
-                                  }}
-                                />
-                              );
+                        {mentionSectionGroups.map(({ section, startIndex, rows }) => (
+                          <CommandSection key={section} heading={section}>
+                            {rows.map((candidate, i) => {
+                              const index = startIndex + i;
+                              const isActive = index === selectedMentionIndex;
+                              const onHover = () => selectMention(index);
+                              if (candidate.channel) {
+                                return (
+                                  <ChannelRow
+                                    key={candidate.channel.id}
+                                    value={`mention-${section === 'DMs' ? 'dm' : 'channel'}-${candidate.channel.id}`}
+                                    label={candidate.name}
+                                    channel={candidate.channel}
+                                    isActive={isActive}
+                                    onMouseEnter={onHover}
+                                    onSelect={candidate.accept}
+                                  />
+                                );
+                              }
+                              if (candidate.user) {
+                                return (
+                                  <UserRow
+                                    key={candidate.user.id}
+                                    user={candidate.user}
+                                    value={`mention-user-${candidate.user.id}`}
+                                    isActive={isActive}
+                                    onMouseEnter={onHover}
+                                    badgeCount={dmUnreadCountForUser(candidate.user.id)}
+                                    onSelect={candidate.accept}
+                                  />
+                                );
+                              }
+                              return null;
                             })}
                           </CommandSection>
-                        )}
-                        {/* Empty state for in: when nothing matches */}
-                        {availableRegularChannels.length === 0 &&
-                          availableDMs.length === 0 &&
-                          mentionSearchQuery && (
-                            <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                              No results found for &quot;{mentionSearchQuery}&quot;
-                            </Command.Empty>
-                          )}
-
-                        {/* Regular USER mention search (@, from:, assignee:) - Show only Users */}
-                        {mentionSearchType === ChipType.USER &&
-                          (userTrigger === '@' ||
-                            userTrigger === 'from:' ||
-                            userTrigger === 'to:' ||
-                            userTrigger === 'assignee:') &&
-                          availableUsers.length > 0 && (
-                            <CommandSection heading='Users'>
-                              {availableUsers.map((user, index) => (
-                                <UserRow
-                                  key={user.id}
-                                  user={user}
-                                  value={`mention-user-${user.id}`}
-                                  isActive={index === selectedMentionIndex}
-                                  onMouseEnter={() => selectMention(index)}
-                                  badgeCount={dmUnreadCountForUser(user.id)}
-                                  onSelect={() => {
-                                    void handleMentionSelect({
-                                      id: user.id,
-                                      name: getUserDisplayName(user),
-                                      type: ChipType.USER,
-                                      ...(user.email ? { email: user.email } : {}),
-                                    });
-                                  }}
-                                />
-                              ))}
-                            </CommandSection>
-                          )}
-                        {mentionSearchType === ChipType.USER &&
-                          (userTrigger === '@' ||
-                            userTrigger === 'from:' ||
-                            userTrigger === 'to:' ||
-                            userTrigger === 'assignee:') &&
-                          availableUsers.length === 0 &&
-                          mentionSearchQuery && (
-                            <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                              No users found for &quot;{mentionSearchQuery}&quot;
-                            </Command.Empty>
-                          )}
-                      </>
-                    )}
-
-                    {/* 'in:#' trigger - Show Channels only (NO DMs, NO Users) */}
-                    {channelTrigger === 'in:#' && (
-                      <>
-                        {/* Channels Section */}
-                        {availableRegularChannels.length > 0 && (
-                          <CommandSection heading='Channels'>
-                            {availableRegularChannels.map(({ channel, displayName }, index) => (
-                              <ChannelRow
-                                key={channel.id}
-                                value={`mention-channel-${channel.id}`}
-                                label={displayName}
-                                channel={channel}
-                                isActive={index === selectedMentionIndex}
-                                onMouseEnter={() => selectMention(index)}
-                                onSelect={() => {
-                                  void handleMentionSelect({
-                                    id: channel.id,
-                                    name: displayName,
-                                    type: ChipType.CHANNEL,
-                                  });
-                                }}
-                              />
-                            ))}
-                          </CommandSection>
-                        )}
-                        {/* Empty state */}
-                        {availableRegularChannels.length === 0 && mentionSearchQuery && (
+                        ))}
+                        {activeMentionCandidates.length === 0 && mentionSearchQuery && (
                           <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                            No channels found for &quot;{mentionSearchQuery}&quot;
+                            {mentionEmptyText} for &quot;{mentionSearchQuery}&quot;
                           </Command.Empty>
                         )}
                       </>
                     )}
-
-                    {/* 'in:@' trigger - Show DMs only (NOT Users!) */}
-                    {channelTrigger === 'in:@' && availableDMs.length > 0 && (
-                      <CommandSection heading='DMs'>
-                        {availableDMs.map(({ channel, displayName }, index) => (
-                          <ChannelRow
-                            key={channel.id}
-                            value={`mention-dm-${channel.id}`}
-                            label={displayName}
-                            channel={channel}
-                            isActive={index === selectedMentionIndex}
-                            onMouseEnter={() => selectMention(index)}
-                            onSelect={() => {
-                              void handleMentionSelect({
-                                id: channel.id,
-                                name: displayName,
-                                type: ChipType.CHANNEL,
-                              });
-                            }}
-                          />
-                        ))}
-                      </CommandSection>
-                    )}
-                    {channelTrigger === 'in:@' &&
-                      availableDMs.length === 0 &&
-                      mentionSearchQuery && (
-                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                          No DMs found for &quot;{mentionSearchQuery}&quot;
-                        </Command.Empty>
-                      )}
-
-                    {/* '#' trigger - Show only Channels (Slack-style quick switcher) */}
-                    {channelTrigger === '#' && availableChannels.length > 0 && (
-                      <CommandSection heading='Channels'>
-                        {availableChannels.map(({ channel, displayName }, index) => (
-                          <ChannelRow
-                            key={channel.id}
-                            value={`mention-channel-${channel.id}`}
-                            label={displayName}
-                            channel={channel}
-                            isActive={index === selectedMentionIndex}
-                            onMouseEnter={() => selectMention(index)}
-                            onSelect={() => {
-                              void handleMentionSelect({
-                                id: channel.id,
-                                name: displayName,
-                                type: ChipType.CHANNEL,
-                              });
-                            }}
-                          />
-                        ))}
-                      </CommandSection>
-                    )}
-                    {channelTrigger === '#' &&
-                      availableChannels.length === 0 &&
-                      mentionSearchQuery && (
-                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                          No channels found for &quot;{mentionSearchQuery}&quot;
-                        </Command.Empty>
-                      )}
-
-                    {/* Regular USER mention search (@, from:, with:, assignee:) - Show only Users */}
-                    {mentionSearchType === ChipType.USER &&
-                      (userTrigger === '@' ||
-                        userTrigger === 'from:' ||
-                        userTrigger === 'to:' ||
-                        userTrigger === 'with:' ||
-                        userTrigger === 'assignee:') &&
-                      availableUsers.length > 0 && (
-                        <CommandSection heading='Users'>
-                          {availableUsers.map((user, index) => (
-                            <UserRow
-                              key={user.id}
-                              user={user}
-                              value={`mention-user-${user.id}`}
-                              isActive={index === selectedMentionIndex}
-                              onMouseEnter={() => selectMention(index)}
-                              badgeCount={dmUnreadCountForUser(user.id)}
-                              onSelect={() => {
-                                void handleMentionSelect({
-                                  id: user.id,
-                                  name: getUserDisplayName(user),
-                                  type: ChipType.USER,
-                                  ...(user.email ? { email: user.email } : {}),
-                                });
-                              }}
-                            />
-                          ))}
-                        </CommandSection>
-                      )}
-                    {mentionSearchType === ChipType.USER &&
-                      (userTrigger === '@' ||
-                        userTrigger === 'from:' ||
-                        userTrigger === 'to:' ||
-                        userTrigger === 'with:' ||
-                        userTrigger === 'assignee:') &&
-                      availableUsers.length === 0 &&
-                      mentionSearchQuery && (
-                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                          No users found for &quot;{mentionSearchQuery}&quot;
-                        </Command.Empty>
-                      )}
 
                     {/* 'priority:' trigger — the closed TicketPriority value list */}
                     {mentionSearchType === ChipType.BOARD && availableBoards.length > 0 && (
