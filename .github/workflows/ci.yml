@@ -63,8 +63,12 @@ jobs:
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
-    name: Dashboard build
+    name: Dashboard ${{ matrix.task }}
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, typecheck, build]
     env:
       NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
@@ -83,17 +87,19 @@ jobs:
       - name: Build workspace libraries
         run: pnpm --filter @xyne/shared --filter @xyne/icons run build
 
-      # Lint, format check, typecheck, then build — merged into one job (was a
-      # 3-way matrix of separate pods) to avoid paying for checkout/setup-node/
-      # install/workspace-lib-build three times over. Trades the previous
-      # parallel-pod wall-clock time for less duplicated setup cost.
+      # --- lint leg ---------------------------------------------------------
+      # errors-only (warnings ignored).
       - name: Lint (errors only)
+        if: matrix.task == 'lint'
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
 
+      # --- typecheck leg ----------------------------------------------------
       - name: Format check
+        if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run format:check
 
       - name: Restore tsc incremental state
+        if: matrix.task == 'typecheck'
         uses: actions/cache@v4
         with:
           path: apps/dashboard/node_modules/.tmp/tsconfig.app.tsbuildinfo
@@ -102,9 +108,11 @@ jobs:
             dashboard-tsbuildinfo-${{ runner.os }}-
 
       - name: Typecheck
+        if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
+        if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
 
   # Framework lint — self-contained (no workspace deps).
