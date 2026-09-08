@@ -4,7 +4,6 @@ import { hostname } from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type { Config } from '../config.js';
-import { registry } from '../metrics.js';
 import type { Origin } from '../origin/index.js';
 import type { RulesStore } from '../rules/store.js';
 
@@ -50,12 +49,6 @@ export function makeStatusHandlers(
     };
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(`${JSON.stringify(body)}\n`);
-  });
-
-  handlers.set('/_edge/metrics', async (_req, res): Promise<void> => {
-    const text = await registry.metrics();
-    res.writeHead(200, { 'Content-Type': registry.contentType, 'Cache-Control': 'no-store' });
-    res.end(text);
   });
 
   return handlers;

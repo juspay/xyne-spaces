@@ -248,7 +248,7 @@ export class RulesStore {
     this.hash = hash;
     this.lastError = undefined;
     for (const r of parsed.rules) {
-      metrics.ruleHealthy.set({ rule: r.id }, r.healthy ? 1 : 0);
+      metrics.setRuleHealth(r.id, r.healthy);
     }
     log.info('rules loaded', {
       file: this.opts.file,
