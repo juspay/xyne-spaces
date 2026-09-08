@@ -1,3 +1,10 @@
+## [1.294.0](https://github.com/juspay/xyne-spaces/compare/v1.293.0...v1.294.0) (2026-09-08)
+
+
+### Features
+
+* reload bundle in the edge ([#1683](https://github.com/juspay/xyne-spaces/issues/1683)) ([94bc870](https://github.com/juspay/xyne-spaces/commit/94bc8707e69549b52d2b036f244763c1e09de136))
+
 ## [1.293.0](https://github.com/juspay/xyne-spaces/compare/v1.292.0...v1.293.0) (2026-09-08)
 
 
