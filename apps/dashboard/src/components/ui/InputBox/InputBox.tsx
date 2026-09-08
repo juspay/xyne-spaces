@@ -416,11 +416,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         fileInputRef.current.click();
       },
       {
-        enabled: Boolean(features.fileAttachments) && !disabled && !isSending,
+        // Focus-gate so a mounted-but-unfocused composer (e.g. the channel
+        // composer while a thread is open) doesn't also hold this binding.
+        // Without it, both composers register composer.attach at equal scope/
+        // priority and the resolver's last tie-break (registration order) sends
+        // the file into whichever mounted later — usually the thread.
+        enabled: isFocused && Boolean(features.fileAttachments) && !disabled && !isSending,
       },
     );
 
-    useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle());
+    useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle(), {
+      enabled: isFocused && !disabled && !isSending,
+    });
 
     useEffect(() => {
       if (!isVoiceRecording) return;
