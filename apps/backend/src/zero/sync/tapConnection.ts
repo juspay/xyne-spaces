@@ -549,6 +549,7 @@ export class PackConnection {
           // Grant instances get the complete-boundary marker at their got-transition; data
           // instances don't need it (clients hydrate off the data snapshot directly).
           resyncMarkers: this.#isGrantGroup ? newlyGot : undefined,
+          grantGroup: this.#isGrantGroup, // grant streams use the small transport MAXLEN
         },
         this.#opts.guard,
       );

@@ -22,6 +22,10 @@ const registryKey = (clientGroupID: string): string => `${PREFIX}:ginst:${client
 const zgroupKey = (clientGroupID: string): string => `${PREFIX}:zgroup:${clientGroupID}`;
 
 const STREAM_MAXLEN = 10_000;
+/** Grant/tree streams are TRANSPORT, not history — the fan-out tails them live for re-gate and
+ *  clients never resume them, and the snapshot lives in the `sync:snap` hash (not rebuilt from the
+ *  stream). So a tiny cap suffices; 10k retained entries would just pin Redis memory (audit P8). */
+const GRANT_STREAM_MAXLEN = 100;
 const CLEAR_DIFF = JSON.stringify({ upserts: [], deletes: [], cleared: true });
 const EMPTY_DIFF = JSON.stringify({ upserts: [], deletes: [] });
 /** Deterministic "instance fully (re)materialized" boundary — emitted at the got-transition for
@@ -178,6 +182,9 @@ export interface PokeWrite {
   /** Grant instances to stamp with a `{resynced:true}` marker this poke (their got-transition) — the
    *  deterministic complete-boundary the fan-out gates cold-defer on. Appended after row entries. */
   resyncMarkers?: readonly string[];
+  /** This poke's instances are grant/tree streams (one tap = one query-type) → use the small
+   *  transport MAXLEN. */
+  grantGroup?: boolean;
 }
 
 /** XRANGE returns fields as a flat [f, v, f, v, …] array — collapse to an object. */
@@ -280,16 +287,17 @@ export class RedisStreamStore {
    */
   async applyPoke(w: PokeWrite, guard?: FenceGuard): Promise<FenceOutcome> {
     const instancesJSON = JSON.stringify(this.#buildPokeInstances(w));
+    const maxlen = w.grantGroup ? GRANT_STREAM_MAXLEN : STREAM_MAXLEN;
     if (guard) {
       return this.#fenced(
         APPLY_POKE_FENCED,
         [fenceKey(guard.groupKey), cookieKey(w.clientGroupID)],
-        [String(guard.token), w.cookie, STREAM_MAXLEN, instancesJSON],
+        [String(guard.token), w.cookie, maxlen, instancesJSON],
       );
     }
     const r = await redisService
       .getClient()
-      .eval(APPLY_POKE, 1, cookieKey(w.clientGroupID), w.cookie, String(STREAM_MAXLEN), instancesJSON);
+      .eval(APPLY_POKE, 1, cookieKey(w.clientGroupID), w.cookie, String(maxlen), instancesJSON);
     return r === 'STALE' ? 'stale' : 'applied';
   }
 
