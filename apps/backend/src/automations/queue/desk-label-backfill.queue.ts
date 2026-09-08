@@ -124,12 +124,15 @@ class DeskLabelBackfillQueue {
         existing.isCompleted(),
       ]);
       if (!failed && !completed) return 'already-running';
-      await existing.remove().catch(err =>
-        logger.warn(
-          `[DESK-LABEL-BACKFILL-QUEUE] Could not clear finished job ${jobId}; continuing:`,
+      try {
+        await existing.remove();
+      } catch (err) {
+        logger.error(
+          `[DESK-LABEL-BACKFILL-QUEUE] Could not clear finished job ${jobId}:`,
           err,
-        ),
-      );
+        );
+        throw new Error(`Could not clear the previous backfill run for ${workflowId}`);
+      }
     }
 
     await queue.add(DESK_LABEL_BACKFILL_JOB, { workflowId }, { jobId });

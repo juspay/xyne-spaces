@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, History, Loader2, Mail, Power, RefreshCw, Tag, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -51,8 +50,16 @@ function BackfillStatus({ automationId }: { automationId: string }): React.React
   const run = data?.backfill;
   if (!run) return null;
 
+  // Owns its own top margin: the row renders this unconditionally, so an empty wrapper
+  // would still push every rule down by a couple of pixels.
+  const line = (content: React.ReactNode): React.ReactElement => (
+    <div className='mt-0.5'>{content}</div>
+  );
+
   if (run.state === 'failed') {
-    return <span className='text-[11px] text-destructive'>Applying to older emails failed</span>;
+    return line(
+      <span className='text-[11px] text-destructive'>Applying to older emails failed</span>,
+    );
   }
 
   const progress = run.progress;
@@ -60,22 +67,22 @@ function BackfillStatus({ automationId }: { automationId: string }): React.React
 
   if (run.state === 'completed') {
     const threads = `${labeled} older ${labeled === 1 ? 'thread' : 'threads'}`;
-    return (
+    return line(
       <span className='text-[11px] text-muted-foreground'>
         {progress?.stoppedEarly
           ? `Stopped after ${threads} — rule is no longer active`
           : `Applied to ${threads}`}
-      </span>
+      </span>,
     );
   }
 
-  return (
+  return line(
     <span className='inline-flex items-center gap-1 text-[11px] text-muted-foreground'>
       <Loader2 className='size-3 animate-spin' />
       {run.state === 'queued'
         ? 'Queued for older emails…'
         : `Scanning older emails — ${labeled} labeled`}
-    </span>
+    </span>,
   );
 }
 
@@ -108,14 +115,9 @@ export function MyAutoLabelRules({
     onError: err => toast.error(err instanceof Error ? err.message : 'Status update failed'),
   });
 
-  // Rules that have been asked to backfill this session — their status line stays
-  // mounted so the poll can report progress without refetching the whole list.
-  const [backfilling, setBackfilling] = useState<Set<string>>(new Set());
-
   const backfillMutation = useMutation({
     mutationFn: (item: Automation) => startDeskLabelRuleBackfill(item.id),
     onSuccess: (data, item) => {
-      setBackfilling(prev => new Set(prev).add(item.id));
       void queryClient.invalidateQueries({ queryKey: backfillQueryKey(item.id) });
       toast.success(
         data.backfill === 'already-running'
@@ -221,11 +223,7 @@ export function MyAutoLabelRules({
                     {isActive ? 'Active' : 'Disabled'}
                   </span>
                 </div>
-                {backfilling.has(item.id) && (
-                  <div className='mt-0.5'>
-                    <BackfillStatus automationId={item.id} />
-                  </div>
-                )}
+                <BackfillStatus automationId={item.id} />
               </div>
               <div className='flex items-center gap-1'>
                 <Tooltip

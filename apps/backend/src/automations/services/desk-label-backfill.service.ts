@@ -232,6 +232,7 @@ export async function runDeskLabelBackfill(
   let lastId: string | undefined;
   let hasMore = true;
   let firstPage = true;
+  const seen = new Set<string>();
 
   while (hasMore) {
     // Skipped on the first page — the worker just resolved the rule.
@@ -276,9 +277,6 @@ export async function runDeskLabelBackfill(
       needsAttachments ? loadEmailIdsWithAttachments(emails) : Promise.resolve(null),
     ]);
 
-    // The label lands on the conversation, so N matching emails in one thread
-    // collapse to a single apply.
-    const seen = new Set<string>();
     const conversationIds: string[] = [];
     for (const email of emails) {
       const root = rootByThread && email.externalThreadId

@@ -116,10 +116,9 @@ export function ApplyConversationLabelStepForm({
           value={cfg.labelName ?? ''}
           onChange={e => {
             const name = e.target.value;
-            const matches = (catalog ?? []).filter(
-              l => l.name.toLowerCase() === name.trim().toLowerCase(),
+            const existing = (catalog ?? []).find(
+              l => l.name.toLowerCase() === name.trim().toLowerCase() && l.createdBy === user?.id,
             );
-            const existing = matches.find(l => l.createdBy === user?.id) ?? matches[0];
             onChange({
               ...cfg,
               labelName: name,
