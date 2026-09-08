@@ -91,7 +91,11 @@ class WebSocketService {
     // (io.to(room)) instead of serializing per client. Clients join/leave the room on
     // hydrate/revoke (see clientGateway + fanout).
     if (config.enableSyncEngine) {
-      fanout.setBroadcast((room, event, payload) => this.io?.to(room).emit(event, payload));
+      // `.local` = LOCAL sockets only. Identical to `.to()` under the default in-memory adapter
+      // (each pod's fan-out already delivers once to its own clients), but if a Redis adapter is
+      // ever added for app-level cross-pod broadcasts, plain `.to()` would publish this fan-out
+      // delta cluster-wide → delivered × N_pods. `.local` is correct under any adapter.
+      fanout.setBroadcast((room, event, payload) => this.io?.local.to(room).emit(event, payload));
     }
 
     // Authentication middleware - reuse Express auth logic
