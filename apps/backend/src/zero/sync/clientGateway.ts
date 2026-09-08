@@ -17,6 +17,9 @@ import { obsEmit } from './obs';
 export interface SyncIoSocket extends Socket {
   userId: string;
   workspaceId?: string;
+  /** Workspace role. The ACL gate is derived with a MEMBER sentinel ctx, so the sync engine
+   *  serves MEMBER-role principals only; others (esp. GUEST) are refused fail-closed. */
+  workspaceRole?: string;
 }
 
 interface Subscription {
@@ -97,6 +100,16 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
   ): void {
     const workspaceId = socket.workspaceId;
     if (!workspaceId) return; // guaranteed set once `ready`; guard for safety
+    // FAIL-CLOSED role gate: deriveAclGate freezes the sentinel ctx at role=MEMBER, so the gate is
+    // only correct for MEMBER principals. A GUEST evaluated under the MEMBER shape would be admitted
+    // to PUBLIC channels the guest ACL (guestChannelAccessWhere) would deny — a leak; ADMIN/OWNER
+    // would be under-privileged (safe but wrong). Serve MEMBER only until per-role gates exist; the
+    // client falls back to stock Zero for everything else.
+    if (socket.workspaceRole !== 'MEMBER') {
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'non-member-role' });
+      socket.emit('sync:error', { queryName, message: 'sync engine serves member-role principals only' });
+      return;
+    }
     const dataInstanceKey = syncEngine.subscribe(queryName, args, connId);
     if (!dataInstanceKey) {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName });

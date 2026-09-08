@@ -25,6 +25,9 @@ interface AuthenticatedSocket extends Socket {
   orgMemberId?: string;
   workspaceId?: string;
   workspaceName?: string;
+  /** Workspace role (MEMBER/ADMIN/OWNER/GUEST/…). The sync engine's ACL gate is derived for
+   *  MEMBER, so the gateway serves MEMBER-role principals only (see attachSyncHandlers). */
+  workspaceRole?: string;
 }
 
 // interface JoinSessionData {
@@ -275,6 +278,8 @@ class WebSocketService {
         socket.workspaceId = userWithWorkspace.workspaceId;
         socket.workspaceName = userWithWorkspace.workspace?.name;
       }
+      // Workspace role for the sync engine's fail-closed role gate (see attachSyncHandlers).
+      socket.workspaceRole = userWithWorkspace?.role;
 
       if (userWithWorkspace?.orgMemberId) {
         socket.orgMemberId = userWithWorkspace.orgMemberId;
