@@ -51,6 +51,8 @@ const FATAL_KINDS = new Set(['VersionNotSupported', 'SchemaVersionNotSupported']
 
 const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
+/** Persist backlog depth at which we warn (a stalled Redis accumulating pokes). */
+const PERSIST_DEPTH_WARN = 100;
 
 /**
  * One raw Zero sync-protocol connection to zero-cache for a PACK GROUP: many
@@ -101,6 +103,9 @@ export class PackConnection {
    *  reconnect resumes from the last SAVED cookie and replays, so persisting it would double-write
    *  or, post-reset, write to torn-down streams). */
   #persistEpoch = 0;
+  /** Enqueued-but-not-yet-run persists — a SLOW (not failing) Redis accumulates these silently;
+   *  warn once when the backlog crosses the threshold. */
+  #persistDepth = 0;
   /** Instances already marked hydrated (gotQueriesPatch is a diff — mark once). */
   readonly #got = new Set<string>();
   /** Instances whose demux attribution maps have been rebuilt from their persisted snapshot
@@ -322,6 +327,12 @@ export class PackConnection {
       // post-reset → deferred clients stuck). #invalidatePersist already did resetAll + #seeded.clear.
       this.#got.clear();
       this.#baseCookie = '';
+      // Drain in-flight/queued persists BEFORE the reset: an in-flight applyPoke EVAL can't be
+      // epoch-bailed, and its writes must not land AFTER the reset's DELs (that would repopulate a
+      // wiped snapshot with a non-cleared tail → isHydrated over torn state). Draining orders
+      // reset strictly after every persist on ANY connection — not just via shared-client FIFO,
+      // which P2's dedicated sync connections would break.
+      await this.#persistQueue.drain();
       try {
         const outcome = await this.#opts.store.reset(
           this.#zeroClientGroupID,
@@ -358,7 +369,23 @@ export class PackConnection {
       delayMs = Math.random() * ceiling;
       this.#attempt += 1;
     }
-    this.#reconnectTimer = setTimeout(() => this.#connect(), delayMs);
+    this.#reconnectTimer = setTimeout(() => void this.#reconnect(), delayMs);
+  }
+
+  /**
+   * Reconnect path: SEED the demux from the durable snapshot BEFORE the socket exists. #onClose
+   * wiped attribution (#invalidatePersist), and the init header desires every instance, so
+   * zero-cache can poke resume deltas the instant it sees 'connected' — before #onConnected's lazy
+   * seed finishes. Since #onPokeEnd is synchronous, a resume del for a not-yet-seeded instance
+   * would find an empty #owner and be silently dropped (delete-leak class, df59b9055a). Seeding
+   * first — exactly what start() does — makes that window impossible. (No-op on the reset path:
+   * the snapshot was just wiped, so there is nothing to seed and no resume deltas.)
+   */
+  async #reconnect(): Promise<void> {
+    if (this.#closed || this.#stopped) return;
+    await this.#ensureSeeded([...this.#desired.keys()]);
+    if (this.#closed || this.#stopped) return;
+    this.#connect();
   }
 
   #onMessage(raw: string): void {
@@ -476,6 +503,10 @@ export class PackConnection {
       }
     }
     const epoch = this.#persistEpoch;
+    this.#persistDepth += 1;
+    if (this.#persistDepth === PERSIST_DEPTH_WARN) {
+      logger.warn('sync_pack_persist_backlog', { clientGroupID: this.#opts.clientGroupID, depth: this.#persistDepth });
+    }
     this.#persistQueue.enqueue(this.#opts.clientGroupID, () => this.#persistPoke(epoch, cookie, diffs, newlyGot));
   }
 
@@ -491,14 +522,15 @@ export class PackConnection {
     diffs: Map<string, StreamDiff>,
     newlyGot: readonly string[],
   ): Promise<void> {
+    this.#persistDepth -= 1; // dequeued
     if (epoch !== this.#persistEpoch) return;
     try {
       const outcome = await this.#opts.store.applyPoke(
         { clientGroupID: this.#zeroClientGroupID, cookie, diffs, newlyGot },
         this.#opts.guard,
       );
+      if (outcome === 'stale') return this.#demoteFenceLost(); // fence loss is epoch-independent — handle first
       if (epoch !== this.#persistEpoch) return; // reconnected mid-write; result is moot (resume re-seeds + replays)
-      if (outcome === 'stale') return this.#demoteFenceLost();
       this.#baseCookie = cookie;
       for (const [instanceKey, diff] of diffs) {
         if (diff.upserts.length || diff.deletes.length) {
