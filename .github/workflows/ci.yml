@@ -18,12 +18,25 @@ env:
   PNPM_FLAGS: "--frozen-lockfile --prod=false"
 
 jobs:
+  # TEMPORARY: DNS debugging on ci-pool. Just echoes hello + tests DNS
+  # resolution of an external hostname from a real ARC self-hosted runner
+  # pod. Remove once the ci-pool DNS issue is root-caused and fixed.
+  hello:
+    name: Hello (DNS debug)
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
+    steps:
+      - name: Say hello and test DNS
+        run: |
+          echo "hello"
+          getent hosts broker.actions.githubusercontent.com || echo "DNS resolution FAILED"
+
   # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
+    if: false # TEMPORARY: disabled during ci-pool DNS debugging
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
@@ -64,6 +77,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard ${{ matrix.task }}
+    if: false # TEMPORARY: disabled during ci-pool DNS debugging
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
@@ -118,6 +132,7 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
+    if: false # TEMPORARY: disabled during ci-pool DNS debugging
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
