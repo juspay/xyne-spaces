@@ -231,8 +231,7 @@ export class RedisStreamStore {
     keys: readonly string[],
     args: readonly (string | number)[],
   ): Promise<FenceOutcome> {
-    const r = await redisService
-      .getClient()
+    const r = await syncClient()
       .eval(script, keys.length, ...(keys as string[]), ...(args as (string | number)[]));
     return r === 'STALE' ? 'stale' : 'applied';
   }
@@ -315,8 +314,7 @@ export class RedisStreamStore {
         [String(guard.token), w.cookie, maxlen, instancesJSON],
       );
     }
-    const r = await redisService
-      .getClient()
+    const r = await syncClient()
       .eval(APPLY_POKE, 1, cookieKey(w.clientGroupID), w.cookie, String(maxlen), instancesJSON);
     return r === 'STALE' ? 'stale' : 'applied';
   }
@@ -355,8 +353,7 @@ export class RedisStreamStore {
     }
     const last = await this.#lastEntry(instanceKey);
     if (last && !last.diff.cleared) return 'applied';
-    await redisService
-      .getClient()
+    await syncClient()
       .xadd(streamKey(instanceKey), 'MAXLEN', '~', STREAM_MAXLEN, '*', 'v', version, 'diff', EMPTY_DIFF);
     return 'applied';
   }
@@ -403,8 +400,7 @@ export class RedisStreamStore {
     instanceKey: string,
     sinceOffset: string,
   ): Promise<Array<{ id: string; version: string; diff: StreamDiff }>> {
-    const entries = await redisService
-      .getClient()
+    const entries = await syncClient()
       .xrange(streamKey(instanceKey), `(${sinceOffset}`, '+');
     return entries.map(([id, fields]) => {
       const map = fieldsToObject(fields);
