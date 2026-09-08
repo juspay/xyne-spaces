@@ -1,3 +1,10 @@
+## [1.289.1](https://github.com/juspay/xyne-spaces/compare/v1.289.0...v1.289.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* List claw agents fix ([#1635](https://github.com/juspay/xyne-spaces/issues/1635)) ([158429f](https://github.com/juspay/xyne-spaces/commit/158429f1d53d1d2989c29d100b5675847dd513df))
+
 ## [1.289.0](https://github.com/juspay/xyne-spaces/compare/v1.288.0...v1.289.0) (2026-09-08)
 
 
