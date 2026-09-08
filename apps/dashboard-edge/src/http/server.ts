@@ -23,9 +23,7 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
       await objectsHandler(req, res, pathname);
       return;
     }
-    // Own keys only: a request for /constructor or /__proto__ must not reach
-    // Object.prototype through the lookup.
-    const status = Object.hasOwn(statusHandlers, pathname) ? statusHandlers[pathname] : undefined;
+    const status = statusHandlers.get(pathname);
     if (status && (req.method === 'GET' || req.method === 'HEAD')) {
       await status(req, res);
       return;
