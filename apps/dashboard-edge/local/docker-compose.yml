@@ -1,0 +1,94 @@
+# Local run against emulators: fake-gcs-server (GCS backend) and MinIO (S3
+# backend). Two edge instances share the same rules.json.
+#   cd apps/dashboard-edge/local
+#   docker compose up --build -d
+#   ./seed.sh                      # creates buckets and four sample bundles
+#   curl -si localhost:8089/ | head -20     # GCS-backed edge
+#   curl -si localhost:8090/ | head -20     # S3-backed edge (MinIO)
+#   curl -s localhost:8089/_edge/status | jq
+# Edit rules.json; both edges reload it within EDGE_RELOAD_INTERVAL seconds.
+services:
+  fake-gcs:
+    image: mirror.gcr.io/fsouza/fake-gcs-server:latest
+    command: ["-scheme", "http", "-port", "4443", "-external-url", "http://localhost:4443", "-public-host", "fake-gcs:4443"]
+    ports:
+      - "4443:4443"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  minio:
+    image: quay.io/minio/minio:latest
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # One-shot: copies ./.bundles into MinIO. Run by seed.sh.
+  mc:
+    image: quay.io/minio/mc:latest
+    profiles: ["seed"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb -p local/xyne-frontend-bundles &&
+        mc cp -r /bundles/ local/xyne-frontend-bundles/ &&
+        echo seeded minio
+    volumes:
+      - ./.bundles:/bundles:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  edge:
+    build:
+      context: ../../..
+      dockerfile: apps/dashboard-edge/Dockerfile
+    environment:
+      STORAGE_BACKEND: gcs
+      STORAGE_BUCKET: xyne-frontend-bundles
+      STORAGE_ENDPOINT: http://fake-gcs:4443
+      STORAGE_AUTH: none
+      EDGE_RELOAD_INTERVAL: "2"
+      LOG_LEVEL: info
+    volumes:
+      - ./rules.json:/etc/edge/rules/rules.json:ro
+    ports:
+      - "8089:8080"
+    depends_on:
+      fake-gcs:
+        condition: service_healthy
+
+  edge-s3:
+    build:
+      context: ../../..
+      dockerfile: apps/dashboard-edge/Dockerfile
+    environment:
+      STORAGE_BACKEND: s3
+      STORAGE_BUCKET: xyne-frontend-bundles
+      STORAGE_ENDPOINT: http://minio:9000
+      # STORAGE_AUTH=sdk (default): the credential helper resolves these
+      # through the AWS SDK default chain, the same path IRSA or instance
+      # metadata would take in a cluster.
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      EDGE_RELOAD_INTERVAL: "2"
+      LOG_LEVEL: info
+    volumes:
+      - ./rules.json:/etc/edge/rules/rules.json:ro
+    ports:
+      - "8090:8080"
+    depends_on:
+      minio:
+        condition: service_healthy
