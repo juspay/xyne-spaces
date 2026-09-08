@@ -35,6 +35,12 @@ const RunAgentConfigSchema = z.object({
     .max(10)
     .optional()
     .describe('How many times to retry the agent if its response fails schema validation. Default 3.'),
+  outputMode: z
+    .enum(['capture', 'thread'])
+    .default('capture')
+    .describe(
+      "How the agent's result is delivered. 'capture' (default) parses the response into { result } JSON that downstream steps can read. 'thread' posts the agent's final answer back into the conversation that triggered the automation and skips output-schema validation; it requires a trigger that carries a conversation (message/ticket), and downstream steps cannot read a result from a thread-mode node.",
+    ),
 });
 
 export type RunAgentConfig = z.infer<typeof RunAgentConfigSchema>;
@@ -75,6 +81,12 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const visibleContext = resolveVisibleConversationContext(context);
+    const deliverToThread = cfg.outputMode === 'thread';
+    if (deliverToThread && !visibleContext) {
+      throw new Error(
+        "[RUN_AGENT] outputMode 'thread' requires a trigger that carries a conversation (channelId + conversationId); this automation has none. Use outputMode 'capture', or trigger the automation from a message/ticket.",
+      );
+    }
 
     logger.info(
       `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
@@ -90,6 +102,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         ...identityContext,
         callbackUrl,
         ...(visibleContext ? visibleContext : {}),
+        ...(deliverToThread ? { deliverToThread: true } : {}),
       });
     } catch (err) {
       logger.error(
@@ -116,6 +129,21 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       const envErr =
         (agentRawResult as { error?: unknown }).error ?? `agent run ${String(envelopeStatus)}`;
       throw new Error(`[RUN_AGENT] claw run status=${String(envelopeStatus)}: ${String(envErr)}`);
+    }
+
+    // Thread-output mode: the agent's answer was posted into the trigger
+    // conversation by claw-auth. There is no { result } JSON to validate or hand
+    // to downstream steps — just record that delivery happened and advance.
+    if (cfg.outputMode === 'thread') {
+      const threadAttachments = parseAgentAttachments(
+        (agentRawResult as { attachments?: unknown }).attachments,
+      );
+      logger.info(
+        `[RUN_AGENT] thread delivery — result posted to the trigger conversation; skipping output-schema capture (attachments=${threadAttachments.length})`,
+      );
+      return (threadAttachments.length
+        ? { delivered: true, attachments: threadAttachments }
+        : { delivered: true }) as RunAgentOutput;
     }
 
     const declaredSchema = (cfg.outputSchema ?? {}) as Record<string, unknown>;

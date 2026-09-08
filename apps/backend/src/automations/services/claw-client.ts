@@ -33,6 +33,13 @@ export interface RunAgentRequest {
   context?: string;
   conversationId?: string;
   channelId?: string;
+  /**
+   * When true, claw-auth posts the agent's final answer into the bound
+   * conversation (channelId + conversationId) instead of only forwarding a
+   * captured { result } back to the workflow step. The completion callback
+   * still fires so the step resumes.
+   */
+  deliverToThread?: boolean;
 }
 
 export interface RunAgentResponse {
@@ -96,6 +103,7 @@ class ClawClient {
       ...(req.context ? { context: req.context } : {}),
       ...(req.conversationId ? { conversationId: req.conversationId } : {}),
       ...(req.channelId ? { channelId: req.channelId } : {}),
+      ...(req.deliverToThread ? { deliverToThread: true } : {}),
     };
     const body = JSON.stringify(payload);
     const signature = signWebhookPayload(body, signingSecret);
