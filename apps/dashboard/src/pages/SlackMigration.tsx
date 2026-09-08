@@ -113,7 +113,8 @@ const TONE: Record<Tone, { pill: string; dot: string; bar: string; ring: string 
 };
 
 const isStalled = (j: MigrationJobView): boolean =>
-  (j.status === 'COLLECTING' || j.status === 'REFRESHING' || j.status === 'INGESTING') && Date.now() - j.heartbeatAt > STALE_MS;
+  (j.status === 'COLLECTING' || j.status === 'REFRESHING' || j.status === 'INGESTING') &&
+  Date.now() - j.heartbeatAt > STALE_MS;
 
 const ago = (ts: number): string => {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -162,7 +163,8 @@ const activeStage = (j: MigrationJobView): number => {
 
 // ── small pieces ─────────────────────────────────────────────────────────────
 function StatusPill({ job }: { job: MigrationJobView }): React.JSX.Element {
-  const running = job.status === 'COLLECTING' || job.status === 'REFRESHING' || job.status === 'INGESTING';
+  const running =
+    job.status === 'COLLECTING' || job.status === 'REFRESHING' || job.status === 'INGESTING';
   const stopping = running && job.stopRequested;
   const stalled = running && !stopping && isStalled(job);
   const approvedQueued = job.status === 'AWAITING_APPROVAL' && job.phase === 'ingest';
@@ -267,11 +269,16 @@ function PhaseProgress({ job }: { job: MigrationJobView }): React.JSX.Element | 
     return (
       <div>
         <div className='mb-1 flex items-center justify-between text-xs text-muted-foreground'>
-          <span>Fetching latest… {rd.toLocaleString()} / {rt.toLocaleString()} conversations</span>
+          <span>
+            Fetching latest… {rd.toLocaleString()} / {rt.toLocaleString()} conversations
+          </span>
           <span className='tabular-nums'>{pct}%</span>
         </div>
         <div className='h-1.5 overflow-hidden rounded-full bg-muted'>
-          <div className={cn('h-full rounded-full transition-[width] duration-500', TONE.blue.bar)} style={{ width: `${pct}%` }} />
+          <div
+            className={cn('h-full rounded-full transition-[width] duration-500', TONE.blue.bar)}
+            style={{ width: `${pct}%` }}
+          />
         </div>
       </div>
     );
@@ -1125,7 +1132,8 @@ function OwnerActions({
     void run(fn).finally(() => setPending(null));
   };
   const canResume = job.status === 'STOPPED' || job.status === 'FAILED';
-  const canDelete = job.status !== 'COLLECTING' && job.status !== 'REFRESHING' && job.status !== 'INGESTING';
+  const canDelete =
+    job.status !== 'COLLECTING' && job.status !== 'REFRESHING' && job.status !== 'INGESTING';
   return (
     <>
       {canResume && (
