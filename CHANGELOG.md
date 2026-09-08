@@ -1,3 +1,10 @@
+## [1.293.0](https://github.com/juspay/xyne-spaces/compare/v1.292.0...v1.293.0) (2026-09-08)
+
+
+### Features
+
+* spaces badge ([#1675](https://github.com/juspay/xyne-spaces/issues/1675)) ([828569c](https://github.com/juspay/xyne-spaces/commit/828569c80a13951168b6d3e08aba6c25dc32ed4b))
+
 ## [1.292.0](https://github.com/juspay/xyne-spaces/compare/v1.291.1...v1.292.0) (2026-09-08)
 
 
