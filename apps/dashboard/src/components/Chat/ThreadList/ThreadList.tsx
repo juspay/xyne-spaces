@@ -1,4 +1,12 @@
-import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ReactElement,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { queries } from '../../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuthContext } from '../../../providers/AuthProvider';
@@ -52,6 +60,21 @@ type ThreadListProps = {
     ChatListV4. Applied as padding-bottom on the scroll container, so scroll-to-bottom
     (`scrollHeight - clientHeight`) naturally lands with the last message clear of it. */
 const ACTIVITY_BAR_PADDING = 28;
+
+/**
+ * First ancestor of `start` that currently scrolls. Used to compensate viewport
+ * drift after the thread list grows in place: on fixed-height surfaces that is
+ * the thread's own scroller; inside preview cards (whose height follows their
+ * content) it is the surrounding page list scroller.
+ */
+function findScrollableAncestor(start: HTMLElement): HTMLElement | null {
+  for (let el: HTMLElement | null = start.parentElement; el; el = el.parentElement) {
+    if (el.scrollHeight <= el.clientHeight + 1) continue;
+    const overflowY = window.getComputedStyle(el).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return el;
+  }
+  return null;
+}
 
 const ThreadList = ({
   channelId,
@@ -298,6 +321,54 @@ const ThreadList = ({
       hiddenCount: olderCount,
     };
   })();
+
+  /**
+   * "Show N older replies" inserts the hidden replies between the root message
+   * and the replies the user is currently reading. Without compensation the raw
+   * scroll offset survives, so the viewport lands on the root/oldest replies
+   * instead. Anchor the last visible reply: capture its viewport position on
+   * click, then restore it once the expanded list has committed — the thread
+   * then grows upward from the user's current view.
+   */
+  const expandScrollAnchorRef = useRef<{ messageId: string; viewportTop: number } | null>(null);
+
+  const handleExpandOlderReplies = useCallback(() => {
+    const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
+    if (lastVisibleMessage) {
+      const anchorEl = scrollContentRef.current?.querySelector<HTMLElement>(
+        `[id="thread-message-${conversationId}-${lastVisibleMessage.messageId}"]`,
+      );
+      if (anchorEl) {
+        expandScrollAnchorRef.current = {
+          messageId: lastVisibleMessage.messageId,
+          viewportTop: anchorEl.getBoundingClientRect().top,
+        };
+      }
+    }
+    setIsExpanded(true);
+  }, [conversationId, visibleMessages]);
+
+  useLayoutEffect(() => {
+    const anchor = expandScrollAnchorRef.current;
+    if (!anchor) return;
+    expandScrollAnchorRef.current = null;
+    const anchorEl = scrollContentRef.current?.querySelector<HTMLElement>(
+      `[id="thread-message-${conversationId}-${anchor.messageId}"]`,
+    );
+    if (!anchorEl) return;
+
+    const restoreAnchorPosition = (): void => {
+      const drift = anchorEl.getBoundingClientRect().top - anchor.viewportTop;
+      if (Math.abs(drift) < 2) return;
+      const scroller = findScrollableAncestor(anchorEl);
+      if (scroller) scroller.scrollTop += drift;
+    };
+
+    restoreAnchorPosition();
+    // The preview-card list (Virtuoso) re-measures the grown card asynchronously
+    // and can shift the list once more — re-check after a frame settles.
+    requestAnimationFrame(restoreAnchorPosition);
+  }, [conversationId, isExpanded]);
 
   // messageId -> index lookup for the ticket-thread render path. A per-item
   // threadMessages.findIndex() made that path O(n²) per render on long threads.
@@ -654,7 +725,7 @@ const ThreadList = ({
                 {shouldShowCollapseButton && (
                   <div className='flex items-center my-1 px-2 gap-2'>
                     <button
-                      onClick={() => setIsExpanded(true)}
+                      onClick={handleExpandOlderReplies}
                       className='flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors'
                       data-track-category='THREAD_PANEL'
                       data-track-name='EXPAND_THREAD'
