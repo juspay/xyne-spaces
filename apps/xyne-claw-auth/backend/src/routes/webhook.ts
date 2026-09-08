@@ -3948,6 +3948,7 @@ export async function handleAutomationWebhook(
     channelId?: string | null;
     channelName?: string | null;
     workspaceId?: string | null;
+    deliverToThread?: boolean;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
     sdlcOperation?: "baseline" | "work" | "wiki";
@@ -4186,6 +4187,13 @@ export async function handleAutomationWebhook(
       // MCP swap on this (not on the resolveMentions proxy).
       isAutomation: true,
       triggerSource: "automation",
+      // Thread-output agent node: in addition to forwarding the completion (so
+      // the workflow step resumes), post the agent's final answer into the
+      // conversation that triggered the automation. Requires a bound
+      // conversation; otherwise falls back to capture-only behavior.
+      ...(payload.deliverToThread && payload.conversationId && payload.channelId
+        ? { deliverResultToThread: true }
+        : {}),
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
@@ -5665,6 +5673,32 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // self-heals instead of its caller receiving a blank and nobody retrying.
     if (payload.emptyReason === "provider_capacity" && !forwardText.trim()) {
       await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
+    }
+    // Thread-output automation node: post the agent's final answer into the
+    // conversation that triggered the automation, in addition to forwarding the
+    // completion below so the workflow step still resumes. Guarded on
+    // deliverResultToThread + a bound conversation; fail-open so a post failure
+    // never blocks the step from advancing.
+    if (
+      ctx.deliverResultToThread &&
+      ctx.conversationId &&
+      ctx.channelId &&
+      ctx.appToken &&
+      forwardText.trim()
+    ) {
+      await spacesAppFetch(
+        "/chat/postMessage",
+        {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: forwardText,
+          userId: ctx.spacesAppUserId,
+          metadata: { contentFormat: "markdown" },
+        },
+        ctx.appToken,
+      ).catch((err) =>
+        log.warn(`[webhook/result] thread-output post failed sessionId=${sessionId}: ${errMsg(err)}`),
+      );
     }
     await forwardResult(ctx.resultForwardUrl, payload, forwardText);
     return;

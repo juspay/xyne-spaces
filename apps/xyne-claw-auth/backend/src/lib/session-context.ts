@@ -126,6 +126,15 @@ export interface SessionContext {
    */
   resolveMentions?: boolean;
   /**
+   * True when a Spaces automation "agent node" runs in thread-output mode.
+   * /webhook/result then ALSO posts the agent's final answer into the bound
+   * conversation (channelId + conversationId) before forwarding the completion
+   * to the automation callback, so the workflow step still resumes. Only set by
+   * handleAutomationWebhook when the trigger carries a conversation. Fail-open:
+   * a failed thread post never blocks the step from advancing.
+   */
+  deliverResultToThread?: boolean;
+  /**
    * True when this session was dispatched by the Spaces automation webhook
    * (app-user run, no human in the thread). This is the EXPLICIT gate the
    * MCP layer uses to serve Spaces tools in app mode (routes/mcp.ts injects
