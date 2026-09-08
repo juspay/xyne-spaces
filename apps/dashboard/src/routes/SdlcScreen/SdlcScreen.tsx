@@ -1222,10 +1222,11 @@ export default function SdlcScreen(): ReactElement {
     resetArtifactDialog();
     const newCanvasId = response.data.artifact.canvasId;
     setRelatedSourceId(null);
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/artifacts`,
-      `?type=${encodeURIComponent(folder.id)}&canvas=${encodeURIComponent(newCanvasId)}`,
-    );
+    // Same search as opening an artifact from the list, so a new artifact lands
+    // with its discussion open rather than only doing so once reopened.
+    const search = canvasSearch(newCanvasId, true);
+    search.set('type', folder.id);
+    navigateWithinSdlc(`/sdlc/${channelId}/artifacts`, `?${search.toString()}`);
   };
 
   const createArtifactType = async (): Promise<void> => {
