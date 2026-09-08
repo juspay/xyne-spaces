@@ -125,6 +125,63 @@ test('redisStore: fenced writes apply with a matching token, STALE otherwise', {
   }
 });
 
+test('redisStore: applyPoke writes all instances + cookie atomically (fenced + unfenced parity)', { skip }, async () => {
+  const store = new RedisStreamStore!();
+  const own = ownership!;
+  const client = redisService!.getClient();
+  const rnd = Math.floor(Math.random() * 1e9);
+  const G = `testgrp-poke-${rnd}`;
+  const A = `pk-a-${rnd}`;
+  const B = `pk-b-${rnd}`;
+  const E = `pk-empty-${rnd}`; // newlyGot with no diff → empty marker
+  const CG = `pk-cg-${rnd}`;
+  const Ap = `pk-a-plain-${rnd}`; // unfenced parity reference for A
+  const keys = [A, B, E, Ap].flatMap((i) => [`sync:snap:${i}`, `sync:stream:${i}`]).concat([`sync:cookie:${CG}`, `sync:cookie:${CG}-plain`, `sync:owner:${G}`, fenceKey!(G)]);
+  const cleanup = () => client.del(...keys);
+  const diffA = { upserts: [{ key: 'tbl:1', tableName: 'tbl', row: { id: '1', txt: 'a' } }], deletes: [] as string[], cleared: false };
+  const diffB = { upserts: [{ key: 'tbl:2', tableName: 'tbl', row: { id: '2' } }], deletes: [] as string[], cleared: false };
+
+  try {
+    const token = (await own.acquireGroup(G)) as number;
+    const guard = { groupKey: G, token };
+
+    // One atomic poke: A + B diffs, E as a newlyGot empty instance, cookie 'c1'.
+    assert.equal(
+      await store.applyPoke({ clientGroupID: CG, cookie: 'c1', diffs: new Map([[A, diffA], [B, diffB]]), newlyGot: [E] }, guard),
+      'applied',
+    );
+    assert.deepEqual(await store.snapshot(A), [{ tableName: 'tbl', row: { id: '1', txt: 'a' } }]);
+    assert.deepEqual(await store.snapshot(B), [{ tableName: 'tbl', row: { id: '2' } }]);
+    assert.equal(await client.get(`sync:cookie:${CG}`), 'c1', 'cookie set in the same write');
+    assert.equal(await store.isHydrated(E), true, 'empty newlyGot instance got its hydration marker');
+    assert.equal(await store.isHydrated(A), true, 'non-empty instance hydrated by its own entry');
+
+    // Byte-parity: A via applyPoke == the unfenced applyDiff path for the same data.
+    assert.equal(await store.applyDiff(Ap, 'c1', diffA), 'applied');
+    assert.deepEqual(await client.hgetall(`sync:snap:${A}`), await client.hgetall(`sync:snap:${Ap}`), 'applyPoke snapshot bytes == applyDiff');
+
+    // cleared: a poke that clears A and re-puts one row → snapshot is exactly that row.
+    assert.equal(
+      await store.applyPoke({ clientGroupID: CG, cookie: 'c2', diffs: new Map([[A, { upserts: [{ key: 'tbl:9', tableName: 'tbl', row: { id: '9' } }], deletes: [], cleared: true }]]), newlyGot: [] }, guard),
+      'applied',
+    );
+    assert.deepEqual(await store.snapshot(A), [{ tableName: 'tbl', row: { id: '9' } }], 'cleared dropped old rows, kept the re-put');
+    assert.equal(await client.get(`sync:cookie:${CG}`), 'c2');
+
+    // STALE under a bad token → NOTHING written (atomic rollback), cookie unchanged.
+    const bad = { groupKey: G, token: token + 777 };
+    assert.equal(
+      await store.applyPoke({ clientGroupID: CG, cookie: 'c3', diffs: new Map([[A, diffB]]), newlyGot: [] }, bad),
+      'stale',
+    );
+    assert.equal(await client.get(`sync:cookie:${CG}`), 'c2', 'stale poke left the cookie');
+    assert.deepEqual(await store.snapshot(A), [{ tableName: 'tbl', row: { id: '9' } }], 'stale poke mutated no snapshot');
+  } finally {
+    await own.releaseGroup(G);
+    await cleanup();
+  }
+});
+
 test('redisStore: fenced applyDiff chunks past the Lua unpack limit', { skip }, async () => {
   const store = new RedisStreamStore!();
   const own = ownership!;

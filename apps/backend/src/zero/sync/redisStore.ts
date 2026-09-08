@@ -134,6 +134,44 @@ const DEREGISTER = `${FENCE_GATE}
 redis.call('HDEL', KEYS[2], ARGV[2])
 return 'OK'`;
 
+/**
+ * atomic per-poke write (C-FIX-ATOMIC). Applies EVERY touched instance's diff + the group
+ * cookie in ONE script — so a poke is all-or-nothing and ordered by construction (closes the
+ * cross-poke reorder + partial-persist races), and costs 1 Redis RT instead of K+1. Per-instance
+ * snap/stream keys arrive in ARGV as a cjson array (same pattern as RESET — legal on standalone
+ * Redis, one keyspace/clock). Each entry: `{s:snap, x:stream, c:'1'|'0'(cleared), u:[f,v,…]upserts,
+ * d:[keys]deletes, j:diffJson}`. HSET/HDEL chunked past Lua's unpack limit, as in APPLY_DIFF.
+ * An empty-but-just-`got` instance is passed with j=EMPTY_DIFF, u/d=[] → its XADD flips isHydrated.
+ */
+const APPLY_POKE_BODY = `
+local cookie = ARGV[COOKIE_ARG]
+local maxlen = ARGV[MAXLEN_ARG]
+local instances = cjson.decode(ARGV[INSTANCES_ARG])
+for _, inst in ipairs(instances) do
+  if inst.c == '1' then redis.call('DEL', inst.s) end
+  for i = 1, #inst.u, 2000 do redis.call('HSET', inst.s, unpack(inst.u, i, math.min(i + 1999, #inst.u))) end
+  for i = 1, #inst.d, 4000 do redis.call('HDEL', inst.s, unpack(inst.d, i, math.min(i + 3999, #inst.d))) end
+  redis.call('XADD', inst.x, 'MAXLEN', '~', maxlen, '*', 'v', cookie, 'diff', inst.j)
+end
+redis.call('SET', KEYS[COOKIE_KEY], cookie)
+return 'OK'`;
+// Fenced: KEYS=[fence, cookie]  ARGV=[token, cookie, maxlen, instancesJSON]
+const APPLY_POKE_FENCED =
+  FENCE_GATE + APPLY_POKE_BODY.replace('COOKIE_ARG', '2').replace('MAXLEN_ARG', '3').replace('INSTANCES_ARG', '4').replace('COOKIE_KEY', '2');
+// Unfenced: KEYS=[cookie]  ARGV=[cookie, maxlen, instancesJSON]
+const APPLY_POKE =
+  APPLY_POKE_BODY.replace('COOKIE_ARG', '1').replace('MAXLEN_ARG', '2').replace('INSTANCES_ARG', '3').replace('COOKIE_KEY', '1');
+
+/** One poke's worth of persistence: every touched instance's diff + the newly-hydrated instances + the cookie. */
+export interface PokeWrite {
+  clientGroupID: string;
+  cookie: string;
+  /** instanceKey → its compacted diff (from the demux). */
+  diffs: Map<string, StreamDiff>;
+  /** Instances that transitioned to `got` this poke (hydration markers); ones already in `diffs` are skipped. */
+  newlyGot: readonly string[];
+}
+
 /** XRANGE returns fields as a flat [f, v, f, v, …] array — collapse to an object. */
 function fieldsToObject(fields: string[]): Record<string, string> {
   const obj: Record<string, string> = {};
@@ -201,6 +239,45 @@ export class RedisStreamStore {
     pipeline.xadd(stream, 'MAXLEN', '~', STREAM_MAXLEN, '*', 'v', version, 'diff', JSON.stringify(diff));
     await pipeline.exec();
     return 'applied';
+  }
+
+  /** Flatten a poke into the per-instance payload the atomic script consumes. */
+  #buildPokeInstances(w: PokeWrite): Array<{ s: string; x: string; c: string; u: string[]; d: string[]; j: string }> {
+    const out: Array<{ s: string; x: string; c: string; u: string[]; d: string[]; j: string }> = [];
+    const seen = new Set<string>();
+    for (const [instanceKey, diff] of w.diffs) {
+      const u: string[] = [];
+      for (const up of diff.upserts) u.push(up.key, JSON.stringify({ tableName: up.tableName, row: up.row }));
+      out.push({ s: snapKey(instanceKey), x: streamKey(instanceKey), c: diff.cleared ? '1' : '0', u, d: [...diff.deletes], j: JSON.stringify(diff) });
+      seen.add(instanceKey);
+    }
+    // A newly-`got` instance with no diff this poke (empty result) needs an explicit marker to flip
+    // isHydrated; one that IS in `diffs` is already hydrated by its own stream entry.
+    for (const instanceKey of w.newlyGot) {
+      if (seen.has(instanceKey)) continue;
+      out.push({ s: snapKey(instanceKey), x: streamKey(instanceKey), c: '0', u: [], d: [], j: EMPTY_DIFF });
+    }
+    return out;
+  }
+
+  /**
+   * Persist one poke ATOMICALLY: all instance diffs + hydration markers + the group cookie in a
+   * single script. `stale` (fenced fence-mismatch) → caller demotes; the whole poke is rolled back
+   * (nothing applied) so the caller can resume from the last saved cookie.
+   */
+  async applyPoke(w: PokeWrite, guard?: FenceGuard): Promise<FenceOutcome> {
+    const instancesJSON = JSON.stringify(this.#buildPokeInstances(w));
+    if (guard) {
+      return this.#fenced(
+        APPLY_POKE_FENCED,
+        [fenceKey(guard.groupKey), cookieKey(w.clientGroupID)],
+        [String(guard.token), w.cookie, STREAM_MAXLEN, instancesJSON],
+      );
+    }
+    const r = await redisService
+      .getClient()
+      .eval(APPLY_POKE, 1, cookieKey(w.clientGroupID), w.cookie, String(STREAM_MAXLEN), instancesJSON);
+    return r === 'STALE' ? 'stale' : 'applied';
   }
 
   /** Current compacted rows for an instance (hydration). */

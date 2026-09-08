@@ -3,8 +3,9 @@ import WebSocket from 'ws';
 import { logger } from '@/utils/logger';
 import { encodeSecProtocols, PROTOCOL_VERSION } from './protocol';
 import { PackDemux } from './packDemux';
-import type { RowPatchOp } from './streamState';
+import type { RowPatchOp, StreamDiff } from './streamState';
 import type { RedisStreamStore, FenceGuard } from './redisStore';
+import { SerialQueue } from './serialQueue';
 import type { ClientSchema } from './clientSchema';
 import type { QueryMeta } from './queryMeta';
 import { mintSecProtocolToken, buildCookieHeader, SYNC_SERVICE_SUB } from './serviceIdentity';
@@ -88,6 +89,16 @@ export class PackConnection {
   readonly #pending = new Map<string, RowPatchOp[]>();
   /** Accumulated `gotQueriesPatch` ops per in-flight poke (hash = instanceKey). */
   readonly #pendingGot = new Map<string, { op: string; hash: string }[]>();
+  /** Serializes the atomic per-poke persist so writes land in poke order (closes the C1 reorder);
+   *  demux runs synchronously in message order, only the Redis write is queued. Single key = fully
+   *  serial for this one connection. */
+  readonly #persistQueue = new SerialQueue((error) =>
+    logger.error('sync_pack_persist_queue_error', { clientGroupID: this.#opts.clientGroupID, error }),
+  );
+  /** Bumped on every disconnect/reset; a queued persist tagged with a stale epoch bails (the
+   *  reconnect resumes from the last SAVED cookie and replays, so persisting it would double-write
+   *  or, post-reset, write to torn-down streams). */
+  #persistEpoch = 0;
   /** Instances already marked hydrated (gotQueriesPatch is a diff — mark once). */
   readonly #got = new Set<string>();
   /** Instances whose demux attribution maps have been rebuilt from their persisted snapshot
@@ -266,16 +277,22 @@ export class PackConnection {
 
   async #onClose(): Promise<void> {
     this.#connected = false;
+    // C4: a disconnect mid-poke strands the accumulated rowsPatch (can be MBs) forever, since
+    // PackConnection lives across reconnects — drop it.
+    this.#pending.clear();
+    this.#pendingGot.clear();
     if (this.#closed || this.#stopped) return;
+    // Invalidate any queued/in-flight persist and force the demux to re-seed from the durable
+    // snapshot on reconnect (bumps the epoch + resetAll + clears #seeded). Without this, a resume
+    // replays un-persisted pokes against a demux whose #owner already dropped their del entries →
+    // dropped-del attribution poison. Runs for BOTH the reset and normal-reconnect paths.
+    this.#invalidatePersist();
     if (this.#pendingReset) {
       this.#pendingReset = false;
       this.#attempt = 0;
-      this.#demux.resetAll();
-      // The fresh materialize re-sends gotQueriesPatch and rebuilds the demux, so let both
-      // re-fire: clear #got (else an empty instance never re-marks hydrated post-reset →
-      // deferred clients stuck) and #seeded (re-seed from the now-wiped snapshot; a no-op).
+      // Full rehydrate: re-observe gotQueriesPatch (else an empty instance never re-marks hydrated
+      // post-reset → deferred clients stuck). #invalidatePersist already did resetAll + #seeded.clear.
       this.#got.clear();
-      this.#seeded.clear();
       this.#baseCookie = '';
       try {
         const outcome = await this.#opts.store.reset(
@@ -350,7 +367,7 @@ export class PackConnection {
         break;
       }
       case 'pokeEnd':
-        void this.#onPokeEnd(body);
+        this.#onPokeEnd(body); // synchronous demux (message order) + enqueue the atomic persist
         break;
       default:
         break;
@@ -394,7 +411,13 @@ export class PackConnection {
     }
   }
 
-  async #onPokeEnd(body: Record<string, unknown>): Promise<void> {
+  /**
+   * SYNCHRONOUS: demux the poke (mutating attribution in strict message order — no interleave),
+   * then ENQUEUE the atomic persist. The demux must run in poke order and does so here because
+   * ws 'message' handling is sequential; only the Redis write is deferred, onto the per-connection
+   * SerialQueue so writes also land in poke order.
+   */
+  #onPokeEnd(body: Record<string, unknown>): void {
     this.#lastPokeAt = Date.now();
     const pokeID = String(body.pokeID);
     const ops = this.#pending.get(pokeID) ?? [];
@@ -415,16 +438,41 @@ export class PackConnection {
       return;
     }
     const diffs = this.#demux.applyPoke(cookie, ops);
-    this.#baseCookie = cookie;
+    // Instances that transitioned to `got` this poke (mark hydrated once each). The hash IS the
+    // instanceKey. Recorded synchronously so a stale gotOps can't double-mark across pokes.
+    const newlyGot: string[] = [];
+    for (const { op, hash } of gotOps) {
+      if (op === 'put' && this.#desired.has(hash) && !this.#got.has(hash)) {
+        this.#got.add(hash);
+        newlyGot.push(hash);
+      }
+    }
+    const epoch = this.#persistEpoch;
+    this.#persistQueue.enqueue(this.#opts.clientGroupID, () => this.#persistPoke(epoch, cookie, diffs, newlyGot));
+  }
+
+  /**
+   * Persist one poke atomically (all instance diffs + hydration markers + cookie in one write).
+   * Advances `#baseCookie` ONLY after the write is durable, so a failed/skipped poke resumes from
+   * the last saved cookie on reconnect. A stale epoch (a disconnect/reset happened since enqueue)
+   * bails — the reconnect replays from the saved cookie against a re-seeded demux.
+   */
+  async #persistPoke(
+    epoch: number,
+    cookie: string,
+    diffs: Map<string, StreamDiff>,
+    newlyGot: readonly string[],
+  ): Promise<void> {
+    if (epoch !== this.#persistEpoch) return;
     try {
-      // Persist row diffs FIRST so an instance's snapshot HSET reflects its data before it
-      // is marked hydrated (a deferred fan-out client snapshots on the hydrated marker). A
-      // STALE fenced write means we lost the lease mid-poke → stop immediately and demote;
-      // the remaining writes (and saveCookie) would each be rejected anyway.
+      const outcome = await this.#opts.store.applyPoke(
+        { clientGroupID: this.#zeroClientGroupID, cookie, diffs, newlyGot },
+        this.#opts.guard,
+      );
+      if (epoch !== this.#persistEpoch) return; // reconnected mid-write; result is moot (resume re-seeds + replays)
+      if (outcome === 'stale') return this.#demoteFenceLost();
+      this.#baseCookie = cookie;
       for (const [instanceKey, diff] of diffs) {
-        if ((await this.#opts.store.applyDiff(instanceKey, cookie, diff, this.#opts.guard)) === 'stale') {
-          return this.#demoteFenceLost();
-        }
         if (diff.upserts.length || diff.deletes.length) {
           obsEmit('tap-poke', {
             instanceKey,
@@ -435,21 +483,30 @@ export class PackConnection {
           });
         }
       }
-      // Mark newly-"got" instances hydrated (once each). The hash IS the instanceKey.
-      for (const { op, hash } of gotOps) {
-        if (op === 'put' && this.#desired.has(hash) && !this.#got.has(hash)) {
-          this.#got.add(hash);
-          if ((await this.#opts.store.markHydrated(hash, cookie, this.#opts.guard)) === 'stale') {
-            return this.#demoteFenceLost();
-          }
-          obsEmit('tap', { action: 'hydrated', instanceKey: hash, clientGroupID: this.#opts.clientGroupID });
-        }
-      }
-      if ((await this.#opts.store.saveCookie(this.#zeroClientGroupID, cookie, this.#opts.guard)) === 'stale') {
-        return this.#demoteFenceLost();
+      for (const hash of newlyGot) {
+        obsEmit('tap', { action: 'hydrated', instanceKey: hash, clientGroupID: this.#opts.clientGroupID });
       }
     } catch (error) {
+      // Persist failed → the poke never reached Redis but the demux already applied it (dels
+      // dropped their #owner entries). Roll back: bump the epoch (skips queued persists), undo the
+      // in-memory `got` marks, re-seed the demux from the still-correct snapshot, and reconnect —
+      // resume from the last SAVED cookie replays the poke with correct attribution. (`#baseCookie`
+      // was not advanced, so it already points at the last durable cookie.)
       logger.error('sync_pack_persist_failed', { clientGroupID: this.#opts.clientGroupID, error });
+      this.#invalidatePersist();
+      for (const hash of newlyGot) this.#got.delete(hash);
+      this.#ws?.close();
     }
+  }
+
+  /**
+   * Invalidate any queued/in-flight persist and force the demux to rebuild from the durable
+   * snapshot on the next connect. Called on every disconnect and on a persist failure so a
+   * resume's del/update pokes (PK-only) re-attribute instead of dropping (C2).
+   */
+  #invalidatePersist(): void {
+    this.#persistEpoch += 1;
+    this.#demux.resetAll();
+    this.#seeded.clear();
   }
 }
