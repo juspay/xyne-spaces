@@ -1,0 +1,35 @@
+{
+  "name": "xyne-spaces-dashboard-edge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard edge: rule resolver, storage origin and status service behind nginx's disk cache",
+  "type": "module",
+  "main": "dist/main.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts'",
+    "format": "prettier --write 'src/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts'",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@xyne/storage": "workspace:*",
+    "prom-client": "^15.1.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.39.4",
+    "prettier": "^3.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.62.0",
+    "vitest": "^2.0.0"
+  }
+}
