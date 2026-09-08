@@ -1,5 +1,5 @@
 import { GCSService } from './gcsService.js';
-import type { StorageService, UploadOptions, UploadResult, UploadToPathOptions, DeleteResult, FileMetadata, ListedFile } from './types.js';
+import type { StorageService, UploadOptions, UploadResult, UploadToPathOptions, DeleteResult, FileMetadata, ListedFile, ObjectInfo, ObjectRead } from './types.js';
 
 export class GCSAdapter implements StorageService {
   constructor(private gcs: GCSService) {}
@@ -60,6 +60,14 @@ export class GCSAdapter implements StorageService {
 
   async createReadStream(path: string, options?: { start?: number; end?: number }): Promise<NodeJS.ReadableStream> {
     return this.gcs.createReadStream(path, options);
+  }
+
+  async headObject(path: string): Promise<ObjectInfo | null> {
+    return this.gcs.headObject(path);
+  }
+
+  async getObject(path: string): Promise<ObjectRead | null> {
+    return this.gcs.getObject(path);
   }
 
   async listFiles(prefix: string): Promise<ListedFile[]> {
