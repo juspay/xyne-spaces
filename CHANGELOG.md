@@ -1,3 +1,10 @@
+## [1.274.0-release-20260904.2](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.1...v1.274.0-release-20260904.2) (2026-09-08)
+
+
+### Features
+
+* multi bundle handling for dashboard ([#1646](https://github.com/juspay/xyne-spaces/issues/1646)) ([#1662](https://github.com/juspay/xyne-spaces/issues/1662)) ([f71ab36](https://github.com/juspay/xyne-spaces/commit/f71ab36e6ad81dd3c869db30ec53f75d872188be))
+
 ## [1.274.0-release-20260904.1](https://github.com/juspay/xyne-spaces/compare/v1.273.2...v1.274.0-release-20260904.1) (2026-09-08)
 
 
