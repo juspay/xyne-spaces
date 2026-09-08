@@ -1,6 +1,26 @@
+import Redis, { type RedisOptions } from 'ioredis';
 import { redisService } from '@/services/redisService';
 import { fenceKey } from './ownership';
 import type { CompactedRow, StreamDiff } from './streamState';
+
+/**
+ * Dedicated Redis connection for ALL sync-store reads/writes (P2/audit P3), shared across every
+ * RedisStreamStore instance. Keeps the store off the app's MAIN connection so a big snapshot
+ * HGETALL (or a fenced EVAL) no longer head-of-line-blocks unrelated app Redis calls, and vice
+ * versa — sync latency decouples from app load. (The fan-out tail already has its own connection.)
+ * Safe only now that P0's SerialQueue+drain provides poke ordering — the tap no longer relies on the
+ * shared-client FIFO. A read/write connection SPLIT is a P5-scale refinement (big data snapshots).
+ */
+let syncStoreConn: Redis | null = null;
+function syncClient(): Redis {
+  if (!syncStoreConn) syncStoreConn = new Redis(redisService.getRedisConfig() as RedisOptions);
+  return syncStoreConn;
+}
+/** Close the dedicated sync-store connection (shutdown + test teardown — a lingering socket hangs node:test). */
+export function disconnectSyncStore(): void {
+  syncStoreConn?.disconnect();
+  syncStoreConn = null;
+}
 
 /**
  * Durable sync state in Redis, split by the two levels it belongs to:
@@ -245,7 +265,7 @@ export class RedisStreamStore {
         ],
       );
     }
-    const pipeline = redisService.getClient().pipeline();
+    const pipeline = syncClient().pipeline();
     if (diff.cleared) pipeline.del(snap);
     for (const up of diff.upserts) {
       pipeline.hset(snap, up.key, JSON.stringify({ tableName: up.tableName, row: up.row }));
@@ -303,7 +323,7 @@ export class RedisStreamStore {
 
   /** Current compacted rows for an instance (hydration). */
   async snapshot(instanceKey: string): Promise<CompactedRow[]> {
-    const hash = await redisService.getClient().hgetall(snapKey(instanceKey));
+    const hash = await syncClient().hgetall(snapKey(instanceKey));
     return Object.values(hash).map((v) => JSON.parse(v) as CompactedRow);
   }
 
@@ -311,7 +331,7 @@ export class RedisStreamStore {
   async #lastEntry(
     instanceKey: string,
   ): Promise<{ id: string; version: string; diff: StreamDiff } | null> {
-    const last = await redisService.getClient().xrevrange(streamKey(instanceKey), '+', '-', 'COUNT', 1);
+    const last = await syncClient().xrevrange(streamKey(instanceKey), '+', '-', 'COUNT', 1);
     if (last.length === 0) return null;
     const map = fieldsToObject(last[0][1]);
     return { id: last[0][0], version: map.v ?? '', diff: JSON.parse(map.diff ?? CLEAR_DIFF) as StreamDiff };
@@ -369,7 +389,7 @@ export class RedisStreamStore {
 
   /** The oldest surviving op-stream id, or null if empty. Used for the resume trim check. */
   async firstId(instanceKey: string): Promise<string | null> {
-    const first = await redisService.getClient().xrange(streamKey(instanceKey), '-', '+', 'COUNT', 1);
+    const first = await syncClient().xrange(streamKey(instanceKey), '-', '+', 'COUNT', 1);
     return first.length > 0 ? first[0][0] : null;
   }
 
@@ -401,12 +421,12 @@ export class RedisStreamStore {
         [String(guard.token), cookie],
       );
     }
-    await redisService.getClient().set(cookieKey(clientGroupID), cookie);
+    await syncClient().set(cookieKey(clientGroupID), cookie);
     return 'applied';
   }
 
   async loadCookie(clientGroupID: string): Promise<string> {
-    return (await redisService.getClient().get(cookieKey(clientGroupID))) ?? '';
+    return (await syncClient().get(cookieKey(clientGroupID))) ?? '';
   }
 
   /**
@@ -432,7 +452,7 @@ export class RedisStreamStore {
         ],
       );
     }
-    const pipeline = redisService.getClient().pipeline();
+    const pipeline = syncClient().pipeline();
     pipeline.del(cookieKey(clientGroupID));
     for (const instanceKey of instanceKeys) {
       pipeline.del(snapKey(instanceKey));
@@ -450,7 +470,7 @@ export class RedisStreamStore {
         [String(guard.token)],
       );
     }
-    await redisService.getClient().del(snapKey(instanceKey), streamKey(instanceKey));
+    await syncClient().del(snapKey(instanceKey), streamKey(instanceKey));
     return 'applied';
   }
 
@@ -462,7 +482,7 @@ export class RedisStreamStore {
         [String(guard.token)],
       );
     }
-    await redisService.getClient().del(cookieKey(clientGroupID), registryKey(clientGroupID), zgroupKey(clientGroupID));
+    await syncClient().del(cookieKey(clientGroupID), registryKey(clientGroupID), zgroupKey(clientGroupID));
     return 'applied';
   }
 
@@ -472,13 +492,13 @@ export class RedisStreamStore {
     if (guard) {
       return this.#fenced(SAVE_ZGROUP, [fenceKey(guard.groupKey), zgroupKey(clientGroupID)], [String(guard.token), zeroGroupID]);
     }
-    await redisService.getClient().set(zgroupKey(clientGroupID), zeroGroupID);
+    await syncClient().set(zgroupKey(clientGroupID), zeroGroupID);
     return 'applied';
   }
 
   /** The zero-cache clientGroupID the group's tap last used (null = never rotated → use the base). */
   async loadZGroup(clientGroupID: string): Promise<string | null> {
-    return redisService.getClient().get(zgroupKey(clientGroupID));
+    return syncClient().get(zgroupKey(clientGroupID));
   }
 
   /**
@@ -487,12 +507,12 @@ export class RedisStreamStore {
    * unfenced: any pod may announce a subscription; the owner prunes it (fenced) when interest dies.
    */
   async registerInstance(clientGroupID: string, instanceKey: string, descriptor: string): Promise<void> {
-    await redisService.getClient().hset(registryKey(clientGroupID), instanceKey, descriptor);
+    await syncClient().hset(registryKey(clientGroupID), instanceKey, descriptor);
   }
 
   /** Every subscribed instance in a group: instanceKey → descriptor JSON (the owner's work-list). */
   async groupInstances(clientGroupID: string): Promise<Record<string, string>> {
-    return redisService.getClient().hgetall(registryKey(clientGroupID));
+    return syncClient().hgetall(registryKey(clientGroupID));
   }
 
   /** Owner-only prune of a registry entry once its instance has no live interest (fenced). */
@@ -500,7 +520,7 @@ export class RedisStreamStore {
     if (guard) {
       return this.#fenced(DEREGISTER, [fenceKey(guard.groupKey), registryKey(clientGroupID)], [String(guard.token), instanceKey]);
     }
-    await redisService.getClient().hdel(registryKey(clientGroupID), instanceKey);
+    await syncClient().hdel(registryKey(clientGroupID), instanceKey);
     return 'applied';
   }
 }

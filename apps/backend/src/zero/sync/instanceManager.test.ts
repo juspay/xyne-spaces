@@ -14,12 +14,13 @@ let InstanceManager: Mod['InstanceManager'] | undefined;
 let ownership: (typeof import('./ownership'))['ownership'] | undefined;
 let Ownership: (typeof import('./ownership'))['Ownership'] | undefined;
 let RedisStreamStore: (typeof import('./redisStore'))['RedisStreamStore'] | undefined;
+let disconnectSyncStore: (typeof import('./redisStore'))['disconnectSyncStore'] | undefined;
 let redisService: (typeof import('@/services/redisService'))['redisService'] | undefined;
 let reason = '';
 try {
   ({ InstanceManager } = await import('./instanceManager.js'));
   ({ ownership, Ownership } = await import('./ownership.js'));
-  ({ RedisStreamStore } = await import('./redisStore.js'));
+  ({ RedisStreamStore, disconnectSyncStore } = await import('./redisStore.js'));
   ({ redisService } = await import('@/services/redisService'));
   await redisService.getClient().ping();
 } catch (e) {
@@ -68,6 +69,7 @@ const argsFor = (channelId: string): readonly unknown[] => [{ channelId, limit: 
 
 after(() => {
   redisService?.getClient().disconnect();
+  disconnectSyncStore?.();
 });
 
 test('InstanceManager single-pod: unfenced materialize + teardown', { skip }, async () => {

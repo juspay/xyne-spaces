@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { InstanceManager } from './instanceManager';
+import { disconnectSyncStore } from './redisStore';
 
 const zeroCacheUrl = (): string => process.env['ZERO_CACHE_UPSTREAM'] || 'http://localhost:4848';
 
@@ -21,6 +22,9 @@ export class SyncEngine {
   stop(): void {
     this.#manager?.stopAll();
     this.#manager = null;
+    // Close the dedicated sync-store connection (app.ts stops the fan-out first, so nothing else
+    // is using it by now). Lazily recreated if the engine restarts.
+    disconnectSyncStore();
     logger.info('sync_engine_stopped');
   }
 

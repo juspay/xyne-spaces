@@ -8,12 +8,13 @@ import assert from 'node:assert/strict';
  *     npx dotenv -e .env.local -- tsx --test src/zero/sync/redisStore.test.ts
  */
 let RedisStreamStore: (typeof import('./redisStore'))['RedisStreamStore'] | undefined;
+let disconnectSyncStore: (typeof import('./redisStore'))['disconnectSyncStore'] | undefined;
 let ownership: (typeof import('./ownership'))['ownership'] | undefined;
 let fenceKey: (typeof import('./ownership'))['fenceKey'] | undefined;
 let redisService: (typeof import('@/services/redisService'))['redisService'] | undefined;
 let reason = '';
 try {
-  ({ RedisStreamStore } = await import('./redisStore.js'));
+  ({ RedisStreamStore, disconnectSyncStore } = await import('./redisStore.js'));
   ({ ownership, fenceKey } = await import('./ownership.js'));
   ({ redisService } = await import('@/services/redisService'));
   await redisService.getClient().ping();
@@ -24,6 +25,7 @@ const skip = RedisStreamStore && ownership && redisService ? false : reason || '
 
 after(() => {
   redisService?.getClient().disconnect();
+  disconnectSyncStore?.(); // close the dedicated sync-store connection, else node:test hangs
 });
 
 test('redisStore: fenced writes apply with a matching token, STALE otherwise', { skip }, async () => {
