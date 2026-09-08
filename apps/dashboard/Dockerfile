@@ -93,6 +93,11 @@ RUN apt-get update && apt-get install -y zip && \
     mkdir -p /repo/apps/dashboard/releases && \
     cd /repo/apps/dashboard/dist && zip -r ../releases/dashboard.zip .
 
+
+FROM scratch AS bundle
+COPY --from=builder /repo/apps/dashboard/dist /
+COPY --from=builder /repo/apps/dashboard/releases /releases
+
 # Production image with nginx
 FROM nginx:alpine AS runner
 
