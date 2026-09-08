@@ -100,7 +100,8 @@ import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
-import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import { ChannelRow, UserRow, CommandSection } from './CommandRows';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
@@ -576,17 +577,28 @@ const ChannelCommandMenu = ({
   // used by the empty-state DIRECT MESSAGES section). `rankUsers` uses this
   // both as a "frequent contact" signal AND as a tie-breaker so the `from:`
   // typeahead's empty state mirrors the plain-search DM ordering.
-  const dmContactRecency = useMemo(() => {
-    const map = new Map<string, number>();
+  // dmContactRecency (peer user id → recency rank) and dmChannelIdByUserId (peer user id → their
+  // 1:1 DM channel id, so a person row can read that DM's unread count for its badge). First 1:1 DM
+  // per peer wins — the same earliest-in-directMessages order used for the recency rank.
+  const { dmContactRecency, dmChannelIdByUserId } = useMemo(() => {
+    const recency = new Map<string, number>();
+    const channelByUser = new Map<string, string>();
     directMessages.forEach(channel => {
-      if (isOneToOneDMChannel(channel.scopeType)) {
-        const participants = parseDMParticipantIds(channel);
-        const otherUserId = participants.find(id => id !== currentUserID);
-        if (otherUserId && !map.has(otherUserId)) map.set(otherUserId, map.size);
-      }
+      if (!isOneToOneDMChannel(channel.scopeType)) return;
+      const otherUserId = parseDMParticipantIds(channel).find(id => id !== currentUserID);
+      if (!otherUserId || recency.has(otherUserId)) return;
+      recency.set(otherUserId, recency.size);
+      channelByUser.set(otherUserId, channel.id);
     });
-    return map;
+    return { dmContactRecency: recency, dmChannelIdByUserId: channelByUser };
   }, [directMessages, currentUserID]);
+
+  // A person row's unread badge: the count on their 1:1 DM only (group DMs are not counted), or 0
+  // when there's no 1:1 DM / nothing unread.
+  const dmUnreadCountForUser = (userId: string): number => {
+    const dmChannelId = dmChannelIdByUserId.get(userId);
+    return dmChannelId ? (unreadCounts[dmChannelId] ?? 0) : 0;
+  };
 
   // Resolved enabled tabs — computed early so useEffects below can reference it
   const activeEnabledTabs = enabledTabs ?? DEFAULT_ENABLED_TABS;
@@ -2614,30 +2626,27 @@ const ChannelCommandMenu = ({
     <>
       {isFlatAllView
         ? flatAllBackendResults.length > 0 && (
-            <div className='mb-4'>
-              <Command.Group
-                heading={`${getGroupLabel('others')} (${flatAllBackendResults.length})`}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-              >
-                {flatAllBackendResults.map((result, index) => (
-                  <SearchResultItem
-                    key={`${result.type}-${result.id}`}
-                    result={result}
-                    channelDisplayName={getResultChannelLabel(result)}
-                    channelTag={getResultChannelTag(result)}
-                    onSelect={res => handleBackendResultSelect(res, index + 1)}
-                    onPreview={handleFilePreview}
-                    onItemMouseDown={handleItemMouseDown}
-                    onItemMouseEnter={handleTicketMouseEnter}
-                    onItemMouseLeave={handleTicketMouseLeave}
-                    isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
-                    mergeMode={deskMergeMode && !!getDeskTicketId(result)}
-                    isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
-                    onToggleSelect={handleToggleDeskMergeSelect}
-                  />
-                ))}
-              </Command.Group>
-            </div>
+            <CommandSection
+              heading={`${getGroupLabel('others')} (${flatAllBackendResults.length})`}
+            >
+              {flatAllBackendResults.map((result, index) => (
+                <SearchResultItem
+                  key={`${result.type}-${result.id}`}
+                  result={result}
+                  channelDisplayName={getResultChannelLabel(result)}
+                  channelTag={getResultChannelTag(result)}
+                  onSelect={res => handleBackendResultSelect(res, index + 1)}
+                  onPreview={handleFilePreview}
+                  onItemMouseDown={handleItemMouseDown}
+                  onItemMouseEnter={handleTicketMouseEnter}
+                  onItemMouseLeave={handleTicketMouseLeave}
+                  isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                  mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                  isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
+                  onToggleSelect={handleToggleDeskMergeSelect}
+                />
+              ))}
+            </CommandSection>
           )
         : ['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
             .filter(groupKey => backendGroupBelongsToTab(groupKey, activeTab))
@@ -2665,47 +2674,45 @@ const ChannelCommandMenu = ({
               const showSeeMore = !!sectionTab && (!isScreenAll || hiddenCount > 0);
 
               return (
-                <div key={groupKey} className='mb-4'>
-                  <Command.Group
-                    heading={
-                      isScreenAll
-                        ? getGroupLabel(groupKey)
-                        : `${getGroupLabel(groupKey)} (${displayCount})`
-                    }
-                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                  >
-                    {displayItems.map((result, index) => (
-                      <SearchResultItem
-                        key={result.id}
-                        result={result}
-                        channelDisplayName={getResultChannelLabel(result)}
-                        channelTag={getResultChannelTag(result)}
-                        onSelect={res => handleBackendResultSelect(res, index + 1)}
-                        onPreview={handleFilePreview}
-                        onItemMouseDown={handleItemMouseDown}
-                        onItemMouseEnter={handleTicketMouseEnter}
-                        onItemMouseLeave={handleTicketMouseLeave}
-                        isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
-                        mergeMode={deskMergeMode && !!getDeskTicketId(result)}
-                        isMergeSelected={selectedMergeTickets.has(
-                          result.searchContext?.ticketId || '',
-                        )}
-                        onToggleSelect={handleToggleDeskMergeSelect}
-                      />
-                    ))}
-                    {showSeeMore && sectionTab && (
-                      <SeeMoreItem
-                        value={`__see-more-backend-${groupKey}__`}
-                        label={hiddenCount > 0 ? `See ${hiddenCount} more` : 'See more'}
-                        onSelect={() => handleSeeMoreNavigate(sectionTab)}
-                        hoverable={!isMobile}
-                        trackCategory='SEARCH'
-                        trackName='SEE_MORE_SECTION'
-                        trackMetadata={JSON.stringify({ tab: sectionTab })}
-                      />
-                    )}
-                  </Command.Group>
-                </div>
+                <CommandSection
+                  key={groupKey}
+                  heading={
+                    isScreenAll
+                      ? getGroupLabel(groupKey)
+                      : `${getGroupLabel(groupKey)} (${displayCount})`
+                  }
+                >
+                  {displayItems.map((result, index) => (
+                    <SearchResultItem
+                      key={result.id}
+                      result={result}
+                      channelDisplayName={getResultChannelLabel(result)}
+                      channelTag={getResultChannelTag(result)}
+                      onSelect={res => handleBackendResultSelect(res, index + 1)}
+                      onPreview={handleFilePreview}
+                      onItemMouseDown={handleItemMouseDown}
+                      onItemMouseEnter={handleTicketMouseEnter}
+                      onItemMouseLeave={handleTicketMouseLeave}
+                      isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                      mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                      isMergeSelected={selectedMergeTickets.has(
+                        result.searchContext?.ticketId || '',
+                      )}
+                      onToggleSelect={handleToggleDeskMergeSelect}
+                    />
+                  ))}
+                  {showSeeMore && sectionTab && (
+                    <SeeMoreItem
+                      value={`__see-more-backend-${groupKey}__`}
+                      label={hiddenCount > 0 ? `See ${hiddenCount} more` : 'See more'}
+                      onSelect={() => handleSeeMoreNavigate(sectionTab)}
+                      hoverable={!isMobile}
+                      trackCategory='SEARCH'
+                      trackName='SEE_MORE_SECTION'
+                      trackMetadata={JSON.stringify({ tab: sectionTab })}
+                    />
+                  )}
+                </CommandSection>
               );
             })}
 
@@ -2756,53 +2763,48 @@ const ChannelCommandMenu = ({
           const sectionTab = GROUP_KEY_TO_DOC_TYPE[type];
 
           return (
-            <div key={type} className='mb-4'>
-              <Command.Group
-                heading={`${getGroupLabel(type)} (${displayCount})`}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-              >
-                {displayItems.map((result, index) => (
-                  <SearchResultItem
-                    key={result.id}
-                    result={result}
-                    channelDisplayName={getResultChannelLabel(result)}
-                    channelTag={getResultChannelTag(result)}
-                    onSelect={res => handleBackendResultSelect(res, index + 1)}
-                    onPreview={handleFilePreview}
-                    onItemMouseDown={handleItemMouseDown}
-                    onItemMouseEnter={handleTicketMouseEnter}
-                    onItemMouseLeave={handleTicketMouseLeave}
-                    isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
-                  />
-                ))}
-                {isUserType && hasMore && (
-                  <SeeMoreItem
-                    value={`__see-more-default-${type}__`}
-                    label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    onSelect={() => toggleCategoryExpansion(type)}
-                    hoverable={!isMobile}
-                    trackCategory='CHANNEL_SEARCH'
-                    trackName='TOGGLE_BACKEND_USER_EXPANSION'
-                    trackMetadata={JSON.stringify({ type, isExpanded })}
-                  />
-                )}
-                {/* Same routing link the search branch offers. This renderer runs when
+            <CommandSection key={type} heading={`${getGroupLabel(type)} (${displayCount})`}>
+              {displayItems.map((result, index) => (
+                <SearchResultItem
+                  key={result.id}
+                  result={result}
+                  channelDisplayName={getResultChannelLabel(result)}
+                  channelTag={getResultChannelTag(result)}
+                  onSelect={res => handleBackendResultSelect(res, index + 1)}
+                  onPreview={handleFilePreview}
+                  onItemMouseDown={handleItemMouseDown}
+                  onItemMouseEnter={handleTicketMouseEnter}
+                  onItemMouseLeave={handleTicketMouseLeave}
+                  isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                />
+              ))}
+              {isUserType && hasMore && (
+                <SeeMoreItem
+                  value={`__see-more-default-${type}__`}
+                  label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() => toggleCategoryExpansion(type)}
+                  hoverable={!isMobile}
+                  trackCategory='CHANNEL_SEARCH'
+                  trackName='TOGGLE_BACKEND_USER_EXPANSION'
+                  trackMetadata={JSON.stringify({ type, isExpanded })}
+                />
+              )}
+              {/* Same routing link the search branch offers. This renderer runs when
                     a filter chip is applied with no free-text query (`from:`,
                     `assignee:`), so it needs the way out to the full results page too.
                     Users are excluded — their row above expands in place instead. */}
-                {!isUserType && sectionTab && (
-                  <SeeMoreItem
-                    value={`__see-more-default-route-${type}__`}
-                    label='See more'
-                    onSelect={() => handleSeeMoreNavigate(sectionTab)}
-                    hoverable={!isMobile}
-                    trackCategory='SEARCH'
-                    trackName='SEE_MORE_SECTION'
-                    trackMetadata={JSON.stringify({ tab: sectionTab })}
-                  />
-                )}
-              </Command.Group>
-            </div>
+              {!isUserType && sectionTab && (
+                <SeeMoreItem
+                  value={`__see-more-default-route-${type}__`}
+                  label='See more'
+                  onSelect={() => handleSeeMoreNavigate(sectionTab)}
+                  hoverable={!isMobile}
+                  trackCategory='SEARCH'
+                  trackName='SEE_MORE_SECTION'
+                  trackMetadata={JSON.stringify({ tab: sectionTab })}
+                />
+              )}
+            </CommandSection>
           );
         })}
 
@@ -2825,9 +2827,8 @@ const ChannelCommandMenu = ({
   const renderSearchUsersSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.USERS) &&
     showGroupedUsers &&
-    filteredLocalUsers.length > 0 ? (
-      <div className='mb-4'>
-        {(() => {
+    filteredLocalUsers.length > 0
+      ? (() => {
           // Use the shared, hoisted Cmd+K user rank, then map to DisplaySearchResult.
           const allItems: DisplaySearchResult[] = rankedLocalUsers.map(user => ({
             id: user.id,
@@ -2852,10 +2853,7 @@ const ChannelCommandMenu = ({
           const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
 
           return (
-            <Command.Group
-              heading={`${getGroupLabel('user')} (${displayCount})`}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-            >
+            <CommandSection heading={`${getGroupLabel('user')} (${displayCount})`}>
               {displayItems.map((item, index) => (
                 <SearchResultItem
                   key={item.id}
@@ -2878,11 +2876,10 @@ const ChannelCommandMenu = ({
                   trackMetadata={JSON.stringify({ category: 'user', isExpanded })}
                 />
               )}
-            </Command.Group>
+            </CommandSection>
           );
-        })()}
-      </div>
-    ) : null;
+        })()
+      : null;
 
   // Render the plain-search CHANNELS section. Extracted (like
   // renderSearchUsersSection) so it can be rendered above the "Show results
@@ -2891,9 +2888,8 @@ const ChannelCommandMenu = ({
     (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
     showGroupedLocalResults &&
     groupedChannels['channels'] &&
-    groupedChannels['channels'].length > 0 ? (
-      <div className='mb-4'>
-        {(() => {
+    groupedChannels['channels'].length > 0
+      ? (() => {
           const items = groupedChannels['channels'];
           const category = ChannelCategory.CHANNELS;
           const isExpanded = expandedCategories.has(category);
@@ -2903,10 +2899,7 @@ const ChannelCommandMenu = ({
           const hiddenCount = items.length - DISPLAY_LIMIT;
 
           return (
-            <Command.Group
-              heading={getCategoryLabel(category)}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-            >
+            <CommandSection heading={getCategoryLabel(category)}>
               {displayItems.map(({ channel }, index) => {
                 const unreadCount = unreadCounts[channel.id] ?? 0;
                 return (
@@ -2941,11 +2934,10 @@ const ChannelCommandMenu = ({
                   trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                 />
               )}
-            </Command.Group>
+            </CommandSection>
           );
-        })()}
-      </div>
-    ) : null;
+        })()
+      : null;
 
   // Render the plain-search STARRED section. Extracted (like
   // renderSearchUsersSection / renderSearchChannelsSection) so it can be pinned
@@ -2954,9 +2946,8 @@ const ChannelCommandMenu = ({
     (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
     showGroupedLocalResults &&
     groupedChannels['starred'] &&
-    groupedChannels['starred'].length > 0 ? (
-      <div className='mb-4'>
-        {(() => {
+    groupedChannels['starred'].length > 0
+      ? (() => {
           const items = groupedChannels['starred'];
           const category = ChannelCategory.STARRED;
           const isExpanded = expandedCategories.has(category);
@@ -2966,10 +2957,7 @@ const ChannelCommandMenu = ({
           const hiddenCount = items.length - DISPLAY_LIMIT;
 
           return (
-            <Command.Group
-              heading={getCategoryLabel(category)}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-            >
+            <CommandSection heading={getCategoryLabel(category)}>
               {displayItems.map(({ channel }, index) => {
                 const unreadCount = unreadCounts[channel.id] ?? 0;
                 return (
@@ -3004,11 +2992,10 @@ const ChannelCommandMenu = ({
                   trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
                 />
               )}
-            </Command.Group>
+            </CommandSection>
           );
-        })()}
-      </div>
-    ) : null;
+        })()
+      : null;
 
   // Render the local sections (Starred, Users, Group DMs, Channels) for the search branch.
   // Each `include*` flag is false when that section is pinned to the top of the
@@ -3042,47 +3029,42 @@ const ChannelCommandMenu = ({
             !isExpanded && hasMore ? localGroupDMs.slice(0, DISPLAY_LIMIT) : localGroupDMs;
           const hiddenCount = localGroupDMs.length - DISPLAY_LIMIT;
           return (
-            <div className='mb-4'>
-              <Command.Group
-                heading={getCategoryLabel(category)}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-              >
-                {displayItems.map(({ channel }, index) => {
-                  const unreadCount = unreadCounts[channel.id] ?? 0;
-                  return (
-                    <ChannelCommandItem
-                      key={channel.id}
-                      channel={channel}
-                      currentUserID={currentUserID}
-                      unreadCount={unreadCount}
-                      onSelect={displayName => {
-                        void handleChannelSelect(channel, displayName, index + 1);
-                      }}
-                      onItemMouseDown={handleItemMouseDown}
-                      getChannelIcon={getChannelIcon}
-                      isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                    />
-                  );
-                })}
-                {hasMore && (
-                  <SeeMoreItem
-                    value={`__see-more-group-dm-${category as string}__`}
-                    label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    onSelect={() =>
-                      routeSeeMore
-                        ? handleSeeMoreNavigate('channels')
-                        : toggleCategoryExpansion(category)
-                    }
-                    hoverable={!isMobile}
-                    trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
-                    trackName={
-                      routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
-                    }
-                    trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
+            <CommandSection heading={getCategoryLabel(category)}>
+              {displayItems.map(({ channel }, index) => {
+                const unreadCount = unreadCounts[channel.id] ?? 0;
+                return (
+                  <ChannelCommandItem
+                    key={channel.id}
+                    channel={channel}
+                    currentUserID={currentUserID}
+                    unreadCount={unreadCount}
+                    onSelect={displayName => {
+                      void handleChannelSelect(channel, displayName, index + 1);
+                    }}
+                    onItemMouseDown={handleItemMouseDown}
+                    getChannelIcon={getChannelIcon}
+                    isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                   />
-                )}
-              </Command.Group>
-            </div>
+                );
+              })}
+              {hasMore && (
+                <SeeMoreItem
+                  value={`__see-more-group-dm-${category as string}__`}
+                  label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  onSelect={() =>
+                    routeSeeMore
+                      ? handleSeeMoreNavigate('channels')
+                      : toggleCategoryExpansion(category)
+                  }
+                  hoverable={!isMobile}
+                  trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
+                  trackName={
+                    routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                  }
+                  trackMetadata={JSON.stringify({ category: category as string, isExpanded })}
+                />
+              )}
+            </CommandSection>
           );
         })()}
 
@@ -3108,41 +3090,36 @@ const ChannelCommandMenu = ({
               const hiddenCount = items.length - DISPLAY_LIMIT;
 
               return (
-                <div key={category} className='mb-4'>
-                  <Command.Group
-                    heading={getCategoryLabel(typedCategory)}
-                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                  >
-                    {displayItems.map(({ channel }, index) => {
-                      const unreadCount = unreadCounts[channel.id] ?? 0;
-                      return (
-                        <ChannelCommandItem
-                          key={channel.id}
-                          channel={channel}
-                          currentUserID={currentUserID}
-                          unreadCount={unreadCount}
-                          onSelect={displayName => {
-                            void handleChannelSelect(channel, displayName, index + 1);
-                          }}
-                          onItemMouseDown={handleItemMouseDown}
-                          getChannelIcon={getChannelIcon}
-                          isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                        />
-                      );
-                    })}
-                    {shouldLimit && hasMore && (
-                      <SeeMoreItem
-                        value={`__see-more-browse-${category}__`}
-                        label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                        onSelect={() => toggleCategoryExpansion(category)}
-                        hoverable={!isMobile}
-                        trackCategory='CHANNEL_SEARCH'
-                        trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
-                        trackMetadata={JSON.stringify({ category, isExpanded })}
+                <CommandSection key={category} heading={getCategoryLabel(typedCategory)}>
+                  {displayItems.map(({ channel }, index) => {
+                    const unreadCount = unreadCounts[channel.id] ?? 0;
+                    return (
+                      <ChannelCommandItem
+                        key={channel.id}
+                        channel={channel}
+                        currentUserID={currentUserID}
+                        unreadCount={unreadCount}
+                        onSelect={displayName => {
+                          void handleChannelSelect(channel, displayName, index + 1);
+                        }}
+                        onItemMouseDown={handleItemMouseDown}
+                        getChannelIcon={getChannelIcon}
+                        isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                       />
-                    )}
-                  </Command.Group>
-                </div>
+                    );
+                  })}
+                  {shouldLimit && hasMore && (
+                    <SeeMoreItem
+                      value={`__see-more-browse-${category}__`}
+                      label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                      onSelect={() => toggleCategoryExpansion(category)}
+                      hoverable={!isMobile}
+                      trackCategory='CHANNEL_SEARCH'
+                      trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                      trackMetadata={JSON.stringify({ category, isExpanded })}
+                    />
+                  )}
+                </CommandSection>
               );
             })}
           </>
@@ -4123,57 +4100,40 @@ const ChannelCommandMenu = ({
                       <>
                         {/* 1. Channels Section */}
                         {availableRegularChannels.length > 0 && (
-                          <Command.Group
-                            heading='Channels'
-                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                          >
-                            {availableRegularChannels.map(({ channel, displayName }, index) => {
-                              return (
-                                <Command.Item
-                                  key={channel.id}
-                                  value={`mention-channel-${channel.id}`}
-                                  onSelect={() => {
-                                    void handleMentionSelect({
-                                      id: channel.id,
-                                      name: displayName,
-                                      type: ChipType.CHANNEL,
-                                    });
-                                  }}
-                                  onMouseEnter={() => {
-                                    selectMention(index);
-                                  }}
-                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                  style={{ WebkitTapHighlightColor: 'transparent' }}
-                                >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                                    {getChannelIcon(channel)}
-                                  </div>
-                                  <div className='flex-1 min-w-0'>
-                                    <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-                                      {displayName}
-                                    </div>
-                                  </div>
-                                </Command.Item>
-                              );
-                            })}
-                          </Command.Group>
+                          <CommandSection heading='Channels'>
+                            {availableRegularChannels.map(({ channel, displayName }, index) => (
+                              <ChannelRow
+                                key={channel.id}
+                                value={`mention-channel-${channel.id}`}
+                                label={displayName}
+                                channel={channel}
+                                isActive={index === selectedMentionIndex}
+                                onMouseEnter={() => selectMention(index)}
+                                onSelect={() => {
+                                  void handleMentionSelect({
+                                    id: channel.id,
+                                    name: displayName,
+                                    type: ChipType.CHANNEL,
+                                  });
+                                }}
+                              />
+                            ))}
+                          </CommandSection>
                         )}
                         {/* 2. DMs Section (includes Group DMs) */}
                         {availableDMs.length > 0 && (
-                          <Command.Group
-                            heading='DMs'
-                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                          >
+                          <CommandSection heading='DMs'>
                             {availableDMs.map(({ channel, displayName }, index) => {
-                              // Calculate index offset for keyboard navigation
-                              const channelCount = availableRegularChannels.length;
-                              const adjustedIndex = channelCount + index;
+                              // DMs render after channels in one list, so offset the highlight index.
+                              const adjustedIndex = availableRegularChannels.length + index;
                               return (
-                                <Command.Item
+                                <ChannelRow
                                   key={channel.id}
                                   value={`mention-dm-${channel.id}`}
+                                  label={displayName}
+                                  channel={channel}
+                                  isActive={adjustedIndex === selectedMentionIndex}
+                                  onMouseEnter={() => selectMention(adjustedIndex)}
                                   onSelect={() => {
                                     void handleMentionSelect({
                                       id: channel.id,
@@ -4181,26 +4141,10 @@ const ChannelCommandMenu = ({
                                       type: ChipType.CHANNEL,
                                     });
                                   }}
-                                  onMouseEnter={() => {
-                                    selectMention(adjustedIndex);
-                                  }}
-                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    adjustedIndex === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                  style={{ WebkitTapHighlightColor: 'transparent' }}
-                                >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                                    {getChannelIcon(channel)}
-                                  </div>
-                                  <div className='flex-1 min-w-0'>
-                                    <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-                                      {displayName}
-                                    </div>
-                                  </div>
-                                </Command.Item>
+                                />
                               );
                             })}
-                          </Command.Group>
+                          </CommandSection>
                         )}
                         {/* Empty state for in: when nothing matches */}
                         {availableRegularChannels.length === 0 &&
@@ -4218,54 +4162,26 @@ const ChannelCommandMenu = ({
                             userTrigger === 'to:' ||
                             userTrigger === 'assignee:') &&
                           availableUsers.length > 0 && (
-                            <Command.Group
-                              heading='Users'
-                              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                            >
-                              {availableUsers.map((user, index) => {
-                                const isDeactivated = isUserDeactivated(user);
-                                return (
-                                  <Command.Item
-                                    key={user.id}
-                                    value={`mention-user-${user.id}`}
-                                    onSelect={() => {
-                                      void handleMentionSelect({
-                                        id: user.id,
-                                        name: getUserDisplayName(user),
-                                        type: ChipType.USER,
-                                        ...(user.email ? { email: user.email } : {}),
-                                      });
-                                    }}
-                                    onMouseEnter={() => {
-                                      selectMention(index);
-                                    }}
-                                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                      index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                    } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                                  >
-                                    <Avatar userId={user.id} size='xs' />
-                                    <div className='flex-1 min-w-0 flex items-center gap-2'>
-                                      <span
-                                        className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                      >
-                                        {getUserDisplayName(user)}
-                                      </span>
-                                      {isDeactivated && (
-                                        <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-                                          Deactivated
-                                        </span>
-                                      )}
-                                      {user.email && (
-                                        <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                                          {user.email}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </Command.Item>
-                                );
-                              })}
-                            </Command.Group>
+                            <CommandSection heading='Users'>
+                              {availableUsers.map((user, index) => (
+                                <UserRow
+                                  key={user.id}
+                                  user={user}
+                                  value={`mention-user-${user.id}`}
+                                  isActive={index === selectedMentionIndex}
+                                  onMouseEnter={() => selectMention(index)}
+                                  badgeCount={dmUnreadCountForUser(user.id)}
+                                  onSelect={() => {
+                                    void handleMentionSelect({
+                                      id: user.id,
+                                      name: getUserDisplayName(user),
+                                      type: ChipType.USER,
+                                      ...(user.email ? { email: user.email } : {}),
+                                    });
+                                  }}
+                                />
+                              ))}
+                            </CommandSection>
                           )}
                         {mentionSearchType === ChipType.USER &&
                           (userTrigger === '@' ||
@@ -4286,42 +4202,25 @@ const ChannelCommandMenu = ({
                       <>
                         {/* Channels Section */}
                         {availableRegularChannels.length > 0 && (
-                          <Command.Group
-                            heading='Channels'
-                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                          >
-                            {availableRegularChannels.map(({ channel, displayName }, index) => {
-                              return (
-                                <Command.Item
-                                  key={channel.id}
-                                  value={`mention-channel-${channel.id}`}
-                                  onSelect={() => {
-                                    void handleMentionSelect({
-                                      id: channel.id,
-                                      name: displayName,
-                                      type: ChipType.CHANNEL,
-                                    });
-                                  }}
-                                  onMouseEnter={() => {
-                                    selectMention(index);
-                                  }}
-                                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                    index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                  style={{ WebkitTapHighlightColor: 'transparent' }}
-                                >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                                    {getChannelIcon(channel)}
-                                  </div>
-                                  <div className='flex-1 min-w-0'>
-                                    <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-                                      {displayName}
-                                    </div>
-                                  </div>
-                                </Command.Item>
-                              );
-                            })}
-                          </Command.Group>
+                          <CommandSection heading='Channels'>
+                            {availableRegularChannels.map(({ channel, displayName }, index) => (
+                              <ChannelRow
+                                key={channel.id}
+                                value={`mention-channel-${channel.id}`}
+                                label={displayName}
+                                channel={channel}
+                                isActive={index === selectedMentionIndex}
+                                onMouseEnter={() => selectMention(index)}
+                                onSelect={() => {
+                                  void handleMentionSelect({
+                                    id: channel.id,
+                                    name: displayName,
+                                    type: ChipType.CHANNEL,
+                                  });
+                                }}
+                              />
+                            ))}
+                          </CommandSection>
                         )}
                         {/* Empty state */}
                         {availableRegularChannels.length === 0 && mentionSearchQuery && (
@@ -4334,14 +4233,15 @@ const ChannelCommandMenu = ({
 
                     {/* 'in:@' trigger - Show DMs only (NOT Users!) */}
                     {channelTrigger === 'in:@' && availableDMs.length > 0 && (
-                      <Command.Group
-                        heading='DMs'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                      >
+                      <CommandSection heading='DMs'>
                         {availableDMs.map(({ channel, displayName }, index) => (
-                          <Command.Item
+                          <ChannelRow
                             key={channel.id}
                             value={`mention-dm-${channel.id}`}
+                            label={displayName}
+                            channel={channel}
+                            isActive={index === selectedMentionIndex}
+                            onMouseEnter={() => selectMention(index)}
                             onSelect={() => {
                               void handleMentionSelect({
                                 id: channel.id,
@@ -4349,25 +4249,9 @@ const ChannelCommandMenu = ({
                                 type: ChipType.CHANNEL,
                               });
                             }}
-                            onMouseEnter={() => {
-                              selectMention(index);
-                            }}
-                            className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                              index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                            } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                            style={{ WebkitTapHighlightColor: 'transparent' }}
-                          >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                              {getChannelIcon(channel)}
-                            </div>
-                            <div className='flex-1 min-w-0'>
-                              <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-                                {displayName}
-                              </div>
-                            </div>
-                          </Command.Item>
+                          />
                         ))}
-                      </Command.Group>
+                      </CommandSection>
                     )}
                     {channelTrigger === 'in:@' &&
                       availableDMs.length === 0 &&
@@ -4379,42 +4263,25 @@ const ChannelCommandMenu = ({
 
                     {/* '#' trigger - Show only Channels (Slack-style quick switcher) */}
                     {channelTrigger === '#' && availableChannels.length > 0 && (
-                      <Command.Group
-                        heading='Channels'
-                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                      >
-                        {availableChannels.map(({ channel, displayName }, index) => {
-                          return (
-                            <Command.Item
-                              key={channel.id}
-                              value={`mention-channel-${channel.id}`}
-                              onSelect={() => {
-                                void handleMentionSelect({
-                                  id: channel.id,
-                                  name: displayName,
-                                  type: ChipType.CHANNEL,
-                                });
-                              }}
-                              onMouseEnter={() => {
-                                selectMention(index);
-                              }}
-                              className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                              } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
-                            >
-                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
-                                {getChannelIcon(channel)}
-                              </div>
-                              <div className='flex-1 min-w-0'>
-                                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
-                                  {displayName}
-                                </div>
-                              </div>
-                            </Command.Item>
-                          );
-                        })}
-                      </Command.Group>
+                      <CommandSection heading='Channels'>
+                        {availableChannels.map(({ channel, displayName }, index) => (
+                          <ChannelRow
+                            key={channel.id}
+                            value={`mention-channel-${channel.id}`}
+                            label={displayName}
+                            channel={channel}
+                            isActive={index === selectedMentionIndex}
+                            onMouseEnter={() => selectMention(index)}
+                            onSelect={() => {
+                              void handleMentionSelect({
+                                id: channel.id,
+                                name: displayName,
+                                type: ChipType.CHANNEL,
+                              });
+                            }}
+                          />
+                        ))}
+                      </CommandSection>
                     )}
                     {channelTrigger === '#' &&
                       availableChannels.length === 0 &&
@@ -4432,54 +4299,26 @@ const ChannelCommandMenu = ({
                         userTrigger === 'with:' ||
                         userTrigger === 'assignee:') &&
                       availableUsers.length > 0 && (
-                        <Command.Group
-                          heading='Users'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                        >
-                          {availableUsers.map((user, index) => {
-                            const isDeactivated = isUserDeactivated(user);
-                            return (
-                              <Command.Item
-                                key={user.id}
-                                value={`mention-user-${user.id}`}
-                                onSelect={() => {
-                                  void handleMentionSelect({
-                                    id: user.id,
-                                    name: getUserDisplayName(user),
-                                    type: ChipType.USER,
-                                    ...(user.email ? { email: user.email } : {}),
-                                  });
-                                }}
-                                onMouseEnter={() => {
-                                  selectMention(index);
-                                }}
-                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                  index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                style={{ WebkitTapHighlightColor: 'transparent' }}
-                              >
-                                <Avatar userId={user.id} size='xs' />
-                                <div className='flex-1 min-w-0 flex items-center gap-2'>
-                                  <span
-                                    className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                  >
-                                    {getUserDisplayName(user)}
-                                  </span>
-                                  {isDeactivated && (
-                                    <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-                                      Deactivated
-                                    </span>
-                                  )}
-                                  {user.email && (
-                                    <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                                      {user.email}
-                                    </span>
-                                  )}
-                                </div>
-                              </Command.Item>
-                            );
-                          })}
-                        </Command.Group>
+                        <CommandSection heading='Users'>
+                          {availableUsers.map((user, index) => (
+                            <UserRow
+                              key={user.id}
+                              user={user}
+                              value={`mention-user-${user.id}`}
+                              isActive={index === selectedMentionIndex}
+                              onMouseEnter={() => selectMention(index)}
+                              badgeCount={dmUnreadCountForUser(user.id)}
+                              onSelect={() => {
+                                void handleMentionSelect({
+                                  id: user.id,
+                                  name: getUserDisplayName(user),
+                                  type: ChipType.USER,
+                                  ...(user.email ? { email: user.email } : {}),
+                                });
+                              }}
+                            />
+                          ))}
+                        </CommandSection>
                       )}
                     {mentionSearchType === ChipType.USER &&
                       (userTrigger === '@' ||
@@ -4496,10 +4335,7 @@ const ChannelCommandMenu = ({
 
                     {/* 'priority:' trigger — the closed TicketPriority value list */}
                     {mentionSearchType === ChipType.BOARD && availableBoards.length > 0 && (
-                      <Command.Group
-                        heading='Board'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                      >
+                      <CommandSection heading='Board'>
                         {availableBoards.map((board, index) => (
                           <Command.Item
                             key={board.id}
@@ -4533,7 +4369,7 @@ const ChannelCommandMenu = ({
                             </div>
                           </Command.Item>
                         ))}
-                      </Command.Group>
+                      </CommandSection>
                     )}
 
                     {/* 'mentions:' — people and channels are two separate lists with their
@@ -4548,11 +4384,7 @@ const ChannelCommandMenu = ({
                           .filter(({ target }) => target.type === group.type);
                         if (rows.length === 0) return null;
                         return (
-                          <Command.Group
-                            key={group.type}
-                            heading={group.heading}
-                            className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                          >
+                          <CommandSection key={group.type} heading={group.heading}>
                             {rows.map(({ target, index }) => (
                               <Command.Item
                                 key={`${target.type}-${target.id}`}
@@ -4613,15 +4445,12 @@ const ChannelCommandMenu = ({
                                 Show more
                               </button>
                             )}
-                          </Command.Group>
+                          </CommandSection>
                         );
                       })}
 
                     {mentionSearchType === ChipType.DATE && availableDates.length > 0 && (
-                      <Command.Group
-                        heading='Date'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                      >
+                      <CommandSection heading='Date'>
                         {availableDates.map((option, index) => (
                           <Command.Item
                             key={`${option.id}-${option.name}`}
@@ -4654,14 +4483,11 @@ const ChannelCommandMenu = ({
                             )}
                           </Command.Item>
                         ))}
-                      </Command.Group>
+                      </CommandSection>
                     )}
 
                     {mentionSearchType === ChipType.PRIORITY && availablePriorities.length > 0 && (
-                      <Command.Group
-                        heading='Priority'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                      >
+                      <CommandSection heading='Priority'>
                         {availablePriorities.map((priority, index) => (
                           <Command.Item
                             key={priority.id}
@@ -4695,7 +4521,7 @@ const ChannelCommandMenu = ({
                             </div>
                           </Command.Item>
                         ))}
-                      </Command.Group>
+                      </CommandSection>
                     )}
                   </>
                 )}
@@ -4708,10 +4534,7 @@ const ChannelCommandMenu = ({
                     <>
                       {/* Recent items — shown when search box is empty, read directly from localStorage */}
                       {!searchText.trim() && loadRecents(activeTab).length > 0 && (
-                        <Command.Group
-                          heading='Recent'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                        >
+                        <CommandSection heading='Recent'>
                           {loadRecents(activeTab).map(item => {
                             const isChannelTab = activeTab === TabType.CHANNELS;
                             const subApp =
@@ -4777,7 +4600,7 @@ const ChannelCommandMenu = ({
                               </Command.Item>
                             );
                           })}
-                        </Command.Group>
+                        </CommandSection>
                       )}
                     </>
                   )}
