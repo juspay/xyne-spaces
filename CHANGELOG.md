@@ -1,3 +1,17 @@
+## [1.274.0-release-20260904.3](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.2...v1.274.0-release-20260904.3) (2026-09-08)
+
+
+### Features
+
+* one canvas upload item instead of four ([#1482](https://github.com/juspay/xyne-spaces/issues/1482)) ([#1665](https://github.com/juspay/xyne-spaces/issues/1665)) ([7edd9e5](https://github.com/juspay/xyne-spaces/commit/7edd9e59aae4ed025f5e94dbac7468e38bb577f0))
+
+
+### Bug Fixes
+
+* canvas blocks behave as objects, and reach Ask AI and comments ([#1534](https://github.com/juspay/xyne-spaces/issues/1534)) ([#1666](https://github.com/juspay/xyne-spaces/issues/1666)) ([ce2c2e1](https://github.com/juspay/xyne-spaces/commit/ce2c2e1ab34f706ede21166067c8379c9e2bf196))
+* derive github credential owner from the token [backport to release-20260904] ([#1667](https://github.com/juspay/xyne-spaces/issues/1667)) ([a952f6d](https://github.com/juspay/xyne-spaces/commit/a952f6dd7dd115cc6a5ff2cbc73013d26c7267af))
+* open the discussion with a newly created artifact ([#1484](https://github.com/juspay/xyne-spaces/issues/1484)) ([#1664](https://github.com/juspay/xyne-spaces/issues/1664)) ([45ff2e2](https://github.com/juspay/xyne-spaces/commit/45ff2e23381cc9f3f4c8bc00838d26ebc1b66349))
+
 ## [1.274.0-release-20260904.2](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.1...v1.274.0-release-20260904.2) (2026-09-08)
 
 
