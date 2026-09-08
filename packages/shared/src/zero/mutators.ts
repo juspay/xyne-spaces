@@ -4335,7 +4335,27 @@ export const mutators = defineMutators({
           ...updateData,
         });
 
-        await updateTicketMdFromZero(tx, zql, id);
+        // Only rebuild the serialized ticket card (ticket_md) — and walk the
+        // sub-ticket/parent graph via updateTicketMdFromZero — when a field that
+        // actually appears in that card changed. Fields like kanbanPosition,
+        // boardId, userGroupId, metadata and isArchived never affect ticket_md,
+        // so for those edits (e.g. drag-to-reorder on the kanban) the rebuild +
+        // conversation write + relatives sync is pure write-amplification.
+        // When no md-relevant field changed the serialized md is byte-identical
+        // to what is stored, so skipping the call is behavior-preserving:
+        // updateTicketMdFromZero would early-return after the same reads anyway.
+        const ticketMdFieldChanged =
+          title !== undefined ||
+          description !== undefined ||
+          statusV2 !== undefined ||
+          priority !== undefined ||
+          stageName !== undefined ||
+          assignedTo !== undefined ||
+          ticketType !== undefined ||
+          eta !== undefined;
+        if (ticketMdFieldChanged) {
+          await updateTicketMdFromZero(tx, zql, id);
+        }
       },
     ),
     archiveDeskTicket: defineMutator(
