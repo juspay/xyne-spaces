@@ -19,12 +19,41 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Temporary: validates the new isolated ci-cluster/github-builds-vpc runner
+  # setup end-to-end. Intentionally does nothing but print — no checkout, no
+  # build. Remove once ci-cluster is confirmed working for real jobs.
+  # ---------------------------------------------------------------------------
+  hello-ci-cluster:
+    name: Hello (ci-cluster)
+    runs-on: ci-cluster-github-runners
+    steps:
+      - name: Hello
+        run: echo "hello"
+
+  # ---------------------------------------------------------------------------
+  # Temporary: verifies every image `pnpm run test` needs (via
+  # docker-compose.dev.yml + docker-compose.test.yml) is actually reachable
+  # from inside the DinD sidecar under ci-pool's locked-down egress — i.e.
+  # that Squid's allowlist covers every registry these images live in. Only
+  # pulls images, does not run docker compose or any actual test. Remove once
+  # a real docker-compose.test.yml run is confirmed working end-to-end.
+  # ---------------------------------------------------------------------------
+  verify-docker-images-fetchable:
+    name: Verify Docker images fetchable (ci-cluster)
+    runs-on: ci-cluster-github-runners
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify every required image is pullable
+        run: ./scripts/verify-docker-images-fetchable.sh
+
+  # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    runs-on: ubuntu-latest
+    runs-on:  ci-cluster-github-runners
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
@@ -63,8 +92,9 @@ jobs:
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Dashboard ${{ matrix.task }}
-    runs-on: ubuntu-latest
+    runs-on: github-builds-runners
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +147,7 @@ jobs:
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Framework lint
     runs-on: ubuntu-latest
     steps:
@@ -141,6 +172,7 @@ jobs:
   # whole chain in, replacing the old three-step sequential npm ci.
   # ---------------------------------------------------------------------------
   xyne-claw:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: xyne-claw typecheck
     runs-on: ubuntu-latest
     steps:
@@ -169,6 +201,7 @@ jobs:
   # history), so a shallow checkout is fine.
   # ---------------------------------------------------------------------------
   gitleaks:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     env:
@@ -213,6 +246,7 @@ jobs:
   # --severity CRITICAL`). Pinned to the same TRIVY_VERSION Jenkins uses.
   # ---------------------------------------------------------------------------
   trivy:
+    if: false # temporarily disabled while validating ci-cluster — see hello-ci-cluster
     name: Vulnerability scan (Trivy)
     runs-on: ubuntu-latest
     env:
