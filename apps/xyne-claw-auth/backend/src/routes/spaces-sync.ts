@@ -4,7 +4,10 @@ import { OrgRole } from "@prisma/client";
 import { prisma, type AppPrismaClient, type AppTransactionClient } from "../db.js";
 import { asyncHandler, badRequest, conflict, ok } from "../lib/http.js";
 import { resolveSurfacePerson } from "../lib/identity-resolution.js";
+import { provisionDefaultAgents } from "../lib/provision-org-agents.js";
+import { createLogger } from "../logger.js";
 
+const log = createLogger("spaces-sync");
 const router = Router();
 
 type DbClient = AppPrismaClient | AppTransactionClient;
@@ -340,6 +343,9 @@ router.post("/org", asyncHandler(async (req: Request, res: Response) => {
       metadata: body["metadata"],
     });
   });
+  provisionDefaultAgents(result.orgId).catch((err) => {
+    log.error("[spaces-sync] provisionDefaultAgents failed", { orgId: result.orgId, err });
+  });
   ok(res, result);
 }));
 
@@ -358,6 +364,9 @@ router.post("/workspace", asyncHandler(async (req: Request, res: Response) => {
       status: optionalString(body, "status"),
       metadata: body["metadata"],
     });
+  });
+  provisionDefaultAgents(result.orgId).catch((err) => {
+    log.error("[spaces-sync] provisionDefaultAgents failed", { orgId: result.orgId, err });
   });
   ok(res, result);
 }));
@@ -462,6 +471,9 @@ router.post("/user", asyncHandler(async (req: Request, res: Response) => {
       spacesUserId,
       reusedExistingUser: resolution.kind === "reuse",
     };
+  });
+  provisionDefaultAgents(result.orgId).catch((err) => {
+    log.error("[spaces-sync] provisionDefaultAgents failed", { orgId: result.orgId, err });
   });
   ok(res, result);
 }));
