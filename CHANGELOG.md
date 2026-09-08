@@ -1,3 +1,10 @@
+## [1.288.0](https://github.com/juspay/xyne-spaces/compare/v1.287.0...v1.288.0) (2026-09-08)
+
+
+### Features
+
+* subscribe/unsubscribe from any message in a thread ([#1589](https://github.com/juspay/xyne-spaces/issues/1589)) ([483b324](https://github.com/juspay/xyne-spaces/commit/483b324361d811ffed49d6047c556ea36cced7cf))
+
 ## [1.287.0](https://github.com/juspay/xyne-spaces/compare/v1.286.0...v1.287.0) (2026-09-08)
 
 
