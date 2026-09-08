@@ -11,7 +11,6 @@ import {
 import { Outlet, useNavigate, useParams } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  ArrowUpRight,
   Bug,
   Check,
   ChevronRight,
@@ -47,6 +46,7 @@ import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import { useUsersById } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
 import { cn } from '../../utils/classNames';
+import { Tooltip } from '../ui/Tooltip';
 
 type RadarTab = 'all' | 'pending' | 'waiting';
 
@@ -116,7 +116,7 @@ const RadarPanel = (): ReactElement => {
   // "Pending on" replaces the old tabs: me maps to the pending feed, others to
   // the waiting feed, both to all.
   const [pendingMe, setPendingMe] = useState(true);
-  const [pendingOthers, setPendingOthers] = useState(false);
+  const [pendingOthers, setPendingOthers] = useState(true);
   const [pendingUsers, setPendingUsers] = useState<Set<string>>(new Set());
   const [requestedByUsers, setRequestedByUsers] = useState<Set<string>>(new Set());
   const [requesterSearch, setRequesterSearch] = useState('');
@@ -311,30 +311,26 @@ const RadarPanel = (): ReactElement => {
   ];
 
   const selfId = localStorage.getItem('user_id');
-  const nameTag = (id: string): string => (id === selfId ? 'you' : `@${nameOf(id)}`);
 
-  const sentAgo = (card: RadarThreadCard): string => {
+  // Mock-style meta line: waiting cards say who the ball is with; pending
+  // cards say who asked and who holds it.
+  /** Compact age: 8m, 5h, 3d, 2w. Long enough to place a card, short enough to
+   *  never be the reason the channel gets truncated. */
+  const shortAgo = (card: RadarThreadCard): string => {
     const latest = card.items.reduce(
       (max, i) => Math.max(max, new Date(i.updatedAt).getTime()),
       card.lastActivityAt ? new Date(card.lastActivityAt).getTime() : 0,
     );
-    return latest ? formatDistanceToNow(latest, { addSuffix: true }) : '';
+    if (!latest) return '';
+    const mins = Math.max(0, Math.round((Date.now() - latest) / 60000));
+    if (mins < 60) return `${mins}m`;
+    if (mins < 1440) return `${Math.round(mins / 60)}h`;
+    const days = Math.round(mins / 1440);
+    return days < 14 ? `${days}d` : `${Math.round(days / 7)}w`;
   };
 
-  // Mock-style meta line: waiting cards say who the ball is with; pending
-  // cards say who asked and who holds it.
-  const cardMeta = (card: RadarThreadCard, kind: 'pending' | 'waiting'): string => {
-    const holders = [...new Set(card.items.flatMap(i => i.pendingOn))];
-    const requesters = [...new Set(card.items.flatMap(i => i.requestedBy))];
-    const ago = sentAgo(card);
-    if (kind === 'waiting') {
-      const to = holders.map(nameTag).join(', ') || 'nobody yet';
-      return `${channelLabel(card.channelId)} · Sent ${ago} to ${to}`;
-    }
-    const by = requesters.map(nameTag).join(', ') || 'someone';
-    const on = holders.map(nameTag).join(', ') || 'nobody';
-    return `${channelLabel(card.channelId)} · Sent ${ago} by ${by} · pending on ${on}`;
-  };
+  const cardMeta = (card: RadarThreadCard): string =>
+    [channelLabel(card.channelId), shortAgo(card)].filter(Boolean).join(' · ');
 
   const badge = (kind: 'pending' | 'waiting', count: number) => (
     <span
@@ -378,17 +374,10 @@ const RadarPanel = (): ReactElement => {
                 className='group/bullet flex items-start gap-2 text-sm text-muted-foreground rounded cursor-pointer hover:text-foreground'
                 data-track-category='RADAR'
                 data-track-name='OPEN_SOURCE_MESSAGE'
-                title='Open the message this came from'
                 {...openOnClick(() => openThread(card, item.sourceMessageId))}
               >
                 <span className='mt-[7px] size-1 rounded-full bg-muted-foreground shrink-0' />
-                <span>
-                  {item.contextSummary}{' '}
-                  <ArrowUpRight
-                    aria-hidden='true'
-                    className='inline size-3.5 align-middle text-muted-foreground/70 group-hover/bullet:text-foreground'
-                  />
-                </span>
+                <span>{item.contextSummary}</span>
               </li>
             </ul>
           )}
@@ -398,44 +387,46 @@ const RadarPanel = (): ReactElement => {
               the people who asked for it — matching the parser's own rule
               that a requester's confirmation is what closes an item. */}
           {selfId && (item.requestedBy.includes(selfId) || item.pendingOn.includes(selfId)) && (
-            <button
-              data-track-category='RADAR'
-              data-track-name='RESOLVE_ITEM'
-              title='Resolve — marks it done and closes it for everyone'
-              className='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
-              disabled={busyKey === itemKey}
-              onClick={e => {
-                e.stopPropagation();
-                void withBusy(itemKey, () => resolveRadarItem(item.id));
-              }}
-            >
-              {busyKey === itemKey ? (
-                <Loader2 className='size-4 animate-spin' />
-              ) : (
-                <Check className='size-4' />
-              )}
-              Resolve
-            </button>
+            <Tooltip content='Mark this item done' className='px-2 py-1 text-[11px]'>
+              <button
+                data-track-category='RADAR'
+                data-track-name='RESOLVE_ITEM'
+                className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
+                disabled={busyKey === itemKey}
+                onClick={e => {
+                  e.stopPropagation();
+                  void withBusy(itemKey, () => resolveRadarItem(item.id));
+                }}
+              >
+                {busyKey === itemKey ? (
+                  <Loader2 className='size-3.5 animate-spin' />
+                ) : (
+                  <Check className='size-3.5' />
+                )}
+                Resolve
+              </button>
+            </Tooltip>
           )}
           {selfId && item.pendingOn.includes(selfId) && (
-            <button
-              data-track-category='RADAR'
-              data-track-name='DISMISS_ITEM'
-              title='Dismiss — clears it from your list only'
-              className='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
-              disabled={busyKey === dismissKey}
-              onClick={e => {
-                e.stopPropagation();
-                void withBusy(dismissKey, () => dismissRadarItem(item.id));
-              }}
-            >
-              {busyKey === dismissKey ? (
-                <Loader2 className='size-4 animate-spin' />
-              ) : (
-                <X className='size-4' />
-              )}
-              Dismiss
-            </button>
+            <Tooltip content='Remove from my list' className='px-2 py-1 text-[11px]'>
+              <button
+                data-track-category='RADAR'
+                data-track-name='DISMISS_ITEM'
+                className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
+                disabled={busyKey === dismissKey}
+                onClick={e => {
+                  e.stopPropagation();
+                  void withBusy(dismissKey, () => dismissRadarItem(item.id));
+                }}
+              >
+                {busyKey === dismissKey ? (
+                  <Loader2 className='size-3.5 animate-spin' />
+                ) : (
+                  <X className='size-3.5' />
+                )}
+                Dismiss
+              </button>
+            </Tooltip>
           )}
         </span>
       </div>
@@ -505,7 +496,7 @@ const RadarPanel = (): ReactElement => {
               {involvedNames}
             </span>
           </span>
-          <span className='text-sm text-muted-foreground truncate'>{cardMeta(card, kind)}</span>
+          <span className='text-sm text-muted-foreground truncate'>{cardMeta(card)}</span>
           {/* Both bulk verbs live behind the overflow menu: each one acts on
             every item at once, which is not something to put a stray click
             away from the per-item buttons directly above it. */}

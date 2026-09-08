@@ -457,6 +457,12 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
                 name: responseBody.name,
                 picture: responseBody.picture,
                 userExistsButRemoved: responseBody.userExistsButRemoved || false,
+                // Present when the user's email domain already maps to an enterprise org;
+                // the renderer needs these to show request-to-join instead of create-org.
+                domainConflictError: responseBody.domainConflictError,
+                publicEmailDomainError: responseBody.publicEmailDomainError,
+                enterpriseJoinOrgName: responseBody.enterpriseJoinOrgName,
+                enterpriseJoinWorkspaces: responseBody.enterpriseJoinWorkspaces,
               });
               forwardAuthEventToClawOverlay('auth:success');
               mainWindow?.show();

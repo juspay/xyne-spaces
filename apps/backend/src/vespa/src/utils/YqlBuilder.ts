@@ -792,6 +792,15 @@ export class YqlBuilder {
       conditions.push(`(${mentionedUsers})`);
     }
 
+    // Message-tag filter. `messageActs` is `match: exact` in the schema, so values go
+    // through verbatim — no casing coercion like `stage` does.
+    if (filters.messageActs && filters.messageActs.length > 0) {
+      const acts = filters.messageActs
+        .map((value) => `messageActs contains ${params.bind('messageActs', value.trim())}`)
+        .join(' and ');
+      conditions.push(`(${acts})`);
+    }
+
     // Channel-mention filter - messages that reference these channel(s)
     if (filters.mentionedChannelIds && filters.mentionedChannelIds.length > 0) {
       const mentionedChannels = filters.mentionedChannelIds
