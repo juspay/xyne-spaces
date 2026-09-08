@@ -23,10 +23,22 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
       await objectsHandler(req, res, pathname);
       return;
     }
-    const status = statusHandlers.get(pathname);
-    if (status && (req.method === 'GET' || req.method === 'HEAD')) {
-      await status(req, res);
-      return;
+    // Static dispatch on purpose: no lookup keyed by the request path, so
+    // the callee is never derived from request data.
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      switch (pathname) {
+        case '/_edge/healthz':
+          await statusHandlers.healthz(req, res);
+          return;
+        case '/_edge/ready':
+          await statusHandlers.ready(req, res);
+          return;
+        case '/_edge/status':
+          await statusHandlers.status(req, res);
+          return;
+        default:
+          break;
+      }
     }
     res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
     res.end('not found\n');
