@@ -12,6 +12,21 @@ export type ThreadScrollIntent =
   | { type: 'noop' }
   | { type: 'wait' };
 
+/**
+ * Minimal structural view of the TanStack virtualizer the thread list uses. When
+ * the default (virtualized) reply path passes this in, initial scroll targets an
+ * INDEX via the virtualizer instead of querying a DOM node — off-window messages
+ * have no DOM node, so the old querySelector approach silently no-ops on long
+ * threads. The ticket-thread path leaves this undefined and keeps DOM scrolling.
+ */
+export type ThreadScrollVirtualizer = {
+  scrollToIndex: (
+    index: number,
+    options?: { align?: 'start' | 'center' | 'end' | 'auto'; behavior?: 'auto' | 'smooth' },
+  ) => void;
+  scrollToEnd: (options?: { behavior?: 'auto' | 'smooth' }) => void;
+};
+
 export function deriveThreadScrollIntent(params: {
   hash: string;
   conversationId: string;
@@ -115,6 +130,13 @@ export type UseThreadListInitialScrollArgs = {
   hasAppliedInitialScrollRef: MutableRefObject<boolean>;
   setIsNearBottom: (value: boolean) => void;
   matchedMessageId?: string | null;
+  /**
+   * When provided (default reply path), initial scroll uses the virtualizer to
+   * target an index/end rather than a DOM node. Omit for DOM-based paths.
+   */
+  virtualizer?: ThreadScrollVirtualizer | null;
+  /** Resolve a messageId to its index in the rendered (virtualized) list. */
+  getIndexByMessageId?: (messageId: string) => number;
 };
 
 export function useThreadListInitialScroll({
@@ -131,6 +153,8 @@ export function useThreadListInitialScroll({
   hasAppliedInitialScrollRef,
   setIsNearBottom,
   matchedMessageId,
+  virtualizer,
+  getIndexByMessageId,
 }: UseThreadListInitialScrollArgs): void {
   const scrollIntent = useMemo(
     () =>
@@ -165,6 +189,11 @@ export function useThreadListInitialScroll({
   const threadMessagesRef = useRef(threadMessages);
   threadMessagesRef.current = threadMessages;
 
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
+  const getIndexByMessageIdRef = useRef(getIndexByMessageId);
+  getIndexByMessageIdRef.current = getIndexByMessageId;
+
   useEffect(() => {
     if (!scrollReady || hasAppliedInitialScrollRef.current) {
       return;
@@ -189,10 +218,20 @@ export function useThreadListInitialScroll({
         return;
       }
 
+      const virt = virtualizerRef.current;
+
       switch (scrollIntent.type) {
         case 'hash': {
           if (!messages.some(m => m.messageId === scrollIntent.messageId)) {
             return;
+          }
+          if (virt) {
+            const idx = getIndexByMessageIdRef.current?.(scrollIntent.messageId) ?? -1;
+            if (idx < 0) {
+              return;
+            }
+            virt.scrollToIndex(idx, { align: 'start', behavior: 'auto' });
+            break;
           }
           const el = container.querySelector(
             `[id="thread-message-${conversationId}-${scrollIntent.messageId}"]`,
@@ -208,6 +247,10 @@ export function useThreadListInitialScroll({
           if (!msg) {
             return;
           }
+          if (virt) {
+            virt.scrollToIndex(scrollIntent.index, { align: 'start', behavior: 'auto' });
+            break;
+          }
           const el = container.querySelector(
             `[id="thread-message-${conversationId}-${msg.messageId}"]`,
           );
@@ -218,10 +261,16 @@ export function useThreadListInitialScroll({
           break;
         }
         case 'saved':
+          // scrollTop is a pixel offset on the scroll element and stays valid under
+          // virtualization (the sized container fills the scroll element).
           container.scrollTop = scrollIntent.position;
           break;
         case 'bottom':
-          container.scrollTop = container.scrollHeight - container.clientHeight;
+          if (virt) {
+            virt.scrollToEnd({ behavior: 'auto' });
+          } else {
+            container.scrollTop = container.scrollHeight - container.clientHeight;
+          }
           setIsNearBottom(true);
           break;
         default:
@@ -231,7 +280,9 @@ export function useThreadListInitialScroll({
       hasAppliedInitialScrollRef.current = true;
     };
 
-    const needsDomNode = scrollIntent.type === 'hash' || scrollIntent.type === 'firstUnread';
+    const needsDomNode =
+      !virtualizerRef.current &&
+      (scrollIntent.type === 'hash' || scrollIntent.type === 'firstUnread');
 
     requestAnimationFrame(() => {
       run();
