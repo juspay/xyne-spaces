@@ -55,7 +55,13 @@ interface ClientSub {
 export class Fanout {
   readonly #store = new RedisStreamStore();
   readonly #dataSubs = new Map<string, Set<ClientSub>>();
+  /** dataInstanceKey → userId → that user's ClientSubs on the instance (O(1) per-user targeting). */
+  readonly #byUser = new Map<string, Map<string, Set<ClientSub>>>();
   readonly #grantToData = new Map<string, Set<string>>();
+  /** grant instanceKey → its partition. A PER-USER grant (`__grant__T{userId:U}`) carries the one
+   *  user whose admission a delta on it can change → re-gate only U; a PER-SCOPE grant (channels[C])
+   *  has no user → re-gate all of the scope's subscribers. */
+  readonly #grantMeta = new Map<string, { userId?: string }>();
   readonly #cursors = new Map<string, string>();
   // Serialize dispatch per stream so grant deltas (join/leave) re-gate in stream order;
   // a `void #dispatch` let a later entry overtake an earlier one → stale admit survived
@@ -82,9 +88,18 @@ export class Fanout {
   async addClient(sub: Omit<ClientSub, 'admitted' | 'hydrated'>): Promise<void> {
     const client: ClientSub = { ...sub, admitted: false, hydrated: false };
     this.#setAdd(this.#dataSubs, client.dataInstanceKey, client);
+    this.#byUserAdd(client);
     await this.#ensureCursorHead(client.dataInstanceKey);
-    for (const grantKey of client.grantByTable.values()) {
+    // Record each grant instance's partition so a delta on it re-gates the right set: a per-user
+    // grant (`channel_participants{userId:U}`) → only U; a per-scope grant (channels[C]) → all.
+    const perUserTables = new Set(
+      client.gate.grantSources.filter((s) => s.kind === 'per-user').map((s) => s.table),
+    );
+    for (const [table, grantKey] of client.grantByTable) {
       this.#setAdd(this.#grantToData, grantKey, client.dataInstanceKey);
+      if (!this.#grantMeta.has(grantKey)) {
+        this.#grantMeta.set(grantKey, perUserTables.has(table) ? { userId: client.userId } : {});
+      }
       await this.#ensureCursorHead(grantKey);
     }
     // Serialize the initial regate onto the data instance's queue so a subscribe-time
@@ -103,8 +118,24 @@ export class Fanout {
         // instance the client just released.
         s.admitted = false;
         subs.delete(s);
+        this.#byUserDelete(s);
       }
     if (subs.size === 0) this.#dataSubs.delete(dataInstanceKey);
+  }
+
+  #byUserAdd(client: ClientSub): void {
+    let byU = this.#byUser.get(client.dataInstanceKey);
+    if (!byU) this.#byUser.set(client.dataInstanceKey, (byU = new Map()));
+    this.#setAdd(byU, client.userId, client);
+  }
+
+  #byUserDelete(client: ClientSub): void {
+    const byU = this.#byUser.get(client.dataInstanceKey);
+    const set = byU?.get(client.userId);
+    if (!set) return;
+    set.delete(client);
+    if (set.size === 0) byU!.delete(client.userId);
+    if (byU!.size === 0) this.#byUser.delete(client.dataInstanceKey);
   }
 
   #setAdd<T>(map: Map<string, Set<T>>, key: string, value: T): void {
@@ -324,8 +355,12 @@ export class Fanout {
       // flip always uses a view ≥ every delta. It also orders regates against that
       // instance's data-delta dispatches (same key), so the emit-time recheck sees settled
       // flags. Distinct channels stay parallel.
+      // A PER-USER grant delta (`channel_participants{userId:U}`) can only change U's admission —
+      // the instance IS the user, so re-gate only U on each affected data instance (O(subs_U)).
+      // A PER-SCOPE grant delta (channels[C] visibility flip) affects everyone → re-gate all.
+      const targetUserId = this.#grantMeta.get(instanceKey)?.userId;
       for (const dataKey of affected) {
-        this.#enqueueRegate(dataKey, () => this.#regateInstance(dataKey));
+        this.#enqueueRegate(dataKey, () => this.#regateInstance(dataKey, targetUserId));
       }
     }
   }
@@ -336,14 +371,16 @@ export class Fanout {
   }
 
   /**
-   * Re-gate every client of one data instance against a single fresh grant snapshot built
-   * INSIDE this (serialized) job — so the cache reflects all grant deltas applied before
-   * the job runs, and one point-in-time view is shared across the instance's clients
-   * (≈ M reads for the delta; `#grantToData` fan-out is per-channel, typically one instance).
+   * Re-gate clients of one data instance against a single fresh grant snapshot built INSIDE this
+   * (serialized) job. `targetUserId` set (a per-user grant delta) → re-gate only that user's
+   * ClientSubs (O(subs_U) via #byUser); absent (per-scope delta / subscribe) → re-gate all. Cache
+   * reflects every grant delta applied before the job runs; one point-in-time view for the batch.
    */
-  async #regateInstance(dataKey: string): Promise<void> {
-    const subs = this.#dataSubs.get(dataKey);
-    if (!subs) return;
+  async #regateInstance(dataKey: string, targetUserId?: string): Promise<void> {
+    const subs = targetUserId
+      ? this.#byUser.get(dataKey)?.get(targetUserId)
+      : this.#dataSubs.get(dataKey);
+    if (!subs || subs.size === 0) return;
     const grantCache = new Map<string, Record<string, unknown>[]>();
     for (const client of subs) {
       try {

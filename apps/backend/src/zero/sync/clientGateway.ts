@@ -141,11 +141,14 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     const grantByTable = new Map<string, string>();
     const grantInstanceKeys: string[] = [];
     for (const gs of gate.grantSources) {
-      const gk = syncEngine.subscribe(
-        grantQueryName(gs.table),
-        grantArgs(gs.scopeColumn, partitionValue),
-        connId,
-      );
+      // Two-plane partition (final plan): a PER-USER grant materializes ALL of U's rows
+      // (`__grant__channel_participants{userId:U}`), shared across every channel U views and
+      // warm for the session; a PER-SCOPE grant is the scope-root row for THIS channel
+      // (`__grant__channels{id:C}`). The evaluator filters the per-user snapshot to the scope
+      // via the ACL correlation, so the snapshot semantics are unchanged.
+      const [col, val] =
+        gs.kind === 'per-user' ? [gs.boundColumn as string, userId] : [gs.scopeColumn, partitionValue];
+      const gk = syncEngine.subscribe(grantQueryName(gs.table), grantArgs(col, val), connId);
       if (gk) {
         grantByTable.set(gs.table, gk);
         grantInstanceKeys.push(gk);
