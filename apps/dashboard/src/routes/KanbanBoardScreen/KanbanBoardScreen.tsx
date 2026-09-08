@@ -198,7 +198,13 @@ import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
-import { readViewDraft, writeViewDraft, clearViewDraft } from './viewDraft';
+import {
+  readViewDraft,
+  writeViewDraft,
+  clearViewDraft,
+  readViewColumns,
+  writeViewColumns,
+} from './viewDraft';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../utils/apiError';
 import {
@@ -522,8 +528,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       viewModeProp === 'workspace-view' && !hasSharedSeed ? readViewDraft(viewDraftKey) : null,
     [viewModeProp, viewDraftKey, hasSharedSeed],
   );
+  const persistedColumnsKey =
+    viewModeProp === 'my-tickets' ||
+    viewModeProp === 'user-tickets' ||
+    viewModeProp === 'group-tickets'
+      ? viewModeProp
+      : null;
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
-    () => new Set(initialDraft?.columns ?? initialColumns ?? DEFAULT_VISIBLE_COLUMNS),
+    () =>
+      new Set(
+        initialDraft?.columns ??
+          (persistedColumnsKey ? readViewColumns(persistedColumnsKey) : null) ??
+          initialColumns ??
+          DEFAULT_VISIBLE_COLUMNS,
+      ),
   );
   // The tickets table always surfaces the Stage column (parity with the Support
   // desk table, which renders TicketTable with its stage-inclusive defaults).
@@ -1112,6 +1130,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         .sort(),
     [visibleColumns],
   );
+
+  useEffect(() => {
+    if (!persistedColumnsKey) return;
+    writeViewColumns(persistedColumnsKey, savableColumns);
+  }, [persistedColumnsKey, savableColumns]);
 
   const savedViewSignature = useMemo(
     () =>
