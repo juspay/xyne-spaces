@@ -386,7 +386,13 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   }
   const scopedUser = scopeUserId ? await findUserByAnyId(scopeUserId) : null;
   if (scopeUserId && !scopedUser) {
-    throw notFound("User not found");
+    // If the caller is querying their OWN userId (matched by header aliases),
+    // fall through — canonicalScopeUserId will use authedUserId below.
+    // This handles the case where UserSurfaceIdentity isn't populated yet
+    // (e.g. the Surface migration hasn't run) but the user is authenticated.
+    if (!matchesAuthenticatedUserId(req, scopeUserId)) {
+      throw notFound("User not found");
+    }
   }
   const canonicalScopeUserId = (scopedUser?.id ?? authedUserId) || undefined;
 
