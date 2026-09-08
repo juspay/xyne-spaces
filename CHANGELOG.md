@@ -1,3 +1,12 @@
+## [1.292.0](https://github.com/juspay/xyne-spaces/compare/v1.291.1...v1.292.0) (2026-09-08)
+
+
+### Features
+
+* call summary templates ([#1190](https://github.com/juspay/xyne-spaces/issues/1190)) ([8a75b52](https://github.com/juspay/xyne-spaces/commit/8a75b52b3fad25280c80caa241f3b95baa241075))
+* mandatory sidebar change ([#1651](https://github.com/juspay/xyne-spaces/issues/1651)) ([376eab1](https://github.com/juspay/xyne-spaces/commit/376eab1f61ae086a81877a780bfda2c6b33cc647))
+* multi bundle handling for dashboard ([#1646](https://github.com/juspay/xyne-spaces/issues/1646)) ([7b7a17b](https://github.com/juspay/xyne-spaces/commit/7b7a17b2db2e813d6c450261d07b21fc026b44ec))
+
 ## [1.291.1](https://github.com/juspay/xyne-spaces/compare/v1.291.0...v1.291.1) (2026-09-08)
 
 
