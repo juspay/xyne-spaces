@@ -22,11 +22,6 @@ const router = Router();
 
 const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex", "litellm"]);
 
-const GITHUB_CLIENT_ID = "Ov23li8tweQw6odWQebz";
-const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
-const GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
-const DEVICE_CODE_PREFIX = "gh-device-user:";
-const DEVICE_CODE_TTL = 900;
 
 // GET /settings/provider-credentials — list user's credentials (without raw keys)
 router.get("/provider-credentials", asyncHandler(async (req: Request, res: Response) => {
@@ -65,10 +60,16 @@ router.put("/provider-credentials/:provider", asyncHandler(async (req: Request<{
     if (authType !== "api_key" && authType !== "oauth_token") {
       throw badRequest("authType must be 'api_key' or 'oauth_token'");
     }
-    // Claude + Codex OAuth were removed (vendor subscription tokens must not
-    // be stored on a third-party server) — only API keys are accepted.
-    if (authType === "oauth_token" && (provider === "claude" || provider === "codex")) {
-      throw badRequest(`${provider} supports API keys only (oauth_token not allowed)`);
+    // Every provider OAuth flow was removed (GitHub Copilot device code,
+    // Claude Pro/Max, Codex ChatGPT): vendor subscription tokens must not be
+    // stored on a third-party server. Only API-key credentials are accepted.
+    if (authType === "oauth_token") {
+      throw badRequest("Only API-key credentials are supported (OAuth sign-in was removed)");
+    }
+    // Copilot had no API-key alternative — without its OAuth flow there is no
+    // compliant way to add it, so the provider is retired entirely.
+    if (provider === "copilot") {
+      throw badRequest("Copilot is no longer supported (GitHub Copilot OAuth was removed)");
     }
     data.authType = authType;
   }
@@ -236,81 +237,6 @@ router.delete("/subagent-routing/:subagentName", asyncHandler(async (req: Reques
   ok(res);
 }));
 
-// ── GitHub Copilot device-code login (user-level) ──────────────────
-
-router.post("/copilot/github-login", asyncHandler(async (req: Request, res: Response) => {
-  const userId = requireRequester(req);
-  const ghRes = await fetch(GITHUB_DEVICE_CODE_URL, {
-    method: "POST",
-    headers: { Accept: "application/json" },
-    body: new URLSearchParams({ client_id: GITHUB_CLIENT_ID, scope: "read:user" }),
-  });
-  if (!ghRes.ok) {
-    const text = await ghRes.text().catch(() => "");
-    throw new HttpError(502, `GitHub error: ${text.slice(0, 200)}`);
-  }
-  const data = await ghRes.json() as {
-    device_code: string;
-    user_code: string;
-    verification_uri: string;
-    expires_in: number;
-    interval: number;
-  };
-  const key = `${DEVICE_CODE_PREFIX}${userId}`;
-  const redis = redisService.getConnection();
-  await redis.set(key, JSON.stringify({ device_code: data.device_code, interval: data.interval }), "EX", DEVICE_CODE_TTL);
-  ok(res, {
-    userCode: data.user_code,
-    verificationUri: data.verification_uri,
-    expiresIn: data.expires_in,
-    interval: data.interval,
-  });
-}));
-
-router.post("/copilot/github-poll", asyncHandler(async (req: Request, res: Response) => {
-  const userId = requireRequester(req);
-  const key = `${DEVICE_CODE_PREFIX}${userId}`;
-  const redis = redisService.getConnection();
-  const raw = await redis.get(key);
-  if (!raw) throw badRequest("No pending login — start again");
-  const { device_code } = JSON.parse(raw) as { device_code: string };
-
-  const ghRes = await fetch(GITHUB_ACCESS_TOKEN_URL, {
-    method: "POST",
-    headers: { Accept: "application/json" },
-    body: new URLSearchParams({
-      client_id: GITHUB_CLIENT_ID,
-      device_code,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    }),
-  });
-  const data = await ghRes.json() as { access_token?: string; error?: string; error_description?: string };
-
-  if (data.access_token) {
-    const encrypted = encrypt(data.access_token, CONFIG.encryptionKey);
-    await userProviderCredentialsRepository.upsert(userId, "copilot", {
-      encryptedKey: encrypted.ciphertext,
-      iv: encrypted.iv,
-      authTag: encrypted.authTag,
-      model: "gpt-4o",
-      baseUrl: "https://api.githubcopilot.com",
-    });
-    await redis.del(key);
-    ok(res, { status: "approved" });
-    return;
-  }
-  if (data.error === "authorization_pending") {
-    ok(res, { status: "pending" });
-    return;
-  }
-  if (data.error === "slow_down") {
-    ok(res, { status: "slow_down" });
-    return;
-  }
-  await redis.del(key);
-  throw new HttpError(400, data.error_description ?? data.error ?? "Authorization failed");
-}));
-
 // ── Model catalog fetchers (live, keyed on user's stored credentials) ─
 
 interface CopilotModel { id: string; name: string }
@@ -319,14 +245,12 @@ router.get("/copilot/models", asyncHandler(async (req: Request, res: Response) =
   const userId = requireRequester(req);
   const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, "copilot");
   if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
-    throw badRequest("Copilot is not configured. Log in with GitHub first.");
+    throw badRequest("Copilot is no longer available (GitHub Copilot OAuth was removed).");
   }
   const githubToken = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
 
-  // Mirror opencode's CopilotAuthPlugin: use the GitHub OAuth token directly
-  // as Bearer for api.githubcopilot.com. GitHub's edge handles session-scoped
-  // token derivation server-side. No client-side /copilot_internal/v2/token
-  // exchange is needed (and that endpoint 404s for our OAuth scope anyway).
+  // Legacy: reads a previously-stored GitHub OAuth token (the OAuth login
+  // flow was removed — no new copilot creds can be added).
   const modelsRes = await fetch("https://api.githubcopilot.com/models", {
     headers: {
       Authorization: `Bearer ${githubToken}`,

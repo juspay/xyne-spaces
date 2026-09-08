@@ -1313,32 +1313,6 @@ export async function resolveChannelChainBinding(channelId: string, entryAgentSl
   return data.data;
 }
 
-export interface GitHubDeviceCode {
-  userCode: string;
-  verificationUri: string;
-  expiresIn: number;
-  interval: number;
-}
-
-export async function initiateGitHubLogin(slug: string, userId: string): Promise<GitHubDeviceCode> {
-  const data = await request<{ success: boolean; data: GitHubDeviceCode }>(
-    `${AUTH_API_URL}/api/v1/agents/${slug}/user-config/${userId}/github-login`,
-    { method: "POST" },
-  );
-  return data.data;
-}
-
-export async function pollGitHubLogin(slug: string, userId: string): Promise<{ status: string }> {
-  const data = await request<{ success: boolean; data?: { status: string }; error?: string }>(
-    `${AUTH_API_URL}/api/v1/agents/${slug}/user-config/${userId}/github-poll`,
-    { method: "POST" },
-  );
-  if (!data.success) {
-    throw new Error(data.error ?? "Authorization failed");
-  }
-  return data.data!;
-}
-
 export async function listClaudeModels(
   slug: string,
   userId: string,
@@ -3684,23 +3658,6 @@ export async function deleteSubagentRouting(userId: string, subagentName: string
     `${AUTH_API_URL}/api/v1/settings/subagent-routing/${encodeURIComponent(subagentName)}`,
     { method: "DELETE", headers: { "x-user-id": userId } },
   );
-}
-
-export async function initiateCopilotGitHubLogin(userId: string): Promise<GitHubDeviceCode> {
-  const data = await request<{ success: boolean; data: GitHubDeviceCode }>(
-    `${AUTH_API_URL}/api/v1/settings/copilot/github-login`,
-    { method: "POST", headers: { "x-user-id": userId } },
-  );
-  return data.data;
-}
-
-export async function pollCopilotGitHubLogin(userId: string): Promise<{ status: string }> {
-  const data = await request<{ success: boolean; data?: { status: string }; error?: string }>(
-    `${AUTH_API_URL}/api/v1/settings/copilot/github-poll`,
-    { method: "POST", headers: { "x-user-id": userId } },
-  );
-  if (!data.success) throw new Error(data.error ?? "Authorization failed");
-  return data.data!;
 }
 
 export async function listCopilotModelsForUser(userId: string): Promise<Array<{ id: string; name: string }>> {

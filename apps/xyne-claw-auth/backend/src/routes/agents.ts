@@ -2883,13 +2883,7 @@ router.delete("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<
   }
 });
 
-// ── GitHub Copilot Device Code OAuth ────────────────────────────────
-
-const GITHUB_CLIENT_ID = "Ov23li8tweQw6odWQebz"; // Same as OpenCode / GitHub Copilot CLI
-const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
-const GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
-const DEVICE_CODE_PREFIX = "gh-device:";
-const DEVICE_CODE_TTL = 900; // 15 minutes
+// ── LLM model catalog fetchers ──────────────────────────────────────
 
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -2934,122 +2928,6 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string): Pr
     }));
 }
 
-router.post("/:slug/user-config/:userId/github-login", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
-  try {
-    const ghRes = await fetch(GITHUB_DEVICE_CODE_URL, {
-      method: "POST",
-      headers: { Accept: "application/json" },
-      body: new URLSearchParams({ client_id: GITHUB_CLIENT_ID, scope: "read:user" }),
-    });
-
-    if (!ghRes.ok) {
-      const text = await ghRes.text().catch(() => "");
-      res.status(502).json({ success: false, error: `GitHub error: ${text.slice(0, 200)}` });
-      return;
-    }
-
-    const data = await ghRes.json() as {
-      device_code: string;
-      user_code: string;
-      verification_uri: string;
-      expires_in: number;
-      interval: number;
-    };
-
-    // Store device_code in Redis so poll endpoint can use it
-    const key = `${DEVICE_CODE_PREFIX}${req.params.userId}:${req.params.slug}`;
-    const redis = redisService.getConnection();
-    await redis.set(key, JSON.stringify({
-      device_code: data.device_code,
-      interval: data.interval,
-    }), "EX", DEVICE_CODE_TTL);
-
-    res.json({
-      success: true,
-      data: {
-        userCode: data.user_code,
-        verificationUri: data.verification_uri,
-        expiresIn: data.expires_in,
-        interval: data.interval,
-      },
-    });
-  } catch (err) {
-    log.error("[agents] github-login error:", err);
-    res.status(500).json({ success: false, error: "Failed to initiate GitHub login" });
-  }
-});
-
-router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
-  try {
-    const key = `${DEVICE_CODE_PREFIX}${req.params.userId}:${req.params.slug}`;
-    const redis = redisService.getConnection();
-    const raw = await redis.get(key);
-
-    if (!raw) {
-      res.status(400).json({ success: false, error: "No pending login — start again" });
-      return;
-    }
-
-    const { device_code } = JSON.parse(raw) as { device_code: string; interval: number };
-
-    const ghRes = await fetch(GITHUB_ACCESS_TOKEN_URL, {
-      method: "POST",
-      headers: { Accept: "application/json" },
-      body: new URLSearchParams({
-        client_id: GITHUB_CLIENT_ID,
-        device_code,
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      }),
-    });
-
-    const data = await ghRes.json() as {
-      access_token?: string;
-      error?: string;
-      error_description?: string;
-    };
-
-    if (data.access_token) {
-      // Success — encrypt and store the token at user-level
-      const encrypted = encrypt(data.access_token, CONFIG.encryptionKey);
-
-      await userProviderCredentialsRepository.upsert(req.params.userId, "copilot", {
-        encryptedKey: encrypted.ciphertext,
-        iv: encrypted.iv,
-        authTag: encrypted.authTag,
-        model: "gpt-4o",
-        baseUrl: "https://api.githubcopilot.com",
-      });
-      // Also flip this agent's provider to copilot
-      const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-      if (!agent) { logAgentScopedMiss(req, "agents/copilot-login-poll", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-      await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider: "copilot" }, agent.orgId);
-
-      // Cleanup Redis
-      await redis.del(key);
-
-      log.info(`[agents] GitHub Copilot login success for user ${req.params.userId} / agent ${req.params.slug}`);
-      res.json({ success: true, data: { status: "approved" } });
-      return;
-    }
-
-    if (data.error === "authorization_pending") {
-      res.json({ success: true, data: { status: "pending" } });
-      return;
-    }
-
-    if (data.error === "slow_down") {
-      res.json({ success: true, data: { status: "slow_down" } });
-      return;
-    }
-
-    // Other error
-    await redis.del(key);
-    res.json({ success: false, error: data.error_description ?? data.error ?? "Authorization failed" });
-  } catch (err) {
-    log.error("[agents] github-poll error:", err);
-    res.status(500).json({ success: false, error: "Failed to poll GitHub" });
-  }
-});
 
 router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
@@ -4025,8 +3903,16 @@ router.post(
       }
       // Claude OAuth was removed (subscription tokens must not be stored on a
       // third-party server) — only Console-issued Anthropic API keys are accepted.
-      if ((provider === "claude" || provider === "codex") && authType === "oauth_token") {
-        res.status(400).json({ success: false, error: `${provider} supports API keys only (oauth_token not allowed)` });
+      // All provider OAuth flows were removed (GitHub Copilot device code,
+      // Claude Pro/Max, Codex ChatGPT) — only API-key credentials accepted.
+      if (authType === "oauth_token") {
+        res.status(400).json({ success: false, error: "Only API-key credentials are supported (OAuth sign-in was removed)" });
+        return;
+      }
+      // Copilot had no API-key alternative; with its OAuth flow gone the
+      // provider is retired entirely.
+      if (provider === "copilot") {
+        res.status(400).json({ success: false, error: "Copilot is no longer supported (GitHub Copilot OAuth was removed)" });
         return;
       }
 
