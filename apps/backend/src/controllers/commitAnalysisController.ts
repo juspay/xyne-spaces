@@ -553,14 +553,15 @@ export class CommitAnalysisController {
         });
 
         if (canvasId) {
-          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasId}`;
+          canvasUrl = buildWorkspaceCanvasUrl(params.workspaceId, canvasId);
         }
       }
 
       if (params.parentTicketId && results.length > 0) {
         await this.postToParentTicket(
           params.parentTicketId, results, primary.projectKey, primary.repoSlug, conversationId, channelId,
-          affectedApplications, userId, primary.deployedCommitId, primary.newCommitId, envChanges, migrationLinks,
+          affectedApplications, userId, primary.deployedCommitId, primary.newCommitId, params.workspaceId,
+          envChanges, migrationLinks,
           repoSlices,
         );
       }
@@ -676,6 +677,7 @@ export class CommitAnalysisController {
     userId: string,
     deployedCommitId: string,
     newCommitId: string,
+    workspaceId: string,
     envChanges?: Array<{ filePath: string; fileName: string; newValue: string }>,
     migrationLinks?: Array<{ filePath: string; diffUrl: string }>,
     repoSlices?: CommitAnalysisRepoSlice[]
@@ -710,7 +712,7 @@ export class CommitAnalysisController {
         );
 
         if (canvasId) {
-          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasId}`;
+          canvasUrl = buildWorkspaceCanvasUrl(workspaceId, canvasId);
         }
       }
 
