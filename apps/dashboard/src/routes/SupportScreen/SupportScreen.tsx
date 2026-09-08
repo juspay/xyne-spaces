@@ -2008,7 +2008,9 @@ const SupportScreen = (): ReactElement => {
   const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
   const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
   const selectedChannelIntegration = useChannelIntegrationInfo(
-    isSocialMediaDesk && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : null,
+    isSocialMediaDesk && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null,
   );
   const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
 
@@ -5862,7 +5864,8 @@ export const SupportTicketDetail = ({
                   {emails.length > 0 &&
                     channel?.type !== ChannelType.SLACK &&
                     channel?.type !== ChannelType.APP &&
-                    (channel?.type !== ChannelType.SOCIAL_MEDIA || channelIntegrationInfo.sourceType !== 'instagram') && (
+                    (channel?.type !== ChannelType.SOCIAL_MEDIA ||
+                      channelIntegrationInfo.sourceType !== 'instagram') && (
                       <>
                         <div className='w-px h-4 bg-border' />
                         <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
@@ -6154,10 +6157,7 @@ export const SupportTicketDetail = ({
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
-                    <SlackThread
-                      emails={emails}
-                      ticketId={ticket?.id}
-                    />
+                    <SlackThread emails={emails} ticketId={ticket?.id} />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
                   ) : (

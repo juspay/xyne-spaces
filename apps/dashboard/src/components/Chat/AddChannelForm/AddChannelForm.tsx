@@ -20,7 +20,6 @@ import {
   MessageSquareMore,
   Smartphone,
   Phone,
-  Share2,
   Plus,
   Trash2,
 } from 'lucide-react';

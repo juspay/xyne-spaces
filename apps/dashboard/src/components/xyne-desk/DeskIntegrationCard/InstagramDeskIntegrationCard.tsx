@@ -1,6 +1,9 @@
 import { ReactElement } from 'react';
 import { toast } from 'sonner';
-import { disconnectInstagramDesk, reconnectInstagramDesk } from '../../../services/clients/socialMediaDeskApi';
+import {
+  disconnectInstagramDesk,
+  reconnectInstagramDesk,
+} from '../../../services/clients/socialMediaDeskApi';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
