@@ -20,6 +20,7 @@ import {
   Trash2,
 } from 'lucide-react';
 
+import { SiInstagram } from 'react-icons/si';
 import { Button } from '../../ui/Button';
 import { Tooltip } from '../../ui/Tooltip';
 import {
@@ -95,7 +96,7 @@ const DESK_SOURCES: ReadonlyArray<{
     value: DeskType.SOCIAL_MEDIA,
     label: 'Instagram',
     description: 'Connect an Instagram Business account to receive and reply to DMs',
-    icon: Instagram,
+    icon: SiInstagram,
   },
 ];
 

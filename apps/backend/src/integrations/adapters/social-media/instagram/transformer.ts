@@ -23,7 +23,10 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     const igsid = messaging.sender.id;
     const senderName = messaging.sender.username ?? igsid;
     const mid = messaging.message.mid;
-    const text = messaging.message.text ?? '';
+    // Use a descriptive fallback when a message has attachments but no text body
+    // (e.g. images, videos, audio) — prevents blank ticket bodies.
+    const hasAttachments = (messaging.message.attachments?.length ?? 0) > 0;
+    const text = messaging.message.text || (hasAttachments ? '[Attachment received — open Instagram to view]' : '');
 
     // For content updates (customer edited a sent message), find the existing
     // thread by the mid and update the email body in-place — no window logic needed.
@@ -62,7 +65,10 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     const latestTime = latest?.createdAt;
     // messaging.timestamp is Unix ms (Meta sends 13-digit ms timestamps, not seconds)
     const newMessageTime = messaging.timestamp;
-    const windowExpired = !latestTime || newMessageTime - latestTime.getTime() > INSTAGRAM_REPLY_WINDOW_MS;
+    // Math.abs handles out-of-order delivery: late-arriving webhooks can have
+    // newMessageTime < latestTime.getTime(), making the raw delta negative and
+    // incorrectly skipping the expiry check.
+    const windowExpired = !latestTime || Math.abs(newMessageTime - latestTime.getTime()) > INSTAGRAM_REPLY_WINDOW_MS;
 
     // A unique suffix creates a new thread (new ticket); the bare IGSID
     // appends to the existing active thread.

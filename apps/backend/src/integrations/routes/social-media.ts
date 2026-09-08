@@ -6,6 +6,7 @@ import { config as appConfig } from '@/config/env';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
 import { ExternalSourcePlatform } from '../core/types';
+import { SOCIAL_MEDIA_SOURCE_TYPES } from '../social-media/constants';
 import { socialMediaService } from '../social-media/socialMediaService';
 import {
   authorizeSocialMediaManager,

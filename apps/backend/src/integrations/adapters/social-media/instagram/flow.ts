@@ -13,8 +13,10 @@ export class InstagramFlow extends BaseFlow {
 
     if (payload?.object !== 'instagram') return [];
 
-    // Debug-only: full raw payload. Not logged at info — DM text is PII.
-    logger.debug('[InstagramFlow] Raw webhook payload from Meta', { payload: JSON.stringify(rawPayload) });
+    logger.debug('[InstagramFlow] Webhook received', {
+      entryCount: payload.entry?.length ?? 0,
+      messagingCount: payload.entry?.reduce((n, e) => n + (e.messaging?.length ?? 0), 0) ?? 0,
+    });
 
     // Decrypt credentials so we can fetch message content and sender profile.
     let accessToken: string | undefined;
@@ -40,7 +42,14 @@ export class InstagramFlow extends BaseFlow {
       // B2: Meta can batch entries from multiple IG accounts in one webhook POST.
       // Only process entries matching the resolved source's account to prevent
       // cross-account data corruption.
-      if (businessIgUserId && entry.id !== businessIgUserId) continue;
+      if (businessIgUserId && entry.id !== businessIgUserId) {
+        logger.warn('[InstagramFlow] Dropping batched entry for non-matching IG account', {
+          sourceId: source?.id,
+          expectedIgUserId: businessIgUserId,
+          entryId: entry.id,
+        });
+        continue;
+      }
 
       for (const messaging of (entry.messaging ?? []) as unknown as Array<Record<string, unknown>>) {
         // Standard message event — text is included directly in the payload.

@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from 'express';
+import { Prisma } from '@prisma/client';
 import {
   ChannelRole,
   ChannelScopeType,
@@ -267,6 +268,20 @@ router.get(
       const { igUserId, igsid, username: igUsername } = await metaGraphClient.getMe(longLived.access_token);
       logger.debug(`${TAG} OAuth callback: connected Instagram account @${igUsername} (igUserId=${igUserId}, igsid=${igsid})`);
 
+      // If Meta did not return user_id, igUserId falls back to igsid. That breaks the B2
+      // filter (entry.id matches real user ID, not igsid) — all DMs would be silently dropped.
+      // Fail the connect loudly rather than store broken credentials.
+      if (igUserId === igsid) {
+        logger.error(`${TAG} OAuth callback: Meta omitted user_id — cannot establish B2 filter, rejecting connect`, { igsid });
+        redirectToDesk(req, res, {
+          workspaceId: state.workspaceId,
+          channelId: state.channelId,
+          platform: state.platform,
+          error: 'instagram_connection_failed',
+        });
+        return;
+      }
+
       const credentials: InstagramCredentials = {
         accessToken: longLived.access_token,
         igUserId,  // real user ID — matches webhook entry.id; used for source name & B2 filter
@@ -290,7 +305,11 @@ router.get(
           userId: state.userId,
           workspaceId: state.workspaceId,
         });
-        res.status(400).json({ error: 'User no longer in workspace' });
+        redirectToDesk(req, res, {
+          workspaceId: state.workspaceId,
+          platform: state.platform,
+          error: 'instagram_user_removed',
+        });
         return;
       }
 
@@ -443,6 +462,20 @@ router.get(
         platform: state.platform,
       });
     } catch (error) {
+      // P2002 on externalSource.name means another workspace already connected this IG account.
+      // The name column is globally unique (`instagram-{igUserId}`), not workspace-scoped.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        logger.warn(`${TAG} Instagram account already connected in another workspace`, {
+          target: error.meta?.target,
+        });
+        redirectToDesk(req, res, {
+          workspaceId: state.workspaceId,
+          channelId: state.channelId,
+          platform: state.platform,
+          error: 'instagram_account_already_connected',
+        });
+        return;
+      }
       logger.error(`${TAG} Instagram OAuth callback failed`, { error });
       redirectToDesk(req, res, {
         workspaceId: state.workspaceId,
@@ -555,22 +588,27 @@ router.post(
         return;
       }
 
-      // For Instagram Login apps, user_id in the signed_request is the IG user ID.
+      // For Instagram Business Login, user_id in the signed_request is the real IG user ID.
+      // Require it — without it we cannot identify whose data to delete.
       const igUserId = payload.user_id;
+      if (!igUserId) {
+        logger.warn(`${TAG} Data deletion request missing user_id — rejecting`, { payload });
+        res.status(400).json({ error: 'signed_request payload missing user_id' });
+        return;
+      }
+
       logger.info(`${TAG} Data deletion request received`, { igUserId });
 
-      if (igUserId) {
-        // externalIdentifier stores igUserId directly (set at channel creation) — no decryption needed.
-        const result = await db.externalSource.updateMany({
-          where: {
-            sourceType: ExternalSourcePlatform.INSTAGRAM,
-            externalIdentifier: igUserId,
-            isActive: true,
-          },
-          data: { isActive: false, credentials: '' },
-        });
-        logger.info(`${TAG} Deactivated ${result.count} source(s) for igUserId=${igUserId}`);
-      }
+      // externalIdentifier stores igUserId directly (set at channel creation) — no decryption needed.
+      const result = await db.externalSource.updateMany({
+        where: {
+          sourceType: ExternalSourcePlatform.INSTAGRAM,
+          externalIdentifier: igUserId,
+          isActive: true,
+        },
+        data: { isActive: false, credentials: '' },
+      });
+      logger.info(`${TAG} Data deletion: deactivated sources`, { count: result.count, igUserId });
 
       const confirmationCode = `xyne-del-${Date.now()}`;
       res.json({

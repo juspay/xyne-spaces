@@ -7,7 +7,6 @@ import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
-import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegrationCard';
 import { InstagramDeskIntegrationCard } from '../../DeskIntegrationCard/InstagramDeskIntegrationCard';
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
@@ -105,7 +104,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && !isSocialMedia && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isApp && <AppDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocialMedia && <InstagramDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {/*
         Single owner of app connections on every desk type, APP included. Apps are the

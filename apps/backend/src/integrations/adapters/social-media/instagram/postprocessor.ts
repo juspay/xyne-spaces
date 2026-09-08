@@ -49,7 +49,7 @@ export class InstagramPostprocessor extends BasePostprocessor {
         // Resolve the workspace channel owner to use as updatedBy actor
         const source = await db.externalSource.findUnique({
           where: { id: context.sourceId },
-          select: { channelId: true },
+          select: { channelId: true, ownerUserId: true },
         });
         const preference = source?.channelId
           ? await db.emailChannelPreference.findFirst({
@@ -57,9 +57,11 @@ export class InstagramPostprocessor extends BasePostprocessor {
               select: { ownerUserId: true },
             })
           : null;
-        const updatedBy = preference?.ownerUserId;
+        // Prefer the channel owner; fall back to the source owner for IG accounts
+        // not bound to a desk channel yet.
+        const updatedBy = preference?.ownerUserId ?? source?.ownerUserId;
         if (!updatedBy) {
-          logger.warn(`${TAG} Cannot reopen ticket — ownerUserId missing for channel`, {
+          logger.warn(`${TAG} Cannot reopen ticket — ownerUserId missing for channel and source`, {
             ticketId: ticket.id,
             channelId: source?.channelId,
           });
