@@ -18,6 +18,7 @@ import { useCallMediaQualitySettings } from './useCallMediaQualitySettings';
 import { useRecordingDefaultLayout } from './useRecordingDefaultLayout';
 import { useRecordingVersion } from './useRecordingVersion';
 import { useRecordingStore } from './useRecordingStore';
+import { useCallsVersion } from './useCallsVersion';
 import {
   getLinkOpenExternalDefault,
   setLinkOpenExternalDefault,
@@ -71,6 +72,7 @@ export function usePreferencesState(enabled: boolean) {
   const { recordingVersion, setRecordingVersion } = useRecordingVersion();
   const recordingStatus = useRecordingStore(context => context.status);
   const canSwitchRecordingVersion = recordingStatus === 'idle' || recordingStatus === 'error';
+  const { callsVersion, setCallsVersion } = useCallsVersion();
   const linksOpenExternalByDefault = useSyncExternalStore(
     subscribeLinkOpenPref,
     getLinkOpenExternalDefault,
@@ -186,6 +188,8 @@ export function usePreferencesState(enabled: boolean) {
     recordingVersion,
     setRecordingVersion,
     canSwitchRecordingVersion,
+    callsVersion,
+    setCallsVersion,
   };
 }
 
