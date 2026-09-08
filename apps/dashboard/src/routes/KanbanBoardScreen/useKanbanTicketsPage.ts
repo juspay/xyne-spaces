@@ -485,9 +485,9 @@ export const useKanbanTicketsPage = (
   // membership correct immediately, before Vespa catches up.
   const [liveDirectRows] = useCachedQuery(
     queries.ticketsByIds({
-      ticketIds: shouldUseDirectVespaRows ? vespaTicketIds : [],
+      ticketIds: shouldUseDirectVespaRows ? (vespaTicketIds ?? []) : [],
     }),
-    { enabled: shouldUseDirectVespaRows && vespaTicketIds.length > 0 },
+    { enabled: shouldUseDirectVespaRows && (vespaTicketIds?.length ?? 0) > 0 },
   );
   const liveDirectRowsById = useMemo(() => {
     const byId = new Map<string, Ticket>();

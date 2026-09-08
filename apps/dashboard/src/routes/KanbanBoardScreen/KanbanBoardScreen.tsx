@@ -4996,7 +4996,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           availableTags={availableTags || []}
                           keyPrefix={`${group.key}::`}
                           onTicketsChange={handleKanbanTicketsChange}
-                          allKnownTickets={localTickets ?? []}
+                          allKnownTickets={group.allTickets}
                           {...(paginatedColumnConfig ? { paginatedColumnConfig } : {})}
                           {...(canCreateTicket &&
                           channel &&

@@ -275,6 +275,9 @@ const PaginatedStageList: React.FC<{
     // filter, the moved ticket is dropped from its old column above but the search
     // index has not yet returned it for the new column; without this loop the card
     // disappears from every column until Vespa reindexes.
+    // allKnownTickets is scoped to THIS swimlane's tickets (group.allTickets), so
+    // a ticket is only reconciled into its own group's column, never duplicated
+    // across swimlanes when a groupBy is active.
     for (const knownTicket of allKnownTickets) {
       if (renderedTicketsById.has(knownTicket.id)) continue;
       if (!ticketBelongsToColumn(knownTicket, columnType, columnValue, columnStatus)) continue;
