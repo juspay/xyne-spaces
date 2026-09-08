@@ -179,8 +179,13 @@ export class RulesStore {
     return value;
   }
 
-  /** Force a reload now (used by tests and the initial load). */
   async reload(force = true): Promise<void> {
+    while (this.running) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+    if (force) {
+      this.existence.clear();
+    }
     await this.tick(force);
   }
 
