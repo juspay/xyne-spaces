@@ -1,3 +1,10 @@
+## [1.289.2](https://github.com/juspay/xyne-spaces/compare/v1.289.1...v1.289.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* attach shortcut targets the focused composer, not the last-mounted one ([#1637](https://github.com/juspay/xyne-spaces/issues/1637)) ([5e1e8f9](https://github.com/juspay/xyne-spaces/commit/5e1e8f95e493ba81c55eebc756b57b74e23ce9d0))
+
 ## [1.289.1](https://github.com/juspay/xyne-spaces/compare/v1.289.0...v1.289.1) (2026-09-08)
 
 
