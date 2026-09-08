@@ -118,16 +118,44 @@ export class Fanout {
   removeClient(clientId: string, dataInstanceKey: string): void {
     const subs = this.#dataSubs.get(dataInstanceKey);
     if (!subs) return;
+    let departed: ClientSub | undefined;
     for (const s of subs)
       if (s.id === clientId) {
         // Clear admission so a concurrent data dispatch that already captured this client
         // in `liveBefore` skips it at the emit-time recheck — no stray delta for an
         // instance the client just released.
         s.admitted = false;
+        departed = s;
         subs.delete(s);
         this.#byUserDelete(s);
       }
-    if (subs.size === 0) this.#dataSubs.delete(dataInstanceKey);
+    if (!departed) return;
+    // Prune the grant fan-out map (P2 / standing finding #5 — the XREAD stream list otherwise grows
+    // for the process lifetime). Drop this data instance from each grant the departing client used,
+    // UNLESS a remaining client on the instance still uses that grant (per-scope grants are shared
+    // across a channel's clients; per-user grants are 1:1 with the client). A grant that then fans
+    // to nothing is dead → drop its cursor (stop tailing) + meta + hydration state.
+    for (const grantKey of departed.grantByTable.values()) {
+      let stillUsed = false;
+      for (const s of subs)
+        if ([...s.grantByTable.values()].includes(grantKey)) {
+          stillUsed = true;
+          break;
+        }
+      if (stillUsed) continue;
+      const set = this.#grantToData.get(grantKey);
+      set?.delete(dataInstanceKey);
+      if (set && set.size === 0) {
+        this.#grantToData.delete(grantKey);
+        this.#grantMeta.delete(grantKey);
+        this.#grantHydrated.delete(grantKey);
+        this.#cursors.delete(streamKey(grantKey)); // stop tailing the now-unreferenced grant stream
+      }
+    }
+    if (subs.size === 0) {
+      this.#dataSubs.delete(dataInstanceKey);
+      this.#cursors.delete(streamKey(dataInstanceKey)); // stop tailing the now-clientless data stream
+    }
   }
 
   #byUserAdd(client: ClientSub): void {
