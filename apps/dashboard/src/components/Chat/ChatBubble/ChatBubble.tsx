@@ -927,6 +927,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     channel?.type !== ChannelType.SUPPORT &&
     (context === 'channel' || context === 'thread');
 
+  const showSubscription =
+    (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
+    (!isMessageDeleted || context === 'channel') &&
+    (context === 'thread' || (!!replies?.onOpenThread && !isShowInChannel));
+
   const shouldEnableMobileThreadOpen =
     isMobile &&
     (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
@@ -1070,6 +1075,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         (!isMessageDeleted || context === 'channel') && {
           onReplyInThread: replies.onOpenThread,
         }),
+      showSubscription,
       ...(!isSystemMessage &&
         !isMessageDeleted && {
           onInitiateCall: handleInitiateCall,
@@ -1404,6 +1410,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     replies?.onOpenThread?.(e);
                   },
                 })}
+              showSubscription={showSubscription}
               {...(!isSystemMessage &&
                 !isMessageDeleted && {
                   onInitiateCall: handleInitiateCall,
