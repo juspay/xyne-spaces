@@ -136,7 +136,7 @@ export function validateGateAst(cond: Cond): void {
  * binds ONLY if EVERY arm binds on the SAME column (a non-binding arm would grant regardless of the
  * subscriber ⇒ not per-user); a nested correlatedSubquery's binding belongs to ITS table, not this.
  */
-function boundColumnOf(where: Cond | undefined): string | null {
+export function boundColumnOf(where: Cond | undefined): string | null {
   if (!where) return null;
   switch (where.type) {
     case 'simple':

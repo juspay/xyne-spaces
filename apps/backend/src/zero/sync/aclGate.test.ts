@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveAclGate, validateGateAst, type Cond, type SnapshotProvider } from './aclGate';
+import { deriveAclGate, validateGateAst, boundColumnOf, SENTINEL_USER, SENTINEL_WORKSPACE, type Cond, type SnapshotProvider } from './aclGate';
+
+const uEq = (col: string): Cond => ({ type: 'simple', left: { name: col }, op: '=', right: { value: SENTINEL_USER } });
+const lit = (col: string, value: unknown): Cond => ({ type: 'simple', left: { name: col }, op: '=', right: { value } });
 
 const snap =
   (tables: Record<string, Record<string, unknown>[]>): SnapshotProvider =>
@@ -171,4 +174,32 @@ test('message_attachments: the userId-binding leaf is PER-USER, structural hops 
   assert.equal(byTable.get('channel_participants')?.boundColumn, 'userId');
   assert.equal(byTable.get('channels')?.kind, 'per-scope');
   assert.equal(byTable.get('conversations')?.kind, 'per-scope', 'the conversation→channel hop is structural, not user-bound');
+});
+
+// ---- boundColumnOf: the conservative partition rules (real ACLs don't exercise all arms) ----
+
+test('boundColumnOf: simple ==/IS SENTINEL_USER binds; other simples do not', () => {
+  assert.equal(boundColumnOf(uEq('userId')), 'userId');
+  assert.equal(boundColumnOf({ type: 'simple', left: { name: 'userId' }, op: 'IS', right: { value: SENTINEL_USER } }), 'userId');
+  assert.equal(boundColumnOf(lit('visibility', 'PUBLIC')), null);
+  assert.equal(boundColumnOf(lit('workspaceId', SENTINEL_WORKSPACE)), null, 'workspace sentinel is not the user sentinel');
+  assert.equal(boundColumnOf({ type: 'simple', left: { name: 'userId' }, op: '!=', right: { value: SENTINEL_USER } }), null);
+});
+
+test('boundColumnOf: AND binds if ANY conjunct binds (extra conjuncts are row filters)', () => {
+  assert.equal(boundColumnOf({ type: 'and', conditions: [lit('workspaceId', SENTINEL_WORKSPACE), uEq('userId')] }), 'userId');
+});
+
+test('boundColumnOf: OR binds only if EVERY arm binds the SAME column', () => {
+  assert.equal(boundColumnOf({ type: 'or', conditions: [uEq('userId'), uEq('userId')] }), 'userId');
+  assert.equal(boundColumnOf({ type: 'or', conditions: [uEq('userId'), lit('visibility', 'PUBLIC')] }), null, 'a non-binding arm grants regardless ⇒ not per-user');
+  assert.equal(boundColumnOf({ type: 'or', conditions: [uEq('userId'), uEq('memberId')] }), null, 'different bound columns ⇒ not a single partition key');
+});
+
+test('boundColumnOf: a nested correlatedSubquery does not bind THIS table', () => {
+  const nested: Cond = {
+    type: 'correlatedSubquery', op: 'EXISTS',
+    related: { correlation: { parentField: ['id'], childField: ['channelId'] }, subquery: { table: 'channel_participants', where: uEq('userId') } },
+  };
+  assert.equal(boundColumnOf(nested), null);
 });
