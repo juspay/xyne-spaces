@@ -93,6 +93,31 @@ test('InstanceManager single-pod: unfenced materialize + teardown', { skip }, as
   mgr.stopAll();
 });
 
+test('InstanceManager: grant instances get the longer grant grace + warm reconnect', { skip }, async () => {
+  const created: Rec[] = [];
+  const mgr = new InstanceManager!('http://zero', {
+    multiPod: false,
+    graceMs: 20, // a DATA instance would tear down this fast
+    grantGraceMs: 10_000, // a per-user GRANT instance stays warm far longer
+    createConnection: fakeFactory(created),
+  });
+  const gArgs: readonly unknown[] = [{ userId: 'grace-' + Math.random() }];
+  const gik = mgr.subscribe('__grant__channel_participants', gArgs, 'sub1');
+  assert.equal(typeof gik, 'string');
+  assert.equal(mgr.activeInstances(), 1);
+
+  mgr.unsubscribe(gik!, 'sub1');
+  await sleep(80); // well past graceMs(20), well within grantGraceMs(10s)
+  assert.equal(mgr.activeInstances(), 1, 'grant instance kept warm past the data grace');
+  assert.equal(created[0].stopped, 0, 'grant connection not stopped during grace');
+
+  // A reconnect within the window reuses the WARM instance — same key, no new connection.
+  const again = mgr.subscribe('__grant__channel_participants', gArgs, 'sub2');
+  assert.equal(again, gik, 'reconnect reuses the same warm grant instance');
+  assert.equal(created.length, 1, 'no cold re-materialize');
+  mgr.stopAll();
+});
+
 test('InstanceManager multi-pod: acquire → fenced materialize → interest, teardown releases', { skip }, async () => {
   const own = ownership!;
   const client = redisService!.getClient();

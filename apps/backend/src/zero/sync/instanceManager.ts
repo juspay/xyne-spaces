@@ -13,6 +13,13 @@ import { obsEmit } from './obs';
 
 const QUERY_TTL_MS = 60_000;
 const IDLE_GRACE_MS = 30_000;
+/** Grant instances are PER-USER — refcount hits 0 the instant U disconnects (only U references
+ *  them), unlike shared per-channel data instances. A longer grace keeps U's grants WARM across
+ *  reconnects (tab reloads, network blips) and, critically, across a reconnect STORM (mass CVR
+ *  wipe / redeploy), so the fleet doesn't re-hydrate every user's grants from cold at once
+ *  (ratification finding #2). Small + cheap to hold; the window just trades a little idle memory
+ *  for storm resilience. */
+const GRANT_IDLE_GRACE_MS = 300_000;
 /** Owner heartbeat: refresh owned group leases + re-stamp interest well inside their TTLs
  *  (LEASE_TTL_MS 10s, INTEREST_TTL_MS 15s). Also re-acquires a lost-but-still-wanted group. */
 const HEARTBEAT_MS = 2_000;
@@ -55,6 +62,7 @@ export interface InstanceManagerDeps {
   multiPod?: boolean;
   assertRedisSafe?: () => Promise<void>;
   graceMs?: number;
+  grantGraceMs?: number;
   heartbeatMs?: number;
 }
 
@@ -78,6 +86,8 @@ interface Instance {
   args: readonly unknown[];
   subscribers: Set<string>;
   idleTimer: NodeJS.Timeout | null;
+  /** Grant instances get a longer idle grace (kept warm across reconnects) — see GRANT_IDLE_GRACE_MS. */
+  isGrant: boolean;
 }
 
 /**
@@ -110,6 +120,7 @@ export class InstanceManager {
   #stopped = false;
   #heartbeat: NodeJS.Timeout | null = null;
   readonly #graceMs: number;
+  readonly #grantGraceMs: number;
   readonly #heartbeatMs: number;
   /** Resolves once the Redis-safety assertion has passed — no lease is acquired before then. */
   readonly #ready: Promise<void>;
@@ -120,6 +131,7 @@ export class InstanceManager {
     this.#createConnection = deps.createConnection ?? ((opts) => new PackConnection(opts));
     this.#multiPod = deps.multiPod ?? config.enableSyncEngineMultiPod;
     this.#graceMs = deps.graceMs ?? IDLE_GRACE_MS;
+    this.#grantGraceMs = deps.grantGraceMs ?? GRANT_IDLE_GRACE_MS;
     this.#heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
 
     if (this.#multiPod) {
@@ -166,7 +178,7 @@ export class InstanceManager {
 
     let instance = this.#instances.get(instanceKey);
     if (!instance) {
-      instance = { groupKey: clientGroupID, partitionValue, args: queryArgs, subscribers: new Set(), idleTimer: null };
+      instance = { groupKey: clientGroupID, partitionValue, args: queryArgs, subscribers: new Set(), idleTimer: null, isGrant: isGrantQuery(queryName) };
       this.#instances.set(instanceKey, instance);
       group.members.add(instanceKey);
       obsEmit('tap', {
@@ -272,7 +284,10 @@ export class InstanceManager {
     if (!instance) return;
     instance.subscribers.delete(subscriberId);
     if (instance.subscribers.size === 0 && !instance.idleTimer) {
-      instance.idleTimer = setTimeout(() => void this.#teardownInstance(instanceKey), this.#graceMs);
+      // Per-user grant instances stay warm longer than shared data instances (finding #2): a
+      // reconnect within the window reuses the hydrated grant instead of a cold re-materialize.
+      const grace = instance.isGrant ? this.#grantGraceMs : this.#graceMs;
+      instance.idleTimer = setTimeout(() => void this.#teardownInstance(instanceKey), grace);
     }
   }
 
