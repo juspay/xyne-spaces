@@ -14,3 +14,7 @@ type CallTypeCarrier = { callType?: CallType | string | null };
 export function isRecording(call: CallTypeCarrier | null | undefined): boolean {
   return call?.callType === CallType.HEADLESS;
 }
+
+export function callSubject(call: CallTypeCarrier | null | undefined): 'recording' | 'call' {
+  return isRecording(call) ? 'recording' : 'call';
+}

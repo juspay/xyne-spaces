@@ -96,6 +96,7 @@ import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUt
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
@@ -196,14 +197,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const sender = useUser(message.senderId);
 
   // Message shortcuts — fetched per channel, used by HoverActionsToolbar
-  const [messageShortcuts, setMessageShortcuts] = useState<AppShortcutWithApp[]>([]);
+  const messageShortcuts = useChannelShortcuts(channelId, 'MESSAGE');
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  useEffect(() => {
-    appsService
-      .getChannelShortcuts(channelId, { type: 'MESSAGE' })
-      .then(setMessageShortcuts)
-      .catch(() => undefined);
-  }, [channelId]);
 
   const messageConversationId = message.conversationId;
 
@@ -275,8 +270,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const metadata = message?.metadata as Record<string, unknown> | null;
 
-  // Recording anchors use recording-specific actions.
-  const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+  // Shared recording and call anchors both use entity-specific actions.
+  const isSharedEntityMessage =
+    metadata?.['isRecordingMessage'] === true || metadata?.['isCallShareMessage'] === true;
 
   // Both internal and external link previews are stored in link_preview_md.
   // Memoized: ChatBubble re-renders on every hover, and parsing per render
@@ -834,8 +830,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
   // but do not open this message in the generic editor, which would discard that wrapper.
   const canEditMessage =
-    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isRecordingMessage;
-  const canDeleteMessage = canModifyMessage && !hasTicket && !isRecordingMessage;
+    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isSharedEntityMessage;
+  const canDeleteMessage = canModifyMessage && !hasTicket && !isSharedEntityMessage;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -930,6 +926,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     !isDeskChannelType(channel?.type) &&
     channel?.type !== ChannelType.SUPPORT &&
     (context === 'channel' || context === 'thread');
+
+  const showSubscription =
+    (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
+    (!isMessageDeleted || context === 'channel') &&
+    (context === 'thread' || (!!replies?.onOpenThread && !isShowInChannel));
 
   const shouldEnableMobileThreadOpen =
     isMobile &&
@@ -1063,7 +1064,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }),
       ...(!isMessageDeleted &&
         (isCallMessage || !isSystemMessage) &&
-        !isRecordingMessage && { onForwardMessage: handleForwardMessage }),
+        !isSharedEntityMessage && { onForwardMessage: handleForwardMessage }),
       isPinned: conversation?.pinned || false,
       ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
       ...(canEditMessage && { onEditMessage: handleEditMessage }),
@@ -1074,6 +1075,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         (!isMessageDeleted || context === 'channel') && {
           onReplyInThread: replies.onOpenThread,
         }),
+      showSubscription,
       ...(!isSystemMessage &&
         !isMessageDeleted && {
           onInitiateCall: handleInitiateCall,
@@ -1390,7 +1392,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isMessageDeleted && { onRemindMe: handleOpenReminderOptions })}
               {...(!isMessageDeleted &&
                 (isCallMessage || !isSystemMessage) &&
-                !isRecordingMessage && { onForwardMessage: handleForwardMessage })}
+                !isSharedEntityMessage && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && { onEditMessage: handleEditMessage })}
@@ -1408,6 +1410,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     replies?.onOpenThread?.(e);
                   },
                 })}
+              showSubscription={showSubscription}
               {...(!isSystemMessage &&
                 !isMessageDeleted && {
                   onInitiateCall: handleInitiateCall,

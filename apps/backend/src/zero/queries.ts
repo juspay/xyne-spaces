@@ -1356,6 +1356,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
@@ -1368,7 +1369,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -1399,6 +1400,10 @@ export const queries: AnyQueryRegistry = defineQueries({
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
         );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       if (userGroups && userGroups.length > 0) {
@@ -1747,6 +1752,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
@@ -1762,7 +1768,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1790,6 +1796,10 @@ export const queries: AnyQueryRegistry = defineQueries({
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
         );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) => exists('subTicketMappings'));
       }
 
       // Mailbox folder server-side filtering. Spam and Starred REQUIRE an overlay row, so they
@@ -2793,6 +2803,24 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
+  /**
+   * A single non-HEADLESS call (+ its shares) by row id — what the detail route
+   * carries. Used both to resolve a call reached by link, with no navigation state
+   * to read it from, and to list who a call is shared with.
+   */
+  callById: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('id', callId)
+        .related('participants', p => p.where('userId', ctx.userID))
+        .related('shares', shares =>
+          shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+        )
+        .one(),
+  ),
+
   // Fetches the HEADLESS recording (+ shares) by its public
   // externalId (what's in the URL / RecordingDetail.externalId) — used by
   // the Share modal and the detail screen alike.
@@ -2897,7 +2925,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       .orderBy('updatedAt', 'desc')
       .related('message', (m) => m.related('conversation').related('attachments'))
       .related('reaction')
-      .related('canvas')
+      .related('canvas', (c) => c.related('sdlcArtifact'))
       .related('call')
       .related('ticket');
   }),
@@ -3007,7 +3035,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .limit(limit)
         .related('message', (m) => m.related('conversation').related('attachments'))
         .related('reaction')
-        .related('canvas')
+        .related('canvas', (c) => c.related('sdlcArtifact'))
         .related('call')
         .related('ticket');
     }
@@ -3194,10 +3222,16 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({ projectId: z.string(), boardType: z.nativeEnum(BoardType).optional() }),
     ({ args: { projectId, boardType } }) => {
       return zql.stages
-        .whereExists('board', (b) => {
-          const scoped = b.where('projectId', projectId);
-          return boardType ? scoped.where('boardType', boardType) : scoped;
-        })
+        .whereExists(
+          'board',
+          (b) => {
+            const scoped = b.where('projectId', projectId);
+            return boardType ? scoped.where('boardType', boardType) : scoped;
+          },
+          // boards-per-project is the selective side; without the flip the
+          // pipeline walks every stage in the workspace probing boards
+          { flip: true },
+        )
         .orderBy('boardId', 'asc')
         .orderBy('sequenceNumber', 'asc');
     },
@@ -4464,7 +4498,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .limit(limit)
         .related('message', message => message.related('conversation').related('attachments'))
         .related('reaction')
-        .related('canvas')
+        .related('canvas', c => c.related('sdlcArtifact'))
         .related('call')
         .related('ticket');
     },

@@ -477,6 +477,158 @@ export class TicketService {
   }
 
   /**
+   * Bulk add/remove tags across many tickets using ADDITIVE semantics
+   * (NOT replace): only the names in `addTags` / `removeTags` are touched and
+   * every other label on each ticket is preserved. Built for operations like
+   * relabelling a whole sprint (e.g. remove "Sprint June W2", add
+   * "Sprint Aug W2") without having to read and rewrite each ticket's full
+   * label set.
+   *
+   * Each ticket is applied in its OWN transaction so one bad ticket cannot
+   * roll back the rest (partial success is expected and reported).
+   *
+   * SECURITY: the caller passes a trusted `workspaceId` derived from the
+   * authenticated session — NEVER from the request body. Any ticketId that
+   * does not exist or does not belong to that workspace is skipped and
+   * returned in `skipped`, so this can never become a cross-workspace write.
+   */
+  async bulkUpdateTicketTags(
+    ticketIds: string[],
+    ops: { addTags?: string[]; removeTags?: string[] },
+    workspaceId: string,
+    updatedBy: string,
+  ): Promise<{
+    updated: Array<{ ticketId: string; added: string[]; removed: string[] }>;
+    unchanged: string[];
+    skipped: string[];
+    totalAdded: number;
+    totalRemoved: number;
+  }> {
+    const norm = (xs?: string[]) =>
+      Array.from(new Set((xs ?? []).map(t => t.trim()).filter(Boolean)));
+    const addNames = norm(ops.addTags);
+    // A tag requested in BOTH add and remove is kept (add wins) so we never
+    // delete-then-reinsert the same label in a single operation.
+    const removeNames = norm(ops.removeTags).filter(n => !addNames.includes(n));
+
+    if (addNames.length === 0 && removeNames.length === 0) {
+      throw new Error('bulkUpdateTicketTags: at least one of addTags or removeTags must be non-empty');
+    }
+
+    const uniqueIds = Array.from(
+      new Set(ticketIds.map(id => id.trim()).filter(Boolean)),
+    );
+
+    // Workspace-scoped authorization. Only tickets that BOTH exist AND belong
+    // to the caller's workspace are eligible; everything else is skipped.
+    const allowed = await prisma.ticket.findMany({
+      where: { id: { in: uniqueIds }, workspaceId },
+      select: { id: true },
+    });
+    const allowedIds = new Set(allowed.map(t => t.id));
+    const skipped = uniqueIds.filter(id => !allowedIds.has(id));
+
+    const updated: Array<{ ticketId: string; added: string[]; removed: string[] }> = [];
+    const unchanged: string[] = [];
+    let totalAdded = 0;
+    let totalRemoved = 0;
+
+    for (const ticketId of allowedIds) {
+      const existing = await prisma.ticketTag.findMany({
+        where: { ticketId },
+        select: { name: true },
+      });
+      const existingNames = new Set(existing.map(t => t.name));
+
+      const toAdd = addNames.filter(n => !existingNames.has(n));
+      const toRemove = removeNames.filter(n => existingNames.has(n));
+
+      if (toAdd.length === 0 && toRemove.length === 0) {
+        unchanged.push(ticketId);
+        continue;
+      }
+
+      try {
+        await prisma.$transaction(async tx => {
+          if (toRemove.length > 0) {
+            await tx.ticketTag.deleteMany({
+              where: { ticketId, name: { in: toRemove } },
+            });
+            for (const name of toRemove) {
+              await dualDeleteTicketTag(ticketId, name, tx);
+            }
+          }
+          if (toAdd.length > 0) {
+            await tx.ticketTag.createMany({
+              data: toAdd.map(name => ({ name, ticketId, workspaceId })),
+            });
+            await dualWriteTicketTags(ticketId, toAdd, tx);
+          }
+        });
+      } catch (error) {
+        logger.error(
+          `[TicketService] bulkUpdateTicketTags failed for ticket ${ticketId}:`,
+          error,
+        );
+        skipped.push(ticketId);
+        continue;
+      }
+
+      // Best-effort audit rows — the tag write above is already committed, so
+      // an audit failure must not fail the operation.
+      try {
+        const activityValues: Prisma.InputJsonValue[] = [
+          ...toAdd.map(name => ({ action: 'added', newValue: name })),
+          ...toRemove.map(name => ({ action: 'removed', oldValue: name })),
+        ];
+        if (activityValues.length > 0) {
+          await prisma.ticketActivity.createMany({
+            data: activityValues.map(value => ({
+              ticketId,
+              updatedBy,
+              workspaceId,
+              activityType: ActivityType.TAGS,
+              value,
+            })),
+          });
+        }
+      } catch (error) {
+        logger.error(
+          `[TicketService] bulkUpdateTicketTags audit write failed for ticket ${ticketId}:`,
+          error,
+        );
+      }
+
+      // Reindex the ticket in Vespa so search reflects the new labels.
+      await vespaQueue
+        .addJob({
+          schema: ticketSchema,
+          jobType: 'feed',
+          docId: ticketId,
+          userId: updatedBy,
+          workspaceId,
+        })
+        .catch(error => {
+          logger.error('[TicketService] bulkUpdateTicketTags Vespa feed enqueue failed:', {
+            ticketId,
+            error,
+          });
+        });
+
+      updated.push({ ticketId, added: toAdd, removed: toRemove });
+      totalAdded += toAdd.length;
+      totalRemoved += toRemove.length;
+    }
+
+    const safeWorkspaceId = workspaceId.replace(/[\r\n]/g, '');
+    logger.info(
+      `[TicketService] bulkUpdateTicketTags workspace=${safeWorkspaceId} requested=${uniqueIds.length} updated=${updated.length} unchanged=${unchanged.length} skipped=${skipped.length} +${totalAdded} -${totalRemoved}`,
+    );
+
+    return { updated, unchanged, skipped, totalAdded, totalRemoved };
+  }
+
+  /**
    * Fetch and download all image attachments for a ticket
    * Converts them to Base64 format for use in vision-enabled AI workflows
    */

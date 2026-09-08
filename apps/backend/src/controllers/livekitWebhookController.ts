@@ -259,6 +259,10 @@ class LiveKitWebhookController {
       numParticipants: event.room?.numParticipants,
     });
 
+    // Tear down this room's redispatch retry chain — without this it survives the call it
+    // exists for, sleeping up to 10 minutes before rediscovering the room is already gone.
+    livekitService.cancelRedispatchWatch(callId);
+
     try {
       const now = new Date();
 
@@ -351,9 +355,19 @@ class LiveKitWebhookController {
       name: participant?.name,
     });
 
-    // Skip agent participants
+    // Skip agent participants — but record that this call's dispatched agent actually
+    // joined, so dispatchStatus reflects reality (and the ~9s unclaimed-job check
+    // doesn't fire a needless redispatch for a dispatch that in fact succeeded).
     if (participant.identity.startsWith('agent-')) {
       logger.info(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      const existingCall = await repositories.calls.findByExternalId(roomName).catch(() => null);
+      if (existingCall) {
+        await repositories.calls.update(existingCall.id, {
+          metadata: { ...(existingCall.metadata as Record<string, unknown> ?? {}), dispatchStatus: 'joined' },
+        }).catch((error) => {
+          logger.warn(`[LiveKit Webhook] dispatch_status_update_failed | room=${roomName}, error=${error}`);
+        });
+      }
       return;
     }
 
@@ -393,6 +407,7 @@ class LiveKitWebhookController {
         const existingConversationId = roomMetadata.conversationId;
         const artifactMessageId = roomMetadata.artifactMessageId;
         const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
+        const agentName = typeof roomMetadata.agentName === 'string' ? roomMetadata.agentName : undefined;
 
         if (!channelId) {
           logger.error(`[LiveKit Webhook] Missing channelId in room metadata for ${roomName}`);
@@ -480,6 +495,8 @@ class LiveKitWebhookController {
           now,
           callOrigin,
           ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
+          agentName,
+          dispatchStatus: agentName ? 'dispatched' : undefined,
         }).catch((txError) => {
           logger.error('[LiveKit Webhook] call_record_creation_failed', {
             stage: 'call_record_creation',
@@ -714,9 +731,24 @@ class LiveKitWebhookController {
       name: participant?.name,
     });
 
-    // Skip agent participants early
+    // Skip agent participants early — but trigger recovery: the agent leaving mid-call
+    // needs a redispatch to the SAME pinned agent, not a silent skip. This is what keeps
+    // a call transcribed through a worker crash once explicit dispatch has replaced the
+    // ambient automatic-dispatch pool.
     if (participant.identity.startsWith('agent-')) {
       logger.info(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      const leftCall = await repositories.calls.findByExternalId(callId).catch(() => null);
+      const pinnedAgentName = (leftCall?.metadata as { agentName?: string } | null)?.agentName;
+      if (pinnedAgentName) {
+        livekitService.ensureTranscriptionAgent(callId, pinnedAgentName, {
+          excludeIdentity: participant.identity,
+          reason: 'participant_left',
+        }).catch((error) => {
+          logger.error(`[LiveKit Webhook] ensure_transcription_agent_failed | room=${callId}, error=${error}`);
+        });
+      } else {
+        logger.warn(`[LiveKit Webhook] agent_left_no_pinned_agent_name | room=${callId}, cannot_redispatch`);
+      }
       return;
     }
 

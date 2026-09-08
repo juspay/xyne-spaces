@@ -35,6 +35,13 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'canvas_comment_threads'>>, tx: Transaction<Schema>): Promise<void> {
+    if (args.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError(
+        'Canvas comment thread insert failed: workspace mismatch',
+        'canvas_comment_threads',
+      );
+    }
+
     if (!(await this.canEditCanvas(args.canvasId, tx))) {
       throw new MutationACLError('Canvas comment thread insert failed: edit access required', 'canvas_comment_threads');
     }

@@ -13,12 +13,18 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useUsers } from '../../../hooks/useUsers';
 import { IncomingCallCard } from '../IncomingCall/IncomingCallCard';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { buildCallNotificationBody } from '../IncomingCall/callNotificationBody';
 import {
   buildIncomingCallViewModel,
+  getRingSilenceReason,
   isRingableCall,
   type IncomingCallRow,
+  type RingSilenceReason,
 } from '../IncomingCall/IncomingCallCard.utils';
 import type { IncomingCallViewModel } from '../IncomingCall/IncomingCallCard.types';
+import { useRecordingStore } from '../../../hooks/useRecordingStore';
+import { useExternalMeeting, useMicBusy } from '../../../stores/externalMeetingStore';
+import { logger, Event } from '../../../utils/logger';
 
 type CallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -33,6 +39,7 @@ export function IncomingCallModal(): React.ReactElement | null {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastViewModelRef = useRef<IncomingCallViewModel | null>(null);
+  const silenceRef = useRef<{ callId: string; reason: RingSilenceReason | null } | null>(null);
 
   // Get active calls from roomActor context and filter for incoming calls (where user is invited)
   const allActiveCalls = useSelector(roomActor, state => state.context.activeCalls);
@@ -55,6 +62,11 @@ export function IncomingCallModal(): React.ReactElement | null {
   // Only allow incoming call notifications in stable states (idle or connected)
   const canShowIncomingCalls =
     roomState === 'idle' || (typeof roomState === 'object' && 'connected' in roomState);
+
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const micBusy = useMicBusy();
+  // Not part of the decision — only the telemetry below, as attribution.
+  const externalMeeting = useExternalMeeting();
 
   const allChannels = useAllChannels();
   const channelMap = useMemo(() => {
@@ -175,9 +187,44 @@ export function IncomingCallModal(): React.ReactElement | null {
   // Get the first call in the queue (active incoming call)
   const incomingCallData = incomingCallQueue[0];
 
+  // Whether the user is busy enough that this call should arrive quietly. The
+  // mic half is Electron/macOS only; on web it is always false and the other two
+  // carry the feature on their own.
+  const liveSilenceReason = getRingSilenceReason({
+    isInActiveCall,
+    recordingStatus,
+    micBusy,
+  });
+
+  // Decided once per call and then held. Recomputing live would mean hanging up
+  // on your first call sends the second one into a full-volume ringtone
+  // mid-ring — the loudest possible moment for a surprise — and would re-fire
+  // the notification effect below, stacking a second OS banner. Same
+  // write-during-render shape as lastViewModelRef further down.
+  if (!incomingCallData) {
+    // Released once nothing is ringing, so a callId that somehow comes back
+    // around is decided afresh rather than inheriting an old answer.
+    silenceRef.current = null;
+  } else if (silenceRef.current?.callId !== incomingCallData.callId) {
+    silenceRef.current = { callId: incomingCallData.callId, reason: liveSilenceReason };
+    if (liveSilenceReason) {
+      logger.info(Event.LIVEKIT_ROOM_EVENT, {
+        callId: incomingCallData.callId,
+        eventName: 'incoming_call_silenced',
+        reason: liveSilenceReason,
+        // The mic tells us the user is busy but not with what. Null here means
+        // no meeting app was identified — a Zoom call detection missed, or the
+        // mic held by something that was never a meeting at all. It is the only
+        // way to see the false-positive rate from the outside.
+        externalMeetingApp: externalMeeting?.app ?? null,
+      });
+    }
+  }
+  const silenceReason = incomingCallData ? (silenceRef.current?.reason ?? null) : null;
+
   // Play notification sound when incoming call appears
   useEffect(() => {
-    const shouldPlay = isRinging && incomingCallData;
+    const shouldPlay = isRinging && incomingCallData && !silenceReason;
 
     if (shouldPlay && audioRef.current) {
       audioRef.current.currentTime = 0;
@@ -188,7 +235,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-  }, [isRinging, incomingCallData]);
+  }, [isRinging, incomingCallData, silenceReason]);
 
   const handleAcceptCall = useCallback(
     (callIdToAccept?: string): void => {
@@ -245,12 +292,51 @@ export function IncomingCallModal(): React.ReactElement | null {
     [zero, incomingCallData?.callId],
   );
 
-  // Show native Electron notification when app is in background
+  // Derive the OS-notification body from the same view model the modal renders,
+  // so it says the same thing the in-app card would: scheduled calls name the
+  // place, everything else reads as `<inviter> is inviting you to a call`.
+  // Memoized so the notification effect below only re-runs when the *text*
+  // actually changes -- not on every workspace-wide Zero sync that touches
+  // allActiveCalls / channelMap / usersById while a call is ringing.
+  const notificationBody = useMemo((): string | null => {
+    if (!incomingCallData) {
+      return null;
+    }
+    const latestCallData = allActiveCalls?.find(
+      call => call.externalId === incomingCallData.callId,
+    ) as CallWithRelations | undefined;
+    const vm = buildIncomingCallViewModel({
+      callId: incomingCallData.callId,
+      call: latestCallData as unknown as IncomingCallRow | undefined,
+      caller: incomingCallData.caller,
+      channelMap,
+      usersById,
+      currentUserId: user?.id,
+      isInActiveCall,
+      isSilenced: silenceReason !== null,
+    });
+    return buildCallNotificationBody(vm, incomingCallData.caller.name);
+  }, [
+    incomingCallData,
+    allActiveCalls,
+    channelMap,
+    usersById,
+    user?.id,
+    isInActiveCall,
+    silenceReason,
+  ]);
+
+  // Show native Electron notification when app is in background. Keyed on the
+  // ring state, the (reference-stable) incoming call, and the derived body, so
+  // the notification fires once per call and re-shows only when the body
+  // actually changes -- instead of being torn down and recreated (replaying the
+  // ring sound / dock bounce) on every unrelated participant/user/channel sync.
   useEffect(() => {
     if (
       !window.electronAPI ||
       !isRinging ||
       !incomingCallData ||
+      notificationBody === null ||
       typeof window.electronAPI.showCallNotification !== 'function'
     ) {
       return;
@@ -261,6 +347,10 @@ export function IncomingCallModal(): React.ReactElement | null {
       callerName: incomingCallData.caller.name,
       callerEmail: incomingCallData.caller.email,
       callType: incomingCallData.callType,
+      body: notificationBody,
+      // Muting the ringtone alone leaves the OS chime, which is the louder half
+      // when the app is in the background — exactly the busy case.
+      silent: silenceReason !== null,
       ...(incomingCallData.caller.picture && { callerPicture: incomingCallData.caller.picture }),
     });
 
@@ -269,7 +359,7 @@ export function IncomingCallModal(): React.ReactElement | null {
         window.electronAPI.closeCallNotification(incomingCallData.callId);
       }
     };
-  }, [isRinging, incomingCallData]);
+  }, [isRinging, incomingCallData, notificationBody, silenceReason]);
 
   // Handle Electron notification action callbacks (accept/reject from notification)
   useEffect(() => {
@@ -324,6 +414,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       usersById,
       currentUserId: user?.id,
       isInActiveCall,
+      isSilenced: silenceReason !== null,
     });
 
     // Two things happen in the beat between the caller hanging up and this

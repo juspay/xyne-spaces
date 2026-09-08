@@ -18,6 +18,22 @@ export class GoogleCalendarPatchConflictError extends Error {
   }
 }
 
+/**
+ * Thrown when the event no longer exists on Google (404) or was already
+ * deleted (410). Callers that mirror a Xyne row onto Calendar treat this as
+ * "the remote copy is gone" and either re-create it or drop their stored
+ * event id, rather than failing the job forever.
+ */
+export class GoogleCalendarEventGoneError extends Error {
+  constructor(eventId: string) {
+    super(`Google Calendar event ${eventId} no longer exists`);
+    this.name = 'GoogleCalendarEventGoneError';
+  }
+}
+
+/** Who Google emails when a write changes an event. */
+export type GoogleSendUpdates = 'all' | 'externalOnly' | 'none';
+
 export async function getGoogleEventById(accessToken: string, eventId: string): Promise<GCalEvent> {
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
@@ -38,20 +54,24 @@ export async function getGoogleEventById(accessToken: string, eventId: string): 
 /**
  * PATCH a single Google Calendar event owned by the connected (organizer)
  * user. Used by the Xyne Call Link Auto-Injection reconciler to replace/inject
- * the conference entry and description block. Callers own retry-on-conflict
+ * the conference entry and description block, and by the outbound push to
+ * update an event Xyne itself created. Callers own retry-on-conflict
  * decisions; this function only performs the network call and surfaces a
  * typed error for 412 so callers can distinguish "stale etag, re-evaluate
  * once" from other failures.
+ *
+ * `sendUpdates` defaults to 'none': the reconciler is a background pass, not
+ * an organizer-authored change, so it must not email attendees. The outbound
+ * push passes 'all' because there the edit *is* the organizer's own.
  */
 export async function patchGoogleEvent(
   accessToken: string,
   eventId: string,
   body: Record<string, unknown>,
-  options?: { conferenceDataVersion?: boolean; etag?: string }
+  options?: { conferenceDataVersion?: boolean; etag?: string; sendUpdates?: GoogleSendUpdates }
 ): Promise<GCalEvent> {
-  // This is a background reconciliation, not an organizer-authored update.
-  // Suppress attendee emails; webhook delivery is unaffected by sendUpdates.
-  const params = new URLSearchParams({ sendUpdates: 'none' });
+  // Webhook delivery is unaffected by sendUpdates.
+  const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'none' });
   if (options?.conferenceDataVersion) {
     params.set('conferenceDataVersion', '1');
   }
@@ -78,12 +98,77 @@ export async function patchGoogleEvent(
     throw new GoogleCalendarPatchConflictError(eventId);
   }
 
+  if (res.status === 404 || res.status === 410) {
+    throw new GoogleCalendarEventGoneError(eventId);
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Google Calendar API ${res.status}: ${text}`);
   }
 
   return (await res.json()) as GCalEvent;
+}
+
+/**
+ * Create a Google Calendar event on the connected user's primary calendar.
+ * Used by the outbound push so a call scheduled inside Xyne shows up on the
+ * organizer's calendar — and, via `attendees` + `sendUpdates: 'all'`, on every
+ * invitee's calendar, including people who never connected Xyne.
+ */
+export async function insertGoogleEvent(
+  accessToken: string,
+  body: Record<string, unknown>,
+  options?: { sendUpdates?: GoogleSendUpdates }
+): Promise<GCalEvent> {
+  const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'all' });
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google Calendar API ${res.status}: ${text}`);
+  }
+
+  return (await res.json()) as GCalEvent;
+}
+
+/**
+ * Delete an event from the connected user's primary calendar. A 404/410 means
+ * someone already removed it, which is the state the caller wanted, so it
+ * resolves instead of throwing.
+ */
+export async function deleteGoogleEvent(
+  accessToken: string,
+  eventId: string,
+  options?: { sendUpdates?: GoogleSendUpdates }
+): Promise<void> {
+  const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'all' });
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}?${params.toString()}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+
+  if (res.ok || res.status === 404 || res.status === 410) return;
+
+  const text = await res.text();
+  throw new Error(`Google Calendar API ${res.status}: ${text}`);
 }
 
 interface CalendarFetchResult<TEvent> {

@@ -9,14 +9,22 @@ import { AutoDraftAgentChatPanel } from '../AutoDraftAgentChatPanel';
 import { PriorityClassificationConfigPanel } from '../PriorityClassificationConfig';
 import { TagGenerationConfig } from '../TagGenerationConfig';
 import { useClawAgentDetail } from '../../../../hooks/useClawAgentDetail';
+import type { ChannelClawAgent } from '../../../../hooks/useChannelClawAgents';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { apiInstance } from '../../../../services/clients/apiClient';
-import { Button } from '../../../ui/Button/Button';
+
 import KnowledgeTab from '../../../../routes/ClawAgentsScreen/tabs/KnowledgeTab';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import type { AIFeaturesSubTabId } from '../DeskSettings';
 
 type DeskSettingsForm = ReturnType<typeof useDeskSettingsForm>;
+
+/** "Add agent" can pick a non-participant agent — merge it in so the picker can match it. */
+const withSelectedAgent = (
+  agents: ChannelClawAgent[],
+  selected: ChannelClawAgent | undefined,
+): ChannelClawAgent[] =>
+  selected && !agents.some(a => a.slug === selected.slug) ? [...agents, selected] : agents;
 
 interface AIFeaturesTabProps {
   channelId: string;
@@ -86,6 +94,11 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
   const knowledgeAgentSlug = autoAIDraft ? (autoDraftAgentSlug ?? undefined) : undefined;
   const { data: knowledgeAgent, isError: isKnowledgeAgentError } =
     useClawAgentDetail(knowledgeAgentSlug);
+  // Shares the Knowledge lookup's query key, so this resolves from cache, not a refetch.
+  const { data: draftAgent } = useClawAgentDetail(autoDraftAgentSlug ?? undefined);
+  const { data: deskReportAgent } = useClawAgentDetail(deskReportAgentSlug ?? undefined);
+  const draftAgents = withSelectedAgent(clawAgents, draftAgent);
+  const reportAgents = withSelectedAgent(clawAgents, deskReportAgent);
 
   if (aiFeatureConfig === 'priority') {
     return (
@@ -169,7 +182,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
                 compact
                 value={autoDraftAgentSlug}
                 onChange={setAutoDraftAgentSlug}
-                clawAgents={clawAgents}
+                clawAgents={draftAgents}
                 disabled={!canManage}
               />
             )}
@@ -186,7 +199,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
           <AutoDraftAgentChatPanel
             channelId={channelId}
             autoDraftAgentSlug={autoDraftAgentSlug}
-            clawAgents={clawAgents}
+            clawAgents={draftAgents}
           />
         )}
       </div>
@@ -231,7 +244,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
                 compact
                 value={deskReportAgentSlug}
                 onChange={setDeskReportAgentSlug}
-                clawAgents={clawAgents}
+                clawAgents={reportAgents}
                 disabled={!canManage}
                 defaultLabel='Report Generator'
                 emptyStateHelperText='Uses the built-in Report Generator agent. Add a Claw agent to this channel to use a different one instead.'
@@ -666,10 +679,9 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
 
       <MaybeTooltip side='bottom'>
         <span className='inline-flex self-start'>
-          <Button
+          <button
             type='button'
-            variant='ghost'
-            trackId='run_ai_sync'
+            data-ph-capture-attribute-track-id='run_ai_sync'
             className='inline-flex h-auto items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
             onClick={() => {
               void handleRunSync();
@@ -680,7 +692,7 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
           >
             {syncLoading ? <Loader2 size={14} className='animate-spin' /> : <Sparkles size={14} />}
             {inCooldown ? 'AI Sync ran recently — wait a few minutes' : 'Run AI Sync'}
-          </Button>
+          </button>
         </span>
       </MaybeTooltip>
     </div>

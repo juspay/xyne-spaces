@@ -65,12 +65,10 @@ export class SendEmailToUserStep extends BaseActionStep<
       const trigger = context.trigger as { channel?: { id?: string } };
       const channelId = trigger.channel?.id;
       if (channelId) {
-        const channelSource = await this.externalSourceRepo.findByChannelId(channelId);
-        if (
-          channelSource &&
-          channelSource.workspaceId === workspaceId &&
-          ['google', 'microsoft'].includes(channelSource.sourceType)
-        ) {
+        const channelSource = await this.externalSourceRepo.findChannelSource(channelId, {
+          sourceTypes: ['google', 'microsoft'],
+        });
+        if (channelSource && channelSource.workspaceId === workspaceId) {
           externalSource = channelSource;
         }
       }

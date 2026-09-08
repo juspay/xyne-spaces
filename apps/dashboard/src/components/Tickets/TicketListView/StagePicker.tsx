@@ -18,7 +18,6 @@ import { getReachableStageIds, findMatchingTransition } from '../../../utils/sta
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import type { StageVisitEta } from '../StageFormFields/useStageForm';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
-import { Button } from '../../ui/Button/Button';
 
 interface StagePickerProps {
   ticketId: string;
@@ -663,11 +662,10 @@ export function StagePicker({
       >
         <div className='flex flex-col'>
           {reachableStages.map(stage => (
-            <Button
+            <button
               key={stage}
-              variant='ghost'
               type='button'
-              trackId='ticket_set_stage_row'
+              data-ph-capture-attribute-track-id='ticket_set_stage_row'
               onClick={e => {
                 e.stopPropagation();
                 setStage(stage);
@@ -684,7 +682,7 @@ export function StagePicker({
                 style={{ backgroundColor: getStageColor(stage) }}
               />
               <span className='text-foreground'>{stage}</span>
-            </Button>
+            </button>
           ))}
         </div>
       </Popover>
