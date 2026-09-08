@@ -31,6 +31,20 @@ const UPLOAD_CONCURRENCY = 4;
 /** User delegation keys (OAuth-signed SAS) are valid for at most seven days. */
 const MAX_DELEGATION_HOURS = 7 * 24;
 
+/** Trailing-slash trim without a regex: an endpoint is caller input and `/\/+$/` backtracks. */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+/** Paths and filenames are caller input; keep log lines to one line each. */
+function logSafe(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ');
+}
+
 /**
  * Azure Blob Storage through the official SDK. Credentials come from, in order:
  * a connection string, a SAS token, anonymous (public container), or
@@ -48,9 +62,9 @@ export class AzureBlobStorageService implements StorageService {
     if (cfg.connectionString) {
       this.service = BlobServiceClient.fromConnectionString(cfg.connectionString);
     } else {
-      const endpoint = (
-        cfg.endpoint ?? (cfg.accountName ? `https://${cfg.accountName}.blob.core.windows.net` : undefined)
-      )?.replace(/\/+$/, '');
+      const rawEndpoint =
+        cfg.endpoint ?? (cfg.accountName ? `https://${cfg.accountName}.blob.core.windows.net` : undefined);
+      const endpoint = rawEndpoint === undefined ? undefined : stripTrailingSlashes(rawEndpoint);
       if (!endpoint) throw new Error('AzureStorageConfig needs accountName, endpoint or connectionString');
 
       if (cfg.sasToken) {
@@ -73,11 +87,11 @@ export class AzureBlobStorageService implements StorageService {
     if (!options.contentType) throw new Error('Content type is required');
 
     const filePath = generateFilePath(options);
-    logger.info(`Uploading to Azure Blob: ${filePath}`, { contentType: options.contentType, size: buffer.length });
+    logger.info(`Uploading to Azure Blob: ${logSafe(filePath)}`, { contentType: options.contentType, size: buffer.length });
 
     await this.uploadBody(Readable.from(buffer), filePath, options.contentType, options.metadata, 'public, max-age=31536000');
 
-    logger.info(`File uploaded to Azure Blob: ${filePath}`);
+    logger.info(`File uploaded to Azure Blob: ${logSafe(filePath)}`);
     return { filename: filePath, path: filePath, size: buffer.length };
   }
 
@@ -88,11 +102,11 @@ export class AzureBlobStorageService implements StorageService {
 
     const filePath = generateFilePath(options);
     const { body, size } = this.countingBody(stream);
-    logger.info(`Streaming upload to Azure Blob: ${filePath}`, { contentType: options.contentType });
+    logger.info(`Streaming upload to Azure Blob: ${logSafe(filePath)}`, { contentType: options.contentType });
 
     await this.uploadBody(body, filePath, options.contentType, options.metadata, 'public, max-age=31536000');
 
-    logger.info(`Stream uploaded to Azure Blob: ${filePath}`, { size: size() });
+    logger.info(`Stream uploaded to Azure Blob: ${logSafe(filePath)}`, { size: size() });
     return { filename: filePath, path: filePath, size: size() };
   }
 
@@ -129,10 +143,10 @@ export class AzureBlobStorageService implements StorageService {
 
     const resp = await this.container.getBlobClient(filename).deleteIfExists();
     if (!resp.succeeded) {
-      logger.warn(`File does not exist in Azure Blob: ${filename}`);
+      logger.warn(`File does not exist in Azure Blob: ${logSafe(filename)}`);
       return { filename, deleted: false };
     }
-    logger.info(`File deleted from Azure Blob: ${filename}`);
+    logger.info(`File deleted from Azure Blob: ${logSafe(filename)}`);
     return { filename, deleted: true };
   }
 
@@ -229,7 +243,7 @@ export class AzureBlobStorageService implements StorageService {
     try {
       return await this.container.getBlobClient(filename).exists();
     } catch (error) {
-      logger.error(`Failed to check file existence: ${filename}`, error);
+      logger.error(`Failed to check file existence: ${logSafe(filename)}`, error);
       return false;
     }
   }
@@ -253,14 +267,14 @@ export class AzureBlobStorageService implements StorageService {
         if (!path) throw new Error('Path is required for file content retrieval');
 
         const buffer = await this.container.getBlobClient(path).downloadToBuffer();
-        if (attempt > 1) logger.info(`Successfully fetched file from Azure Blob after ${attempt} attempts: ${path}`);
+        if (attempt > 1) logger.info(`Successfully fetched file from Azure Blob after ${attempt} attempts: ${logSafe(path)}`);
         return buffer;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error('Unknown error');
         if (attempt === maxRetries) break;
 
         const delay = initialDelay * Math.pow(2, attempt - 1);
-        logger.warn(`Attempt ${attempt}/${maxRetries} failed to fetch from Azure Blob: ${path}. Retrying in ${delay}ms...`);
+        logger.warn(`Attempt ${attempt}/${maxRetries} failed to fetch from Azure Blob: ${logSafe(path)}. Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -273,7 +287,7 @@ export class AzureBlobStorageService implements StorageService {
     if (!localPath) throw new Error('Local path is required');
 
     await this.container.getBlobClient(remotePath).downloadToFile(localPath);
-    logger.info(`File downloaded from Azure Blob: ${remotePath} to ${localPath}`);
+    logger.info(`File downloaded from Azure Blob: ${logSafe(remotePath)} to ${logSafe(localPath)}`);
   }
 
   async createReadStream(path: string, options?: { start?: number; end?: number }): Promise<NodeJS.ReadableStream> {
@@ -325,11 +339,11 @@ export class AzureBlobStorageService implements StorageService {
     try {
       await source.delete();
     } catch (error) {
-      logger.warn(`File copied to ${destinationPath} but failed to delete source ${sourcePath} — file exists in both locations`, error);
+      logger.warn(`File copied to ${logSafe(destinationPath)} but failed to delete source ${logSafe(sourcePath)} — file exists in both locations`, error);
       throw error;
     }
 
-    logger.info(`File moved in Azure Blob: ${sourcePath} -> ${destinationPath}`);
+    logger.info(`File moved in Azure Blob: ${logSafe(sourcePath)} -> ${logSafe(destinationPath)}`);
   }
 
   async ensureBucketExists(): Promise<void> {
