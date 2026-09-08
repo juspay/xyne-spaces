@@ -79,6 +79,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const draftStorageKey = getDraftStorageKey(user?.email);
   const loadedDraftKeyRef = useRef<string | null>(null);
+  const hasNavigatedRef = useRef(false);
 
   const [harnesses, setHarnesses] = useState<LocalHarnessInstallation[]>([]);
   const [harnessDevice, setHarnessDevice] = useState({ name: 'This machine', platform: '' });
@@ -134,7 +135,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
   useEffect(() => {
     const hash = `#${clampedStep + 1}`;
     if (window.location.hash !== hash) {
-      window.history.replaceState(null, '', hash);
+      window.history.replaceState(window.history.state, '', hash);
     }
   }, [clampedStep]);
 
@@ -151,7 +152,13 @@ const QuestionnaireScreen = (): ReactElement | null => {
     let cancelled = false;
     void Promise.all([api.detect(), api.getStatus()])
       .then(([found, status]) => {
-        if (cancelled || currentStepRef.current > 1) return;
+        if (cancelled) return;
+        const visibleStep = (['name', 'company', 'ai'] as StepKey[])[
+          Math.min(currentStepRef.current, 2)
+        ];
+        // Don't insert the harness step under a user who has manually advanced past it this
+        // session (it would swap their view); a hash-restored step is safe to re-map.
+        if (hasNavigatedRef.current && visibleStep === 'ai') return;
         setHarnesses(found.filter(install => install.authenticated));
         setHarnessDevice({ name: machineLabel(status.deviceName), platform: status.platform });
       })
@@ -256,6 +263,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const handleNext = (): void => {
     if (clampedStep < steps.length - 1) {
       if (!canAdvance()) return;
+      hasNavigatedRef.current = true;
       setCurrentStep(clampedStep + 1);
       return;
     }
@@ -523,7 +531,10 @@ const QuestionnaireScreen = (): ReactElement | null => {
             <div className='mt-auto mb-4 md:mb-0 flex items-center gap-5'>
               <button
                 type='button'
-                onClick={() => setCurrentStep(0)}
+                onClick={() => {
+                  hasNavigatedRef.current = true;
+                  setCurrentStep(0);
+                }}
                 className='text-[14px] text-[#8E939D] hover:text-[#272B35] transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='Step2Back'
@@ -553,7 +564,10 @@ const QuestionnaireScreen = (): ReactElement | null => {
             onSelect={setSelectedHarness}
             connected={connectedHarness}
             onConnected={setConnectedHarness}
-            onBack={() => setCurrentStep(currentStep - 1)}
+            onBack={() => {
+              hasNavigatedRef.current = true;
+              setCurrentStep(clampedStep - 1);
+            }}
             onNext={handleNext}
           />
         )}
