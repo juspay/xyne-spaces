@@ -1,4 +1,5 @@
 import { clawApiRequest } from '@/services/claw/clawRequest';
+import { currentOAuthReturnTo } from './oauthReturnTo';
 import type { CredentialField, McpServer, UserConnection } from '@/services/claw/clawMcpTypes';
 import { openOAuthConsent } from './openOAuthConsent';
 
@@ -20,7 +21,7 @@ export function createMcpConnection(
 function startOAuth(userId: string, serverType: string): Promise<{ authUrl: string }> {
   return clawApiRequest<{ authUrl: string }>(
     `/users/${encodeURIComponent(userId)}/oauth/${encodeURIComponent(serverType)}/authorize`,
-    { method: 'POST', userId, body: JSON.stringify({}) },
+    { method: 'POST', userId, body: JSON.stringify({ returnTo: currentOAuthReturnTo() }) },
   );
 }
 

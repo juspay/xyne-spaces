@@ -132,6 +132,9 @@ interface CreateTicketModalProps {
   entityLinkContext?: EntityLinkScope | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
+  allowChannelSelection?: boolean;
+  useLocalAttachments?: boolean;
+  focusDescriptionOnOpen?: boolean;
   ticketSequence?: { current: number; total: number };
   parentTicketId?: string;
   onBeforeCreate?: (description: string, files: File[]) => Promise<void>;
@@ -226,6 +229,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   releaseChannelIds,
   isFromSubTicket = false,
   isFromAI = false,
+  allowChannelSelection = false,
+  useLocalAttachments = false,
+  focusDescriptionOnOpen = false,
   ticketSequence,
   parentTicketId,
   sourceConversation,
@@ -263,6 +269,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Determine if we're creating from conversation or tickets tab
   const isFromTicketsTab = tab === 'tickets' && !sourceConversation;
+  const canSelectChannel = isFromSubTicket || isFromAI || releaseOnly || allowChannelSelection;
+  const usesLocalAttachments = isFromTicketsTab || useLocalAttachments;
   // Fetch existing CHAT attachments from INITIAL MESSAGE ONLY using Zero
 
   const messageIdForQuery =
@@ -339,7 +347,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         return;
       }
 
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Load from DraftProvider (DB-backed)
         try {
           const map = getDroppedFilesForEntity(
@@ -367,12 +375,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     };
 
     void loadAttachments();
-  }, [isOpen, isFromTicketsTab, sourceConversation, channelId, getDroppedFilesForEntity]);
+  }, [isOpen, usesLocalAttachments, sourceConversation, channelId, getDroppedFilesForEntity]);
 
   // Unified add file handler
   const addFile = useCallback(
     async (file: File): Promise<void> => {
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Use DraftProvider (DB-backed)
         await providerAddDroppedFiles(file, channelId, sourceConversation?.conversationId);
       } else {
@@ -380,13 +388,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         setTicketLocalFiles(prev => [...prev, { id: newLocalFileId(), file }]);
       }
     },
-    [isFromTicketsTab, providerAddDroppedFiles, channelId, sourceConversation],
+    [usesLocalAttachments, providerAddDroppedFiles, channelId, sourceConversation],
   );
 
   // Unified remove file handler
   const removeFile = useCallback(
     async (attachmentId: string, _file: File): Promise<void> => {
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Use DraftProvider
         await providerRemoveDroppedFile(attachmentId);
       } else {
@@ -394,19 +402,23 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         setTicketLocalFiles(prev => prev.filter(entry => entry.id !== attachmentId));
       }
     },
-    [isFromTicketsTab, providerRemoveDroppedFile],
+    [usesLocalAttachments, providerRemoveDroppedFile],
   );
 
   // Clear all files handler
   const clearFiles = useCallback(async () => {
-    if (!isFromTicketsTab) {
+    if (!usesLocalAttachments) {
       await providerClearDroppedFiles(channelId, sourceConversation?.conversationId ?? null);
     } else {
       setTicketLocalFiles([]);
     }
-  }, [isFromTicketsTab, providerClearDroppedFiles, channelId, sourceConversation]);
+  }, [usesLocalAttachments, providerClearDroppedFiles, channelId, sourceConversation]);
 
-  const channels = useAllVisibleChannels().filter(c => c.scopeType === ChannelScopeType.DEFAULT);
+  const channels = useAllVisibleChannels().filter(
+    channel =>
+      channel.scopeType === ChannelScopeType.DEFAULT &&
+      (!allowChannelSelection || (!channel.isArchived && Boolean(channel.projectId))),
+  );
 
   // Track if title has been auto-generated for this modal session
   const [hasTitleBeenGenerated, setHasTitleBeenGenerated] = useState(false);
@@ -486,11 +498,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Fetch boards for the selected channel's project (or default projectId)
   const selectedChannelProjectId =
-    (isFromSubTicket || isFromAI) && selectedChannel?.projectId
-      ? selectedChannel.projectId
-      : projectId;
-  const effectiveChannelId =
-    isFromSubTicket || isFromAI ? (selectedChannelId ?? channelId) : channelId;
+    canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
+  const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
   const [channelBoardMappings, mappingDetails] = useCachedQuery(
     queries.boardsByChannel({ channelId: effectiveChannelId }),
     { enabled: !!effectiveChannelId },
@@ -828,7 +837,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
 
     // Add newly uploaded files (from DraftProvider or local state)
-    if (!isFromTicketsTab) {
+    if (!usesLocalAttachments) {
       // From DraftProvider (DB)
       const draftFiles = Array.from(attachmentsMap.entries()).map(([attachmentId, file]) => ({
         attachmentId,
@@ -860,7 +869,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     attachmentsMap,
     sourceConversation,
     excludedChatAttachmentIds,
-    isFromTicketsTab,
+    usesLocalAttachments,
     ticketLocalFiles,
   ]);
 
@@ -1237,6 +1246,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       // Validate mandatory board-configured fields
       const mandatoryFieldErrors: string[] = [];
 
+      if (canSelectChannel && !formData.channelId.trim()) {
+        mandatoryFieldErrors.push(
+          releaseOnly ? 'Release channel is required' : 'Channel is required',
+        );
+      }
       if (
         !releaseOnly &&
         showUserGroupsOnly &&
@@ -1362,10 +1376,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
 
       // Collect draft attachment IDs from DraftProvider (for conversation case)
-      const draftAttachmentIds = !isFromTicketsTab ? Array.from(attachmentsMap.keys()) : [];
+      const draftAttachmentIds = !usesLocalAttachments ? Array.from(attachmentsMap.keys()) : [];
 
       // Get files to send - combine both sources
-      const draftFiles = !isFromTicketsTab
+      const draftFiles = !usesLocalAttachments
         ? Array.from(attachmentsMap.values()).filter((f): f is File => f instanceof File)
         : ticketLocalFiles.map(entry => entry.file);
 
@@ -1378,12 +1392,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         formDataPayload.append('title', formData.title.trim());
         formDataPayload.append('description', formData.description.trim());
         formDataPayload.append('boardId', formData.boardId);
-        // For subtickets, AI-initiated tickets, or a release-only launch, use the
-        // channel picked in the form; otherwise use the prop (the current channel).
-        formDataPayload.append(
-          'channelId',
-          isFromSubTicket || isFromAI || releaseOnly ? formData.channelId : channelId,
-        );
+        // Channel-selecting flows use the value picked in the form; regular flows
+        // remain tied to the channel supplied by their caller.
+        formDataPayload.append('channelId', canSelectChannel ? formData.channelId : channelId);
         if (selectedBoard?.projectId) {
           formDataPayload.append('projectId', selectedBoard.projectId);
         }
@@ -1496,8 +1507,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           assignedTo: assignedTo || undefined,
           userGroupId: userGroupId || undefined,
           boardId: formData.boardId,
-          // Use the form channel for subtickets/AI/releaseOnly; else the prop. Matches the multipart branch.
-          channelId: isFromSubTicket || isFromAI || releaseOnly ? formData.channelId : channelId,
+          // Keep JSON and multipart channel resolution identical.
+          channelId: canSelectChannel ? formData.channelId : channelId,
           fromTicketsTab: isFromTicketsTab,
           ...(selectedBoard?.projectId && { projectId: selectedBoard.projectId }),
           ticketType: formData.ticketType,
@@ -1564,7 +1575,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   };
 
   const handleClose = (): void => {
-    if (isFromTicketsTab) {
+    if (usesLocalAttachments) {
       void clearFiles();
     }
     setExcludedChatAttachmentIds(new Set());
@@ -1595,7 +1606,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
     }
 
-    if (isFromTicketsTab) {
+    if (usesLocalAttachments) {
       if (ticketLocalFiles.length > 0) return true;
     } else if (attachmentsMap.size > (baselineAttachmentCountRef.current ?? 0)) {
       return true;
@@ -1619,7 +1630,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     handleClose();
   };
 
-  const canPopOut = !standalone && !ticketSequence;
+  const canPopOut = !standalone && !ticketSequence && !allowChannelSelection;
 
   const handlePopOut = (): void => {
     const popoutId = uuidv4();
@@ -2300,8 +2311,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
         {/* Channel and Board Selection */}
         <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
-          {/* Channel Selection */}
-          {(isFromSubTicket || isFromAI || releaseOnly) && (
+          {/* Optional channel selection for subtickets, AI, and context-free entry points. */}
+          {canSelectChannel && (
             <form.Field
               name='channelId'
               validators={{
@@ -2317,9 +2328,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   variant='inline'
                   options={releaseOnly ? releaseChannelOptions : channelOptions}
                   selectedValue={field.state.value || ''}
-                  onSelect={(value: string | null) =>
-                    field.handleChange(value as CreateTicketFormData['channelId'])
-                  }
+                  onSelect={(value: string | null) => {
+                    field.handleChange(value as CreateTicketFormData['channelId']);
+                    if (allowChannelSelection) form.setFieldValue('boardId', '');
+                  }}
                   searchPlaceholder={releaseOnly ? 'release channel' : 'channel'}
                   placeholder={releaseOnly ? 'Select release channel' : 'channel'}
                   inputIcon={<Hash className='size-3.5' strokeWidth={2.33} />}
@@ -3163,7 +3175,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }}
       title='Create Ticket'
       description='Create and edit ticket details before submitting.'
-      {...(!isMobile ? { focusRef: titleInputRef } : {})}
+      {...(!isMobile
+        ? { focusRef: focusDescriptionOnOpen ? descriptionTextareaRef : titleInputRef }
+        : {})}
       data-testid='create-ticket-modal'
       className={cn(
         'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',

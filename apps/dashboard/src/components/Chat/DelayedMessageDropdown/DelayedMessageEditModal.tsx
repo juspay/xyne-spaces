@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import type { DelayedMessage } from '@xyne/shared';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { InputBox } from '../../ui/InputBox';
-import { Button } from '../../ui/Button';
+
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { sanitizeHtmlContent } from '../ChatInput/ChatInput.utils';
@@ -136,11 +136,10 @@ export const DelayedMessageEditModal = ({
           >
             Cancel
           </button>
-          <Button
-            variant='default'
+          <button
             type='button'
             onClick={() => void handleSave()}
-            trackId='edit_scheduled_message'
+            data-ph-capture-attribute-track-id='edit_scheduled_message'
             disabled={isSaving || !hasContent}
             className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors inline-flex items-center gap-2'
             data-track-category='delayed-messages'
@@ -148,7 +147,7 @@ export const DelayedMessageEditModal = ({
           >
             {isSaving && <Loader2 size={14} className='animate-spin' />}
             Save
-          </Button>
+          </button>
         </div>
       </div>
     </Dialog>

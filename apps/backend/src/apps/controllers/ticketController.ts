@@ -20,6 +20,8 @@ import {
   EmailType,
   DeskType,
   isDeskChannelType,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
 } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
@@ -60,6 +62,17 @@ import {
 } from '@/services/ticketCustomFieldService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
+import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
+import {
+  resolveStepEstimate,
+  loadBoardEtaContext,
+  evaluateEta,
+  buildEtaActivityIntents,
+  isTerminalStatus,
+  dispatchEtaNotifications,
+  etaSignalsFromResult,
+  writeEtaActivitiesPrisma,
+} from '@/services/etaManagement';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
@@ -350,7 +363,28 @@ const transferTicketToBoard = async (params: {
   const { ticketId, targetBoardId, updatedBy } = params;
   const now = new Date();
 
-  await prismaClient.$transaction(async tx => {
+  const currentTicket = await prismaClient.ticket.findUnique({
+    where: { id: ticketId },
+    select: {
+      workspaceId: true,
+      channelId: true,
+      statusV2: true,
+      assignedTo: true,
+      createdBy: true,
+      userGroupId: true,
+      eta: true,
+      metadata: true,
+    },
+  });
+  if (!currentTicket) {
+    throw new Error(`Ticket ${ticketId} not found`);
+  }
+
+  // Resolved outside the transaction: a stable bot-user lookup, not part of the
+  // transactional state, and best kept off the held connection.
+  const systemActorId = await getTicketBotActorId(currentTicket.workspaceId);
+
+  const txResult = await prismaClient.$transaction(async tx => {
     const newBoardStages = await tx.stage.findMany({
       where: { boardId: targetBoardId },
       orderBy: { sequenceNumber: 'asc' },
@@ -361,8 +395,6 @@ const transferTicketToBoard = async (params: {
     }
 
     const firstStage = newBoardStages[0];
-    const totalEtaHours = newBoardStages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
-    const ticketEta = totalEtaHours > 0 ? calculateETADeadline(now, totalEtaHours) : null;
 
     const firstTicketInStage = await tx.ticket.findFirst({
       where: {
@@ -381,13 +413,16 @@ const transferTicketToBoard = async (params: {
       kanbanPosition = generateKeyBetween(null, null);
     }
 
-    const updatedTicket = await tx.ticket.update({
+    // `eta` is deliberately left out of this base update - an automatic due date is only
+    // ever set by the domain-service evaluation below, and only when the target board has
+    // opted into automatic ETA management (never a blind stage-eta sum, and never a write
+    // that can shorten the ticket's existing due date).
+    await tx.ticket.update({
       where: { id: ticketId },
       data: {
         boardId: targetBoardId,
         stageName: firstStage.name,
         statusV2: firstStage.defaultTicketStatusV2 ?? undefined,
-        eta: ticketEta,
         kanbanPosition,
         updatedAt: now,
         updatedBy,
@@ -396,24 +431,122 @@ const transferTicketToBoard = async (params: {
 
     await tx.ticketStageEta.deleteMany({ where: { ticketId } });
 
+    let newStageEtaEntryId: string | null = null;
+    let stageEtaDeadline: Date | null = null;
     if (firstStage.eta !== null && firstStage.eta > 0) {
-      await tx.ticketStageEta.create({
+      stageEtaDeadline = calculateETADeadline(now, firstStage.eta);
+      const newStageEtaEntry = await tx.ticketStageEta.create({
         data: {
           ticketId,
           stageId: firstStage.id,
           stageEnteredAt: now,
           stageLeftAt: null,
-          stageEta: calculateETADeadline(now, firstStage.eta),
+          stageEta: stageEtaDeadline,
           updatedBy,
-          workspaceId: updatedTicket.workspaceId,
+          workspaceId: currentTicket.workspaceId,
         },
+        select: { id: true },
       });
+      newStageEtaEntryId = newStageEtaEntry.id;
     }
 
     await syncStageOverdueFlag(tx, ticketId, now);
+    // ETA domain-service evaluation: forecast (extend-only) + planning-risk state, mirroring
+    // the pattern already used by TicketRepository.updateTicketStage and the Zero
+    // ticket.update board-transfer branch.
+    const effectiveStatusV2 = (firstStage.defaultTicketStatusV2 ?? currentTicket.statusV2) as TicketStatusV2;
+    // metadata AND eta were both read before this transaction opened, so a concurrent write
+    // (e.g. acknowledgeEtaRisk, or a manual due-date edit) landing before ours would be lost.
+    // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
+    // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
+    // against - and then overwrite - a due date someone else just moved.
+    const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
+      SELECT "metadata", "eta"
+      FROM "tickets"
+      WHERE "id" = ${ticketId}
+      FOR UPDATE
+    `;
+    const lockedEta = lockedTicket?.eta ?? null;
+    const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
+    const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
+    const stepEstimate = resolveStepEstimate(
+      { id: firstStage.id, eta: firstStage.eta },
+      null,
+      { requireExplicitTransition: false },
+    );
+
+    const etaResult = evaluateEta({
+      ticketId,
+      ticketStatus: effectiveStatusV2,
+      isTerminal: isTerminalStatus(effectiveStatusV2),
+      currentTicketEta: lockedEta,
+      currentTicketEtaManagement,
+      boardType: boardEtaCtx.boardType,
+      boardEtaManagement: boardEtaCtx.boardEtaManagement,
+      currentStageId: firstStage.id,
+      stages: boardEtaCtx.stages,
+      transitions: boardEtaCtx.transitions,
+      activeVisit: {
+        stageVisitId: newStageEtaEntryId,
+        transitionId: null,
+        deadline: stageEtaDeadline,
+        deadlineTracked: newStageEtaEntryId !== null,
+        estimateSource: stepEstimate.source,
+        estimateHours: stepEstimate.incomplete ? null : stepEstimate.hours,
+      },
+      trigger: 'STAGE_TRANSITION',
+      now,
+    });
+
+    const mergedMetadata = mergeTicketEtaManagement(
+      lockedTicket?.metadata,
+      etaResult.ticketEtaManagementPatch,
+    );
+
+    const updatedTicket = await tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+          ? { eta: etaResult.etaDecision.newEta }
+          : {}),
+        metadata: mergedMetadata as Prisma.InputJsonValue,
+      },
+    });
+
+    const activityIntents = buildEtaActivityIntents(etaResult, {
+      currentStageId: firstStage.id,
+      oldEta: lockedEta ? lockedEta.getTime() : null,
+      trigger: 'STAGE_TRANSITION',
+      systemReason: `Automatic recalculation after moving ticket to board "${targetBoardId}"`,
+      previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+    });
+    await writeEtaActivitiesPrisma(tx, activityIntents, {
+      ticketId,
+      workspaceId: currentTicket.workspaceId,
+      channelId: currentTicket.channelId,
+      timestamp: now.getTime(),
+      systemActorId,
+    });
 
     await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
+
+    return { updatedTicket, etaResult };
   });
+
+  // Post-commit notification dispatch - best-effort, must never affect the already-
+  // committed response. Suppressed while the ticket is paused.
+  if (txResult.updatedTicket.statusV2 !== TicketStatusV2.PAUSED) {
+    void dispatchEtaNotifications(etaSignalsFromResult(txResult.etaResult), {
+      ticketId,
+      createdBy: currentTicket.createdBy,
+      assignedTo: currentTicket.assignedTo,
+      ticketUserGroupId: currentTicket.userGroupId,
+      boardId: targetBoardId,
+      actorId: updatedBy,
+    }).catch(error => {
+      logger.error('[TicketController] Failed to dispatch ETA notifications', { ticketId, error });
+    });
+  }
 };
 
 export class TicketController {

@@ -3,6 +3,7 @@ import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
 const AUTOMATION_WORKFLOW_TYPE = 'Automations'
+const WORKFLOWS_TYPE = 'Workflow'
 
 export class WorkflowsACL extends BaseQueryACL<
   Prisma.WorkflowWhereInput,
@@ -34,6 +35,7 @@ export class WorkflowsACL extends BaseQueryACL<
   async canCreate(data: Prisma.WorkflowUncheckedCreateInput): Promise<boolean> {
     if (data.workspaceId !== this.ctx.workspaceId) return false
     if (data.workflowType === AUTOMATION_WORKFLOW_TYPE) return true
+    if (data.workflowType === WORKFLOWS_TYPE) return true
     if (!data.ticketId) return false
     const ticket = await this.prisma.ticket.findFirst({
       where: { id: data.ticketId },

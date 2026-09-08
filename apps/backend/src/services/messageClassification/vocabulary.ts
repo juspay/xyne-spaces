@@ -171,6 +171,7 @@ export const seedWorkspaceVocabulary = async (
       data: {
         ...key,
         workspaceId,
+        updatedAt: new Date(),
         name: entry.name,
         label: entry.label,
         summary: entry.summary,
@@ -217,6 +218,8 @@ export async function getThreadTypeVocabulary(workspaceId: string): Promise<Thre
 export interface VocabularyInput {
   name: string;
   label: string;
+  /** The column has no default — the request schema fills '' for a caller that omits it. */
+  summary: string;
   color: string;
   description: string;
   /** Omitted means APPROVED — writing an entry through the API is how a candidate is promoted. */
@@ -247,7 +250,14 @@ export async function setThreadTypeVocabulary(
       if (keep.has(name)) continue;
       await tx.threadTypeVocabulary.upsert({
         where: { scope_scopeId_name: { ...key, name } },
-        create: { ...key, workspaceId, ...suppression(name), createdBy: userId, updatedBy: userId },
+        create: {
+          ...key,
+          workspaceId,
+          ...suppression(name),
+          createdBy: userId,
+          updatedBy: userId,
+          updatedAt: now,
+        },
         update: { isDeleted: true, updatedBy: userId, updatedAt: now },
       });
     }
@@ -264,6 +274,7 @@ export async function setThreadTypeVocabulary(
           status: entry.status ?? 'APPROVED',
           createdBy: userId,
           updatedBy: userId,
+          updatedAt: now,
         },
         update: {
           ...entry,
@@ -343,7 +354,14 @@ export async function patchThreadTypeVocabulary(
     for (const name of removed) {
       await tx.threadTypeVocabulary.upsert({
         where: { scope_scopeId_name: { ...key, name } },
-        create: { ...key, workspaceId, ...suppression(name), createdBy: userId, updatedBy: userId },
+        create: {
+          ...key,
+          workspaceId,
+          ...suppression(name),
+          createdBy: userId,
+          updatedBy: userId,
+          updatedAt: now,
+        },
         update: { isDeleted: true, updatedBy: userId, updatedAt: now },
       });
     }
@@ -359,6 +377,7 @@ export async function patchThreadTypeVocabulary(
           status: entry.status ?? 'APPROVED',
           createdBy: userId,
           updatedBy: userId,
+          updatedAt: now,
         },
         update: {
           ...entry,
@@ -637,6 +656,8 @@ export async function recordVocabularyCandidate(
         // Placeholders an admin edits on approval. The label is the raw name so the review
         // screen shows what was actually typed.
         label: name,
+        // No prose yet — an admin writes one when they approve the name.
+        summary: '',
         color: '#6b7280',
         // The note the inventor typed, if they gave one. It belongs here rather than on the
         // thread: it explains what the TAG means, so it is written once and every chip of
@@ -645,10 +666,11 @@ export async function recordVocabularyCandidate(
         status: 'UNDER_REVIEW',
         createdBy: userId,
         updatedBy: userId,
+        updatedAt: new Date(),
       },
       // Re-using their own tag changes nothing, except that a note fills in a description
       // they did not give the first time.
-      update: description ? { description, updatedBy: userId } : {},
+      update: description ? { description, updatedBy: userId, updatedAt: new Date() } : {},
     });
     logger.info(`${TAG} Recorded free-form tag as a candidate`, { workspaceId, name, userId });
   } catch (error) {

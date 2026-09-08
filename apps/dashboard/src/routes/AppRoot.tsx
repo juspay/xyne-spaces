@@ -87,7 +87,10 @@ import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOver
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
-import { ElectronUpdateNudge } from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
+import {
+  ElectronUpdateNudge,
+  ELECTRON_UPDATE_NUDGE_ENABLED,
+} from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { SlashCommandArtifactBanner } from '../components/Chat/SlashCommandArtifactBanner';
 import { SlashCommandArtifactSideEffectProvider } from '../components/Chat/SlashCommandArtifactSideEffects';
@@ -217,6 +220,7 @@ import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScree
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { WorkflowScreen } from './WorkflowScreen';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
@@ -574,6 +578,9 @@ const AppRoot = (): ReactElement => {
     !isOnAIChatExperiencePage &&
     !isSdlcRoute &&
     !showSdlcDebuggerPanel;
+  // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
+  // branch), so this is what decides whether that in-frame panel is showing.
+  const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -708,66 +715,81 @@ const AppRoot = (): ReactElement => {
                         />
                       )}
                       {isInPanelWebview ? (
-                        isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
-                          // SDLC lane (chrome-free iframe) with Ask AI open: render the
-                          // XyneAI panel INSIDE the frame so Ask AI ships with this lane.
-                          <div className='flex h-screen flex-col'>
-                            <ResizableGroup
-                              orientation='horizontal'
-                              className='flex-1 no-scrollbar overflow-auto'
-                              autoSaveId='sdlc-frame-xyneai'
-                            >
-                              <Panel
-                                id='sdlc-frame-content'
-                                defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                              >
-                                <main className='h-full flex-1 no-scrollbar overflow-auto'>
-                                  <EditWarningModal />
-                                  <Outlet />
-                                </main>
-                              </Panel>
-                              <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
-                                <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
-                              </Separator>
-                              <Panel
-                                id='sdlc-frame-xyneai'
-                                defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                                minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
-                              >
-                                <XyneAISidebarZIndexShell>
-                                  <XyneAISidebar
-                                    channelId={xyneAIChannelId}
-                                    threadInfo={xyneAIThreadInfo}
-                                    startFreshChat={xyneAIStartFreshChat}
-                                    canvasInfo={xyneAICanvasInfo}
-                                    initialContextSelections={xyneAIInitialContextSelections}
-                                    contextOpenNonce={xyneAIContextOpenNonce}
-                                    kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                    kbChannelId={xyneAIKbChannelId ?? ''}
-                                    kbDocId={xyneAIKbDocId ?? ''}
-                                    kbDocName={xyneAIKbDocName ?? ''}
-                                    kbFolderId={xyneAIKbFolderId ?? ''}
-                                    kbFolderName={xyneAIKbFolderName ?? ''}
-                                    kbOpenNonce={xyneAIKbOpenNonce}
-                                    researchContext={xyneAIResearchContext}
-                                    initialQuery={xyneAIInitialQuery ?? undefined}
-                                    autoSendNonce={xyneAIAutoSendNonce}
-                                    onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                                  />
-                                </XyneAISidebarZIndexShell>
-                              </Panel>
-                            </ResizableGroup>
-                          </div>
-                        ) : (
-                          // Inside the browser-panel webview (or SDLC lane with Ask AI
-                          // closed) — render only the route content. No GlobalTopBar /
-                          // AppSidebar / right panels / ChatDirectory.
-                          <main className='flex-1 h-screen'>
-                            <EditWarningModal />
-                            <Outlet />
-                          </main>
-                        )
+                        // Inside the browser-panel webview / SDLC lane: only the route
+                        // content, no GlobalTopBar / AppSidebar / right panels /
+                        // ChatDirectory. The Ask AI panel joins it as a sibling.
+                        //
+                        // The group is rendered whether or not Ask AI is open, and only
+                        // the assistant's own Panel is conditional. Swapping between two
+                        // different layouts moved <Outlet /> to another position in the
+                        // tree, so React unmounted the whole route and built it again —
+                        // opening Ask AI rebuilt the canvas editor and its Y-Sweet
+                        // connection, and the reader lost their place in the document.
+                        <div className='flex h-screen flex-col'>
+                          <ResizableGroup
+                            orientation='horizontal'
+                            className='flex-1 no-scrollbar overflow-auto'
+                            autoSaveId='sdlc-frame-xyneai'
+                            // The assistant's Panel is conditional, so the group
+                            // has to say which panels it is rendering — without
+                            // it the saved two-panel layout is restored over one
+                            // panel, and the split comes back wrong after Ask AI
+                            // has been closed and opened again.
+                            panelIds={
+                              showSdlcFrameXyneAI
+                                ? ['sdlc-frame-content', 'sdlc-frame-xyneai']
+                                : ['sdlc-frame-content']
+                            }
+                          >
+                            {/* defaultSize is read once, on mount: with the
+                                group now always rendered it must describe the
+                                whole width, and the split comes from the saved
+                                layout the ids above select. */}
+                            <Panel id='sdlc-frame-content' defaultSize='100%'>
+                              <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                                <EditWarningModal />
+                                <Outlet />
+                              </main>
+                            </Panel>
+                            {showSdlcFrameXyneAI && (
+                              <>
+                                <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                                  <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+                                </Separator>
+                                <Panel
+                                  id='sdlc-frame-xyneai'
+                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                  minSize={
+                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
+                                  }
+                                >
+                                  <XyneAISidebarZIndexShell>
+                                    <XyneAISidebar
+                                      channelId={xyneAIChannelId}
+                                      threadInfo={xyneAIThreadInfo}
+                                      startFreshChat={xyneAIStartFreshChat}
+                                      canvasInfo={xyneAICanvasInfo}
+                                      initialContextSelections={xyneAIInitialContextSelections}
+                                      contextOpenNonce={xyneAIContextOpenNonce}
+                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                      kbChannelId={xyneAIKbChannelId ?? ''}
+                                      kbDocId={xyneAIKbDocId ?? ''}
+                                      kbDocName={xyneAIKbDocName ?? ''}
+                                      kbFolderId={xyneAIKbFolderId ?? ''}
+                                      kbFolderName={xyneAIKbFolderName ?? ''}
+                                      kbOpenNonce={xyneAIKbOpenNonce}
+                                      researchContext={xyneAIResearchContext}
+                                      initialQuery={xyneAIInitialQuery ?? undefined}
+                                      autoSendNonce={xyneAIAutoSendNonce}
+                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                    />
+                                  </XyneAISidebarZIndexShell>
+                                </Panel>
+                              </>
+                            )}
+                          </ResizableGroup>
+                        </div>
                       ) : isOnboarding ? (
                         // Onboarding screen - full width without sidebar
                         <main
@@ -944,7 +966,7 @@ const AppRoot = (): ReactElement => {
                           <GlobalUploadProgress />
                           <NotificationHandler />
                           <ElectronBadgeSync />
-                          <ElectronUpdateNudge />
+                          {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
                           <SosAlertBanner />
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
@@ -1064,6 +1086,10 @@ const AppRoot = (): ReactElement => {
 /** Real screen in the SDLC bundle; the framed placeholder in the main one. */
 const SdlcRouteElement = (): ReactElement =>
   isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
+
+/** A ticket page, but still inside the hub's frame so its history stays in one router. */
+const SdlcTicketRouteElement = (): ReactElement =>
+  isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1431,6 +1457,16 @@ export const router = createBrowserRouter(
                   element: <SearchResults />,
                 },
                 {
+                  // Splat: @xyne/workflow-ui owns every screen below /workflows and
+                  // routes between them itself, handing the sub-path back via onNavigate.
+                  path: 'workflows/*',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
+                      <WorkflowScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
                   path: 'product-insights',
                   element: (
                     <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
@@ -1601,6 +1637,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:channelId/tickets/:ticketId',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcTicketRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },
@@ -1982,6 +2026,38 @@ export const router = createBrowserRouter(
               </ZeroProvider>
             </EncryptionBootstrapProvider>
           ),
+        },
+        {
+          path: '/newWindow/chat/canvas',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <ZeroFallbackProvider>
+                  <InitialStateLoader>
+                    <EditProvider>
+                      <div className='h-full bg-background'>
+                        <CanvasPanel />
+                      </div>
+                      <AttachmentGalleryModal />
+                      <AttachmentCitationPreview />
+                      <ThreadCitationModal />
+                      <TranscriptCitationModal />
+                    </EditProvider>
+                  </InitialStateLoader>
+                </ZeroFallbackProvider>
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
+          children: [
+            {
+              index: true,
+              element: null,
+            },
+            {
+              path: ':canvasId',
+              element: <CanvasScreen />,
+            },
+          ],
         },
         {
           path: '/newWindow/create-ticket',

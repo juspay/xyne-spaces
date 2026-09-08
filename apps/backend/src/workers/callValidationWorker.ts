@@ -7,17 +7,32 @@ import { repositories } from '@/database/repositories';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { recurringCallService } from '@/services/recurringCallService';
 import { callSideEffectService } from '@/services/callSideEffectService';
+import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
+// A recording whose detailed summary has been 'pending' this long with no row
+// activity is treated as stranded (the API process that owned the in-flight
+// generation is gone). Must stay above the worst-case honest run — roughly
+// 55 min with callLlmRetry's 5 attempts × 5 min timeout plus 2/4/8/16 min
+// backoff — so a slow-but-alive run is not swept prematurely. If one is, it
+// simply overwrites 'failed' with 'ready' when it finishes.
+const SUMMARY_PENDING_STALE_MS = 60 * 60 * 1000; // 1 hour
+const SUMMARY_SWEEP_BATCH_SIZE = 50;
+
 /**
  * Call Validation Worker
- * 
+ *
  * Runs periodically to validate active calls against LiveKit room state.
  * Automatically ends calls that:
  * - Have no corresponding LiveKit room
  * - Have zero active participants in LiveKit
- * 
+ *
+ * Also sweeps HEADLESS recordings whose detailed summary has been stuck in
+ * 'pending' for over an hour, marking them 'failed' so the recording screen
+ * offers "Try again" instead of shimmering forever.
+ *
  * This replaces the frontend-triggered validateRooms endpoint to avoid
  * unnecessary API calls triggered by participant updates.
  */
@@ -74,10 +89,11 @@ export class CallValidationWorker {
     try {
       logger.info('[CallValidationWorker] Starting validation cycle');
 
-      // Run both checks in parallel
+      // Run all checks in parallel
       await Promise.all([
         this.validateLiveActiveCalls(),
         this.cleanupStaleScheduledCalls(),
+        this.failStalePendingSummaries(),
       ]);
 
       logger.info('[CallValidationWorker] Validation cycle completed');
@@ -190,6 +206,55 @@ export class CallValidationWorker {
       }
     } catch (error) {
       logger.error(`[CallValidationWorker] Failed to clean up stale scheduled call ${externalId}:`, error);
+    }
+  }
+
+  /**
+   * Defense mechanism for stranded summary generation: summary work runs
+   * in-process in the API (awaited in the transcript-ready webhook, or
+   * fire-and-forget from the regenerate endpoint), so a backend restart
+   * mid-run leaves Call.metadata.detailedSummaryStatus at 'pending' with
+   * nothing to ever flip it. Marking such rows 'failed' lets the recording
+   * screen (which trusts the backend status) surface "Try again" — the
+   * status change reaches open screens through Zero sync.
+   */
+  private async failStalePendingSummaries(): Promise<void> {
+    try {
+      const staleBefore = new Date(Date.now() - SUMMARY_PENDING_STALE_MS);
+      const staleCalls = await repositories.calls.findStalePendingSummaryCalls(
+        SUMMARY_SWEEP_BATCH_SIZE,
+        staleBefore,
+      );
+
+      if (staleCalls.length === 0) {
+        logger.debug('[CallValidationWorker] No stale pending summaries found');
+        return;
+      }
+
+      logger.info(
+        `[CallValidationWorker] Found ${staleCalls.length} recording(s) with a summary stuck in 'pending'`,
+      );
+
+      for (const call of staleCalls) {
+        await this.failStalePendingSummary(call);
+      }
+    } catch (error) {
+      logger.error('[CallValidationWorker] Error sweeping stale pending summaries:', error);
+    }
+  }
+
+  private async failStalePendingSummary(call: Call): Promise<void> {
+    const { externalId, endedAt, updatedAt } = call;
+
+    try {
+      await noteTakerTranscriptService.markDetailedSummaryStatus(call, 'failed');
+      logDetailedSummaryFailed(externalId, 'stale_pending_swept');
+      logger.info(
+        `[CallValidationWorker] [${externalId}] detailed_summary_status_updated | from=pending, to=failed, reason=stale_pending_swept`,
+        { endedAt, updatedAt },
+      );
+    } catch (error) {
+      logger.error(`[CallValidationWorker] Failed to sweep stale pending summary ${externalId}:`, error);
     }
   }
 
