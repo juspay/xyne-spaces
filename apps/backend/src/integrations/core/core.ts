@@ -143,7 +143,7 @@ export class ExternalSourceCore {
       try {
         await adapter.onIngestFailures(source, failedExternalIds);
       } catch (error) {
-        logger.error(`Failed to record ingest failures for ${sourceName}`, { error });
+        logger.error('Failed to record ingest failures', { sourceName, error });
       }
     }
 
