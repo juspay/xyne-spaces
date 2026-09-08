@@ -385,6 +385,15 @@ export class PackConnection {
     if (this.#closed || this.#stopped) return;
     await this.#ensureSeeded([...this.#desired.keys()]);
     if (this.#closed || this.#stopped) return;
+    // #ensureSeeded swallows per-instance snapshot-read failures (logs + drops from #seeded).
+    // Connecting with an incompletely-seeded demux reopens the dropped-del window for exactly
+    // those instances, so retry seeding via the normal backoff instead of connecting blind (a
+    // persistent Redis outage then cycles seed-retry rather than poking against empty #owner).
+    if ([...this.#desired.keys()].some((k) => !this.#seeded.has(k))) {
+      logger.warn('sync_pack_reseed_incomplete', { clientGroupID: this.#opts.clientGroupID });
+      this.#scheduleReconnect();
+      return;
+    }
     this.#connect();
   }
 
