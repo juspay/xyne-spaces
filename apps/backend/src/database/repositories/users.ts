@@ -56,6 +56,19 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     });
   }
 
+  /**
+   * Resolve a caller-supplied user id, scoped to the caller's workspace. Use this
+   * for ids from a request body: `findById` matches installation-wide, so it would
+   * let a member reference any user in any workspace. Returns null both when the
+   * user does not exist and when they exist elsewhere, so the two cannot be told
+   * apart to enumerate accounts.
+   */
+  async findByIdInWorkspace(id: string, workspaceId: string): Promise<User | null> {
+    return await this.db.user.findFirst({
+      where: { id, workspaceId },
+    });
+  }
+
   async findByIdWithWorkspace(id: string): Promise<
     (User & { workspace: { id: string; name: string } }) | null
   > {
@@ -254,6 +267,23 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
   }
 
   /**
+   * Resolve ids to ACTIVE users, reporting the first id that does not resolve.
+   */
+  async findActiveByIds(userIds: string[]): Promise<{ users: User[]; missingUserId: string | null }> {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) {
+      return { users: [], missingUserId: null };
+    }
+
+    const users = await this.db.user.findMany({
+      where: { id: { in: ids }, status: UserStatus.ACTIVE },
+    });
+
+    const found = new Set(users.map(user => user.id));
+    return { users, missingUserId: ids.find(id => !found.has(id)) ?? null };
+  }
+
+  /**
    * Private helper method to enrich users with their group mappings
    * Efficiently fetches mappings and groups in batched queries, then combines them
    */
@@ -435,6 +465,21 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     return await tx.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, name: true, displayName: true },
+    });
+  }
+
+  /**
+   * Emails for a set of user ids, in one query. Used when a fan-out needs to
+   * address people outside Xyne — e.g. building the attendee list for a
+   * Google Calendar invite. Only ACTIVE members who have not left are
+   * returned, so a departed teammate is never re-invited.
+   */
+  async getEmailsByIds(userIds: string[]): Promise<Array<{ id: string; email: string }>> {
+    if (userIds.length === 0) return [];
+
+    return await this.db.user.findMany({
+      where: { id: { in: userIds }, status: UserStatus.ACTIVE, leftAt: null },
+      select: { id: true, email: true },
     });
   }
 }

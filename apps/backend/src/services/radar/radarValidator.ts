@@ -37,8 +37,8 @@ export interface ValidationResult {
 
 /** Hard caps on model output: transaction budget and feed layout both bound. */
 const MAX_OPERATIONS = 50;
-const MAX_TITLE_CHARS = 200;
-const MAX_CONTEXT_CHARS = 500;
+const MAX_TITLE_CHARS = 300;
+const MAX_CONTEXT_CHARS = 800;
 
 export function validateTransitions(
   operations: ParserOperation[],

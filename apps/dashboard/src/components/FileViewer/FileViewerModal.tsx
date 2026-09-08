@@ -25,7 +25,6 @@ import {
 } from '../../machines/attachmentViewerMachine';
 import { ZoomState } from './utils';
 import { FileSearchControls, FileSearchProvider, useFileSearchContext } from './search';
-import { Button } from '../ui/Button/Button';
 
 export interface FileItem {
   fileName: string;
@@ -111,14 +110,23 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
 };
 
 // Individual slide component - fetches its own file
-const SlideContent: React.FC<{
+export const SlideContent: React.FC<{
   file: FileItem;
   isActive: boolean;
   disableGestures?: boolean;
   initialTime?: number | undefined;
   autoPlay?: boolean;
   onInteractionStateChange?: (state: ZoomState) => void;
-}> = ({ file, isActive, disableGestures, initialTime, autoPlay, onInteractionStateChange }) => {
+  onExpand?: () => void;
+}> = ({
+  file,
+  isActive,
+  disableGestures,
+  initialTime,
+  autoPlay,
+  onInteractionStateChange,
+  onExpand,
+}) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -180,6 +188,7 @@ const SlideContent: React.FC<{
             fileName={file.fileName}
             attachmentId={file.attachmentId}
             autoPlay={Boolean(autoPlay)}
+            {...(onExpand && { onExpand })}
             {...(initialTime !== undefined && { initialTime })}
             {...(isCarouselMode && { disableGestures: true })}
             {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
@@ -240,17 +249,16 @@ const ErrorState: React.FC<{
       <div className='text-red-300 text-sm mb-4'>{error}</div>
     </div>
     <div className='flex gap-2'>
-      <Button
+      <button
         onClick={onRetry}
-        variant='ghost'
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 transition-colors text-sm backdrop-blur-sm'
         data-track-category='FileViewer'
         data-track-name='RETRY_LOAD_FILE'
         data-track-metadata={JSON.stringify({ error })}
-        trackId='retry_load_file'
+        data-ph-capture-attribute-track-id='retry_load_file'
       >
         Try Again
-      </Button>
+      </button>
       <button
         onClick={onDownload}
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'
@@ -617,6 +625,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={onClose}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 {...(index === currentFileIndex && {
                   onInteractionStateChange: (state: ZoomState) => {
@@ -1372,6 +1381,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={() => attachmentViewerActor.send({ type: 'CLOSE' })}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 // Pass initialTime to active video
                 initialTime={initialTime}

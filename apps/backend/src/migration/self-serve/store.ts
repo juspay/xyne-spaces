@@ -6,6 +6,10 @@ const KEY = (id: string) => `slackmig:job:${id}`;
 const INDEX = 'slackmig:index';
 const DM_LOCK = (workspaceId: string, userId: string) => `slackmig:dmlock:${workspaceId}:${userId}`;
 const CHANNEL_LOCK = (workspaceId: string, slackChannelId: string) => `slackmig:chanlock:${workspaceId}:${slackChannelId}`;
+// Parallel ingest: the set of conversations already ingested (atomic SADD, so many workers on one migration never lose each other's ticks),
+// and a once-only claim so exactly one worker runs the finalize (COMPLETED + announce + GCS cleanup).
+const INGESTED_SET = (id: string) => `slackmig:ingested:${id}`;
+const FINALIZE = (id: string) => `slackmig:finalize:${id}`;
 const channelKeyOf = (job: MigrationJob): string | undefined =>
   job.type === MigrationType.CHANNEL ? job.channelInput?.slackChannelId : undefined;
 
@@ -144,14 +148,62 @@ export class MigrationStore {
     await this.redis.expire(KEY(id), TTL_SECONDS);
   }
 
+  /**
+   * Parallel ingest: mark one conversation done. SADD is atomic, so concurrent workers on the same migration
+   * never clobber each other (unlike the checkpoint-blob RMW above). Returns whether this was the first time
+   * (increment the count only then, so a re-delivered job can't double-count) and the running total for finalize detection.
+   */
+  async markConversationDone(id: string, conversationId: string): Promise<{ firstTime: boolean; total: number }> {
+    const added = await this.redis.sadd(INGESTED_SET(id), conversationId);
+    const firstTime = added === 1;
+    if (firstTime) {
+      const now = String(Date.now());
+      const pipe = this.redis.pipeline();
+      pipe.hincrby(KEY(id), 'ingestedCount', 1);
+      pipe.hset(KEY(id), 'progressAt', now, 'heartbeatAt', now, 'updatedAt', now);
+      pipe.expire(KEY(id), TTL_SECONDS);
+      pipe.expire(INGESTED_SET(id), TTL_SECONDS);
+      await pipe.exec();
+    }
+    const total = await this.redis.scard(INGESTED_SET(id));
+    return { firstTime, total };
+  }
+
+  async isConversationDone(id: string, conversationId: string): Promise<boolean> {
+    return (await this.redis.sismember(INGESTED_SET(id), conversationId)) === 1;
+  }
+
+  /** Authoritative done count (the set itself, not the derived HINCRBY field) — used to gate finalize. */
+  async doneCount(id: string): Promise<number> {
+    return this.redis.scard(INGESTED_SET(id));
+  }
+
+  /** Seed the done-set from the existing checkpoint (resume / upgrade from the old serial array) and sync the count. */
+  async seedDoneSet(id: string, conversationIds: string[]): Promise<void> {
+    if (conversationIds.length) await this.redis.sadd(INGESTED_SET(id), ...conversationIds);
+    const total = await this.redis.scard(INGESTED_SET(id));
+    await this.redis.hset(KEY(id), 'ingestedCount', String(total));
+    await this.redis.expire(INGESTED_SET(id), TTL_SECONDS);
+  }
+
+  /** Once-only finalize claim: exactly one worker (the one that closed the last conversation) runs COMPLETED + announce + cleanup. */
+  async tryClaimFinalize(id: string): Promise<boolean> {
+    return (await this.redis.set(FINALIZE(id), '1', 'EX', TTL_SECONDS, 'NX')) === 'OK';
+  }
+
+  // Atomic append to the issues JSON array (server-side), so parallel ingest workers appending at once never lose entries.
+  private static readonly APPEND_ISSUE_LUA = `
+local cur = redis.call('HGET', KEYS[1], 'issues')
+local arr = cur and cjson.decode(cur) or {}
+table.insert(arr, cjson.decode(ARGV[1]))
+redis.call('HSET', KEYS[1], 'issues', cjson.encode(arr), 'heartbeatAt', ARGV[2], 'updatedAt', ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return #arr`;
+
   /** Record a conversation that couldn't be fully collected/ingested so the UI can show it. */
   async addIssue(id: string, issue: MigrationIssue): Promise<void> {
-    const raw = await this.redis.hget(KEY(id), 'issues');
-    const issues: MigrationIssue[] = raw ? (JSON.parse(raw) as MigrationIssue[]) : [];
-    issues.push(issue);
     const now = String(Date.now());
-    await this.redis.hset(KEY(id), 'issues', JSON.stringify(issues), 'heartbeatAt', now, 'updatedAt', now);
-    await this.redis.expire(KEY(id), TTL_SECONDS);
+    await this.redis.eval(MigrationStore.APPEND_ISSUE_LUA, 1, KEY(id), JSON.stringify(issue), now, String(TTL_SECONDS));
   }
 
   async isStopRequested(id: string): Promise<boolean> {
@@ -175,7 +227,7 @@ export class MigrationStore {
 
   async delete(id: string): Promise<void> {
     const job = await this.findById(id);
-    await this.redis.del(KEY(id));
+    await this.redis.del(KEY(id), INGESTED_SET(id), FINALIZE(id));
     await this.redis.zrem(INDEX, id);
     if (job?.type === MigrationType.DM) await this.redis.del(DM_LOCK(job.workspaceId, job.submittedByUserId));
     if (job) { const chan = channelKeyOf(job); if (chan) await this.redis.del(CHANNEL_LOCK(job.workspaceId, chan)); }
@@ -235,6 +287,7 @@ function decode(h: Record<string, string>): MigrationJob {
     slackChannelCreated: numOpt('slackChannelCreated'),
     channelProgress: h.channelProgress ? (JSON.parse(h.channelProgress) as MigrationJob['channelProgress']) : undefined,
     checkpoint: h.checkpoint ? (JSON.parse(h.checkpoint) as Checkpoint) : emptyCheckpoint(),
+    ingestedCount: numOpt('ingestedCount'),
     stats: { conversations: numReq('statsConversations'), messages: numReq('statsMessages') },
     stopRequested: h.stopRequested === '1',
     stopReason: opt('stopReason') as MigrationJob['stopReason'],
@@ -243,6 +296,7 @@ function decode(h: Record<string, string>): MigrationJob {
     createdAt: numReq('createdAt'),
     updatedAt: numReq('updatedAt'),
     completedAt: numOpt('completedAt'),
+    ingestStartedAt: numOpt('ingestStartedAt'),
     error: opt('error'),
     issues: h.issues ? (JSON.parse(h.issues) as MigrationIssue[]) : undefined,
   };

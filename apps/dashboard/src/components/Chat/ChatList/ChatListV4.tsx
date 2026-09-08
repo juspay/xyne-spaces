@@ -226,7 +226,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
-  const isMember = !!channelParticipation;
+  const isDmScope =
+    channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
+  // A closed DM isn't in the seeded status map at mount, so participation is briefly undefined;
+  // treat an opened DM/group-DM as a member so ConversationsACL loads messages (its participant
+  // check still re-verifies real membership — a non-participant gets nothing, not a leak).
+  const isMember = !!channelParticipation || isDmScope;
   const channel = useVisibleChannel(channelId);
 
   const [newConversationsAnchor, setNewConversationsAnchor] = useState<Anchor | null>(
@@ -294,6 +299,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     didDeferredScrollCorrection: false,
   });
   const initialLinkedIdRef = useRef<string | null>(null);
+  const requestedFetchKeyRef = useRef<string | null>(null);
   const lastAutoScrollKeyRef = useRef<string | undefined>(undefined);
 
   // ── Scroll container ──────────────────────────────────────────────────────────
@@ -343,8 +349,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // Container for the shared hover toolbar overlay (Slack pattern): one
   // toolbar for the whole list, positioned over the hovered row.
   const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
+  // Require resolved participation: while it's undefined, `?.conversationSeenCutoffAt !== null`
+  // is spuriously true and — now that DMs default isMember to true — would route to the cutoff
+  // path with a null anchor, skipping both load paths and leaving the list stuck empty.
   const shouldUseCutoffQuery =
-    channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+    !!channelParticipation &&
+    channelParticipation.conversationSeenCutoffAt !== null &&
+    isMember &&
+    !linkedConversationId;
 
   // ── TanStack Virtualizer ──────────────────────────────────────────────────────
   // anchorTo: 'end' replaces Virtuoso's firstItemIndex trick and alignToBottom.
@@ -797,17 +809,23 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // No double-rAF re-snap needed.
   }, [combinedMessages.length, isInitialLoadComplete]);
 
-  // ── Activity re-scroll (subsequent navigations) ───────────────────────────────────
+  // ── Activity re-scroll (subsequent navigations + deep links not yet loaded) ──────────
+  // Re-runs on combinedMessages so a deep link whose target is not in the initial
+  // window still scrolls once the fetch below lands it. initialLinkedIdRef is
+  // consumed ONLY after the target is actually found — consuming it up front (the
+  // old bug) latched the navigation as handled while the target was still absent,
+  // so the corrective scroll never ran when the data arrived.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!linkedItemCreatedAt || !linkedConversationId || !isInitialLoadComplete) return;
     const navigationKey = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
     if (navigationKey === initialLinkedIdRef.current) return;
-    initialLinkedIdRef.current = navigationKey;
 
     const idx = combinedMessages.findIndex(
       item => item.data.conversationId === linkedConversationId,
     );
     if (idx !== -1) {
+      initialLinkedIdRef.current = navigationKey;
       const isLast = idx === combinedMessages.length - 1;
 
       requestAnimationFrame(() => {
@@ -820,23 +838,31 @@ const ChatListV4: React.FC<ChatListProps> = ({
           window.setTimeout(scrollToLinkedConversation, 80);
         }
       });
-    } else {
-      if (linkedCutoffCreatedAt) {
-        setCutoffAnchor(prev =>
-          prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
-        );
-        return;
-      }
-      oldConversationsAnchorRef.current = linkedItemCreatedAt;
-      setNewConversationsAnchor(linkedItemCreatedAt);
-      window.setTimeout(() => {
-        fetchNewerMessages();
-        fetchOlderMessages();
-      }, 0);
+      return;
     }
+
+    // Target not in the current window: fetch it ONCE per navigation (do not
+    // consume initialLinkedIdRef) so this effect re-runs on the resulting
+    // combinedMessages change and scrolls to the target above.
+    if (requestedFetchKeyRef.current === navigationKey) return;
+    requestedFetchKeyRef.current = navigationKey;
+
+    if (linkedCutoffCreatedAt) {
+      setCutoffAnchor(prev =>
+        prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
+      );
+      return;
+    }
+    oldConversationsAnchorRef.current = linkedItemCreatedAt;
+    setNewConversationsAnchor(linkedItemCreatedAt);
+    window.setTimeout(() => {
+      fetchNewerMessages();
+      fetchOlderMessages();
+    }, 0);
   }, [
     linkedConversationId,
     activityNavigationNonce,
+    combinedMessages,
     isInitialLoadComplete,
     isConversationFullyVisible,
   ]);
@@ -1051,22 +1077,28 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const prevActiveThreadRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (
-      !activeThreadConversationId ||
-      activeThreadConversationId === prevActiveThreadRef.current ||
-      !isInitialLoadComplete
-    ) {
-      prevActiveThreadRef.current = activeThreadConversationId;
+    // Reset when no thread is open so reopening the same thread scrolls again.
+    if (!activeThreadConversationId) {
+      prevActiveThreadRef.current = undefined;
       return;
     }
-    prevActiveThreadRef.current = activeThreadConversationId;
+    if (!isInitialLoadComplete) return;
+    if (activeThreadConversationId === prevActiveThreadRef.current) return;
 
     const idx = combinedMessages.findIndex(
       item => item.data.conversationId === activeThreadConversationId,
     );
+    // Target not loaded into the window yet — do NOT consume the ref; this effect
+    // re-runs on combinedMessages and scrolls once the conversation lands.
     if (idx === -1) return;
 
     const timer = setTimeout(() => {
+      // Consume only once the scroll actually runs. Consuming before the timer
+      // fires loses it: a `conversations` change inside the 100ms window clears
+      // the timer through this effect's cleanup, and the re-run then early-returns
+      // on the already-consumed ref. Leaving it unconsumed lets the re-run
+      // recompute `idx` against the new list and reschedule.
+      prevActiveThreadRef.current = activeThreadConversationId;
       requestAnimationFrame(() => {
         if (isConversationFullyVisible(activeThreadConversationId, idx)) return;
         virtualizer.scrollToIndex(idx, { align: 'center' });

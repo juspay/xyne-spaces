@@ -6,7 +6,6 @@ import {
   ArrowLeft,
 } from '@xyne/icons';
 import { tagsConfigApi } from '../../../../../api/tagsConfigApi';
-import type { ChannelGeneratedTagItem } from '../../../../../api/tagsConfigApi';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import Input from '../../../../ui/Input/Input';
 
@@ -23,13 +22,19 @@ export const GeneratedTagsSubmenu = ({
 }: GeneratedTagsSubmenuProps): ReactElement => {
   // null = level 1 (category list), string = level 2 (tags for that category)
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  // Separate search state per level so they don't bleed into each other
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [categorySearchTerm, setCategorySearchTerm] = useState('');
   const [tagSearchQuery, setTagSearchQuery] = useState('');
   const [tagSearchTerm, setTagSearchTerm] = useState('');
-  const [allTags, setAllTags] = useState<ChannelGeneratedTagItem[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+
+  const [categories, setCategories] = useState<string[]>([]);
+  const [tagsForCategory, setTagsForCategory] = useState<string[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+  const [isLoadingTags, setIsLoadingTags] = useState(false);
+
+  // Cache fetched tags per category so back-navigation doesn't re-fetch
+  const tagCache = useRef<Record<string, string[]>>({});
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
 
@@ -54,47 +59,58 @@ export const GeneratedTagsSubmenu = ({
     return () => clearTimeout(timer);
   }, [tagSearchQuery]);
 
-  // Load all generated tags for the channel once
+  // Load categories on mount; clear cache when channel changes
   useEffect(() => {
     if (!channelId) return;
-    setIsLoading(true);
+    tagCache.current = {};
+    setCategories([]);
+    setActiveCategory(null);
+    setIsLoadingCategories(true);
     tagsConfigApi
-      .getAllGeneratedTags(channelId)
-      .then(setAllTags)
-      .catch(() => setAllTags([]))
-      .finally(() => setIsLoading(false));
+      .getGeneratedTagCategories(channelId)
+      .then(setCategories)
+      .catch(() => setCategories([]))
+      .finally(() => setIsLoadingCategories(false));
   }, [channelId]);
 
-  // All tags grouped by category (unfiltered — used for level 2 and counts)
-  const groupedByCategory = useMemo(() => {
-    const groups: Record<string, string[]> = {};
-    for (const item of allTags) {
-      (groups[item.category] ??= []).push(`${item.category}:${item.tag}`);
+  // Load tags for the active category (uses cache)
+  useEffect(() => {
+    if (!channelId || activeCategory === null) return;
+    if (tagCache.current[activeCategory]) {
+      setTagsForCategory(tagCache.current[activeCategory]);
+      return;
     }
-    return groups;
-  }, [allTags]);
+    setIsLoadingTags(true);
+    tagsConfigApi
+      .getGeneratedTagsByCategory(channelId, activeCategory)
+      .then(tags => {
+        tagCache.current[activeCategory] = tags;
+        setTagsForCategory(tags);
+      })
+      .catch(() => setTagsForCategory([]))
+      .finally(() => setIsLoadingTags(false));
+  }, [channelId, activeCategory]);
 
-  // Category list filtered by search term (level 1)
+  // Category list filtered by search
   const filteredCategories = useMemo(() => {
     const lower = categorySearchTerm.trim().toLowerCase();
-    const categories = Object.keys(groupedByCategory);
     if (!lower) return categories;
     return categories.filter(c => c.toLowerCase().includes(lower));
-  }, [groupedByCategory, categorySearchTerm]);
+  }, [categories, categorySearchTerm]);
 
-  // Tags for the active category filtered by tag search term (level 2)
+  // Tags for active category filtered by search
   const filteredTagKeys = useMemo(() => {
     if (activeCategory === null) return [];
     const lower = tagSearchTerm.trim().toLowerCase();
-    const tagKeys = groupedByCategory[activeCategory] ?? [];
+    const tagKeys = tagsForCategory.map(tag => `${activeCategory}:${tag}`);
     if (!lower) return tagKeys;
     return tagKeys.filter(key => {
       const tagValue = key.slice(activeCategory.length + 1);
       return tagValue.toLowerCase().includes(lower);
     });
-  }, [groupedByCategory, activeCategory, tagSearchTerm]);
+  }, [tagsForCategory, activeCategory, tagSearchTerm]);
 
-  // How many tags are selected per category — drives the badge count
+  // Selected count per category — derives from selectedTags, unaffected by lazy loading
   const selectedCountByCategory = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const tagKey of selectedTags) {
@@ -114,21 +130,23 @@ export const GeneratedTagsSubmenu = ({
     }
   };
 
+  const handleCategoryClick = (category: string): void => {
+    setActiveCategory(category);
+    setTagSearchQuery('');
+    setTagSearchTerm('');
+  };
+
   const handleBack = (): void => {
     setActiveCategory(null);
     setTagSearchQuery('');
     setTagSearchTerm('');
   };
 
-  const totalTagCount = allTags.length;
-
   // ── Level 2: tags for the selected category ──────────────────────────────
   if (activeCategory !== null) {
-    const allTagKeys = groupedByCategory[activeCategory] ?? [];
     const count = selectedCountByCategory[activeCategory] ?? 0;
     return (
       <div className='w-80 border border-border flex flex-col rounded-lg shadow-lg bg-background overflow-hidden'>
-        {/* Header: back button + category name */}
         <div className='flex items-center gap-2 px-3 py-2.5 border-b bg-background'>
           <button
             type='button'
@@ -143,7 +161,6 @@ export const GeneratedTagsSubmenu = ({
           <span className='text-sm font-medium text-foreground truncate'>{activeCategory}</span>
         </div>
 
-        {/* Tag search */}
         <div className='p-3 border-b bg-background'>
           <div className='relative'>
             <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
@@ -159,7 +176,9 @@ export const GeneratedTagsSubmenu = ({
         </div>
 
         <div className='max-h-72 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
-          {allTagKeys.length === 0 ? (
+          {isLoadingTags ? (
+            <div className='p-8 text-center text-sm text-muted-foreground'>Loading…</div>
+          ) : tagsForCategory.length === 0 ? (
             <div className='p-8 text-center text-sm text-muted-foreground'>No tags available</div>
           ) : filteredTagKeys.length === 0 ? (
             <div className='p-8 text-center text-sm text-muted-foreground'>No tags found</div>
@@ -222,9 +241,9 @@ export const GeneratedTagsSubmenu = ({
       </div>
 
       <div className='max-h-80 overflow-y-auto p-1' role='listbox'>
-        {isLoading ? (
+        {isLoadingCategories ? (
           <div className='p-8 text-center text-sm text-muted-foreground'>Loading…</div>
-        ) : totalTagCount === 0 ? (
+        ) : categories.length === 0 ? (
           <div className='p-8 text-center text-sm text-muted-foreground'>
             No AI tags available for this channel
           </div>
@@ -238,7 +257,7 @@ export const GeneratedTagsSubmenu = ({
                 <button
                   key={category}
                   type='button'
-                  onClick={() => setActiveCategory(category)}
+                  onClick={() => handleCategoryClick(category)}
                   className='w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-none hover:bg-muted text-foreground focus-visible:ring-2 focus-visible:ring-ring'
                   data-track-category='Tickets'
                   data-track-name='OpenGeneratedTagCategory'

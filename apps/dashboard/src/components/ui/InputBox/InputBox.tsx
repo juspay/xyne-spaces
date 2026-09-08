@@ -42,6 +42,7 @@ import {
 import { toast } from 'sonner';
 import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
+import { LinkPopover } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
@@ -63,6 +64,7 @@ import { formatTypingMessage, resolveCommandTextFromHtml } from './InputBox.util
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
+import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -408,6 +410,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useScope('composer', isFocused && !disabled && !isSending);
 
+    const isEventFromThisComposer = useCallback(
+      (event: KeyboardEvent): boolean => isEventFromInput(event, id),
+      [id],
+    );
+
     useShortcutById(
       'composer.attach',
       () => {
@@ -416,6 +423,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       {
         enabled: Boolean(features.fileAttachments) && !disabled && !isSending,
+        when: isEventFromThisComposer,
       },
     );
 
@@ -1554,6 +1562,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {features.emojiPicker && (
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
         )}
+
+        {features.richText && <LinkPopover editor={editor} />}
 
         {/* Activity bar — absolutely positioned above the input box so showing/hiding
             never shifts the chat layout. The typing indicator and the agent pill share

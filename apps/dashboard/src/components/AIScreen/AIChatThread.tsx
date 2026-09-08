@@ -69,7 +69,7 @@ import {
   resolveCitationIconUrl,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
-import { Button } from '../ui/Button/Button';
+
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
 import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
@@ -1147,9 +1147,8 @@ function ChatMessageBubble({
                     >
                       Cancel
                     </button>
-                    <Button
-                      variant='ghost'
-                      trackId='ai_chat_edit_submit'
+                    <button
+                      data-ph-capture-attribute-track-id='ai_chat_edit_submit'
                       type='button'
                       onClick={() => {
                         if (editText.trim()) {
@@ -1163,7 +1162,7 @@ function ChatMessageBubble({
                       data-track-name='EDIT_SUBMIT'
                     >
                       Send
-                    </Button>
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -1360,9 +1359,8 @@ function ChatMessageBubble({
               {/* Regenerate — re-runs the last user query as a new bot sibling.
                   Only wired on the latest bot message. */}
               {onRegenerate && (
-                <Button
-                  variant='ghost'
-                  trackId='ai_chat_regenerate'
+                <button
+                  data-ph-capture-attribute-track-id='ai_chat_regenerate'
                   type='button'
                   onClick={onRegenerate}
                   title='Regenerate response'
@@ -1371,7 +1369,7 @@ function ChatMessageBubble({
                   data-track-name='REGENERATE_MESSAGE'
                 >
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                </Button>
+                </button>
               )}
               {/* Branch switcher for bot-response versions (created via regenerate). */}
               {branchInfo && onBranchNavigate && (
@@ -2305,7 +2303,14 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             ref={scrollRef}
             // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
             tabIndex={0}
-            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4'
+            // md:px-10 reserves the prompt rail's column. The rail is 32px wide
+            // and absolutely positioned at the left edge, so with only sm:px-4
+            // the transcript ran right up against the ticks whenever the
+            // available width was tight — which is exactly App Creation mode.
+            // Applied on BOTH sides so the centred column stays centred; at
+            // wide sizes max-w-3xl already leaves far more margin than this, so
+            // the padding only bites when it is actually needed.
+            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4 md:px-10'
             role='log'
             aria-live='polite'
             aria-label='Chat messages'
@@ -2405,7 +2410,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         </div>
 
         {/* Bottom composer — pill sits above it, mirroring xyne-search /ai. */}
-        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6'>
+        {/* md:px-10 matches the transcript's gutter above. Both columns are
+            `mx-auto max-w-3xl`, so they only line up while their padding
+            agrees: once width is tight enough that the cap stops binding — App
+            Creation mode — a narrower gutter here would make the composer
+            wider than the messages it sits under. */}
+        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6 md:px-10'>
           {showJumpPill && (
             <button
               type='button'

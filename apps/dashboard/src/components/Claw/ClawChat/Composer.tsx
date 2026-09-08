@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
-import { Button } from '../../ui/Button/Button';
+
 import { cn } from '../../../utils/classNames';
 import { MAX_TEXTAREA_HEIGHT_PX } from './clawChat.constants';
 
@@ -79,13 +79,12 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
             <Square className='size-3 fill-current' />
           </button>
         ) : (
-          <Button
-            variant='ghost'
+          <button
             type='button'
             onClick={handleSubmit}
             disabled={!canSend}
             aria-label='Send message'
-            trackId='claw_send_message'
+            data-ph-capture-attribute-track-id='claw_send_message'
             data-track-category='CLAW_CHAT'
             data-track-name='SEND_MESSAGE'
             className={cn(
@@ -96,7 +95,7 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
             )}
           >
             <ArrowUp className='size-4' />
-          </Button>
+          </button>
         )}
       </div>
     </div>

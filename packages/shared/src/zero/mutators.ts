@@ -56,6 +56,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   GuestEntity,
   WorkspaceRole,
   Status,
@@ -113,6 +114,12 @@ import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
+import {
+  parseBoardEtaManagement,
+  mergeBoardEtaManagement,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+} from '../validation/etaManagementSchema.js';
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
@@ -4378,6 +4385,41 @@ export const mutators = defineMutators({
         await updateTicketMdFromZero(tx, zql, ticketId);
       },
     ),
+    acknowledgeEtaRisk: defineMutator(
+      z.object({
+        ticketId: z.string(),
+        expectedFingerprint: z.string(),
+        reason: z.string().min(1),
+        clientTimestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { ticketId, expectedFingerprint, reason, clientTimestamp } }) => {
+        const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+        if (!ticket) return;
+
+        const current = parseTicketEtaManagement(ticket.metadata);
+        // Optimistic no-op on a stale fingerprint - the server is authoritative and will
+        // reject with a conflict the client can refetch from; this just avoids the local
+        // optimistic UI flashing an acknowledgment that won't be confirmed.
+        if (current.planningRisk.state !== 'ACTIVE' || current.planningRisk.fingerprint !== expectedFingerprint) {
+          return;
+        }
+
+        const merged = mergeTicketEtaManagement(ticket.metadata, {
+          planningRisk: {
+            state: 'ACKNOWLEDGED',
+            acknowledgedAt: clientTimestamp,
+            acknowledgedBy: ctx.userID,
+            acknowledgmentReason: reason,
+          },
+        });
+
+        await tx.mutate.tickets.update({
+          id: ticketId,
+          metadata: merged as ReadonlyJSONValue,
+          updatedAt: clientTimestamp,
+        });
+      },
+    ),
   },
   ticketStageEta: {
     update: defineMutator(
@@ -4850,6 +4892,11 @@ export const mutators = defineMutators({
         projectId: z.string().optional(),
         boardType: z.nativeEnum(BoardType).optional(),
         metadata: z.any().optional(),
+        // Automatic ETA management - see the backend mutator for the Standard Path
+        // validation this optimistic client-side write deliberately skips (the server is
+        // authoritative and will reject an invalid path, rolling this write back).
+        autoRecomputeEnabled: z.boolean().optional(),
+        standardPathStageIds: z.array(z.string()).optional(),
         stages: z
           .array(
             z.object({
@@ -4886,6 +4933,8 @@ export const mutators = defineMutators({
           description,
           projectId,
           metadata,
+          autoRecomputeEnabled,
+          standardPathStageIds,
           stages,
           timestamp,
           stageIds = {},
@@ -4933,6 +4982,21 @@ export const mutators = defineMutators({
           }
         }
 
+        // ETA settings merge into the etaManagement subtree instead of replacing the whole
+        // column. Base is the caller's `metadata` when it sent one (so both survive),
+        // otherwise the board's current metadata.
+        const nextMetadata =
+          autoRecomputeEnabled !== undefined || standardPathStageIds !== undefined
+            ? mergeBoardEtaManagement(
+                metadata !== undefined ? metadata : board.metadata,
+                boardType ?? board.boardType,
+                {
+                  ...(autoRecomputeEnabled !== undefined && { autoRecomputeEnabled }),
+                  ...(standardPathStageIds !== undefined && { standardPathStageIds }),
+                },
+              )
+            : metadata;
+
         // Update board
         await tx.mutate.boards.update({
           id: boardId,
@@ -4940,7 +5004,7 @@ export const mutators = defineMutators({
           ...(description !== undefined && { description }),
           ...(projectId !== undefined && { projectId }),
           ...(boardType !== undefined && { boardType }),
-          ...(metadata !== undefined && { metadata: metadata as ReadonlyJSONValue }),
+          ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });
@@ -6502,6 +6566,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comment_threads.insert({
           id: threadId,
+          workspaceId: ctx.workspaceId,
           canvasId,
           blockId,
           anchorText: anchorText || null,
@@ -6516,6 +6581,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: ctx.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6547,6 +6613,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: ctx.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6584,7 +6651,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }
@@ -6609,7 +6678,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }
@@ -10948,6 +11019,45 @@ export const mutators = defineMutators({
         }
 
         await tx.mutate.saved_user_configurations.delete({ id: configId });
+      },
+    ),
+  },
+  viewAccess: {
+    grant: defineMutator(
+      z.object({
+        id: z.string(),
+        viewId: z.string(),
+        entityType: z.nativeEnum(ViewAccessEntityType),
+        entityId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, viewId, entityType, entityId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.view_access
+            .where('viewId', viewId)
+            .where('entityType', entityType)
+            .where('entityId', entityId)
+            .one(),
+        );
+        if (existing) return;
+
+        await tx.mutate.view_access.insert({
+          workspaceId: ctx.workspaceId,
+          id,
+          viewId,
+          entityType,
+          entityId,
+          sharedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    revoke: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        await tx.mutate.view_access.delete({ id });
       },
     ),
   },

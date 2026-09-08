@@ -36,9 +36,9 @@ export function ParticipantGrid({
   // Max 4 tiles (2x2) for compact view, 16 tiles (4x4) for full view
   const maxTiles = compact ? 4 : 16;
   // Grid gap in px, matched to the container's Tailwind gap classes below
-  // (compact: gap-1.5 = 6px, full: gap-2..gap-4 responsive, 16px used as the
+  // (compact: gap-1.5 = 6px, full: gap-2..gap-3 responsive, 12px used as the
   // solver's target since it only needs to be a close approximation).
-  const gridGap = compact ? 6 : 16;
+  const gridGap = compact ? 6 : 12;
 
   // Host kill-switch: when transcription is off the agent stays in the room but
   // its tile is hidden (mirrors the participants-sidebar filter) so the call looks
@@ -121,7 +121,7 @@ export function ParticipantGrid({
         />
       ) : (
         <div
-          className={cn('grid flex-1 w-full min-h-0', compact ? 'gap-1.5' : 'gap-2 sm:gap-4')}
+          className={cn('grid flex-1 w-full min-h-0', compact ? 'gap-1.5' : 'gap-2 sm:gap-3')}
           style={{
             gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
             gridAutoRows: 'minmax(0, 1fr)',

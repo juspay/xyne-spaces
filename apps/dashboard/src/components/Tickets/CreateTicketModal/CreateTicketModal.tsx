@@ -4,7 +4,6 @@ import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useZero } from '../../../hooks/useZero';
-import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { isTestEnv } from '../../../config';
 import {
   AttachmentEntityType,
@@ -28,11 +27,9 @@ import {
   CircleDashed,
   CircleDot,
   MultipleCrossCancelCircle as CircleX,
-  CopyDefault as Copy,
   ThreeDotsMenuHorizontal as Ellipsis,
   Hashtag as Hash,
   LinkChainHorizontal as LinkIcon,
-  Spinner as Loader2,
   PaperclipSlant as Paperclip,
   ExternalLink as SquareArrowOutUpRight,
   Tag,
@@ -42,19 +39,17 @@ import {
   MultipleCrossCancelDefault as X,
 } from '@xyne/icons';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../../hooks/useAuth';
 import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/EntityLinkContext';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
-import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
@@ -94,7 +89,6 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
-import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
@@ -138,12 +132,16 @@ interface CreateTicketModalProps {
   entityLinkContext?: EntityLinkScope | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
+  allowChannelSelection?: boolean;
+  useLocalAttachments?: boolean;
+  focusDescriptionOnOpen?: boolean;
   ticketSequence?: { current: number; total: number };
   parentTicketId?: string;
   onBeforeCreate?: (description: string, files: File[]) => Promise<void>;
   onTicketCreated?: (ticket: {
     id: string;
     conversationId?: string;
+    channelId?: string;
     xyneId?: string;
     workflowType?: string;
   }) => void;
@@ -231,6 +229,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   releaseChannelIds,
   isFromSubTicket = false,
   isFromAI = false,
+  allowChannelSelection = false,
+  useLocalAttachments = false,
+  focusDescriptionOnOpen = false,
   ticketSequence,
   parentTicketId,
   sourceConversation,
@@ -243,7 +244,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   enableUrlSync = false,
 }) => {
   const zero = useZero();
-  const shareableOrigin = useShareableOrigin();
   const { user } = useAuth();
   const inheritedEntityLinkScope = useContext(EntityLinkContext);
   const entityLinkScope = entityLinkContextProp ?? inheritedEntityLinkScope;
@@ -269,6 +269,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Determine if we're creating from conversation or tickets tab
   const isFromTicketsTab = tab === 'tickets' && !sourceConversation;
+  const canSelectChannel = isFromSubTicket || isFromAI || releaseOnly || allowChannelSelection;
+  const usesLocalAttachments = isFromTicketsTab || useLocalAttachments;
   // Fetch existing CHAT attachments from INITIAL MESSAGE ONLY using Zero
 
   const messageIdForQuery =
@@ -345,7 +347,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         return;
       }
 
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Load from DraftProvider (DB-backed)
         try {
           const map = getDroppedFilesForEntity(
@@ -373,12 +375,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     };
 
     void loadAttachments();
-  }, [isOpen, isFromTicketsTab, sourceConversation, channelId, getDroppedFilesForEntity]);
+  }, [isOpen, usesLocalAttachments, sourceConversation, channelId, getDroppedFilesForEntity]);
 
   // Unified add file handler
   const addFile = useCallback(
     async (file: File): Promise<void> => {
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Use DraftProvider (DB-backed)
         await providerAddDroppedFiles(file, channelId, sourceConversation?.conversationId);
       } else {
@@ -386,13 +388,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         setTicketLocalFiles(prev => [...prev, { id: newLocalFileId(), file }]);
       }
     },
-    [isFromTicketsTab, providerAddDroppedFiles, channelId, sourceConversation],
+    [usesLocalAttachments, providerAddDroppedFiles, channelId, sourceConversation],
   );
 
   // Unified remove file handler
   const removeFile = useCallback(
     async (attachmentId: string, _file: File): Promise<void> => {
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Use DraftProvider
         await providerRemoveDroppedFile(attachmentId);
       } else {
@@ -400,19 +402,23 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         setTicketLocalFiles(prev => prev.filter(entry => entry.id !== attachmentId));
       }
     },
-    [isFromTicketsTab, providerRemoveDroppedFile],
+    [usesLocalAttachments, providerRemoveDroppedFile],
   );
 
   // Clear all files handler
   const clearFiles = useCallback(async () => {
-    if (!isFromTicketsTab) {
+    if (!usesLocalAttachments) {
       await providerClearDroppedFiles(channelId, sourceConversation?.conversationId ?? null);
     } else {
       setTicketLocalFiles([]);
     }
-  }, [isFromTicketsTab, providerClearDroppedFiles, channelId, sourceConversation]);
+  }, [usesLocalAttachments, providerClearDroppedFiles, channelId, sourceConversation]);
 
-  const channels = useAllVisibleChannels().filter(c => c.scopeType === ChannelScopeType.DEFAULT);
+  const channels = useAllVisibleChannels().filter(
+    channel =>
+      channel.scopeType === ChannelScopeType.DEFAULT &&
+      (!allowChannelSelection || (!channel.isArchived && Boolean(channel.projectId))),
+  );
 
   // Track if title has been auto-generated for this modal session
   const [hasTitleBeenGenerated, setHasTitleBeenGenerated] = useState(false);
@@ -492,11 +498,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Fetch boards for the selected channel's project (or default projectId)
   const selectedChannelProjectId =
-    (isFromSubTicket || isFromAI) && selectedChannel?.projectId
-      ? selectedChannel.projectId
-      : projectId;
-  const effectiveChannelId =
-    isFromSubTicket || isFromAI ? (selectedChannelId ?? channelId) : channelId;
+    canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
+  const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
   const [channelBoardMappings, mappingDetails] = useCachedQuery(
     queries.boardsByChannel({ channelId: effectiveChannelId }),
     { enabled: !!effectiveChannelId },
@@ -620,20 +623,17 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [formMapping?.formFields, formMapping?.formId],
   );
 
-  const titleValue = formValues?.title ?? '';
-  const descriptionValue = formValues?.description ?? '';
-
   // Reset dynamic fields when board changes
   useEffect(() => {
     if (ticketKind === 'release') return;
-    if (formValues?.boardId) {
+    if (formValues.boardId) {
       form.setFieldValue('dynamicFields', {});
       markAutoApplied({ dynamicFields: serializeDynamicFields({}) });
     }
     setSelectedRepoBoardIds([]);
     setRepoRanges({});
     hasPopulatedRepoDeployed.current = new Set();
-  }, [formValues?.boardId, form, markAutoApplied, ticketKind]);
+  }, [formValues.boardId, form, markAutoApplied, ticketKind]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -732,51 +732,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         .catch(() => {});
     }
   }, [isOpen, isReleaseLine, selectedRepoBoardIds, repoRanges]);
-  const {
-    duplicateCheck,
-    // duplicateCandidate,
-    candidateLinks,
-    // duplicateCheckError,
-    isCheckingDuplicate,
-    resetDuplicateState,
-  } = useDuplicateTicketCheck({
-    title: titleValue,
-    description: descriptionValue,
-    projectId: selectedBoard?.projectId ?? '',
-    boardId: formValues?.boardId,
-    isOpen: isOpen && !isReleaseLine,
-    debounceMs: 2000,
-  });
 
-  // Retrieval always returns its top-ranked tickets, so a non-empty candidate list means
-  // "closest matches", not "duplicate". Only surface the panel once the analysis has actually
-  // confirmed a duplicate and named a ticket — otherwise unrelated tickets get shown as similar.
-  const showDuplicatePanel = Boolean(
-    duplicateCheck?.analysis?.isDuplicate &&
-    duplicateCheck?.analysis?.duplicateTicketId &&
-    duplicateCheck?.candidates?.length,
-  );
-
-  // Once the user acts on the board (manual select, accept, or reject), suppress all further AI suggestions
-  const [boardAISuggestionSuppressed, setBoardAISuggestionSuppressed] = useState(false);
   const [boardSelectorOpen, setBoardSelectorOpen] = useState(false);
 
-  // Reset suppression when modal opens/closes
+  // Reset board selector when modal closes
   useEffect(() => {
     if (!isOpen) {
-      setBoardAISuggestionSuppressed(false);
       setBoardSelectorOpen(false);
     }
   }, [isOpen]);
-
-  const { boardSuggestion, isCheckingBoard, resetBoardSuggestionState } = useBoardSuggestion({
-    title: titleValue,
-    description: descriptionValue,
-    projectId: selectedChannelProjectId ?? '',
-    currentBoardId: formValues?.boardId || '',
-    isOpen: isOpen && !boardAISuggestionSuppressed && !selectedBoardId,
-    debounceMs: 2000,
-  });
 
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
@@ -873,7 +837,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
 
     // Add newly uploaded files (from DraftProvider or local state)
-    if (!isFromTicketsTab) {
+    if (!usesLocalAttachments) {
       // From DraftProvider (DB)
       const draftFiles = Array.from(attachmentsMap.entries()).map(([attachmentId, file]) => ({
         attachmentId,
@@ -905,7 +869,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     attachmentsMap,
     sourceConversation,
     excludedChatAttachmentIds,
-    isFromTicketsTab,
+    usesLocalAttachments,
     ticketLocalFiles,
   ]);
 
@@ -955,7 +919,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           form.setFieldValue('workflowType', prefill.workflowType);
         }
       }
-      resetDuplicateState();
       seedSnapshotRef.current = snapshotTicketForm(form.state.values);
     }
   }, [
@@ -969,7 +932,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     initialSubTickets,
     initialTags,
     initialTicketKind,
-    resetDuplicateState,
     selectedBoardId,
   ]);
 
@@ -1004,18 +966,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [boards, form, markAutoApplied]);
 
-  // Auto-select first board when board suggestion returns null (test env only — in prod
-  // the user picks a board explicitly if no suggestion is available).
+  // Auto-select first board in test env when no board is selected
   useEffect(() => {
     if (!isTestEnv) return;
-    if (isCheckingBoard || boardSuggestion?.analysis.suggestedBoardId) return;
     if (form.getFieldValue('boardId')) return;
     const firstBoard = boards?.[0];
     if (firstBoard) {
       form.setFieldValue('boardId', firstBoard.id);
       markAutoApplied({ boardId: firstBoard.id });
     }
-  }, [isCheckingBoard, boardSuggestion, boards, form, markAutoApplied]);
+  }, [boards, form, markAutoApplied]);
 
   // Auto-generate title when modal opens with a description but no title
   useEffect(() => {
@@ -1164,16 +1124,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const processTicketCreationResponse = (
     response: { data?: TicketResponse },
     workflowType: string,
+    channelId?: string,
   ): void => {
     if (onTicketCreated && response.data?.id) {
       const ticketData: {
         id: string;
         conversationId: string;
+        channelId?: string;
         xyneId?: string;
         workflowType?: string;
       } = {
         id: response.data.id,
         conversationId: response.data.conversationId || '',
+        ...(channelId && { channelId }),
         ...(response.data.xyneId && { xyneId: response.data.xyneId }),
       };
 
@@ -1283,6 +1246,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       // Validate mandatory board-configured fields
       const mandatoryFieldErrors: string[] = [];
 
+      if (canSelectChannel && !formData.channelId.trim()) {
+        mandatoryFieldErrors.push(
+          releaseOnly ? 'Release channel is required' : 'Channel is required',
+        );
+      }
       if (
         !releaseOnly &&
         showUserGroupsOnly &&
@@ -1408,10 +1376,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
 
       // Collect draft attachment IDs from DraftProvider (for conversation case)
-      const draftAttachmentIds = !isFromTicketsTab ? Array.from(attachmentsMap.keys()) : [];
+      const draftAttachmentIds = !usesLocalAttachments ? Array.from(attachmentsMap.keys()) : [];
 
       // Get files to send - combine both sources
-      const draftFiles = !isFromTicketsTab
+      const draftFiles = !usesLocalAttachments
         ? Array.from(attachmentsMap.values()).filter((f): f is File => f instanceof File)
         : ticketLocalFiles.map(entry => entry.file);
 
@@ -1424,12 +1392,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         formDataPayload.append('title', formData.title.trim());
         formDataPayload.append('description', formData.description.trim());
         formDataPayload.append('boardId', formData.boardId);
-        // For subtickets, AI-initiated tickets, or a release-only launch, use the
-        // channel picked in the form; otherwise use the prop (the current channel).
-        formDataPayload.append(
-          'channelId',
-          isFromSubTicket || isFromAI || releaseOnly ? formData.channelId : channelId,
-        );
+        // Channel-selecting flows use the value picked in the form; regular flows
+        // remain tied to the channel supplied by their caller.
+        formDataPayload.append('channelId', canSelectChannel ? formData.channelId : channelId);
         if (selectedBoard?.projectId) {
           formDataPayload.append('projectId', selectedBoard.projectId);
         }
@@ -1530,7 +1495,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
-        processTicketCreationResponse(response, formData.workflowType);
+        processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
       } else {
         // No files, use JSON
         response = await apiInstance.post<TicketResponse>('/tickets', {
@@ -1542,8 +1507,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           assignedTo: assignedTo || undefined,
           userGroupId: userGroupId || undefined,
           boardId: formData.boardId,
-          // Use the form channel for subtickets/AI/releaseOnly; else the prop. Matches the multipart branch.
-          channelId: isFromSubTicket || isFromAI || releaseOnly ? formData.channelId : channelId,
+          // Keep JSON and multipart channel resolution identical.
+          channelId: canSelectChannel ? formData.channelId : channelId,
           fromTicketsTab: isFromTicketsTab,
           ...(selectedBoard?.projectId && { projectId: selectedBoard.projectId }),
           ticketType: formData.ticketType,
@@ -1565,7 +1530,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         });
 
         createdTicketResponse = response.data;
-        processTicketCreationResponse(response, formData.workflowType);
+        processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
       }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
@@ -1610,14 +1575,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   };
 
   const handleClose = (): void => {
-    if (isFromTicketsTab) {
+    if (usesLocalAttachments) {
       void clearFiles();
     }
     setExcludedChatAttachmentIds(new Set());
     setEditingSubTicketIndex(null);
     setEditingSubTicketTitle('');
     setEditingSubTicketDescription('');
-    resetDuplicateState();
     onClose();
   };
 
@@ -1642,7 +1606,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
     }
 
-    if (isFromTicketsTab) {
+    if (usesLocalAttachments) {
       if (ticketLocalFiles.length > 0) return true;
     } else if (attachmentsMap.size > (baselineAttachmentCountRef.current ?? 0)) {
       return true;
@@ -1666,7 +1630,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     handleClose();
   };
 
-  const canPopOut = !standalone && !ticketSequence;
+  const canPopOut = !standalone && !ticketSequence && !allowChannelSelection;
 
   const handlePopOut = (): void => {
     const popoutId = uuidv4();
@@ -1741,26 +1705,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       .then(() => {
         toast.success('Link Copied', {
           description: 'A prefilled create-ticket link was copied to your clipboard.',
-          duration: 2000,
-        });
-      })
-      .catch(() => {
-        toast.error('Link Copy Failed', {
-          description: 'Failed to copy the link to your clipboard.',
-          duration: 2000,
-        });
-      });
-  };
-
-  // Handle duplicate ticket copy link
-  const handleDuplicateTicketCopyLink = (link: string): void => {
-    const ticketUrl = `${shareableOrigin}${link}`;
-
-    navigator.clipboard
-      .writeText(ticketUrl)
-      .then(() => {
-        toast.success('Link Copied', {
-          description: 'The link has been copied to your clipboard.',
           duration: 2000,
         });
       })
@@ -2013,7 +1957,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Get tag options
   const tagOptions = useMemo(() => {
-    const selectedTags = formValues?.tags ?? [];
+    const selectedTags = formValues.tags ?? [];
     const allTags = [...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags])];
 
     return allTags
@@ -2023,7 +1967,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         value: tag,
         icon: <span className={cn('size-2 rounded-full', TAG_COLORS[index % TAG_COLORS.length])} />,
       }));
-  }, [availableTags, newTags, initialTags, formValues?.tags]);
+  }, [availableTags, newTags, initialTags, formValues.tags]);
 
   const requiredDynamicFields = useMemo(() => {
     const visibilityMap = boardMetadata?.customFieldVisibility;
@@ -2367,8 +2311,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
         {/* Channel and Board Selection */}
         <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
-          {/* Channel Selection */}
-          {(isFromSubTicket || isFromAI || releaseOnly) && (
+          {/* Optional channel selection for subtickets, AI, and context-free entry points. */}
+          {canSelectChannel && (
             <form.Field
               name='channelId'
               validators={{
@@ -2384,9 +2328,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   variant='inline'
                   options={releaseOnly ? releaseChannelOptions : channelOptions}
                   selectedValue={field.state.value || ''}
-                  onSelect={(value: string | null) =>
-                    field.handleChange(value as CreateTicketFormData['channelId'])
-                  }
+                  onSelect={(value: string | null) => {
+                    field.handleChange(value as CreateTicketFormData['channelId']);
+                    if (allowChannelSelection) form.setFieldValue('boardId', '');
+                  }}
                   searchPlaceholder={releaseOnly ? 'release channel' : 'channel'}
                   placeholder={releaseOnly ? 'Select release channel' : 'channel'}
                   inputIcon={<Hash className='size-3.5' strokeWidth={2.33} />}
@@ -2408,91 +2353,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           >
             {field => {
               if (ticketKind === 'release') return null;
-              // AI is checking — compact shimmer chip with an inline X to stop and pick manually
-              if (isCheckingBoard && !boardAISuggestionSuppressed) {
-                return (
-                  <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background pl-2 pr-1 py-0.5 h-8 w-fit overflow-hidden text-sm'>
-                    <SquareKanban
-                      className='size-3.5 text-muted-foreground shrink-0'
-                      strokeWidth={2.33}
-                    />
-                    <span className='text-sm whitespace-nowrap text-muted-foreground animate-pulse'>
-                      Suggesting board...
-                    </span>
-                    <button
-                      type='button'
-                      className='flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-none focus-visible:text-foreground focus-visible:bg-accent transition-colors shrink-0'
-                      title='Stop and select manually'
-                      aria-label='Stop and select manually'
-                      onClick={() => {
-                        setBoardAISuggestionSuppressed(true);
-                        resetBoardSuggestionState();
-                        setTimeout(() => setBoardSelectorOpen(true), 0);
-                      }}
-                      data-track-category='Tickets'
-                      data-track-name='CancelAISuggestedBoard'
-                    >
-                      <X className='size-3.5 shrink-0' strokeWidth={2.33} />
-                    </button>
-                  </div>
-                );
-              }
-
-              // AI suggestion ready — grey outer wrapper, chip left, Accept/Reject right
-              if (
-                boardSuggestion?.analysis.suggestedBoardId &&
-                !boardAISuggestionSuppressed &&
-                !field.state.value
-              ) {
-                return (
-                  <div className='flex items-center justify-between w-full rounded-lg bg-muted px-3 py-1.5'>
-                    {/* Board name pill — clean bg inside the grey wrapper */}
-                    <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-0.5 h-8 text-sm'>
-                      <SquareKanban
-                        className='size-3.5 text-muted-foreground shrink-0'
-                        strokeWidth={2.33}
-                      />
-                      <span className='text-foreground whitespace-nowrap'>
-                        {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
-                      </span>
-                    </div>
-                    {/* Accept / Reject — separate bordered buttons on the right */}
-                    <div className='flex items-center gap-1.5'>
-                      <button
-                        type='button'
-                        className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
-                        onClick={() => {
-                          if (boardSuggestion.analysis.suggestedBoardId) {
-                            field.handleChange(boardSuggestion.analysis.suggestedBoardId);
-                            setBoardAISuggestionSuppressed(true);
-                            resetBoardSuggestionState();
-                          }
-                        }}
-                        data-track-category='Tickets'
-                        data-track-name='AcceptAISuggestedBoard'
-                      >
-                        Accept
-                      </button>
-                      <button
-                        type='button'
-                        className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
-                        onClick={() => {
-                          setBoardAISuggestionSuppressed(true);
-                          resetBoardSuggestionState();
-                          // Defer open until EntitySelector has mounted in DOM
-                          setTimeout(() => setBoardSelectorOpen(true), 0);
-                        }}
-                        data-track-category='Tickets'
-                        data-track-name='RejectAISuggestedBoard'
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
-
-              // Normal selector (default / after reject / after accept — shows chevron to change)
               return (
                 <EntitySelector
                   showSearch={false}
@@ -2500,7 +2360,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   selectedValue={field.state.value || ''}
                   onSelect={(value: string | null) => {
                     field.handleChange(value as CreateTicketFormData['boardId']);
-                    setBoardAISuggestionSuppressed(true);
                     setBoardSelectorOpen(false);
                   }}
                   searchPlaceholder='board'
@@ -2870,91 +2729,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             </div>
           </div>
         )}
-
-        <div className='py-2'>
-          {isCheckingDuplicate && (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <Loader2 className='h-4 w-4 animate-spin' />
-              <span>Checking for duplicates...</span>
-            </div>
-          )}
-          {showDuplicatePanel && (
-            <div className='rounded-lg border border-border bg-muted p-4 mb-2 transition-all duration-200 ease-out'>
-              <div className='space-y-2'>
-                <div className='flex items-center justify-between pb-0.5'>
-                  <span className='flex items-center gap-2'>
-                    <Copy className='size-3' strokeWidth={2.5} />
-                    <p className='text-sm font-medium text-foreground leading-5'>
-                      Duplicate ticket found
-                    </p>
-                  </span>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    onClick={resetDuplicateState}
-                    data-track-category='Tickets'
-                    data-track-name='RESET_DUPLICATE_STATE'
-                    className='size-6 '
-                  >
-                    <X strokeWidth={2.33} className='size-3.5' />
-                  </Button>
-                </div>
-                {duplicateCheck?.candidates?.slice(0, 1)?.map(candidate => {
-                  const candidateLink = candidateLinks.get(candidate.id);
-
-                  return (
-                    <div
-                      key={candidate.id}
-                      className='border border-border rounded-lg p-2.5 flex items-center justify-between gap-2 group bg-background'
-                    >
-                      <span className='flex items-center gap-2 overflow-hidden cursor-default'>
-                        <p className='text-foreground text-sm font-medium truncate'>
-                          <RenderMessageWithHTML message={candidate.title} />
-                        </p>
-                      </span>
-                      <span className='opacity-0 flex items-center gap-1 group-hover:opacity-100 transition-opacity duration-300 '>
-                        {candidateLink && (
-                          <Tooltip
-                            content='Copy Ticket'
-                            side='top'
-                            className='text-[10px] font-semibold leading-3  p-1.5'
-                          >
-                            <Button
-                              type='button'
-                              variant='ghost'
-                              size='icon'
-                              className='size-6'
-                              onClick={() => {
-                                handleDuplicateTicketCopyLink(candidateLink);
-                              }}
-                              data-track-category='Tickets'
-                              data-track-name='CopyDuplicateTicketLink'
-                            >
-                              <LinkIcon className='size-3.5' />
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {candidateLink && (
-                          <Tooltip
-                            content='Open in new page'
-                            side='top'
-                            className='text-[10px] font-semibold leading-3 p-1.5 '
-                          >
-                            <Link to={candidateLink}>
-                              <Button type='button' variant='ghost' size='icon' className='size-6'>
-                                <SquareArrowOutUpRight className='size-3.5' />
-                              </Button>
-                            </Link>
-                          </Tooltip>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
 
         {allAttachments.length > 0 && (
           <div
@@ -3401,7 +3175,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }}
       title='Create Ticket'
       description='Create and edit ticket details before submitting.'
-      {...(!isMobile ? { focusRef: titleInputRef } : {})}
+      {...(!isMobile
+        ? { focusRef: focusDescriptionOnOpen ? descriptionTextareaRef : titleInputRef }
+        : {})}
       data-testid='create-ticket-modal'
       className={cn(
         'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',

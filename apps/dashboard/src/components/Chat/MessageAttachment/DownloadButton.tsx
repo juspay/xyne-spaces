@@ -3,7 +3,6 @@ import { Download, Loader2 } from 'lucide-react';
 import { downloadAttachment } from './utils';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
-import { Button } from '../../ui/Button/Button';
 
 type DownloadButtonVariant = 'default' | 'overlay';
 
@@ -68,12 +67,11 @@ export const DownloadButton = memo<DownloadButtonProps>(
     const buttonLabel = isDownloading ? 'Downloading...' : `Download ${fileName}`;
 
     return (
-      <Button
-        variant='ghost'
+      <button
         type='button'
         onClick={e => void handleDownload(e)}
         disabled={isDownloading}
-        trackId='download_attachment'
+        data-ph-capture-attribute-track-id='download_attachment'
         className={`p-2 rounded-md text-foreground transition-colors duration-200 disabled:opacity-50 ${VARIANT_STYLES[variant]}`}
         title={buttonLabel}
         aria-label={buttonLabel}
@@ -93,7 +91,7 @@ export const DownloadButton = memo<DownloadButtonProps>(
             {showLabel && <span className={cn('ml-2 text-sm', className)}>Download</span>}
           </div>
         )}
-      </Button>
+      </button>
     );
   },
 );

@@ -266,12 +266,14 @@ export class SlackMigrationService {
   async startIngestion(userId: string): Promise<{ running: boolean }> {
     await this.assertCanIngest(userId);
     await this.queues.resume(QueueName.INGESTION);
+    await this.queues.resume(QueueName.CONV_INGEST); // fan-out: the conversation workers must resume too, not just the planner
     return { running: true };
   }
 
   async stopIngestion(userId: string): Promise<{ running: boolean }> {
     await this.assertCanIngest(userId);
     await this.queues.pause(QueueName.INGESTION);
+    await this.queues.pause(QueueName.CONV_INGEST); // pausing the planner alone wouldn't halt already-fanned-out conversations
     return { running: false };
   }
 

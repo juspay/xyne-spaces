@@ -39,8 +39,15 @@ class RadarExecutionWorker {
     });
 
     queue.on('failed', (job, err) => {
+      // Bull emits 'failed' per attempt, not once at the end. Saying
+      // "permanently" on a job Bull is about to retry reads as data loss that
+      // has not happened.
+      const attempts = job.opts.attempts ?? 1;
+      const final = job.attemptsMade >= attempts;
       logger.error(
-        `[RADAR-EXECUTION-WORKER] Job ${job.id} permanently failed — conversation ${job.data.conversationId}:`,
+        `[RADAR-EXECUTION-WORKER] Job ${job.id} ${
+          final ? 'permanently failed' : `failed (attempt ${job.attemptsMade}/${attempts}, retrying)`
+        } — conversation ${job.data.conversationId}:`,
         err,
       );
     });

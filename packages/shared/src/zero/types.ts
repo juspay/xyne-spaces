@@ -368,6 +368,17 @@ export enum ActivityType {
   EMAIL_SENT = 'EMAIL_SENT',
   TICKET_CREATED = 'TICKET_CREATED',
   CSAT_RECEIVED = 'CSAT_RECEIVED',
+  // ETA risk-detection / automatic-recalculation feature (see
+  // packages/shared/src/tickets/etaActivityValues.ts for each type's stored
+  // `value` shape). Distinct from the existing ETA/STAGE_ETA field-change
+  // activities above and from the pre-existing stage/ticket-overdue breach
+  // activities, which keep using their own actorAction values.
+  ETA_AUTO_RECOMPUTED = 'ETA_AUTO_RECOMPUTED',
+  ETA_MANUALLY_UPDATED = 'ETA_MANUALLY_UPDATED',
+  ETA_RISK_DETECTED = 'ETA_RISK_DETECTED',
+  ETA_RISK_ACKNOWLEDGED = 'ETA_RISK_ACKNOWLEDGED',
+  ETA_RISK_REOPENED = 'ETA_RISK_REOPENED',
+  ETA_RISK_RESOLVED = 'ETA_RISK_RESOLVED',
 }
 
 // @ts-ignore TS1294
@@ -614,6 +625,8 @@ export enum NotificationType {
   TICKET_SUBTICKET_ADDED = "TICKET_SUBTICKET_ADDED",
   TICKET_RELATED_TICKET_ADDED = "TICKET_RELATED_TICKET_ADDED",
   TICKET_RELATED_TICKET_REMOVED = "TICKET_RELATED_TICKET_REMOVED",
+  /** Planning-risk detected/reopened - stage deadline later than ticket due date, not yet overdue. */
+  TICKET_ETA_PLANNING_RISK = "TICKET_ETA_PLANNING_RISK",
   CHANNEL_MESSAGE = "CHANNEL_MESSAGE",
   MENTION = "MENTION",
   DIRECT_MESSAGE = "DIRECT_MESSAGE",
@@ -982,6 +995,12 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
+// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// @ts-ignore TS1294
+export enum ViewAccessEntityType {
+  USER = 'USER',
+}
+
 // @ts-ignore TS1294
 export enum DelayedMessageStatus {
   PENDING = 'PENDING',
@@ -1154,6 +1173,10 @@ export enum WorkflowEventType {
   MESSAGE_RECEIVED = 'MESSAGE_RECEIVED',
   CALL_EVENT = 'CALL_EVENT',
   TAG_GENERATED = 'TAG_GENERATED',
+  MANUAL = 'MANUAL',
+  CRON = 'CRON',
+  EVENT = 'EVENT',
+  WEBHOOK_V2 = 'WEBHOOK_V2',
 }
 
 // @ts-ignore TS1294
@@ -1174,6 +1197,7 @@ export enum WorkflowMappingEntityType {
 export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
+  CALL: 'CALL',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];

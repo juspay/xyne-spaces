@@ -32,6 +32,28 @@ function parseRecordingParticipantIds(stored: string | null): string[] {
 }
 
 /**
+ * The outbound mirror of a Call on the organizer's Google Calendar, recorded
+ * under `calls.metadata.googleCalendarPush`. Absent until the call has been
+ * pushed; removed again when the remote event is deleted.
+ */
+export type GoogleCalendarPushState = {
+  /** Google's event id on the organizer's primary calendar. */
+  eventId: string;
+  /** ExternalSource the event was written through, so a reconnect is detectable. */
+  sourceId: string;
+  /** Organizer whose calendar owns the event — the only account allowed to edit it. */
+  organizerUserId: string;
+  /**
+   * Digest of the event body last written. A reconcile whose payload hashes to
+   * this skips the PATCH entirely — Google emails every attendee on an event
+   * update, so a no-op write is not free.
+   */
+  contentHash: string;
+  htmlLink?: string;
+  syncedAt: string;
+};
+
+/**
  * Shape of `calls.metadata` as written by this repository.
  * `artifactMessageId` is set only for calls started from a slash-command
  * artifact card, and links the call back to the message that owns it.
@@ -40,6 +62,7 @@ export interface CallMetadata {
   systemMessageId?: string;
   conversationId?: string;
   artifactMessageId?: string;
+  googleCalendarPush?: GoogleCalendarPushState;
 }
 
 const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
@@ -233,6 +256,28 @@ export class CallRepository {
         endsAt: { lt: new Date() },
         ...(excludeOrigins?.length && { callOrigin: { notIn: excludeOrigins } }),
       },
+      take,
+    });
+  }
+
+  /**
+   * HEADLESS recordings whose detailed summary has sat in 'pending' since
+   * before `staleBefore` with no row activity. Summary generation runs
+   * in-process in the API, so a backend restart mid-run leaves the row
+   * 'pending' forever — this is the query the validation worker sweeps.
+   * updatedAt is part of the predicate so a fresh manual regenerate on an old
+   * recording (which re-publishes 'pending' and bumps updatedAt) is not swept
+   * on the next cycle.
+   */
+  async findStalePendingSummaryCalls(take: number, staleBefore: Date): Promise<Call[]> {
+    return DatabaseClient.getInstance().call.findMany({
+      where: {
+        callType: CallType.HEADLESS,
+        endedAt: { lt: staleBefore },
+        updatedAt: { lt: staleBefore },
+        metadata: { path: ['detailedSummaryStatus'], equals: 'pending' },
+      },
+      orderBy: { endedAt: 'asc' },
       take,
     });
   }
@@ -767,6 +812,88 @@ export class CallRepository {
     return participants
       .map(p => p.email)
       .filter((email): email is string => Boolean(email));
+  }
+
+  /**
+   * Everything the outbound Google Calendar push needs to mirror a call, in a
+   * single query. Not `findByExternalId`: the push job runs outside any tenant
+   * scope and knows only a call id, so it reads the row's own `workspaceId`
+   * here and opens a scope with it before doing anything else.
+   */
+  async findForCalendarPush(callId: string): Promise<{
+    id: string;
+    externalId: string;
+    workspaceId: string;
+    title: string | null;
+    description: string | null;
+    status: string;
+    callOrigin: string;
+    createdByUserId: string;
+    roomLink: string | null;
+    startsAt: Date | null;
+    endsAt: Date | null;
+    timezone: string;
+    metadata: Prisma.JsonValue | null;
+    updatedAt: Date;
+  } | null> {
+    return await DatabaseClient.getInstance().call.findUnique({
+      where: { id: callId },
+      select: {
+        id: true,
+        externalId: true,
+        workspaceId: true,
+        title: true,
+        description: true,
+        status: true,
+        callOrigin: true,
+        createdByUserId: true,
+        roomLink: true,
+        startsAt: true,
+        endsAt: true,
+        timezone: true,
+        metadata: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  /** `updatedAt` alone, to detect a call edited while a push job was running. */
+  async findCalendarPushRevision(callId: string): Promise<Date | null> {
+    const row = await DatabaseClient.getInstance().call.findUnique({
+      where: { id: callId },
+      select: { updatedAt: true },
+    });
+    return row?.updatedAt ?? null;
+  }
+
+  /**
+   * Record (or clear) the Google Calendar event this call is mirrored to.
+   *
+   * Written as a jsonb merge rather than a read-modify-write of the whole
+   * column: `calls.metadata` also carries `systemMessageId` / `conversationId`
+   * written by unrelated flows, and a push job that round-tripped the object
+   * would silently drop whichever of those landed in between.
+   */
+  async setGoogleCalendarPushState(
+    callId: string,
+    state: GoogleCalendarPushState | null,
+  ): Promise<void> {
+    const db = DatabaseClient.getInstance();
+
+    if (state === null) {
+      await db.$executeRaw`
+        UPDATE "calls"
+        SET "metadata" = COALESCE("metadata", '{}'::jsonb) - 'googleCalendarPush'
+        WHERE "id" = ${callId}
+      `;
+      return;
+    }
+
+    await db.$executeRaw`
+      UPDATE "calls"
+      SET "metadata" = COALESCE("metadata", '{}'::jsonb) || ${JSON.stringify({ googleCalendarPush: state })}::jsonb
+      WHERE "id" = ${callId}
+    `;
   }
 
   /**
@@ -1419,6 +1546,9 @@ export class CallRepository {
       now: Date;
       callOrigin?: CallOrigin;
       artifactMessageId?: string;
+      /** Transcription agent this call was pinned to at creation time (from room metadata). */
+      agentName?: string;
+      dispatchStatus?: string;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1436,6 +1566,8 @@ export class CallRepository {
       now,
       callOrigin,
       artifactMessageId,
+      agentName,
+      dispatchStatus,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1466,6 +1598,8 @@ export class CallRepository {
             systemMessageId: messageId,
             conversationId,
             ...(artifactMessageId && { artifactMessageId }),
+            ...(agentName && { agentName }),
+            ...(dispatchStatus && { dispatchStatus }),
           },
         },
       });

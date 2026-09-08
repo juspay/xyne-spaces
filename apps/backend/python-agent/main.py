@@ -620,8 +620,15 @@ if __name__ == "__main__":
     start_health_server_background()
 
     # Run the LiveKit agent (blocks until shutdown)
+    # agent_name switches this worker from automatic dispatch (joins every room) to
+    # explicit dispatch — the backend must now request it by name via
+    # AgentDispatchClient.createDispatch. This is what makes zero-downtime, canary-tested
+    # agent rollouts possible: a new pod runs under a new agent_name and is invisible to
+    # real traffic until the backend (via this pod's own self-report, or a human fallback)
+    # rolls it into the 'stable' or 'test' slot.
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
+        agent_name=config.transcription_agent_name,
         shutdown_process_timeout=60.0,
         job_memory_warn_mb=4096,
     ))

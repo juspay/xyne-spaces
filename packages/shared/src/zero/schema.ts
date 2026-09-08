@@ -494,6 +494,8 @@ export const workflowTable = table('workflows')
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1082,6 +1084,7 @@ export const activityTable = table('activities')
     conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
+    trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
     actorId: string(),
@@ -1359,6 +1362,7 @@ export const canvasVersionTable = table('canvas_versions')
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1375,6 +1379,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
 export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -2190,6 +2195,18 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
     fieldValue: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const viewAccessTable = table('view_access')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -4633,6 +4650,22 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['configId'],
       destSchema: savedUserConfigurationValueTable,
     }),
+    viewAccess: many({
+      sourceField: ['id'],
+      destField: ['viewId'],
+      destSchema: viewAccessTable,
+    }),
+  }),
+);
+
+export const viewAccessTableRelationships = relationships(
+  viewAccessTable,
+  ({ one }) => ({
+    view: one({
+      sourceField: ['viewId'],
+      destField: ['id'],
+      destSchema: savedUserConfigurationTable,
+    }),
   }),
 );
 
@@ -4873,6 +4906,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTable,
     savedUserConfigurationValueTable,
+    viewAccessTable,
     // Knowledge Base
     collectionTable,
     collectionItemTable,
@@ -5006,6 +5040,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTableRelationships,
     savedUserConfigurationValueTableRelationships,
+    viewAccessTableRelationships,
     // Knowledge Base
     collectionTableRelationships,
     collectionItemTableRelationships,
@@ -5150,6 +5185,7 @@ export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 
 // Knowledge Base Types
 export type Collection = Row<typeof schema.tables.collections>;
