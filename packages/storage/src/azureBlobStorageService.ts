@@ -41,7 +41,7 @@ function stripTrailingSlashes(value: string): string {
 }
 
 function logSafe(value: string): string {
-  return String(value).replace(/\n/g, ' ').replace(/\r/g, ' ');
+  return JSON.stringify(String(value));
 }
 
 /**
