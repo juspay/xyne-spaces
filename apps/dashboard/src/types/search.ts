@@ -109,6 +109,9 @@ export interface VespaSearchFilters {
   from?: string; // User IDs
   fromEmail?: string; // Desk-only: sender email address(es) for the mail `from:` filter
   toEmail?: string; // Desk-only: recipient email address(es) for the mail `to:` filter
+  ccEmail?: string; // Desk-only: cc address(es) for the mail `cc:` filter
+  bccEmail?: string; // Desk-only: bcc address(es) for the mail `bcc:` filter
+  filename?: string; // Desk-only: attachment file name token(s) for `filename:`
   with?: string; // User ID for participant filter (matches userId, threadMentions, threadSenders)
   in?: string; // Channel IDs (scope: within channel/DM)
   mentions?: string; // User IDs the message mentions (scoped mention search; bare @user chip)
@@ -135,6 +138,14 @@ export interface VespaSearchFilters {
   range?: string; // Time keyword (today, yesterday, this week, last 7 days, etc.)
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
+  userGroups?: string; // Comma-separated user group IDs
+  aiCategory?: string; // Comma-separated AI-assigned categories
+  isArchived?: boolean; // Restrict to archived / non-archived tickets
+  lastEmailAtStart?: number; // Epoch-ms bounds on the conversation's newest email
+  lastEmailAtEnd?: number;
+  createdAtStart?: number; // Epoch-ms bounds on ticket creation (inclusive)
+  createdAtEnd?: number;
+  generatedTags?: string; // Comma-separated "category:value" tag-framework tags
   dynamicFieldValues?: string | string[]; // Comma-separated or array of fieldId::value tokens
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'

@@ -275,6 +275,82 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'Assignee must be a string'
   }),
 
+  userGroups: Joi.string().optional().messages({
+    'string.base': 'UserGroups must be a string'
+  }),
+
+  aiCategory: Joi.string().optional().messages({
+    'string.base': 'aiCategory must be a string'
+  }),
+
+  isArchived: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'isArchived must be "true" or "false"'
+  }),
+
+  lastEmailAtStart: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'lastEmailAtStart must be a timestamp',
+    'number.integer': 'lastEmailAtStart must be an integer timestamp',
+    'number.min': 'lastEmailAtStart cannot be negative'
+  }),
+
+  lastEmailAtEnd: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'lastEmailAtEnd must be a timestamp',
+    'number.integer': 'lastEmailAtEnd must be an integer timestamp',
+    'number.min': 'lastEmailAtEnd cannot be negative'
+  }),
+
+  createdAtStart: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'createdAtStart must be a timestamp',
+    'number.integer': 'createdAtStart must be an integer timestamp',
+    'number.min': 'createdAtStart cannot be negative'
+  }),
+
+  createdAtEnd: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'createdAtEnd must be a timestamp',
+    'number.integer': 'createdAtEnd must be an integer timestamp',
+    'number.min': 'createdAtEnd cannot be negative'
+  }),
+
+  ccEmail: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((v: string) => v.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'ccEmail must be a string or array'
+    }),
+
+  bccEmail: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((v: string) => v.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'bccEmail must be a string or array'
+    }),
+
+  filename: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((v: string) => v.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'filename must be a string or array'
+    }),
+
+  generatedTags: Joi.string().optional().messages({
+    'string.base': 'generatedTags must be a string'
+  }),
+
   subApp: Joi.string().valid('canvas', 'transcript', 'recording', 'rca', 'collections').optional().messages({
     'string.base': 'SubApp must be a string',
     'any.only': 'SubApp must be one of: canvas, transcript, recording, rca, collections'

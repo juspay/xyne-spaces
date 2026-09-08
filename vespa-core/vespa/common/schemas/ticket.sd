@@ -106,6 +106,22 @@ schema ticket {
       indexing: attribute | summary
       attribute: fast-search
     }
+
+    # Max email timestamp of the ticket's conversation; the Desk list's sort key.
+    field lastEmailAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field isArchived type bool {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field aiCategory type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
     field closedBy type string {
       indexing: attribute | summary
     }

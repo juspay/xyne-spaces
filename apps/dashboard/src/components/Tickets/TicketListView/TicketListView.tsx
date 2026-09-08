@@ -125,6 +125,19 @@ interface TicketListViewProps {
   showExtraFields?: boolean;
   skeletonRowCount?: number;
   emptyState?: React.ReactNode;
+  /**
+   * Conversation ids in search-relevance order. When set the list abandons keyset paging and
+   * pages in memory; filters must apply before slicing or pages come back ragged.
+   */
+  rankOrder?: readonly string[] | undefined;
+  /** Search hit the index ceiling: lower-ranked matches exist but were never fetched. */
+  searchTruncated?: boolean;
+  /** A search request is in flight, so `rankOrder` is empty or about to grow. */
+  searchPending?: boolean;
+  /** Widen the ranked window, once Zero has filtered the fetched ids below a full page. */
+  onRequestMoreRankedIds?: (() => void) | undefined;
+  /** Words from the active search, marked inside each row's title. */
+  highlightTerms?: readonly string[] | undefined;
   className?: string;
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (row: SelectableRow) => void;
@@ -162,6 +175,11 @@ export const TicketListView = function TicketListView({
   showExtraFields = false,
   skeletonRowCount = 8,
   emptyState,
+  rankOrder,
+  searchTruncated = false,
+  searchPending = false,
+  onRequestMoreRankedIds,
+  highlightTerms,
   className,
   selectedIds,
   onToggleSelect,
@@ -405,7 +423,22 @@ export const TicketListView = function TicketListView({
     [columnWidths, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits],
   );
 
-  const pageStart = pageCursors[pageIndex] ?? null;
+  // Ranked (search) mode: relevance order replaces the lastEmailAt keyset, so instead of a
+  // cursor Zero gets a growing PREFIX of the rank list, extended until the page fills. A
+  // prefix is sound because Zero's filters drop rows without reordering them, so growing it
+  // can only append lower-ranked rows; earlier pages never move.
+  const isRanked = !!rankOrder && rankOrder.length > 0;
+  const rankByConversationId = useMemo(() => {
+    const order = new Map<string, number>();
+    rankOrder?.forEach((conversationId, index) => order.set(conversationId, index));
+    return order;
+  }, [rankOrder]);
+  const rankedConversationIds = useMemo(
+    () => (isRanked ? rankOrder.slice(0, fetchLimit) : conversationIdWhitelist),
+    [isRanked, rankOrder, fetchLimit, conversationIdWhitelist],
+  );
+
+  const pageStart = isRanked ? null : (pageCursors[pageIndex] ?? null);
   const [firstPage, firstPageDetails] = useCachedQuery(
     queries.supportTicketsPageV3({
       channelId,
@@ -415,9 +448,7 @@ export const TicketListView = function TicketListView({
       priority,
       stageName,
       aiCategory,
-      ...(conversationIdWhitelist !== undefined
-        ? { conversationIds: conversationIdWhitelist }
-        : {}),
+      ...(rankedConversationIds !== undefined ? { conversationIds: rankedConversationIds } : {}),
       hasAiDraft,
       hasSubTickets,
       lastEmailAtStart,
@@ -439,6 +470,23 @@ export const TicketListView = function TicketListView({
 
   const loadStartTimeRef = useRef<number | null>(Date.now());
 
+  // A widening appends to the rank list without reordering it, so it must not reset paging
+  // or the fetch window: the reset and the doubling below would then collide in one commit
+  // and can cancel out, leaving `needMoreRows` true with no effect left to fire. Only a list
+  // that does not extend the previous one is a new search.
+  const rankEpochRef = useRef({ epoch: 0, ids: [] as readonly string[] });
+  const rankEpoch = useMemo(() => {
+    const prev = rankEpochRef.current;
+    const ids = rankOrder ?? [];
+    const extendsPrev =
+      prev.ids.length > 0 &&
+      ids.length >= prev.ids.length &&
+      prev.ids.every((id, index) => ids[index] === id);
+    if (!extendsPrev) prev.epoch += 1;
+    prev.ids = ids;
+    return prev.epoch;
+  }, [rankOrder]);
+
   // Filter key — reset accumulator + pagination when filter changes (new view = new data).
   const filterKey = useMemo(
     () =>
@@ -449,7 +497,7 @@ export const TicketListView = function TicketListView({
         p: priority ?? null,
         s: stageName ?? null,
         ac: aiCategory ?? null,
-        ci: conversationIdWhitelist ?? null,
+        ci: isRanked ? rankEpoch : (conversationIdWhitelist ?? null),
         ad: hasAiDraft ?? null,
         hst: hasSubTickets ?? null,
         mf: mailboxFolder ?? null,
@@ -468,6 +516,8 @@ export const TicketListView = function TicketListView({
       priority,
       stageName,
       aiCategory,
+      isRanked,
+      rankEpoch,
       conversationIdWhitelist,
       hasAiDraft,
       hasSubTickets,
@@ -578,10 +628,28 @@ export const TicketListView = function TicketListView({
     return rows;
   }, [allRows, mailboxFolder, dynamicFieldEntries]);
 
+  // Ranked mode sorts the filtered set by search relevance; Zero's `IN` returns table order,
+  // so without this the ranking Vespa computed is lost.
+  const orderedAll = useMemo<SupportTicketRow[]>(() => {
+    if (!isRanked) return filteredAll;
+    const rankOf = (row: SupportTicketRow): number =>
+      rankByConversationId.get(row.conversationId) ?? Number.MAX_SAFE_INTEGER;
+    return [...filteredAll].sort((left, right) => rankOf(left) - rankOf(right));
+  }, [filteredAll, isRanked, rankByConversationId]);
+
   // Paginate over the FILTERED rows: render one PAGE_SIZE window; a (PAGE_SIZE+1)th filtered
   // row is the "next page exists" sentinel (mirrors the server keyset paging, on filtered rows).
-  const filteredTickets = useMemo(() => filteredAll.slice(0, PAGE_SIZE), [filteredAll]);
-  const hasNextPage = filteredAll.length > PAGE_SIZE;
+  // Ranked mode holds the whole set, so it slices by page index instead.
+  const filteredTickets = useMemo(
+    () =>
+      isRanked
+        ? orderedAll.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE)
+        : orderedAll.slice(0, PAGE_SIZE),
+    [orderedAll, isRanked, pageIndex],
+  );
+  const hasNextPage = isRanked
+    ? orderedAll.length > (pageIndex + 1) * PAGE_SIZE
+    : orderedAll.length > PAGE_SIZE;
 
   useEffect(() => {
     onTicketsLoaded?.(filteredTickets);
@@ -589,23 +657,44 @@ export const TicketListView = function TicketListView({
 
   const complete = firstPageDetails.type === 'complete';
   // Server returned fewer rows than requested → the channel/folder is genuinely exhausted;
-  // no amount of extra fetching can surface additional rows.
-  const serverExhausted = allRows.length < fetchLimit;
+  // no amount of extra fetching can surface additional rows. Ranked mode is exhausted once
+  // the window covers the whole rank list.
+  const serverExhausted = isRanked ? fetchLimit >= rankOrder.length : allRows.length < fetchLimit;
   // A client-filtered folder (Inbox / All Mail) can filter a full server page down below a
   // page's worth. Keep growing the fetch window (effect below) until we have a full page
   // (+1 sentinel) of MATCHING rows OR the source is genuinely exhausted — there is no fixed
   // cap, so matching tickets sitting behind a long run of archived/spam are never missed.
+  // Ranked mode pages in memory, so it needs enough to cover the CURRENT page, not the first.
   // `converged` = the page is definitive (safe to show its empty state).
-  const needMoreRows = complete && !serverExhausted && filteredAll.length < PAGE_SIZE + 1;
-  const converged = complete && !needMoreRows;
+  const targetRowCount = isRanked ? (pageIndex + 1) * PAGE_SIZE + 1 : PAGE_SIZE + 1;
+  const needMoreRows = complete && !serverExhausted && filteredAll.length < targetRowCount;
+  // Once the window covers every fetched id and the page is still short, only a deeper Vespa
+  // slice can make up the shortfall. Guarded on `searchTruncated` so an exhausted search stops.
+  const needMoreRankedIds =
+    isRanked &&
+    complete &&
+    serverExhausted &&
+    searchTruncated &&
+    filteredAll.length < targetRowCount;
+
+  const converged = complete && !needMoreRows && !needMoreRankedIds && !searchPending;
 
   const rowsEmpty = converged && filteredTickets.length === 0;
-  const showInitialSkeletons = (!complete && allRows.length === 0) || needMoreRows;
+  // A search refills through several Vespa and Zero rounds; holding one skeleton until the
+  // page is definitive avoids flashing partial rows between them.
+  const showInitialSkeletons =
+    isRanked || searchPending ? !converged : (!complete && allRows.length === 0) || needMoreRows;
 
   const isLastPage = !hasNextPage;
 
   const goToNextPage = useCallback(() => {
     if (isLastPage) return;
+    // Ranked mode pages an in-memory list; there is no cursor to advance.
+    if (isRanked) {
+      setPageIndex(pageIndex + 1);
+      onPageChange?.(pageIndex + 1);
+      return;
+    }
     // Continue from the last RENDERED (filtered) row: filtered rows are a subsequence of the
     // keyset-ordered buffer, so their (lastEmailAt, id) is a valid cursor and the next page
     // picks up the next matching rows without skipping or duplicating.
@@ -619,7 +708,7 @@ export const TicketListView = function TicketListView({
     });
     setPageIndex(pageIndex + 1);
     onPageChange?.(pageIndex + 1);
-  }, [isLastPage, filteredTickets, pageIndex, onPageChange]);
+  }, [isLastPage, isRanked, filteredTickets, pageIndex, onPageChange]);
 
   const goToPrevPage = useCallback(() => {
     if (pageIndex === 0) return;
@@ -630,6 +719,11 @@ export const TicketListView = function TicketListView({
   useEffect(() => {
     virtuosoRef.current?.scrollToIndex({ index: 0 });
   }, [pageIndex]);
+
+  useEffect(() => {
+    if (!needMoreRankedIds) return;
+    onRequestMoreRankedIds?.();
+  }, [needMoreRankedIds, onRequestMoreRankedIds]);
 
   // Grow the fetch window until the client-filtered page holds a full PAGE_SIZE (+1 sentinel)
   // of matching rows, or the source is genuinely exhausted — so Inbox / All Mail never miss
@@ -767,6 +861,7 @@ export const TicketListView = function TicketListView({
         return (
           <TicketListRow
             ticket={row as TicketListItem}
+            highlightTerms={highlightTerms}
             isActive={isActive}
             showExtraFields={showExtraFields}
             gridTemplate={ticketListGridTemplate}
@@ -806,7 +901,14 @@ export const TicketListView = function TicketListView({
 
   const fromIndex = pageIndex * PAGE_SIZE + 1;
   const toIndex = pageIndex * PAGE_SIZE + filteredTickets.length;
-  const rangeLabel = `${fromIndex}–${toIndex}`;
+  // On a truncated search the total is unknowable — the ranked window deliberately stops
+  // before the whole matched set — so flag that rather than invent a denominator. No count
+  // is cited: `searchTruncated` describes the index-side cut, while rankOrder may since have
+  // been narrowed further (the AI-tag filter intersects into the same list), so any number
+  // here would describe a different set from the one that was truncated.
+  const rangeLabel = searchTruncated
+    ? `${fromIndex}–${toIndex} of top matches`
+    : `${fromIndex}–${toIndex}`;
 
   const toSelectable = (t: SupportTicketRow): SelectableRow => {
     const entry: SelectableRow = {

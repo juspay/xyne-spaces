@@ -41,7 +41,6 @@ import {
   SparkleAi02 as Sparkles,
   PencilEdit as Pencil,
   UserTwo as Users,
-  SearchDefault as Search,
   UserDefault as User,
   FilterLines as ListFilter,
   BarchartDefault as BarChart4Icon,
@@ -76,6 +75,7 @@ import {
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
+import { HighlightedText } from '../../components/ui/HighlightedText/HighlightedText';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
@@ -106,6 +106,7 @@ import {
 import {
   buildDynamicFieldFilterEntries,
   toDynamicFieldQueryFilters,
+  toVespaDynamicFieldFilters,
   type DynamicFieldQueryFilter,
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
@@ -141,7 +142,7 @@ import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
-import { useShortcut, invokeShortcut } from '../../shortcuts';
+import { useShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../../hooks/useUsers';
 import { BulkActionToolbar } from '../../components/Tickets/TicketTable/BulkActionToolbar';
@@ -222,6 +223,8 @@ import {
   type CollapsibleFilterId,
 } from './DeskFilterTrigger';
 import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
+import { useDeskSearch } from './useDeskSearch';
+import { DeskSearchBox } from './DeskSearchBox';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
@@ -596,9 +599,22 @@ const SupportScreen = (): ReactElement => {
     [selectedChannelId],
   );
   const [kanbanTickets, setKanbanTickets] = useState<Ticket[]>([]);
+  const [deskSearchTerm, setDeskSearchTerm] = useState('');
+  const [isDeskSearchOpen, setIsDeskSearchOpen] = useState(false);
+  const deskSearchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setKanbanTickets([]);
+    setDeskSearchTerm('');
+    setIsDeskSearchOpen(false);
   }, [selectedChannelId]);
+
+  const openDeskSearch = useCallback((isOpen: boolean): void => {
+    setIsDeskSearchOpen(isOpen);
+    // select() focuses too, so reopening a box that still holds a term highlights it.
+    if (isOpen) {
+      requestAnimationFrame(() => deskSearchInputRef.current?.select());
+    }
+  }, []);
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('support-view-mode');
@@ -733,7 +749,63 @@ const SupportScreen = (): ReactElement => {
     };
   }, [selectedChannelId, filters.generatedTags]);
 
-  // Build the filter args once — reused by both the kanban query and the list view.
+  // Zero remains authoritative and re-applies every filter; this subset only narrows the
+  // ranked window so its budget is spent on rows that will survive.
+  // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
+  const deskSearchFilters = useMemo(
+    () => ({
+      assignedTo:
+        filters.assignee && filters.assignee.length > 0
+          ? filters.assignee
+          : filters.assigned
+            ? [userID]
+            : undefined,
+      createdBy: filters.createdBy && filters.createdBy.length > 0 ? filters.createdBy : undefined,
+      priority: filters.priority && filters.priority.length > 0 ? filters.priority : undefined,
+      stageName: filters.stages && filters.stages.length > 0 ? filters.stages : undefined,
+      userGroups:
+        filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
+      aiCategory:
+        filters.aiCategory && filters.aiCategory.length > 0 ? filters.aiCategory : undefined,
+      lastEmailAtStart: filters.lastEmailAtStart,
+      lastEmailAtEnd: filters.lastEmailAtEnd,
+      createdAtStart: filters.createdDateStart,
+      createdAtEnd: filters.createdDateEnd,
+      generatedTags:
+        filters.generatedTags && filters.generatedTags.length > 0
+          ? filters.generatedTags
+          : undefined,
+      // Only the types Zero also matches exactly.
+      ...toVespaDynamicFieldFilters(dynamicFieldEntries),
+    }),
+    [filters, userID, dynamicFieldEntries],
+  );
+
+  const {
+    conversationIds: searchConversationIds,
+    isSearching: isDeskSearching,
+    truncated: isDeskSearchTruncated,
+    fetchMore: fetchMoreDeskSearchIds,
+    terms: deskSearchTerms,
+  } = useDeskSearch({
+    searchTerm: deskSearchTerm,
+    channelId: selectedChannelId,
+    filters: deskSearchFilters,
+  });
+
+  // AI-tag filtering and desk search share one query slot, so they intersect rather than
+  // overwrite. The search side drives it — the other order would discard the ranking.
+  const conversationIdWhitelist = useMemo(() => {
+    const tagIds =
+      filters.generatedTags && filters.generatedTags.length > 0
+        ? (tagFilterConversationIds ?? [])
+        : undefined;
+    if (tagIds === undefined) return searchConversationIds ?? undefined;
+    if (searchConversationIds === null) return tagIds;
+    const tagged = new Set(tagIds);
+    return searchConversationIds.filter(id => tagged.has(id));
+  }, [filters.generatedTags, tagFilterConversationIds, searchConversationIds]);
+
   // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
   const ticketFilter = useMemo(
     () => ({
@@ -746,25 +818,22 @@ const SupportScreen = (): ReactElement => {
       createdBy: filters.createdBy && filters.createdBy.length > 0 ? filters.createdBy : undefined,
       priority: filters.priority && filters.priority.length > 0 ? filters.priority : undefined,
       stageName: filters.stages && filters.stages.length > 0 ? filters.stages : undefined,
-      aiCategory:
-        filters.aiCategory && filters.aiCategory.length > 0 ? filters.aiCategory : undefined,
-      conversationIdWhitelist:
-        filters.generatedTags && filters.generatedTags.length > 0
-          ? (tagFilterConversationIds ?? [])
-          : undefined,
-      hasAiDraft: filters.hasAiDraft === true ? true : undefined,
       hasSubTickets: filters.hasSubTickets === true ? true : undefined,
       userGroups:
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
+      aiCategory:
+        filters.aiCategory && filters.aiCategory.length > 0 ? filters.aiCategory : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
       lastEmailAtEnd: filters.lastEmailAtEnd,
+      conversationIdWhitelist,
+      hasAiDraft: filters.hasAiDraft === true ? true : undefined,
       createdAtStart: filters.createdDateStart,
       createdAtEnd: filters.createdDateEnd,
       dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
       // Sidebar label view (selectedLabel) takes precedence over the More-Filters label pick.
       conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
     }),
-    [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
+    [filters, userID, dynamicFieldEntries, conversationIdWhitelist, selectedLabel?.id],
   );
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
@@ -2998,9 +3067,12 @@ const SupportScreen = (): ReactElement => {
                         )}
                         <div ref={filterStaticLeftRef} className='flex items-center gap-2'>
                           {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                            <span className='p-1.5'>
-                              <Search size={16} />
-                            </span>
+                            <DeskSearchBox
+                              value={deskSearchTerm}
+                              onChange={setDeskSearchTerm}
+                              isOpen={isDeskSearchOpen}
+                              onOpenChange={setIsDeskSearchOpen}
+                            />
                           )}
                           <Button
                             variant='outline'
@@ -3030,17 +3102,13 @@ const SupportScreen = (): ReactElement => {
                     )}
                     <div className='flex items-center gap-2 min-w-0 flex-1 overflow-hidden'>
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                        <Tooltip content='Search emails' side='bottom'>
-                          <button
-                            onClick={() => invokeShortcut('mod+f')}
-                            className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
-                            data-track-category='Support'
-                            data-track-name='OpenDeskSearch'
-                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                          >
-                            <Search size={16} />
-                          </button>
-                        </Tooltip>
+                        <DeskSearchBox
+                          value={deskSearchTerm}
+                          onChange={setDeskSearchTerm}
+                          isOpen={isDeskSearchOpen}
+                          onOpenChange={openDeskSearch}
+                          inputRef={deskSearchInputRef}
+                        />
                       )}
                       {isSelectedChannelJoined && (
                         <>
@@ -3800,6 +3868,16 @@ const SupportScreen = (): ReactElement => {
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
+                        {...(searchConversationIds
+                          ? {
+                              rankOrder: conversationIdWhitelist ?? [],
+                              searchTruncated: isDeskSearchTruncated,
+                              searchPending: isDeskSearching,
+                              onRequestMoreRankedIds: fetchMoreDeskSearchIds,
+                              highlightTerms: deskSearchTerms,
+                            }
+                          : {})}
+                        emptyState={deskSearchTerm ? 'No results found' : undefined}
                         mailboxFolder={
                           selectedLabel || !selectedChannelHasMailboxFolders
                             ? undefined
@@ -3862,6 +3940,7 @@ const SupportScreen = (): ReactElement => {
           <Panel id='ticket-detail' defaultSize='100%' minSize='100%'>
             <div className='h-full overflow-hidden bg-background'>
               <SupportTicketDetail
+                highlightTerms={deskSearchTerms}
                 ticketFilter={ticketFilter}
                 isMember={isSelectedChannelJoined}
                 onMailtoClick={handleMailtoClick}
@@ -4096,6 +4175,8 @@ const TicketMetaRow = ({
 };
 
 type SupportTicketDetailProps = {
+  /** Words from the active desk search, marked inside each email body. */
+  highlightTerms?: string[];
   ticketFilter: {
     assignedTo: string[] | undefined;
     createdBy: string[] | undefined;
@@ -4160,6 +4241,7 @@ export const SupportTicketDetail = ({
   navBasePath,
   onBack,
   navTickets,
+  highlightTerms,
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -4834,7 +4916,7 @@ export const SupportTicketDetail = ({
                     row break its flex line instead of crushing the title to nothing. */}
                 <TruncatedTooltip content={title || 'Untitled Ticket'} side='bottom'>
                   <span className='font-medium text-foreground flex-1 min-w-[8rem] truncate'>
-                    {title || 'Untitled Ticket'}
+                    <HighlightedText text={title || 'Untitled Ticket'} terms={highlightTerms} />
                   </span>
                 </TruncatedTooltip>
 
@@ -5403,6 +5485,7 @@ export const SupportTicketDetail = ({
                       onMailtoClick={onMailtoClick}
                       mergedSourceByConversationId={mergedSourceByConversationId}
                       onUnmergeSource={handleUnmergeMergedSource}
+                      {...(highlightTerms ? { highlightTerms } : {})}
                     />
                   )}
                 </div>
@@ -5732,8 +5815,11 @@ const EmailThread = ({
   onMailtoClick,
   mergedSourceByConversationId,
   onUnmergeSource,
+  highlightTerms,
 }: {
   collapseState: EmailCollapseState;
+  /** Words from the active desk search, marked in each email body. */
+  highlightTerms?: string[];
   ticketId?: string | null | undefined;
   onReplyToEmail?: (emailId: string, mode: 'reply' | 'replyAll') => void;
   deskEmail?: string | null | undefined;
@@ -5799,6 +5885,7 @@ const EmailThread = ({
             onMailtoClick={onMailtoClick}
             {...(mergedSource && { mergedSource })}
             {...(onUnmergeSource && { onUnmergeSource })}
+            {...(highlightTerms ? { highlightTerms } : {})}
           />
         );
       })}
@@ -5818,8 +5905,10 @@ const EmailThreadItem = ({
   onMailtoClick,
   mergedSource,
   onUnmergeSource,
+  highlightTerms,
 }: {
   email: Email;
+  highlightTerms?: string[];
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
@@ -6001,6 +6090,7 @@ const EmailThreadItem = ({
                   attachments={threadAttachments ?? email.attachments}
                   onMailtoClick={onMailtoClick}
                   autoScroll={!canCollapse}
+                  {...(highlightTerms ? { highlightTerms } : {})}
                 />
               ) : (
                 <span className='text-muted-foreground italic'>No content</span>

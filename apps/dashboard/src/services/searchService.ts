@@ -136,6 +136,18 @@ export class SearchService {
       params['toEmail'] = filters.toEmail;
     }
 
+    if (filters.ccEmail) {
+      params['ccEmail'] = filters.ccEmail;
+    }
+
+    if (filters.bccEmail) {
+      params['bccEmail'] = filters.bccEmail;
+    }
+
+    if (filters.filename) {
+      params['filename'] = filters.filename;
+    }
+
     if (filters.with) {
       params['withUser'] = filters.with;
     }
@@ -227,6 +239,38 @@ export class SearchService {
 
     if (filters.assignee) {
       params['assignee'] = filters.assignee;
+    }
+
+    if (filters.userGroups) {
+      params['userGroups'] = filters.userGroups;
+    }
+
+    if (filters.aiCategory) {
+      params['aiCategory'] = filters.aiCategory;
+    }
+
+    if (filters.isArchived !== undefined) {
+      params['isArchived'] = filters.isArchived.toString();
+    }
+
+    if (filters.lastEmailAtStart !== undefined) {
+      params['lastEmailAtStart'] = filters.lastEmailAtStart.toString();
+    }
+
+    if (filters.lastEmailAtEnd !== undefined) {
+      params['lastEmailAtEnd'] = filters.lastEmailAtEnd.toString();
+    }
+
+    if (filters.createdAtStart !== undefined) {
+      params['createdAtStart'] = filters.createdAtStart.toString();
+    }
+
+    if (filters.createdAtEnd !== undefined) {
+      params['createdAtEnd'] = filters.createdAtEnd.toString();
+    }
+
+    if (filters.generatedTags) {
+      params['generatedTags'] = filters.generatedTags;
     }
 
     if (filters.dynamicFieldValues) {

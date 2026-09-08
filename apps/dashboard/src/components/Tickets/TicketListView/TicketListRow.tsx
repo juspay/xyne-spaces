@@ -5,6 +5,7 @@ import { cn } from '../../../utils/classNames';
 import { findEmailAddress, parseFirstEmailAddress } from '../../../utils/emailAddress';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { TruncatedTooltip } from '../../ui/Tooltip/TruncatedTooltip';
+import { HighlightedText } from '../../ui/HighlightedText/HighlightedText';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
@@ -15,6 +16,8 @@ import { getTicketListColumnAlignClass } from './ticketListColumns';
 
 interface TicketListRowProps {
   ticket: TicketListItem;
+  /** Words from the active search, marked inside the title. */
+  highlightTerms?: readonly string[] | undefined;
   onClick: () => void;
   isActive?: boolean;
   showExtraFields?: boolean;
@@ -90,6 +93,7 @@ const parseSender = (
 
 export const TicketListRow = ({
   ticket,
+  highlightTerms,
   onClick,
   isActive = false,
   showExtraFields = false,
@@ -221,7 +225,7 @@ export const TicketListRow = ({
             hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium',
           )}
         >
-          {ticketIdValue}
+          <HighlightedText text={ticketIdValue} terms={highlightTerms} />
         </span>
         <TruncatedTooltip content={ticket.title}>
           <span
@@ -230,7 +234,7 @@ export const TicketListRow = ({
               hasUnread ? 'font-semibold' : 'font-normal',
             )}
           >
-            {ticket.title}
+            <HighlightedText text={ticket.title} terms={highlightTerms} />
           </span>
         </TruncatedTooltip>
         {ticket.aiCategory && (

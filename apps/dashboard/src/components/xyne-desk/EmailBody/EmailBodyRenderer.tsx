@@ -9,6 +9,7 @@ import {
 import { preprocessEmailHtml } from './preprocessEmailHtml';
 import { collapseQuotedHistory } from './collapseQuotedHistory';
 import { useCidImageResolver } from './useCidImageResolver';
+import { normalizeHighlightTerms, splitOnHighlightTerms } from '../../../utils/highlightTerms';
 
 interface EmailBodyRendererProps {
   body: string;
@@ -19,6 +20,11 @@ interface EmailBodyRendererProps {
   onMailtoClick?: ((email: string) => void) | undefined;
   /** Scroll the parent container to the bottom after the iframe loads. Only true for the latest email. */
   autoScroll?: boolean;
+  /**
+   * Search terms to mark in the body. The body renders inside a sandboxed iframe, so this
+   * is applied to the parsed document before it becomes the srcdoc rather than by React.
+   */
+  highlightTerms?: string[];
   attachments?: ReadonlyArray<{
     id: string;
     metadata?: unknown;
@@ -93,6 +99,7 @@ const blockRemoteImages = (root: HTMLElement): number => {
 };
 
 const IFRAME_STYLES = `
+mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0 1px; }
   html, body {
     margin: 0;
     padding: 0;
@@ -335,10 +342,54 @@ interface BuiltDoc {
   hasBlockedImages: boolean;
 }
 
+/**
+ * Marks search terms on TEXT NODES of the parsed, already-sanitised document. Deliberately
+ * not a string replace on the HTML: that would match inside tag names, attributes and URLs,
+ * and could split a tag in half. Skips already-marked nodes, so re-running is idempotent.
+ */
+const EMPTY_HIGHLIGHT_TERMS: string[] = [];
+
+const HIGHLIGHT_SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'MARK', 'TEXTAREA']);
+
+const highlightTermsInDom = (root: HTMLElement, doc: Document, terms: string[]): void => {
+  const needles = normalizeHighlightTerms(terms);
+  if (needles.length === 0) return;
+
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node: Node) =>
+      node.parentElement && HIGHLIGHT_SKIP_TAGS.has(node.parentElement.tagName)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT,
+  });
+
+  // Collect first: replacing nodes while walking would invalidate the walker.
+  const textNodes: Text[] = [];
+  let current: Node | null;
+  while ((current = walker.nextNode())) textNodes.push(current as Text);
+
+  for (const textNode of textNodes) {
+    const segments = splitOnHighlightTerms(textNode.textContent ?? '', needles);
+    if (segments.length === 0) continue;
+
+    const fragment = doc.createDocumentFragment();
+    for (const segment of segments) {
+      if (segment.matched) {
+        const mark = doc.createElement('mark');
+        mark.textContent = segment.text;
+        fragment.appendChild(mark);
+      } else {
+        fragment.appendChild(doc.createTextNode(segment.text));
+      }
+    }
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  }
+};
+
 const buildIframeSrcdoc = (
   rawBody: string,
   showRemoteImages: boolean,
   rewriteCidRefs: (html: string) => string,
+  highlightTerms: string[],
 ): BuiltDoc => {
   if (!rawBody || !rawBody.trim()) {
     return {
@@ -366,6 +417,7 @@ const buildIframeSrcdoc = (
     };
   }
 
+  highlightTermsInDom(root, doc, highlightTerms);
   collapseQuotedHistory(root, doc);
   wrapQuotesInDetails(doc);
   normalizeRecipientMentions(root, doc);
@@ -396,6 +448,7 @@ export const EmailBodyRenderer = ({
   attachments,
   onMailtoClick,
   autoScroll = false,
+  highlightTerms = EMPTY_HIGHLIGHT_TERMS,
 }: EmailBodyRendererProps): JSX.Element => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const onMailtoClickRef = useRef(onMailtoClick);
@@ -417,8 +470,8 @@ export const EmailBodyRenderer = ({
   attachmentsRef.current = attachments;
 
   const { srcdoc, hasBlockedImages } = useMemo(
-    () => buildIframeSrcdoc(body, showRemoteImages, rewriteCidRefs),
-    [body, showRemoteImages, rewriteCidRefs],
+    () => buildIframeSrcdoc(body, showRemoteImages, rewriteCidRefs, highlightTerms),
+    [body, showRemoteImages, rewriteCidRefs, highlightTerms],
   );
 
   useEffect(() => {

@@ -148,3 +148,53 @@ export const ticketMatchesDynamicFieldEntries = (
   }
   return true;
 };
+
+export interface VespaDynamicFieldFilters {
+  /** `fieldId::value` tokens. */
+  dynamicFieldValues?: string[];
+  dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
+}
+
+/**
+ * The dynamic-field filters pushed into Vespa. Vespa matches a form field with
+ * `sameElement(fieldId contains X and fieldValue contains V)` — an exact whole-value
+ * comparison — and must never be stricter than the app, or it drops rows Zero would keep.
+ *
+ * SINGLE_SELECT / BOOLEAN / NUMBER compare exactly on both sides. MULTI_SELECT / USER are
+ * equivalent too: `buildFormFields` stores one struct element per selected value, so an OR
+ * over sameElement is the any-of match `matchesDynamicFieldValue` performs.
+ *
+ * STRING is pushed as Kanban already does, but `matchesDynamicFieldValue` matches substrings
+ * client-side, so the filter is exact with a search term active and substring without one.
+ * That asymmetry is pre-existing and shared with the Kanban board, so it is left alone.
+ */
+export const toVespaDynamicFieldFilters = (
+  entries: readonly DynamicFieldFilterEntry[],
+): VespaDynamicFieldFilters => {
+  const dynamicFieldValues: string[] = [];
+  const dynamicFieldDateRanges: Record<string, { start?: number; end?: number }> = {};
+
+  for (const entry of entries) {
+    if (Array.isArray(entry.value)) {
+      if (entry.fieldType === undefined) continue;
+      for (const raw of entry.value) {
+        const value = String(raw).trim();
+        if (value) dynamicFieldValues.push(`${entry.fieldId}::${value}`);
+      }
+      continue;
+    }
+
+    const { start, end } = entry.value;
+    if (start !== undefined || end !== undefined) {
+      dynamicFieldDateRanges[entry.fieldId] = {
+        ...(start !== undefined ? { start } : {}),
+        ...(end !== undefined ? { end } : {}),
+      };
+    }
+  }
+
+  return {
+    ...(dynamicFieldValues.length > 0 ? { dynamicFieldValues } : {}),
+    ...(Object.keys(dynamicFieldDateRanges).length > 0 ? { dynamicFieldDateRanges } : {}),
+  };
+};

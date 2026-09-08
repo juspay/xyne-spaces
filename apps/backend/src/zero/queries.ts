@@ -1355,6 +1355,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
+      conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
       hasSubTickets: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
@@ -1369,7 +1370,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
@@ -1394,6 +1395,10 @@ export const queries: AnyQueryRegistry = defineQueries({
 
       if (aiCategory && aiCategory.length > 0) {
         query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
+      }
+
+      if (conversationIds !== undefined) {
+        query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
       }
 
       if (hasAiDraft) {
@@ -1751,6 +1756,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
+      conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
       hasSubTickets: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
@@ -1768,7 +1774,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1790,6 +1796,10 @@ export const queries: AnyQueryRegistry = defineQueries({
 
       if (aiCategory && aiCategory.length > 0) {
         query = query.where(({ or, cmp }) => or(...aiCategory.map((c) => cmp('aiCategory', c))));
+      }
+
+      if (conversationIds !== undefined) {
+        query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
       }
 
       if (hasAiDraft) {

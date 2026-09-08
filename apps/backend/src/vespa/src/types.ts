@@ -281,6 +281,9 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   ticketType: string;
   priority: TicketPriority;
   stage: string;
+  isArchived: boolean;
+  lastEmailAt: number;
+  aiCategory: string;
   createdAtTimestamp: number;
   createdAt: string;
   updatedAt: string;

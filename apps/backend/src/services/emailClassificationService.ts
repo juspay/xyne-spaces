@@ -8,6 +8,8 @@ import { logger } from '../utils/logger.js';
 import { resolveFormFieldDefinitionsForForm } from '../utils/fieldDefinition.js';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
 import { DatabaseClient } from '../database/client.js';
+import { vespaQueue } from '../queues/vespaQueue.js';
+import { ticketSchema } from '@/vespa/src/types';
 import { LLMClient, createUserMessage } from 'agentic-framework';
 import { AgentsConfig } from '../agents/config.js';
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agents/agentLogger.js';
@@ -50,6 +52,22 @@ Respond with this exact JSON structure:
   "confidence": number between 0.0 and 1.0,
   "reasoning": "Brief explanation of why this priority was chosen"
 }`;
+
+/**
+ * Re-index after classification writes `aiCategory` / `aiPriority` / `userGroupId` through
+ * Prisma. The classifier runs after the ticket was first fed, so without this the index
+ * keeps the pre-classification values and a search filtered on them omits the ticket.
+ */
+const queueTicketReindex = async (ticketId: string): Promise<void> => {
+  try {
+    await vespaQueue.addJob({ schema: ticketSchema, jobType: 'feed', docId: ticketId });
+  } catch (error) {
+    logger.error('[Classification] Failed to queue Vespa feed after classification', {
+      ticketId,
+      error,
+    });
+  }
+};
 
 export class EmailClassificationService {
   private repo = new EmailClassificationRepository();
@@ -296,6 +314,7 @@ export class EmailClassificationService {
         error: err instanceof Error ? err.message : err,
       });
     });
+    await queueTicketReindex(ticketId);
   }
 
   /**
@@ -341,6 +360,8 @@ export class EmailClassificationService {
         where: { id: ticketId },
         data: { userGroupId: newResolvedGroupId },
       });
+      // Inside the guard: classifyTicket already queued a feed for its own columns.
+      await queueTicketReindex(ticketId);
     }
 
     return newResolvedGroupId;

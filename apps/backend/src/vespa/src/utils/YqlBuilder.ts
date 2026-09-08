@@ -80,6 +80,7 @@ export interface TicketFilters {
   // New filters
   boardId?: string[]; // Filter by board ID - comma-separated
   tags?: string[]; // Filter by tags
+  generatedTags?: string[]; // "category:value" tags; present on both ticket.sd and mail.sd
   dynamicFieldValues?: string[]; // Filter by dynamic form field tokens (fieldId::value)
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   createdBefore?: string; // Created before date (multiple formats)
@@ -88,6 +89,16 @@ export interface TicketFilters {
   createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
   stage?: string[]; // Filter by ticket stage - comma-separated
   assignedTo?: string[]; // Filter by assigned user ID - comma-separated
+  userGroupId?: string[]; // Filter by user group ID - comma-separated
+  aiCategory?: string[]; // Filter by AI-assigned category - comma-separated
+  isArchived?: boolean; // Restrict to archived / non-archived tickets
+  // Epoch-ms bounds on the conversation's newest email.
+  lastEmailAtStart?: number;
+  lastEmailAtEnd?: number;
+  // Epoch-ms bounds on ticket creation. Inclusive and exact, unlike createdBefore/After
+  // above, which snap to day boundaries and so are narrower than the caller's range.
+  createdAtStart?: number;
+  createdAtEnd?: number;
 }
 
 export interface FileFilters {
@@ -122,6 +133,15 @@ export interface MailFilters {
   channelId?: string[];
   from?: string[];
   to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  attachmentFilenames?: string[];
+  generatedTags?: string[];
+  // Epoch-ms bounds on the individual email's timestamp. Only the END bound is fed from the
+  // caller's per-CONVERSATION lastEmailAt range — see vespaSearch/index.ts for why the start
+  // bound is not safe to translate that way.
+  timestampStart?: number;
+  timestampEnd?: number;
   createdBefore?: string;
   createdAfter?: string;
   createdOn?: string;
@@ -412,11 +432,19 @@ export class YqlBuilder {
       }
     }
 
-    const isMailOnly = apps.length === 1 && apps[0].toLowerCase() === 'mail';
+    // Must agree with the handler's isConversationSearch gate: if it pages groups and this
+    // emits no grouping clause, the search returns zero ids with no error.
+    const normalisedApps = apps.map((app) => app.trim().toLowerCase());
+    // mail and ticket both carry `threadId` = conversationId, which is what lets one query
+    // span both instead of a per-schema query unioned by the caller. `mail` must be present:
+    // a ticket created outside Desk has no conversationId, so grouping a ticket-only search
+    // would collapse every such ticket into one result.
+    const isConversationScoped =
+      normalisedApps.includes('mail') &&
+      normalisedApps.every((app) => ['mail', 'ticket'].includes(app));
 
-    if (isMailOnly) {
-      // Deduplicate mail results by conversation: one result per threadId,
-      // keeping the highest-relevance hit within each thread.
+    if (isConversationScoped) {
+      // Collapsing here rather than after paging keeps a long thread from consuming a page.
       yql += ` | all(group(threadId) max(${safeLimit}) order(-max(relevance())) each(max(1) each(output(summary(default)))))`;
     } else if (groupBy && this.shouldGroup(groupBy, schemas, apps)) {
       const groupClause = this.buildGroupingClause(groupBy, Math.min(safeLimit, 50));
@@ -874,6 +902,16 @@ export class YqlBuilder {
    * Build YQL condition for Ticket app
    * Applies to ticket schema only
    */
+  /** OR of `field contains <bound value>`; null when there is nothing to match. */
+  private buildContainsClause(
+    field: string,
+    values: string[] | undefined,
+    params: VespaQueryParams,
+  ): string | null {
+    if (!values || values.length === 0) return null;
+    return values.map((value) => `${field} contains ${params.bind(field, value.trim())}`).join(' or ');
+  }
+
   private buildTicketConditions(filters: TicketFilters, userId: string, params: VespaQueryParams): string {
     const conditions: string[] = [];
 
@@ -943,6 +981,11 @@ export class YqlBuilder {
         .map((tag) => `tags contains ${params.bind('tags', tag.trim())}`)
         .join(' or ');
       conditions.push(`(${tagConditions})`);
+    }
+
+    const generatedTags = this.buildContainsClause('generatedTags', filters.generatedTags, params);
+    if (generatedTags) {
+      conditions.push(`(${generatedTags})`);
     }
 
     // Dynamic field filter (fieldId::value tokens)
@@ -1034,6 +1077,45 @@ export class YqlBuilder {
         .map((assignedTo) => `assignedTo contains ${params.bind('assignedTo', assignedTo.trim())}`)
         .join(' or ');
       conditions.push(`(${assignees})`);
+    }
+
+    // userGroupId is attribute-only (no index), so `contains` is an exact id match.
+    if (filters.userGroupId && filters.userGroupId.length > 0) {
+      const userGroups = filters.userGroupId
+        .map((userGroupId) => `userGroupId contains ${params.bind('userGroupId', userGroupId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${userGroups})`);
+    }
+
+    if (filters.aiCategory && filters.aiCategory.length > 0) {
+      const aiCategories = filters.aiCategory
+        .map((aiCategory) => `aiCategory contains ${params.bind('aiCategory', aiCategory.trim())}`)
+        .join(' or ');
+      conditions.push(`(${aiCategories})`);
+    }
+
+    // Opt-in so only the caller that wants it pays for the clause. Safe against a document
+    // fed before ticket.sd gained the field: `bool` is not nullable, so an unset value reads
+    // as false and the document is treated as not-archived rather than dropped.
+    if (filters.isArchived !== undefined) {
+      conditions.push(`isArchived contains "${filters.isArchived}"`);
+    }
+
+    // Interpolated raw (bind() is for strings), so coerce — a non-finite value would inject YQL.
+    if (Number.isFinite(filters.lastEmailAtStart)) {
+      conditions.push(`lastEmailAt >= ${Number(filters.lastEmailAtStart)}`);
+    }
+
+    if (Number.isFinite(filters.lastEmailAtEnd)) {
+      conditions.push(`lastEmailAt <= ${Number(filters.lastEmailAtEnd)}`);
+    }
+
+    if (Number.isFinite(filters.createdAtStart)) {
+      conditions.push(`createdAtTimestamp >= ${Number(filters.createdAtStart)}`);
+    }
+
+    if (Number.isFinite(filters.createdAtEnd)) {
+      conditions.push(`createdAtTimestamp <= ${Number(filters.createdAtEnd)}`);
     }
 
     // Date filters (ISO or dd/mm/yy or dd mon yy - no time keywords)
@@ -1322,7 +1404,7 @@ export class YqlBuilder {
       conditions.push(`(${channels})`);
     }
 
-    const buildPeopleClause = (field: 'from' | 'to', emails: string[]): string =>
+    const buildPeopleClause = (field: 'from' | 'to' | 'cc' | 'bcc', emails: string[]): string =>
       emails
         .map(
           (email) =>
@@ -1336,6 +1418,36 @@ export class YqlBuilder {
 
     if (filters.to && filters.to.length > 0) {
       conditions.push(`(${buildPeopleClause('to', filters.to)})`);
+    }
+
+    if (filters.cc && filters.cc.length > 0) {
+      conditions.push(`(${buildPeopleClause('cc', filters.cc)})`);
+    }
+
+    if (filters.bcc && filters.bcc.length > 0) {
+      conditions.push(`(${buildPeopleClause('bcc', filters.bcc)})`);
+    }
+
+    // Indexed, so `contains` matches on tokens: "report" finds "Q3 report.pdf".
+    if (filters.attachmentFilenames && filters.attachmentFilenames.length > 0) {
+      const names = filters.attachmentFilenames
+        .map((name) => `attachmentFilenames contains ${params.bind('attachmentFilenames', name.trim())}`)
+        .join(' or ');
+      conditions.push(`(${names})`);
+    }
+
+    const generatedTags = this.buildContainsClause('generatedTags', filters.generatedTags, params);
+    if (generatedTags) {
+      conditions.push(`(${generatedTags})`);
+    }
+
+    // Interpolated raw (bind() is for strings), so coerce — a non-finite value would inject YQL.
+    if (Number.isFinite(filters.timestampStart)) {
+      conditions.push(`timestamp >= ${Number(filters.timestampStart)}`);
+    }
+
+    if (Number.isFinite(filters.timestampEnd)) {
+      conditions.push(`timestamp <= ${Number(filters.timestampEnd)}`);
     }
 
     if (filters.createdBefore) {

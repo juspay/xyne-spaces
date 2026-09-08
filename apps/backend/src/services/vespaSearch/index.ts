@@ -84,6 +84,9 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
 
 const MAX_FILTER_VALUES = 50;
 const MAX_VESPA_HITS = 400;
+// Every hit costs a Postgres lookup in transformVespaResults, so this bounds hydration
+// cost rather than index work.
+const MAX_HYDRATED_HITS = 200;
 
 /**
  * Keep every non-mail hit, but only the highest-ranked mail hit for each Desk
@@ -228,6 +231,17 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       callEndsAt,      // Call visible range end timestamp
       stage,       // Ticket stage
       assignee,    // Assigned user name
+      userGroups,  // User group id(s) - comma-separated
+      aiCategory,  // AI-assigned category(ies) - comma-separated
+      isArchived,  // 'true'|'false' — restrict to archived / non-archived tickets
+      lastEmailAtStart, // Epoch-ms lower bound on the conversation's newest email
+      lastEmailAtEnd,   // Epoch-ms upper bound on the conversation's newest email
+      createdAtStart,   // Epoch-ms lower bound on ticket creation (inclusive)
+      createdAtEnd,     // Epoch-ms upper bound on ticket creation (inclusive)
+      ccEmail,     // Desk: cc address(es) for the mail `cc:` filter
+      bccEmail,    // Desk: bcc address(es) for the mail `bcc:` filter
+      filename,    // Desk: attachment file name token(s) for the `filename:` filter
+      generatedTags,    // Tag-framework tag(s), "category:value" - comma-separated
       filterOnly,  // Flag for filter-only search (no query text)
       collectionId, // KB collection id(s) - comma-separated; restricts file results to those clIds
       fileId,      // KB file id(s) - comma-separated; restricts file results to those Vespa docIds (collectionItem.fileId)
@@ -609,7 +623,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       const { results, total } = await vespaService.searchService.searchApps(String(q ?? ''), workspaceId, {
         view: appsView,
         orgId: callerOrgId,
-        limit: limit ? Number(limit) : 50,
+        // Clamped here because this branch returns before `effectiveLimit` is computed.
+        limit: Math.min(limit ? Number(limit) : 50, MAX_HYDRATED_HITS),
         offset: offset ? Number(offset) : 0,
       });
       res.json({ success: true, results, total });
@@ -619,8 +634,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     const isFilterOnlyDynamicFieldSearch =
       filterOnly === 'true' &&
       (dynamicFieldValues !== undefined || dynamicFieldDateRanges !== undefined);
-    const effectiveLimit =
+    const requestedLimit =
       limit !== undefined ? Number(limit) : isFilterOnlyDynamicFieldSearch ? 200 : 20;
+    const effectiveLimit = Math.min(requestedLimit, MAX_HYDRATED_HITS);
 
     // Build options object
     const options: any = {
@@ -754,6 +770,18 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.mail.to = toFilterValues(toEmail, 'toEmail');
     }
 
+    if (ccEmail) {
+      options.mail.cc = toFilterValues(ccEmail, 'ccEmail');
+    }
+
+    if (bccEmail) {
+      options.mail.bcc = toFilterValues(bccEmail, 'bccEmail');
+    }
+
+    if (filename) {
+      options.mail.attachmentFilenames = toFilterValues(filename, 'filename');
+    }
+
     if (withUser) {
       const participantIds = toFilterValues(withUser, 'withUser');
       options.slack.participants = participantIds;
@@ -880,6 +908,46 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.assignedTo = toFilterValues(assignee, 'assignee');
     }
 
+    if (userGroups) {
+      options.ticket.userGroupId = toFilterValues(userGroups, 'userGroups');
+    }
+
+    if (aiCategory) {
+      options.ticket.aiCategory = toFilterValues(aiCategory, 'aiCategory');
+    }
+
+    if (isArchived !== undefined) {
+      options.ticket.isArchived = isArchived === 'true';
+    }
+
+    // On mail this bounds the individual email timestamp, which is looser than the
+    // conversation bound and so cannot drop a conversation the caller's range would keep.
+    if (lastEmailAtStart !== undefined) {
+      options.ticket.lastEmailAtStart = Number(lastEmailAtStart);
+      options.mail.timestampStart = Number(lastEmailAtStart);
+    }
+
+    if (lastEmailAtEnd !== undefined) {
+      options.ticket.lastEmailAtEnd = Number(lastEmailAtEnd);
+      options.mail.timestampEnd = Number(lastEmailAtEnd);
+    }
+
+    if (createdAtStart !== undefined) {
+      options.ticket.createdAtStart = Number(createdAtStart);
+    }
+
+    if (createdAtEnd !== undefined) {
+      options.ticket.createdAtEnd = Number(createdAtEnd);
+    }
+
+    // mapTicket copies the latest email's tags onto the ticket, so the same values match
+    // either schema.
+    if (generatedTags) {
+      const tagValues = toFilterValues(generatedTags, 'generatedTags');
+      options.ticket.generatedTags = tagValues;
+      options.mail.generatedTags = tagValues;
+    }
+
     if (subApp) {
       options.file.subApp = toFilterValues(subApp, 'subApp');
     }
@@ -918,18 +986,21 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.groupBy = '';
     }
 
-    const isMailOnlySearch =
-      searchApps.length === 1 && searchApps[0].trim().toLowerCase() === 'mail';
-    const mailGroupOffset = isMailOnlySearch
+    // Mirrors YqlBuilder's isConversationScoped, including the `mail` requirement — see the
+    // comment there for why a ticket-only search must not be grouped.
+    const normalisedSearchApps = searchApps.map((app) => app.trim().toLowerCase());
+    const isConversationSearch =
+      normalisedSearchApps.includes('mail') &&
+      normalisedSearchApps.every((app) => ['mail', 'ticket'].includes(app));
+    // Grouped results are one row per conversation, so `offset` has to skip GROUPS; Vespa's
+    // own offset paginates hits, so the group prefix is fetched and sliced here instead.
+    const groupOffset = isConversationSearch
       ? Math.max(Number(offset) || 0, 0)
       : 0;
 
-    // Vespa's top-level offset paginates hits, not grouping buckets. Desk mail
-    // results are grouped by threadId, so fetch the ranked group prefix and
-    // slice the requested page after parsing the grouping response.
-    if (isMailOnlySearch && mailGroupOffset > 0) {
+    if (isConversationSearch && groupOffset > 0) {
       options.offset = 0;
-      options.limit = Math.min(MAX_VESPA_HITS, mailGroupOffset + effectiveLimit);
+      options.limit = Math.min(MAX_VESPA_HITS, groupOffset + effectiveLimit);
     }
 
     // Call vespa search
@@ -956,8 +1027,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Grouped result don't have matchFeatures
       // Need to be added explicitly
       // Return grouped results
-      const pageGroups = isMailOnlySearch
-        ? parsedResults.groups.slice(mailGroupOffset, mailGroupOffset + effectiveLimit)
+      const pageGroups = isConversationSearch
+        ? parsedResults.groups.slice(groupOffset, groupOffset + effectiveLimit)
         : parsedResults.groups;
 
       const groupedResults = await Promise.all(

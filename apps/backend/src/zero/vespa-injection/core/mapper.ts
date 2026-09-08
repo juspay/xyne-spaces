@@ -706,6 +706,11 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     ticketType: "", // later we should populate ticket type
     priority: args.priority,
     stage: args.stageName,
+    isArchived: args.isArchived ?? false,
+    // Epoch ms: the Zero row carries an ISO string, but ticket.sd declares `long`, and
+    // Vespa rejects the whole document on a type mismatch rather than skipping the field.
+    lastEmailAt: toTimestamp(args.lastEmailAt),
+    aiCategory: args.aiCategory || "",
     createdAtTimestamp: toTimestamp(args.createdAt),
     createdAt: toDateString(args.createdAt),
     updatedAt: toDateString(args.updatedAt),
