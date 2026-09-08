@@ -14,6 +14,8 @@ export interface StatusHandlers {
   healthz: StatusHandler;
   ready: StatusHandler;
   status: StatusHandler;
+  /** POST: re-read the rules and re-fingerprint every bundle now, then answer like status. */
+  reload: StatusHandler;
 }
 
 export function makeStatusHandlers(
@@ -21,6 +23,25 @@ export function makeStatusHandlers(
   origin: Origin,
   config: Config,
 ): StatusHandlers {
+  const statusBody = (): Record<string, unknown> => {
+    let storage: Record<string, unknown>;
+    try {
+      storage = origin.describe();
+    } catch (err) {
+      storage = { error: (err as Error).message };
+    }
+    return {
+      ...store.status(),
+      storage,
+      hostname: hostname(),
+      now: new Date().toISOString(),
+      config: {
+        reload_interval_s: config.reloadIntervalMs / 1000,
+        health_interval_s: config.healthIntervalMs / 1000,
+      },
+    };
+  };
+
   return {
     healthz: async (_req, res): Promise<void> => {
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
@@ -37,22 +58,14 @@ export function makeStatusHandlers(
     },
 
     status: async (_req, res): Promise<void> => {
-      let storage: Record<string, unknown>;
-      try {
-        storage = origin.describe();
-      } catch (err) {
-        storage = { error: (err as Error).message };
-      }
-      const body = {
-        ...store.status(),
-        storage,
-        hostname: hostname(),
-        now: new Date().toISOString(),
-        config: {
-          reload_interval_s: config.reloadIntervalMs / 1000,
-          health_interval_s: config.healthIntervalMs / 1000,
-        },
-      };
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(`${JSON.stringify(statusBody())}\n`);
+    },
+
+    reload: async (_req, res): Promise<void> => {
+      const before = store.current()?.generation ?? 0;
+      await store.reload(true);
+      const body = { reloaded: true, previous_generation: before, ...statusBody() };
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       res.end(`${JSON.stringify(body)}\n`);
     },

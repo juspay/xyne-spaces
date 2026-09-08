@@ -25,6 +25,10 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
     }
     // Static dispatch on purpose: no lookup keyed by the request path, so
     // the callee is never derived from request data.
+    if (req.method === 'POST' && pathname === '/_edge/reload') {
+      await statusHandlers.reload(req, res);
+      return;
+    }
     if (req.method === 'GET' || req.method === 'HEAD') {
       switch (pathname) {
         case '/_edge/healthz':
