@@ -561,7 +561,7 @@ async function requestFindings(
           conversationId: parentConversationId,
           ...(agentSlug ? { agentSlug } : {}),
         },
-        automationRun: true,
+        automationRun: ctx.automationRun ?? false,
       }).then(() => undefined),
   });
   if (!outcome.ok) {
