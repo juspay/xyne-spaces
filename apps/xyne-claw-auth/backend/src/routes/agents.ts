@@ -541,8 +541,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (ownerUserId && !matchesAuthenticatedUserId(req, ownerUserId) && !admin) {
     throw forbidden("Only an admin can create an agent owned by another user");
   }
-  // For personal agents, owner is required
-  const effectiveOwner = ownerUserId ?? requesterId;
+  // For personal agents, owner is required.
+  // When ownerUserId is the caller's own Spaces workspace ID (which the frontend
+  // sends from auth.user.id), prefer requesterId — the canonical Claw user ID
+  // set by requireAuth — so the DB connect targets the correct User row.
+  const effectiveOwner = (() => {
+    if (!ownerUserId) return requesterId;
+    if (matchesAuthenticatedUserId(req, ownerUserId)) return requesterId ?? ownerUserId;
+    return ownerUserId; // admin setting a different owner
+  })();
   if (effectiveScope === "personal" && !effectiveOwner) {
     throw badRequest("ownerUserId or x-user-id header required for personal agents");
   }
