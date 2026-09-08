@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.17](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.16...v1.251.0-release-20260901.17) (2026-09-08)
+
+
+### Features
+
+* mandatory sidebar change ([#1650](https://github.com/juspay/xyne-spaces/issues/1650)) ([aac9fda](https://github.com/juspay/xyne-spaces/commit/aac9fdaa3a680d94a49c043ad2d39327a98d9749))
+
 ## [1.251.0-release-20260901.16](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.15...v1.251.0-release-20260901.16) (2026-09-07)
 
 
