@@ -18,9 +18,6 @@ import {
   deleteProviderCredential,
   upsertSubagentRouting,
   deleteSubagentRouting,
-  initiateCopilotGitHubLogin,
-  pollCopilotGitHubLogin,
-  listCopilotModelsForUser,
   listClaudeModelsForUser,
   listCodexModelsForUser,
   listLitellmModelsForUser,
@@ -28,7 +25,6 @@ import {
   listAgents,
   type ProviderCredential,
   type SubagentRouting,
-  type GitHubDeviceCode,
   type ClaudeModelInfo,
 } from "../../lib/api";
 import {
@@ -55,11 +51,6 @@ const PROVIDER_META: Record<
   string,
   { name: string; description: string; icon: typeof AirplaneTiltIcon }
 > = {
-  copilot: {
-    name: "GitHub Copilot",
-    description: "Code suggestions and autocomplete",
-    icon: AirplaneTiltIcon,
-  },
   claude: {
     name: "Anthropic Claude",
     description: "Reasoning and coding assistance",
@@ -530,211 +521,14 @@ function ProviderConfigDialog({
       description={meta?.description}
       maxWidth={520}
     >
-      {provider === "copilot" ? (
-        <CopilotConfigForm userId={userId} onMutate={onMutate} onError={onError} onClose={onClose} />
-      ) : (
-        <GenericProviderConfigForm
-          provider={provider}
-          userId={userId}
-          onMutate={onMutate}
-          onError={onError}
-          onClose={onClose}
-        />
-      )}
+      <GenericProviderConfigForm
+        provider={provider}
+        userId={userId}
+        onMutate={onMutate}
+        onError={onError}
+        onClose={onClose}
+      />
     </Dialog>
-  );
-}
-
-/* ── Copilot config (GitHub device-code flow) ──────────────────────── */
-
-function CopilotConfigForm({
-  userId,
-  onMutate,
-  onError,
-  onClose,
-}: {
-  userId: string;
-  onMutate: () => void;
-  onError: (msg: string) => void;
-  onClose: () => void;
-}) {
-  const [device, setDevice] = useState<GitHubDeviceCode | null>(null);
-  const [polling, setPolling] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [models, setModels] = useState<Array<{ id: string; name: string }> | null>(null);
-  const [modelsErr, setModelsErr] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [hasKey, setHasKey] = useState(false);
-  const [currentModel, setCurrentModel] = useState<string>("");
-
-  // Load initial state
-  useEffect(() => {
-    listProviderCredentials(userId)
-      .then((creds) => {
-        const copilot = creds.find((c) => c.provider === "copilot");
-        setHasKey(copilot?.hasApiKey ?? false);
-        setCurrentModel(copilot?.model ?? "");
-      })
-      .catch(() => {});
-  }, [userId]);
-
-  // Fetch models when connected
-  useEffect(() => {
-    if (!hasKey) return;
-    setModelsErr(null);
-    listCopilotModelsForUser(userId)
-      .then(setModels)
-      .catch((e) => setModelsErr(e instanceof Error ? e.message : "Failed to load models"));
-  }, [hasKey, userId]);
-
-  // Poll after device code is issued
-  useEffect(() => {
-    if (!polling || !device) return;
-    let cancelled = false;
-    const run = async () => {
-      while (!cancelled) {
-        await new Promise((r) => setTimeout(r, (device.interval + 1) * 1000));
-        if (cancelled) break;
-        try {
-          const result = await pollCopilotGitHubLogin(userId);
-          if (result.status === "approved") {
-            setPolling(false);
-            setDevice(null);
-            onMutate();
-            onClose();
-            break;
-          }
-          if (result.status === "slow_down") await new Promise((r) => setTimeout(r, 5000));
-        } catch (e) {
-          setErr(e instanceof Error ? e.message : "Polling failed");
-          setPolling(false);
-          break;
-        }
-      }
-    };
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [polling, device, userId, onMutate, onClose]);
-
-  const startLogin = async () => {
-    setStarting(true);
-    setErr(null);
-    try {
-      const d = await initiateCopilotGitHubLogin(userId);
-      setDevice(d);
-      setPolling(true);
-      window.open(d.verificationUri, "_blank");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to start GitHub login");
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const handleModelChange = async (model: string) => {
-    setSaving(true);
-    try {
-      await upsertProviderCredential(userId, "copilot", { model });
-      onMutate();
-      setCurrentModel(model);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDisconnect = async () => {
-    setSaving(true);
-    try {
-      await deleteProviderCredential(userId, "copilot");
-      onMutate();
-      onClose();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Disconnect failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-4">
-      {!hasKey && !device && (
-        <div className="flex flex-col gap-3">
-          <p className="text-[13px] text-xyne-fg-muted">
-            Connect your GitHub account to use Copilot-powered code suggestions across all agents.
-          </p>
-          <Button onClick={startLogin} disabled={starting} leadingIcon={<PlugIcon size={14} />}>
-            {starting ? "Starting…" : "Log in with GitHub"}
-          </Button>
-        </div>
-      )}
-
-      {hasKey && (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-2 text-[13px] text-xyne-success-fg">
-            <CheckCircleIcon size={16} />
-            <span>Connected via GitHub</span>
-          </div>
-
-          {models && models.length > 0 && (
-            <div>
-              <label className="mb-1.5 block text-[12px] font-medium text-xyne-fg-secondary">Model</label>
-              <SelectField
-                value={currentModel}
-                onValueChange={(v) => v && handleModelChange(v)}
-                options={models.map((m) => ({ value: m.id, label: m.name }))}
-                disabled={saving}
-              />
-            </div>
-          )}
-          {modelsErr && <p className="text-[12px] text-xyne-warning-fg">{modelsErr}</p>}
-
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={startLogin} disabled={starting || saving}>
-              Reconnect
-            </Button>
-            <Button variant="destructive" onClick={handleDisconnect} disabled={saving}>
-              Disconnect
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {device && (
-        <div className="flex flex-col gap-3 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-4">
-          <p className="text-[13px] text-xyne-fg-muted">Enter this code on GitHub to authorize:</p>
-          <div className="flex items-center gap-2">
-            <code className="rounded-md bg-xyne-surface px-3 py-2 font-mono text-lg tracking-widest text-xyne-fg-primary">
-              {device.userCode}
-            </code>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => navigator.clipboard.writeText(device.userCode)}
-              leadingIcon={<CopyIcon size={14} />}
-            />
-          </div>
-          <p className="text-[12px] text-xyne-fg-muted">
-            Opens at{" "}
-            <a href={device.verificationUri} target="_blank" rel="noreferrer" className="underline">
-              {device.verificationUri}
-            </a>
-          </p>
-          {polling && (
-            <div className="flex items-center gap-2 text-[12px] text-xyne-fg-muted">
-              <SpinnerGapIcon size={14} className="animate-spin" />
-              Waiting for authorization…
-            </div>
-          )}
-        </div>
-      )}
-
-      {err && <p className="text-[13px] text-xyne-error-fg">{err}</p>}
-    </div>
   );
 }
 
