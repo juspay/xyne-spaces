@@ -10,7 +10,7 @@ import type { PreviewClientRef } from './useArtifactDataBridge';
 // The backend origin the dashboard's own api client talks to. On localhost that
 // is :3001 (there is no /api vite proxy in dev); in prod it's same-origin. /claw
 // stays same-origin (it IS proxied in dev). API_BASE_URL ends in '/api'.
-const API_ORIGIN = (() => {
+const API_ORIGIN = ((): string => {
   try {
     return new URL(API_BASE_URL, window.location.origin).origin;
   } catch {
@@ -149,6 +149,9 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
         const target = url.pathname.startsWith('/api/')
           ? `${API_ORIGIN}${url.pathname}${url.search}`
           : url.toString();
+        // Transparent proxy: forward the raw status/headers/text, including
+        // 4xx/5xx, which axios would throw on — fetch is deliberate here.
+        // eslint-disable-next-line local-rules/no-fetch-use-axios
         const res = await fetch(target, {
           method,
           headers: outHeaders,
