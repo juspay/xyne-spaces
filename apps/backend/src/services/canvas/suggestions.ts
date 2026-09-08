@@ -11,15 +11,12 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseClient } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
+import { readFromYSweetOrNull, syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { createBlockRenderer } from './blockRender';
 import type { DerivedOp } from './blockLabels';
-// Relative imports on purpose: the backend's "@xyne/shared" alias points at
-// the package's BUILT output, and these pure modules must be usable (and
-// testable) without a rebuild. The dashboard imports them via "@xyne/shared".
-import { applyOps, type SuggestionRowLike } from '../../../../../packages/shared/src/canvas/suggestionApply';
-import { computeDeletionEvents } from '../../../../../packages/shared/src/canvas/blockDeletionEvents';
+import { applyOps, type SuggestionRowLike } from '@xyne/shared';
+import { computeDeletionEvents } from '@xyne/shared';
 
 function stableStringify(value: unknown): string {
   const normalize = (v: unknown): unknown => {
@@ -130,7 +127,11 @@ export async function applySuggestionChanges(changeIds: string[]): Promise<Batch
   return withCanvasLock(
     canvasId,
     async () => {
-      const current = await readFromYSweet(canvasId);
+      const current = await readFromYSweetOrNull(canvasId);
+      if (current === null) {
+        logger.error(`[Suggestions] Could not read canvas ${canvasId}; no statuses written`);
+        return { ...empty, error: 'Could not read the canvas; no changes applied' };
+      }
       const renderer = await createBlockRenderer(current);
       const preIds = topLevelIds(current);
 

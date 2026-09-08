@@ -36,7 +36,7 @@ import {
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
-import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
+import { readFromYSweetOrNull, syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { buildHandleMap, deriveOps, parseLabelledMarkdown } from '@/services/canvas/blockLabels';
 import { deriveDiffOps } from '@/services/canvas/blockDiff';
@@ -1457,7 +1457,11 @@ export class SdlcHubService implements SdlcHub {
 
     // Suggestion gate (mirrors updateCanvas), no exceptions: every update to a
     // PRD/Tech Doc parks as suggestions for human review.
-    const live = await readFromYSweet(existing.id);
+    // Null is a failed read, not an empty doc — see readFromYSweetOrNull.
+    const live = await readFromYSweetOrNull(existing.id);
+    if (live === null) {
+      throw new AppError('Could not read the artifact canvas right now. Try again shortly.', 503);
+    }
     const nextBlocks = content as unknown as BlockNoteBlock[];
     const renderer = await createBlockRenderer([...live, ...nextBlocks]);
     const entries = parseLabelledMarkdown(resolved.markdown);

@@ -5,6 +5,7 @@
     "lib": ["ES2020"],
     "types": ["node"],
     "outDir": "./dist",
+    "rootDir": "./src",
     "rootDirs": ["./src", "../../packages/framework/src"],
     "strict": true,
     "esModuleInterop": true,
