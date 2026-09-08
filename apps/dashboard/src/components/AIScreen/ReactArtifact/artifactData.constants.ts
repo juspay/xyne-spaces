@@ -201,7 +201,15 @@ export interface HostRequestResultMessage {
 export interface AppArtifactMessage {
   source: 'xyne-artifact';
   v: number;
-  type: 'ready' | 'refresh' | 'mutate' | 'agent-run' | 'agent-cancel' | 'agent-attach' | 'error' | 'request';
+  type:
+    | 'ready'
+    | 'refresh'
+    | 'mutate'
+    | 'agent-run'
+    | 'agent-cancel'
+    | 'agent-attach'
+    | 'error'
+    | 'request';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
   /** `mutate` and `request`. */
