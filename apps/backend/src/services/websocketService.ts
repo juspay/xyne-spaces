@@ -16,6 +16,7 @@ import { activityTrackingService, ActivityEventPayload } from './activityTrackin
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
 import { attachSyncHandlers } from '@/zero/sync/clientGateway';
+import { fanout } from '@/zero/sync/fanout';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -85,6 +86,13 @@ class WebSocketService {
       pingInterval: 5000, // Send ping every 5 seconds
       pingTimeout: 25000, // Wait 25 seconds for pong response before disconnecting
     });
+
+    // Sync engine: let the fan-out broadcast a data delta to a per-instance room in ONE encode
+    // (io.to(room)) instead of serializing per client. Clients join/leave the room on
+    // hydrate/revoke (see clientGateway + fanout).
+    if (config.enableSyncEngine) {
+      fanout.setBroadcast((room, event, payload) => this.io?.to(room).emit(event, payload));
+    }
 
     // Authentication middleware - reuse Express auth logic
     this.io.use(async (socket, next) => {

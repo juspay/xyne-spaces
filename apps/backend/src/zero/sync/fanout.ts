@@ -23,8 +23,17 @@ const BLOCK_MS = 1_000;
 /** The minimal socket surface the fan-out needs — satisfied by a socket.io Socket. */
 export interface SyncSocket {
   emit(event: string, payload: unknown): void;
+  join(room: string): void;
+  leave(room: string): void;
   readonly connected: boolean;
 }
+
+/** Broadcast a payload to every socket in a room (one encode; the socket.io adapter fans out). */
+export type SyncBroadcast = (room: string, event: string, payload: unknown) => void;
+
+/** socket.io room for a data instance's live (admitted+hydrated) clients — joined on hydrate,
+ *  left on revoke/remove/disconnect. Prefixed to avoid colliding with the app's own rooms. */
+const roomFor = (dataInstanceKey: string): string => `sync:${dataInstanceKey}`;
 
 interface ClientSub {
   id: string;
@@ -79,6 +88,14 @@ export class Fanout {
 
   #tail: Redis | null = null;
   #stopped = false;
+  /** Set at startup from the socket.io server (`io.to(room).emit`). When present, a data delta is
+   *  broadcast to the instance's room in ONE encode instead of per-client. Absent (tests / not
+   *  wired) → per-client fallback below. */
+  #broadcast: SyncBroadcast | null = null;
+
+  setBroadcast(fn: SyncBroadcast): void {
+    this.#broadcast = fn;
+  }
 
   start(): void {
     this.#stopped = false;
@@ -124,13 +141,13 @@ export class Fanout {
     let departed: ClientSub | undefined;
     for (const s of subs)
       if (s.id === clientId) {
-        // Clear admission so a concurrent data dispatch that already captured this client
-        // in `liveBefore` skips it at the emit-time recheck — no stray delta for an
-        // instance the client just released.
+        // Clear admission (the no-io per-client delta fallback checks it) and LEAVE the room so no
+        // in-flight/subsequent broadcast reaches a client that just released the instance.
         s.admitted = false;
         departed = s;
         subs.delete(s);
         this.#byUserDelete(s);
+        s.socket.leave(roomFor(dataInstanceKey)); // stop room broadcasts (no-op if already disconnected)
       }
     if (!departed) return;
     // Prune the grant fan-out map (P2 / standing finding #5 — the XREAD stream list otherwise grows
@@ -257,6 +274,9 @@ export class Fanout {
     } else if (!admitted && client.admitted) {
       client.admitted = false;
       client.hydrated = false;
+      // Leave the room BEFORE (well, atomically with) the revoke: no future data-delta broadcast
+      // reaches this client. Ordered against data dispatches via the shared data-key SerialQueue.
+      client.socket.leave(roomFor(client.dataInstanceKey));
       this.#emit(client, 'sync:revoke', { instanceKey: client.dataInstanceKey });
     }
   }
@@ -299,6 +319,7 @@ export class Fanout {
               version,
             });
           }
+          client.socket.join(roomFor(instanceKey)); // now live → future deltas via the room broadcast
           obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: diffs.length });
           return;
         }
@@ -314,6 +335,7 @@ export class Fanout {
     if (!memo || memo.head !== head) this.#snapshotMemo.set(instanceKey, { head, rows });
     client.hydrated = true;
     this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head, version });
+    client.socket.join(roomFor(instanceKey)); // now live → future deltas via the room broadcast
   }
 
   #emit(client: ClientSub, event: string, payload: unknown): void {
@@ -370,28 +392,28 @@ export class Fanout {
 
     const dataSubs = this.#dataSubs.get(instanceKey);
     if (dataSubs) {
-      // Clients already live get this entry as a delta. Deferred clients (admitted, waiting
-      // on hydration) instead snapshot to the CURRENT state — which already includes this
-      // entry — so they must not also receive it as a delta.
-      const liveBefore = [...dataSubs].filter((c) => c.admitted && c.hydrated);
+      const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id, version };
+      // Broadcast to the room = every currently-LIVE (joined) client, in ONE encode. This runs
+      // FIRST, before hydrating the deferred clients below — a deferred client is not in the room
+      // yet, and its snapshot (read after this entry landed in Redis) already includes this delta,
+      // so it must not also receive the delta (no double-delivery). Room membership == the
+      // admitted+hydrated set (join on hydrate, leave on revoke/remove), and revoke's leave is
+      // serialized against this dispatch on the data-key queue, so a revoked client has already
+      // left → no stray delta (subsumes the old emit-time recheck). No-op on `cleared` (empty delta).
+      if (!diff?.cleared) {
+        if (this.#broadcast) this.#broadcast(roomFor(instanceKey), 'sync:delta', delta);
+        else for (const c of dataSubs) if (c.admitted && c.hydrated) this.#emit(c, 'sync:delta', delta); // fallback: no io
+      }
+      // Deferred clients (admitted, not yet hydrated) snapshot to the CURRENT state (which includes
+      // this entry) and join the room — AFTER the broadcast above.
       const deferred = [...dataSubs].filter((c) => c.admitted && !c.hydrated);
       if (deferred.length > 0 && !diff?.cleared) {
         for (const c of deferred) await this.#hydrate(c);
-      }
-      const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id, version };
-      for (const client of liveBefore) {
-        // A grant dispatch on the (different) grant stream can revoke a client during the
-        // `await #hydrate` above; serialize-per-stream does NOT order that cross-stream pair.
-        // Re-check at emit time so a just-revoked client — which has already purged — never
-        // receives a stray delta that would resurrect the rows it can no longer see.
-        if (!client.admitted || !client.hydrated) continue;
-        this.#emit(client, 'sync:delta', delta);
       }
       obsEmit('stream-diff', {
         instanceKey,
         upserts: delta.upserts.length,
         deletes: delta.deletes.length,
-        clients: liveBefore.length,
         subscribers: dataSubs.size,
       });
     }

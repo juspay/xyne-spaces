@@ -61,10 +61,17 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
   }> = [];
   let ready = false;
 
-  // Deliver over this socket via the minimal emitter surface the fan-out expects.
+  // Deliver over this socket via the minimal emitter surface the fan-out expects. join/leave manage
+  // the per-instance room the fan-out broadcasts deltas to (one encode for all live clients).
   const emitter: SyncSocket = {
     emit: (event, payload) => {
       socket.emit(event, payload);
+    },
+    join: (room) => {
+      void socket.join(room);
+    },
+    leave: (room) => {
+      void socket.leave(room);
     },
     get connected() {
       return socket.connected;
