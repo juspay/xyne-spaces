@@ -1,3 +1,10 @@
+## [1.291.1](https://github.com/juspay/xyne-spaces/compare/v1.291.0...v1.291.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* Fix msg_length check for slack adapters ([#1648](https://github.com/juspay/xyne-spaces/issues/1648)) ([928885e](https://github.com/juspay/xyne-spaces/commit/928885e15930e7f78dfa2bcfb8ebd13b8050e035))
+
 ## [1.291.0](https://github.com/juspay/xyne-spaces/compare/v1.290.0...v1.291.0) (2026-09-08)
 
 
