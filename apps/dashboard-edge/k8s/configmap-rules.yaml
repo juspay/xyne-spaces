@@ -1,0 +1,53 @@
+# The live routing table. Edit and apply; the edge picks it up within
+# EDGE_RELOAD_INTERVAL seconds of kubelet syncing the mount (about a minute)
+# with no restart. Rules are evaluated top to bottom, first match wins, and
+# the last rule must be the catch-all default. See apps/dashboard-edge/README.md.
+#
+# "bundle" is a lane prefix in the bucket exactly as the Jenkins pipeline
+# names it: main, release-YYYYMMDD, devqa-xyne-<name>, or a branch name with
+# its fix/feat/feature prefix stripped, plus <lane>-sdlc for the SDLC-mode
+# build of the same commit (served under /sdlc-app/ with strip_prefix). Never a commit hash: a lane is
+# overwritten in place on every build and the edge fingerprints index.html.
+# Every static prefix here must exist before the rule can go live.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xyne-dashboard-edge-rules
+  namespace: xyne-apps
+data:
+  rules.json: |
+    {
+      "rules": [
+        {
+          "id": "sdlc",
+          "match": { "path_prefix": "/sdlc-app/" },
+          "bundle": "main-sdlc",
+          "version": 1,
+          "strip_prefix": "/sdlc-app"
+        },
+        {
+          "id": "playground-header",
+          "match": { "header": { "name": "x-route-env", "exact": "playground" } },
+          "bundle": "release-20260902",
+          "version": 1
+        },
+        {
+          "id": "playground-cookie",
+          "match": { "cookie": { "name": "x-route-env", "regex": "^playground$" } },
+          "bundle": "release-20260902",
+          "version": 1
+        },
+        {
+          "id": "devqa",
+          "match": { "user_agent": { "regex": "devqa-xyne-([A-Za-z0-9_-]+)" } },
+          "bundle": "devqa-xyne-$1",
+          "cache": "never"
+        },
+        {
+          "id": "default",
+          "match": { "path_prefix": "/" },
+          "bundle": "main",
+          "version": 1
+        }
+      ]
+    }
