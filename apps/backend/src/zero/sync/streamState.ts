@@ -32,6 +32,9 @@ export interface StreamDiff {
   upserts: Array<{ key: string; tableName: string; row: Row }>;
   deletes: string[];
   cleared: boolean;
+  /** Set on the grant-instance resync marker (redisStore.RESYNC_DIFF) — the deterministic
+   *  "fully (re)materialized" boundary the fan-out gates cold-defer on. Absent on data diffs. */
+  resynced?: boolean;
 }
 
 /** Compaction key for a row: "table:pk". A `del` carries only the PK, so callers must know each table's PK. */
