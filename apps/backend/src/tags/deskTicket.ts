@@ -1,9 +1,10 @@
 import { db } from '@/database/client';
-import { tagRepository } from '@/database/repositories/tagRepository';
+import { tagRepository, MirrorTagRow } from '@/database/repositories/tagRepository';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
+import { TagMethod } from '@xyne/shared';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from './deskEmail';
 
 export const DESK_TICKET_SOURCE_TYPE = 'desk-ticket';
@@ -76,11 +77,11 @@ export async function syncTicketTagsForConversation(conversationId: string): Pro
         select: { id: true },
       });
 
-      const sourceRows = latest
-        ? await tx.tag.findMany({
+      const sourceRows: MirrorTagRow[] = latest
+        ? (await tx.tag.findMany({
             where: { sourceId: latest.id, sourceType: DESK_EMAIL_SOURCE_TYPE, isDeleted: false },
             select: { tagCategory: true, tag: true, method: true, reason: true },
-          })
+          })).map(r => ({ ...r, method: r.method as TagMethod }))
         : [];
 
       const changed = await tagRepository.replaceAllTagsForSource(

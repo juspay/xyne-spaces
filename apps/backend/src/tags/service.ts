@@ -180,7 +180,7 @@ export class TagService {
       updatedBy: createdBy,
     });
 
-    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
 
     return created;
   }
@@ -225,7 +225,7 @@ export class TagService {
       }, tx);
     });
 
-    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
 
     return updated;
   }
@@ -254,7 +254,7 @@ export class TagService {
 
     await tagRepository.softDeleteTagRow(existing.id, deletedBy);
 
-    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
   }
 
   /**
@@ -272,7 +272,7 @@ export class TagService {
 
     const confirmed = await tagRepository.updateTagMethod(tagId, TagMethod.MANUAL, updatedBy);
 
-    if (existing.sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(existing.sourceId);
+    if (existing.sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(existing.sourceId);
 
     return confirmed;
   }
@@ -346,7 +346,7 @@ export class TagService {
       return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method as TagMethod }));
     });
 
-    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
 
     return result;
   }
@@ -401,7 +401,7 @@ export class TagService {
       return result;
     });
 
-    if (sourceType === DESK_EMAIL_SOURCE_TYPE) await syncTicketTagsFromEmail(sourceId);
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
 
     return persisted;
   }

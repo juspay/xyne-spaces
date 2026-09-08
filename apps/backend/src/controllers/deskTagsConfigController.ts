@@ -431,7 +431,7 @@ export class DeskTagsConfigController {
       });
 
       // Sync ticket tags outside the transaction — raw tx bypasses tagService hooks.
-      await syncTicketTagsFromEmail(emailId);
+      void syncTicketTagsFromEmail(emailId);
 
       res.status(201).json({ success: true });
     } catch (error: any) {

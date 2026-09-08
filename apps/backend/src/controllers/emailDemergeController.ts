@@ -164,7 +164,7 @@ export class EmailDemergeController {
       // Re-sync old ticket's tags — emails moved out so its latest email changed,
       // but no tag write fired on the old conversation's side.
       // New conversation's ticket tags are covered by the regen jobs below.
-      void syncTicketTagsForConversation(email.conversationId);
+      void syncTicketTagsForConversation(originalTicket.conversationId);
 
       // Re-index moved emails in Vespa — conversationId (threadId) and permissions changed
       for (const id of emailIdsToMove) {

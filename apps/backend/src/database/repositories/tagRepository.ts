@@ -8,7 +8,7 @@ export type TxClient = Prisma.TransactionClient;
 export interface MirrorTagRow {
   tagCategory: string;
   tag: string;
-  method: string;
+  method: TagMethod;
   reason?: string | null;
 }
 
@@ -273,7 +273,7 @@ export class TagRepository {
           configKey,
           tagCategory: row.tagCategory,
           tag: row.tag,
-          method: row.method as TagMethod,
+          method: row.method,
           reason: row.reason ?? null,
           createdAt: now,
           updatedAt: now,
@@ -285,7 +285,6 @@ export class TagRepository {
     return true;
   }
 
- 
   /**
    * Returns conversationIds of tickets where any email in the conversation carries
    * any of the given "category:tag" values (OR semantics).
