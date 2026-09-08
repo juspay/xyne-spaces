@@ -28,6 +28,7 @@ import { encrypt } from '@/services/encryptionService';
 import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
+import { automationService } from '@/automations/services/automation.service';
 
 const TAG = '[GoogleAuth]';
 
@@ -634,6 +635,47 @@ router.post(
       res.status(error instanceof GoogleAuthRouteError ? error.status : 400).json({
         error: error instanceof GoogleAuthRouteError ? error.message : 'Unable to start Google Docs connection',
       });
+    }
+  },
+);
+
+/**
+ * A run uses the automation's own author, not whoever is looking at the builder,
+ * so `automationId` names the automation whose author to report on; without it
+ * the caller is the author (a new, unsaved automation).
+ */
+router.get(
+  '/connect/personal-email/status',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    const workspaceId = req.user!.workspaceId;
+    const automationId = typeof req.query.automationId === 'string' ? req.query.automationId : '';
+
+    try {
+      const automation = automationId ? await automationService.get(automationId) : null;
+      const ownerId =
+        automation && automation.workspaceId === workspaceId && automation.createdById
+          ? automation.createdById
+          : req.user!.id;
+
+      const [source, owner] = await Promise.all([
+        new ExternalSourceRepository().findActiveByOwnerAndSourceType(
+          ownerId,
+          RECORDING_EMAIL_SOURCE_TYPE,
+        ),
+        db.user.findFirst({ where: { id: ownerId, workspaceId }, select: { email: true } }),
+      ]);
+      const connected = source?.workspaceId === workspaceId ? source : null;
+
+      res.json({
+        connected: !!connected,
+        isOwner: ownerId === req.user!.id,
+        // The connected address when there is one, else who would have to connect.
+        email: connected?.displayName ?? owner?.email ?? null,
+      });
+    } catch (error: unknown) {
+      logger.error(`${TAG} Error reading personal email connection status`, error);
+      res.status(500).json({ error: 'Unable to read email connection status' });
     }
   },
 );

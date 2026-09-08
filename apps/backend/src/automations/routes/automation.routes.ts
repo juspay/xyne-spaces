@@ -4,7 +4,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
 import { ConditionOperator } from '../types/operators';
-import { automationService } from '../services/automation.service';
+import { automationService, personalMailboxReady } from '../services/automation.service';
 import {
   issueWebhookSecret,
   webhookSecretExists,
@@ -108,6 +108,21 @@ function prepareConfigForSave(
     context: JSON.stringify(configToSave),
     eventType: triggerTypeToEventType(configToSave.trigger.type),
   };
+}
+
+/** True means the 400 has already been sent and the caller should return. */
+async function rejectUnconnectedPersonalMailbox(
+  config: AutomationConfig,
+  authorId: string,
+  res: Response,
+): Promise<boolean> {
+  if (await personalMailboxReady(config, authorId)) return false;
+  res.status(400).json({
+    success: false,
+    error:
+      'A step sends from your own mailbox, but your Google account is not connected. Connect it on that step, or switch the step back to the channel mailbox.',
+  });
+  return true;
 }
 
 function parseListLimit(raw: unknown): number {
@@ -420,6 +435,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const prepared = prepareConfigForSave(parsed.data.config, res);
     if (!prepared) return;
+    if (await rejectUnconnectedPersonalMailbox(prepared.config, auth.userId, res)) return;
 
     const workflow = await db.$transaction(async tx => {
       await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
@@ -593,6 +609,11 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
       ? prepareConfigForSave(parsed.data.config, res)
       : null;
     if (parsed.data.config !== undefined && !prepared) return;
+    // The save below always writes auth.userId as createdById, so the author to
+    // check is the caller in both the draft and the non-draft branch.
+    if (prepared && (await rejectUnconnectedPersonalMailbox(prepared.config, auth.userId, res))) {
+      return;
+    }
 
     const metadata = buildAutomationMetadata({
       description: parsed.data.description !== undefined

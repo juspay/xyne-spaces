@@ -7,6 +7,7 @@ import { ConfigValidator } from '../engine/config-validator';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
 import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
+import { PERSONAL_EMAIL_SOURCE_TYPE, usesPersonalMailbox } from '../steps/send-email-to-user.step';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
@@ -18,6 +19,22 @@ import {
 } from '../types/workflow-adapter';
 
 const validator = new ConfigValidator(triggerRegistry, stepRegistry);
+
+/**
+ * Whether a PERSONAL send has a mailbox behind it. Async, so it cannot live in
+ * the synchronous ConfigValidator.
+ */
+export async function personalMailboxReady(
+  config: AutomationConfig,
+  authorId: string,
+): Promise<boolean> {
+  if (!usesPersonalMailbox(config.steps)) return true;
+  const source = await repositories.externalSources.findActiveByOwnerAndSourceType(
+    authorId,
+    PERSONAL_EMAIL_SOURCE_TYPE,
+  );
+  return !!source;
+}
 
 export interface SaveResult {
   automation: AutomationView;
@@ -72,6 +89,13 @@ class AutomationService {
             })
           : existing;
       return { automation: workflowToAutomation(demoted), validation };
+    }
+
+    const owner = parseAutomationMetadata(existing.metadata).createdById;
+    if (owner && !(await personalMailboxReady(config, owner))) {
+      throw new Error(
+        "The owner's Google account is no longer connected — reconnect it, or switch that step to the channel mailbox.",
+      );
     }
 
     const triggerImpl = triggerRegistry.get(config.trigger.type);
