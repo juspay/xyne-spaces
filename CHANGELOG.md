@@ -1,3 +1,21 @@
+## [1.274.0-release-20260904.1](https://github.com/juspay/xyne-spaces/compare/v1.273.2...v1.274.0-release-20260904.1) (2026-09-08)
+
+
+### Features
+
+* downtime prevention ([#1442](https://github.com/juspay/xyne-spaces/issues/1442)) ([#1629](https://github.com/juspay/xyne-spaces/issues/1629)) ([ef6b7ef](https://github.com/juspay/xyne-spaces/commit/ef6b7efcad662ffb390530dac65063c867031c74))
+* resolve SDLC deep links at write time ([#1425](https://github.com/juspay/xyne-spaces/issues/1425)) ([#1593](https://github.com/juspay/xyne-spaces/issues/1593)) ([b967418](https://github.com/juspay/xyne-spaces/commit/b96741831f720c242986c9fae20cc29bb5aa7603))
+
+
+### Bug Fixes
+
+* attach shortcut targets the focused composer, not the last-mounted one ([#1640](https://github.com/juspay/xyne-spaces/issues/1640)) ([a651a9c](https://github.com/juspay/xyne-spaces/commit/a651a9c81a99d321c0c510bd3c665174bf6b6adf))
+* Enable published apps to use the backend SDK & storage via host bridge (backport to releases-20260904) ([#1645](https://github.com/juspay/xyne-spaces/issues/1645)) ([81870ec](https://github.com/juspay/xyne-spaces/commit/81870ecf124f30f021380439b886639f11d825a6))
+* List claw agents fix ([#1635](https://github.com/juspay/xyne-spaces/issues/1635)) ([#1641](https://github.com/juspay/xyne-spaces/issues/1641)) ([9c2e9b6](https://github.com/juspay/xyne-spaces/commit/9c2e9b6bce875439daebbeda6b4ac98695fec211))
+* port MAPT/SCR retest remediations to releases-20260904 ([#1583](https://github.com/juspay/xyne-spaces/issues/1583)) ([d93ba7a](https://github.com/juspay/xyne-spaces/commit/d93ba7a022ed16afb5a0a2918d910f8c4076d7b7)), closes [#1131](https://github.com/juspay/xyne-spaces/issues/1131) [#1505](https://github.com/juspay/xyne-spaces/issues/1505)
+* revert native-button conversions to raw <button> ([#1563](https://github.com/juspay/xyne-spaces/issues/1563)) ([2ae305f](https://github.com/juspay/xyne-spaces/commit/2ae305f48333238fa5fffe5a8b3c6393ec4a753d))
+* stamp thread-type vocabulary updatedAt from code ([#1558](https://github.com/juspay/xyne-spaces/issues/1558)) ([10c188b](https://github.com/juspay/xyne-spaces/commit/10c188b490212157552469dc1991f918746bb9cb))
+
 ## [1.273.2](https://github.com/juspay/xyne-spaces/compare/v1.273.1...v1.273.2) (2026-09-03)
 
 
