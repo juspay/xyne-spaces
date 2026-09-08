@@ -150,6 +150,8 @@
     --claw-ai-solid-hover: #6d28d9;
 
     --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
+    --activity-chip: rgba(35, 34, 41, 0.07);
+    --activity-chip-hover: rgba(35, 34, 41, 0.13);
 
     --chat-composer-border: rgba(35, 34, 41, 0.06);
     --chat-composer-border-active: rgba(35, 34, 41, 0.2);
@@ -291,6 +293,8 @@
     --claw-ai-solid-hover: #6d28d9;
 
     --activity-sidebar-primary: hsl(0 0% 100% / 0.5);
+    --activity-chip: rgba(35, 34, 41, 0.07);
+    --activity-chip-hover: rgba(35, 34, 41, 0.13);
 
     --chat-composer-border: rgba(35, 34, 41, 0.06);
     --chat-composer-border-active: rgba(35, 34, 41, 0.2);
@@ -447,6 +451,8 @@
     --claw-ai-solid-hover: #8b5cf6;
 
     --activity-sidebar-primary: rgba(45, 46, 52, 0.5);
+    --activity-chip: rgba(255, 255, 255, 0.09);
+    --activity-chip-hover: rgba(255, 255, 255, 0.16);
 
     --chat-composer-border: rgba(255, 255, 255, 0.06);
     --chat-composer-border-active: rgba(255, 255, 255, 0.2);
