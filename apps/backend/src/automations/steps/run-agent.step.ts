@@ -63,11 +63,10 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       );
     }
 
-    const stepCount = Object.keys(context.steps).length;
-    const currentIndex = Math.max(0, stepCount - 1);
+    const stepName = store.stepName ?? `step_${Math.max(0, Object.keys(context.steps).length - 1)}`;
 
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const sessionId = `${store.runId}:${stepName}`;
+    const callbackUrl = buildCallbackUrl(store.runId, stepName);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
@@ -77,7 +76,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
+      `[RUN_AGENT] firing — executionId=${store.runId} stepName=${stepName} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
     );
 
     try {
@@ -93,7 +92,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       });
     } catch (err) {
       logger.error(
-        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepIndex=${currentIndex}:`,
+        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepName=${stepName}:`,
         err,
       );
       throw err;
@@ -166,7 +165,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const stepName =
       typeof rowData['stepName'] === 'string'
         ? (rowData['stepName'] as string)
-        : deriveStepNameFromCtx(context);
+        : (store.stepName ?? deriveStepNameFromCtx(context));
     if (!stepName) {
       throw new Error('[RUN_AGENT] cannot derive stepName for retry');
     }
@@ -223,12 +222,16 @@ function resolveVisibleConversationContext(
   context: AutomationContext,
 ): { conversationId: string; channelId: string } | null {
   const trigger = context.trigger as Record<string, unknown> | undefined;
+  const message = trigger?.message as Record<string, unknown> | undefined;
+  const ticket = trigger?.ticket as Record<string, unknown> | undefined;
   const conversationId =
     asNonEmptyString(trigger?.conversationId) ??
-    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.conversationId);
+    asNonEmptyString(message?.conversationId) ??
+    asNonEmptyString(ticket?.conversationId);
   const channelId =
     asNonEmptyString(trigger?.channelId) ??
-    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.channelId);
+    asNonEmptyString(message?.channelId) ??
+    asNonEmptyString(ticket?.channelId);
   return conversationId && channelId ? { conversationId, channelId } : null;
 }
 
