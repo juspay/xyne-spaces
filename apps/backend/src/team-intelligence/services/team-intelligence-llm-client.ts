@@ -28,14 +28,16 @@ export function createTeamIntelligenceLlmClient(): LLMClient | null {
       },
     },
     defaultModel: appConfig.teamIntelligence.model,
-    // Section-level fallback owns Team Intelligence recovery. Keeping provider
-    // retries to one attempt prevents a long LLM timeout from multiplying into
-    // several hidden waits inside every section call.
+    // Retry on 429 (rate-limit) with exponential backoff. The framework's retry
+    // loop honours the Retry-After header when present; otherwise it backs off
+    // 5 s → 10 s → 20 s. Three attempts (1 original + 2 retries) is enough to
+    // outlast a typical LiteLLM TPM window without blocking the global gate
+    // slot for too long.
     retry: {
-      maxAttempts: 1,
-      baseDelay: 0,
-      maxDelay: 0,
-      exponentialBackoff: false,
+      maxAttempts: 3,
+      baseDelay: 5000,
+      maxDelay: 60000,
+      exponentialBackoff: true,
     },
   });
 }
