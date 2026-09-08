@@ -2,6 +2,7 @@ import Redis, { type RedisOptions } from 'ioredis';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { RedisStreamStore, compareStreamId } from './redisStore';
+import type { CompactedRow } from './streamState';
 import type { AclGate } from './aclGate';
 import { obsEmit } from './obs';
 import { SerialQueue } from './serialQueue';
@@ -66,6 +67,8 @@ export class Fanout {
    *  Admission DEFERS while a client's grant is absent here (cold at session start, or mid-clear
    *  rehydration): a NOT-EXISTS arm would fail OPEN on an empty cold snapshot. */
   readonly #grantHydrated = new Set<string>();
+  /** dataInstanceKey → its snapshot at a given stream head, reused across a mass re-admit (P5). */
+  readonly #snapshotMemo = new Map<string, { head: string; rows: CompactedRow[] }>();
   readonly #cursors = new Map<string, string>();
   // Serialize dispatch per stream so grant deltas (join/leave) re-gate in stream order;
   // a `void #dispatch` let a later entry overtake an earlier one → stale admit survived
@@ -155,6 +158,7 @@ export class Fanout {
     if (subs.size === 0) {
       this.#dataSubs.delete(dataInstanceKey);
       this.#cursors.delete(streamKey(dataInstanceKey)); // stop tailing the now-clientless data stream
+      this.#snapshotMemo.delete(dataInstanceKey);
     }
   }
 
@@ -300,8 +304,14 @@ export class Fanout {
         }
       }
     }
+    // Snapshot memo (P2/P5): a mass re-admit on one instance (reconnect storm) would otherwise do
+    // N identical full HGETALLs. Key the memo by stream head — hydrations for one instance are
+    // serialized on its stream queue, so the first reads, the rest reuse; a moved head (new entry)
+    // misses and refreshes. headWithVersion is a cheap XREVRANGE-1; only the big snapshot is saved.
     const { id: head, version } = await this.#store.headWithVersion(instanceKey);
-    const rows = await this.#store.snapshot(instanceKey);
+    const memo = this.#snapshotMemo.get(instanceKey);
+    const rows = memo && memo.head === head ? memo.rows : await this.#store.snapshot(instanceKey);
+    if (!memo || memo.head !== head) this.#snapshotMemo.set(instanceKey, { head, rows });
     client.hydrated = true;
     this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head, version });
   }
