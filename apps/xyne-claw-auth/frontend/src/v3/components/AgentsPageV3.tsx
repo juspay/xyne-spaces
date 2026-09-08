@@ -479,7 +479,7 @@ interface AgentsPageV3Props {
 }
 
 export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
-  const { agents, loading, reload } = useAgents(userId);
+  const { agents, loading, error, reload } = useAgents(userId);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { show: showSnackbar } = useSnackbar();
@@ -798,6 +798,20 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
                 className="flex items-center justify-center py-16 text-sm text-xyne-fg-tertiary"
               >
                 Loading…
+              </div>
+            ) : error ? (
+              <div
+                data-id="agents-error"
+                className="flex flex-col items-center gap-3 py-16 text-center"
+              >
+                <p className="text-sm text-xyne-fg-tertiary">Couldn't load agents.</p>
+                <button
+                  type="button"
+                  onClick={reload}
+                  className="text-sm font-medium text-xyne-accent underline underline-offset-2"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <>
