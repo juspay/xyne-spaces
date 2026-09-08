@@ -96,6 +96,8 @@ const electronAPI = {
     callerEmail: string;
     callType: 'AUDIO' | 'VIDEO';
     callerPicture?: string;
+    body?: string;
+    silent?: boolean;
   }) => {
     ipcRenderer.send('show-call-notification', data);
   },
@@ -313,6 +315,35 @@ const electronAPI = {
     setEnabled: (enabled: boolean) => {
       ipcRenderer.send('meeting-detection:set-enabled', enabled);
     },
+    // One subscription over both edges, so a consumer that only cares whether a
+    // meeting is running cannot end up handling one event and missing the other.
+    onMeetingStateChanged: (
+      callback: (meeting: { app: string; startedAt: string } | null) => void,
+    ) => {
+      const onDetected = (_event: unknown, meeting: { app: string; startedAt: string }) =>
+        callback(meeting);
+      const onEnded = () => callback(null);
+      ipcRenderer.on('meeting:detected', onDetected);
+      ipcRenderer.on('meeting:ended', onEnded);
+      return () => {
+        ipcRenderer.removeListener('meeting:detected', onDetected);
+        ipcRenderer.removeListener('meeting:ended', onEnded);
+      };
+    },
+    getCurrentMeeting: (): Promise<{ app: string; startedAt: string } | null> =>
+      ipcRenderer.invoke('meeting:get-current'),
+  },
+
+  // Deliberately its own namespace rather than part of `meetingDetector`: this
+  // is raw mic activity, and unlike everything above it the meeting-detection
+  // preference has no say over it.
+  micMonitor: {
+    onStateChanged: (callback: (active: boolean) => void) => {
+      const listener = (_event: unknown, data: { active: boolean }) => callback(data.active);
+      ipcRenderer.on('mic:state-changed', listener);
+      return () => ipcRenderer.removeListener('mic:state-changed', listener);
+    },
+    getState: (): Promise<boolean> => ipcRenderer.invoke('mic:get-state'),
   },
 
   // Meeting popup (used by the popup window itself)

@@ -11,6 +11,7 @@ import { Pool } from 'pg';
 import { Context, schema } from '@xyne/shared';
 import { AuthData, createMutators } from './mutators';
 import { queries } from './queries';
+import { scopeQueryToTenant } from './tenant-scope';
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
 import { getZeroMutationLatency, getZeroMutationOperations, getZeroQueryLatency, getZeroQueryOperations } from '@/services/otel';
@@ -411,7 +412,7 @@ export async function handleQueries(request: Request): Promise<any> {
           }
           const query = mustGetBackendQuery(queryName);
           const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
-          return query.fn({ args, ctx: context });
+          return scopeQueryToTenant(query.fn({ args, ctx: context }), context, queryName);
         })(),
       schema,
       request
@@ -500,7 +501,9 @@ function buildQueryInternals(
   ctx: Context,
 ) {
   try {
-    const query = queryDef.fn({ args: args ?? {}, ctx });
+    // Scope the read to the caller's tenant before it is compiled to SQL, the same
+    // as the primary and zql-to-sql query paths.
+    const query = scopeQueryToTenant(queryDef.fn({ args: args ?? {}, ctx }), ctx, name);
     // @ts-ignore - asQueryInternals works with any Query type at runtime
     return asQueryInternals(query);
   } catch (error) {
@@ -611,10 +614,14 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
       queryRequests.map(async (req) => {
         try {
           const queryDef = mustGetBackendQuery(req.name);
-          const query = queryDef.fn({
-            args: req.args || {},
-            ctx: context,
-          });
+          const query = scopeQueryToTenant(
+            queryDef.fn({
+              args: req.args || {},
+              ctx: context,
+            }),
+            context,
+            req.name,
+          );
 
           // Extract AST and Format from ZQL query
           // @ts-ignore - asQueryInternals works with any Query type at runtime

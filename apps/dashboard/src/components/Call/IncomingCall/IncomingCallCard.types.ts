@@ -28,9 +28,20 @@ export type IncomingCallContextKind =
 /** Icon slot in the context line. Mapped to lucide components by the presenter. */
 export type IncomingCallContextIcon = 'user' | 'users' | 'thread' | 'calendar' | 'hash';
 
+/**
+ * Where the call lives, as data. `text` below is the modal's sentence; copy
+ * that has to name the place in its own words (the OS notification) reads this
+ * instead of parsing that sentence back apart.
+ */
+export type IncomingCallPlace =
+  | { kind: 'channel'; name: string } // rendered as `#name`
+  | { kind: 'group-dm' }
+  | null;
+
 export interface IncomingCallContextVM {
   kind: IncomingCallContextKind;
   icon: IncomingCallContextIcon;
+  place: IncomingCallPlace;
   /**
    * Full context line, already assembled — e.g. `Thread call in #engineering`.
    * Place names are static text by product decision, so there is nothing to
@@ -73,6 +84,14 @@ export interface IncomingCallViewModel {
   subtitle: string | null;
   /** Drives the notice block and swaps Accept for the Switch-call pill. */
   isInActiveCall: boolean;
+  /**
+   * The call arrived without a ringtone because the user was already busy —
+   * on a call, recording, or talking to someone outside Xyne. Purely an
+   * explanation for
+   * the muted-bell glyph; the sound itself is suppressed by the modal, and the
+   * card is otherwise identical either way.
+   */
+  isSilenced: boolean;
   /**
    * Who invited the current user — `invitedBy`, falling back to the call
    * creator. Unused by the card today; it is the signal that separates "invited

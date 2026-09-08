@@ -1,6 +1,5 @@
 import { LayoutDashboard, Loader2, RefreshCw } from 'lucide-react';
 import type { ReactElement } from 'react';
-import { Button } from '../../ui/Button/Button';
 
 interface ComponentEditorHeaderProps {
   dashboardName: string;
@@ -33,12 +32,11 @@ export const ComponentEditorHeader = ({
       <span className='font-medium text-xyne-gray-900 truncate'>{title.trim() || 'Untitled'}</span>
     </div>
     <div className='flex items-center gap-1.5'>
-      <Button
-        variant='ghost'
+      <button
         type='button'
         onClick={onRefresh}
         disabled={isPreviewing || !planIsValid}
-        trackId='refresh_component_preview'
+        data-ph-capture-attribute-track-id='refresh_component_preview'
         className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 transition-colors hover:bg-xyne-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
         data-track-category='COMPONENT_EDITOR'
         data-track-name='Refresh_Preview_Click'
@@ -48,7 +46,7 @@ export const ComponentEditorHeader = ({
           className={`text-xyne-gray-600 ${isPreviewing ? 'animate-spin' : ''}`}
         />
         {isPreviewing ? 'Running…' : 'Refresh'}
-      </Button>
+      </button>
       <button
         type='button'
         onClick={onCancel}
@@ -58,19 +56,18 @@ export const ComponentEditorHeader = ({
       >
         Cancel
       </button>
-      <Button
-        variant='default'
+      <button
         type='button'
         onClick={onSave}
         disabled={isSaving || !planIsValid || hasPreviewError}
-        trackId='save_component'
+        data-ph-capture-attribute-track-id='save_component'
         className='inline-flex items-center h-8 px-4 rounded-lg bg-xyne-primary-500 text-[13px] leading-[18px] font-medium text-white transition-colors hover:bg-xyne-primary-600 disabled:bg-xyne-gray-300 disabled:text-white disabled:cursor-not-allowed'
         data-track-category='COMPONENT_EDITOR'
         data-track-name='Save_Click'
       >
         {isSaving ? <Loader2 size={14} className='mr-1.5 animate-spin' /> : null}
         {isSaving ? 'Saving…' : 'Save'}
-      </Button>
+      </button>
     </div>
   </div>
 );

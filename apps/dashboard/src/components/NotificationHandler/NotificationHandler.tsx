@@ -11,12 +11,11 @@ import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
-import { useAllChannels } from '../../hooks/useChannels';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { useSelector } from '@xstate/react';
-import { CallType, ChannelType } from '@xyne/shared';
-import { buildSdlcPath } from '@xyne/shared/sdlc';
+import { CallType } from '@xyne/shared';
+import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
@@ -30,6 +29,7 @@ import {
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
@@ -79,6 +79,7 @@ interface NotificationData {
       conversation?: Conversation;
       notificationType?: string;
       ticketId?: string;
+      sdlcTarget?: unknown;
     };
     metadata?: {
       notificationType?: string;
@@ -134,14 +135,6 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
-  // Read inside the socket callback, which is registered once.
-  const allChannels = useAllChannels();
-  const sdlcChannelIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    sdlcChannelIdsRef.current = new Set(
-      allChannels.filter(channel => channel.type === ChannelType.SDLC).map(channel => channel.id),
-    );
-  }, [allChannels]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -249,20 +242,10 @@ export const NotificationHandler: React.FC = () => {
         }
         // Socket delivery spreads metadata into `data`; the REST row keeps `metadata`.
         const ids = { ...data.notification.metadata, ...data.notification.data };
-        // No builder knows the SDLC routes, so the hub's own paths are built here
-        // from the ids they all send, against channels the client already holds.
-        const sdlcActionUrl =
-          ids.channelId && sdlcChannelIdsRef.current.has(ids.channelId)
-            ? buildSdlcPath({
-                channelId: ids.channelId,
-                canvasId: ids.canvasId,
-                ticketId: ids.ticketId,
-                conversationId: ids.conversationId,
-                messageId: ids.messageId,
-                blockId: ids.blockId,
-                commentThreadId: ids.commentThreadId,
-              })
-            : undefined;
+        // The server leaves actionUrl chat-shaped for push, which has no SDLC routes,
+        // so a hub path is rebuilt here from the target it resolved at send time.
+        const sdlcTarget = parseSdlcNavTarget(ids.sdlcTarget);
+        const sdlcActionUrl = sdlcTarget ? buildSdlcPath(sdlcTarget) : undefined;
         const resolvedRawActionUrl =
           sdlcActionUrl ||
           data.notification.actionUrl ||
@@ -669,6 +652,67 @@ export const NotificationHandler: React.FC = () => {
       sendRecordingEvent({ type: 'requestStop' });
     });
   }, [isElectron, goToRecordings]);
+
+  // Mirror the main process's meeting state into the renderer, so an incoming
+  // call can ring silently while the user is on Zoom/Meet/Teams. Lives here
+  // beside the two effects that already report call and recording state to main
+  // — this is the return leg of the same conversation.
+  useEffect(() => {
+    const meetingDetector = window.electronAPI?.meetingDetector;
+    if (!isElectron || !meetingDetector?.onMeetingStateChanged) return;
+
+    // Detection is broadcast once and never replayed, so a renderer that
+    // reloaded mid-meeting has to ask.
+    let cancelled = false;
+    void meetingDetector.getCurrentMeeting?.().then(meeting => {
+      // A live event that landed while the seed was in flight is newer than the
+      // seed, so it must not be clobbered by it.
+      if (!cancelled) setExternalMeeting(meeting);
+    });
+
+    const cleanup = meetingDetector.onMeetingStateChanged(meeting => {
+      cancelled = true;
+      setExternalMeeting(meeting);
+    });
+
+    return (): void => {
+      cancelled = true;
+      cleanup();
+      // Nothing is listening for meeting:ended any more; leaving this set would
+      // silence every later call.
+      setExternalMeeting(null);
+    };
+  }, [isElectron]);
+
+  // The signal that actually silences an incoming call: is anything holding the
+  // mic. Gated on Electron and nothing else — in particular not on the
+  // meeting-detection preference, which used to take this whole path down with
+  // it and leave the user's Zoom call fighting a full-volume ringtone.
+  useEffect(() => {
+    const micMonitor = window.electronAPI?.micMonitor;
+    if (!isElectron || !micMonitor?.onStateChanged) return;
+
+    // Broadcasts are not replayed, so a renderer that reloaded mid-meeting has
+    // to ask.
+    let cancelled = false;
+    void micMonitor.getState?.().then(active => {
+      // A live event that landed while the seed was in flight is newer.
+      if (!cancelled) setMicBusy(active);
+    });
+
+    const cleanup = micMonitor.onStateChanged(active => {
+      cancelled = true;
+      setMicBusy(active);
+    });
+
+    return (): void => {
+      cancelled = true;
+      cleanup();
+      // Nothing is listening for the release any more; leaving this set would
+      // silence every later call.
+      setMicBusy(false);
+    };
+  }, [isElectron]);
 
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;

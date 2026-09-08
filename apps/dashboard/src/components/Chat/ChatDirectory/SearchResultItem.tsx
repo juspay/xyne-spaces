@@ -483,7 +483,8 @@ const SearchResultItem = ({
       // Use scopeType to determine channel type instead of parsing title
       const scopeType = result.searchContext?.scopeType;
       const isDmOrGroupDm = scopeType === 'DM' || scopeType === 'GROUP_DM';
-      const preposition = isDmOrGroupDm ? 'with' : 'in';
+      const isThread = (result.searchContext?.replyCount ?? 0) > 0;
+      const preposition = `${isThread ? 'Thread ' : ''}${isDmOrGroupDm ? 'with' : 'in'}`;
 
       return (
         <Command.Item

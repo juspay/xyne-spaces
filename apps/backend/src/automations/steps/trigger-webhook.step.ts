@@ -5,7 +5,7 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import { OutputSchemaSchema } from '../engine/declared-schema';
 import { decryptHeaderValue, isSensitiveHeader } from '../engine/webhook-step-encryption';
-import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import { logger } from '@/utils/logger';
 
 const HttpMethod = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -88,10 +88,6 @@ export class TriggerWebhookStep extends BaseActionStep<
   ): Promise<TriggerWebhookOutput> {
     const { url, method, headers, encoding, body, timeoutMs } = cfg;
 
-    // SSRF guard: resolve the host and reject internal/private/link-local
-    // addresses at request time (the schema only blocks literal private IPs).
-    await assertWebhookUrlSafe(url);
-
     const init: RequestInit = {
       method,
       headers: this.buildHeaders(headers, encoding),
@@ -111,7 +107,9 @@ export class TriggerWebhookStep extends BaseActionStep<
     let responseBody = '';
 
     try {
-      const res = await fetch(url, init);
+      // Validates the destination and pins the connection to the checked address
+      // (rejects internal/private/link-local; rebinding-safe). redirect:'manual' above.
+      const res = await safeWebhookFetch(url, init);
       status = res.status;
       ok = res.ok;
 
