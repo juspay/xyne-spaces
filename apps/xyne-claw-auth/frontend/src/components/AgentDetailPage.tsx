@@ -715,7 +715,6 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
                 >
                   <option value="codex">Codex</option>
                   <option value="claude">Claude (Anthropic)</option>
-                  <option value="copilot">Copilot</option>
                   <option value="openrouter">OpenRouter</option>
                 </select>
               </div>
@@ -727,7 +726,6 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
                 >
                   <option value="api_key">api_key</option>
-                  {form.provider === "copilot" && <option value="oauth_token">oauth_token</option>}
                 </select>
               </div>
               <div className="sm:col-span-2">

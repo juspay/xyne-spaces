@@ -1218,7 +1218,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     </button>
                   )}
                 >
-                  {(["codex", "claude", "copilot", "openrouter", "litellm"] as const).map((key) => (
+                  {(["codex", "claude", "openrouter", "litellm"] as const).map((key) => (
                     <MenuItem
                       key={key}
                       selected={form.provider === key}
@@ -1237,41 +1237,6 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   ))}
                 </Menu>
               </div>
-              {/* Only GitHub Copilot keeps an OAuth auth-type — Claude + Codex
-                  OAuth were removed (subscription tokens must not be stored on
-                  a third-party server), so those are API-key-only. */}
-              {form.provider === "copilot" && (
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-xyne-fg-secondary">
-                  Auth type
-                </label>
-                <Menu
-                  align="start"
-                  trigger={(triggerProps) => (
-                    <button
-                      {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
-                      type="button"
-                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary transition-colors hover:border-xyne-border-strong"
-                    >
-                      <span>{AUTH_TYPE_DISPLAY[form.authType] ?? form.authType}</span>
-                      <CaretDownIcon size={12} className="text-xyne-fg-tertiary" />
-                    </button>
-                  )}
-                >
-                  {(["api_key", "oauth_token"] as const)
-                    .map((key) => (
-                    <MenuItem
-                      key={key}
-                      selected={form.authType === key}
-                      onSelect={() => setForm((p) => ({ ...p, authType: key }))}
-                      trailing={form.authType === key ? <CheckIcon size={12} weight="bold" /> : undefined}
-                    >
-                      {AUTH_TYPE_DISPLAY[key]}
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </div>
-              )}
 
                 <div className="sm:col-span-2 flex flex-col gap-1.5">
                   <label className="text-[12px] font-semibold text-xyne-fg-secondary">
