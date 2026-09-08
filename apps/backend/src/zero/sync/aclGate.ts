@@ -79,7 +79,22 @@ export interface AclGate {
   evaluate(rootRow: Row, userId: string, workspaceId: string, snapshot: SnapshotProvider): boolean;
 }
 
+/** deriveAclGate is pure per rootTable and its result is immutable (ACLs change only at deploy),
+ *  but it runs on EVERY subscribe (QueryACLFactory + canSelect + AST walk + validate) — reconnect
+ *  storms multiply it. Memoize per rootTable; a throw (ungateable ACL) is not cached so it keeps
+ *  refusing. The cached gate is read-only shared (evaluate is a pure closure; grantSources are
+ *  read-only), safe across subscribers. */
+const gateCache = new Map<string, AclGate>();
+
 export function deriveAclGate(rootTable: string): AclGate {
+  const cached = gateCache.get(rootTable);
+  if (cached) return cached;
+  const gate = buildAclGate(rootTable);
+  gateCache.set(rootTable, gate);
+  return gate;
+}
+
+function buildAclGate(rootTable: string): AclGate {
   const acl = QueryACLFactory.getACL(rootTable as never, sentinelCtx);
   const query = acl.canSelect((zql as unknown as Record<string, never>)[rootTable]);
   const where = (query as { ast?: { where?: Cond } }).ast?.where;
