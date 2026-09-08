@@ -369,21 +369,18 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[], u
 }
 
 /**
- * Read BlockNote content from a Y-Sweet document.
- * This retrieves the content stored in Y-Sweet for collaborative editing.
- *
- * @param canvasId - The document ID (canvas ID)
- * @param userId - The actual user/bot performing this read
- * @returns Array of BlockNote blocks, or empty array if unable to read
- */
-/**
- * The canvas as it stands, with a failed read told apart from an empty canvas.
+ * Read BlockNote content from a Y-Sweet document, distinguishing "the document
+ * is empty" from "the read failed".
  *
  * readFromYSweet answers `[]` for both, which is harmless when the answer is
  * only being read and destructive when it is being written back: a write that
  * restores what markdown cannot carry — a whiteboard's drawing — would take an
  * unreachable Y-Sweet as "there was nothing here" and commit the document
  * without it.
+ *
+ * @param canvasId - The document ID (canvas ID)
+ * @param userId - The actual user/bot performing this read
+ * @returns The blocks ([] for a genuinely empty document); throws if the read failed
  */
 export async function readFromYSweetStrict(
   canvasId: string,
@@ -423,6 +420,55 @@ export async function readFromYSweetStrict(
     `[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`
   );
   return blocks as BlockNoteBlock[];
+}
+
+/**
+ * The same distinction reported as `null` instead of a throw, for the callers
+ * that have no acting user to authorize the read with.
+ *
+ * @returns The blocks ([] for a genuinely empty document), or null if the read failed
+ */
+export async function readFromYSweetOrNull(canvasId: string): Promise<BlockNoteBlock[] | null> {
+  try {
+    const ysweetUrl = config.ysweet.url;
+    if (!ysweetUrl) {
+      logger.warn('[YSweetUtils] Y-Sweet URL not configured, cannot read content');
+      return null;
+    }
+
+    // Get a client token with read-only authorization
+    const clientToken = await ysweetGetClientToken(canvasId, {
+      authorization: 'read-only',
+    });
+
+    // Override URLs to use direct Y-Sweet URL instead of proxy URL
+    overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
+
+    const existingUpdate = await ysweetGetAsUpdate(clientToken);
+
+    if (!existingUpdate || existingUpdate.length === 0) {
+      logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
+      return [];
+    }
+
+    // Create a new Y.Doc and apply the existing state
+    const ydoc = new Y.Doc();
+    Y.applyUpdate(ydoc, existingUpdate);
+
+    // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
+    const editor = getServerEditor();
+    const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
+
+    logger.info(`[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`);
+    return blocks as BlockNoteBlock[];
+  } catch (error) {
+    if (error instanceof YSweetHttpError && error.status === 404) {
+      logger.debug(`[YSweetUtils] No Y-Sweet document for canvas ${canvasId}; treating as empty`);
+      return [];
+    }
+    logger.error('[YSweetUtils] Failed to read from Y-Sweet:', error);
+    return null;
+  }
 }
 
 /** The same read, with a failure reported as an empty canvas. */
