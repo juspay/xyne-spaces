@@ -6,15 +6,10 @@ import {
   CheckCircle2,
   ChevronRight,
   Code2,
-  Copy,
-  Github,
   KeyRound,
-  Loader2,
   Plane,
-  Plug,
   Settings,
   Sparkles,
-  Trash2,
 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -34,19 +29,15 @@ import { clawSettingsKey, useClawSettings } from '@/hooks/useClawSettings';
 import {
   deleteProviderCredential,
   deleteSubagentRouting,
-  initiateCopilotGitHubLogin,
   listClaudeModelsForUser,
   listCodexModelsForUser,
-  listCopilotModelsForUser,
   listProviderCredentials,
-  pollCopilotGitHubLogin,
   upsertProviderCredential,
   upsertSubagentRouting,
 } from '@/services/claw/clawSettingsService';
 import type {
   AuthType,
   ClaudeModelInfo,
-  GitHubDeviceCode,
   ProviderCredential,
   ProviderId,
   ProviderModelOption,
@@ -56,11 +47,6 @@ import LocalHarnessSection from './LocalHarnessSection';
 
 const PROVIDER_META: Record<ProviderId, { name: string; description: string; icon: typeof Plane }> =
   {
-    copilot: {
-      name: 'GitHub Copilot',
-      description: 'Code suggestions and autocomplete',
-      icon: Plane,
-    },
     claude: {
       name: 'Anthropic Claude',
       description: 'Reasoning and coding assistance',
@@ -83,7 +69,7 @@ const PROVIDER_META: Record<ProviderId, { name: string; description: string; ico
     },
   };
 
-const PROVIDERS: ProviderId[] = ['copilot', 'claude', 'codex', 'openrouter', 'litellm'];
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'openrouter', 'litellm'];
 
 /* eslint-disable @typescript-eslint/naming-convention */
 const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
@@ -305,249 +291,14 @@ const ProviderConfigDialog = ({
           <h2 className='text-base font-semibold text-foreground'>{meta.name}</h2>
           <p className='text-sm text-muted-foreground'>{meta.description}</p>
         </div>
-        {provider === 'copilot' ? (
-          <CopilotConfigForm userId={userId} onMutate={onMutate} onClose={onClose} />
-        ) : (
-          <GenericProviderConfigForm
-            provider={provider}
-            userId={userId}
-            onMutate={onMutate}
-            onClose={onClose}
-          />
-        )}
+        <GenericProviderConfigForm
+          provider={provider}
+          userId={userId}
+          onMutate={onMutate}
+          onClose={onClose}
+        />
       </div>
     </Dialog>
-  );
-};
-
-const CopilotConfigForm = ({
-  userId,
-  onMutate,
-  onClose,
-}: {
-  userId: string;
-  onMutate: () => Promise<void>;
-  onClose: () => void;
-}): ReactElement => {
-  const [device, setDevice] = useState<GitHubDeviceCode | null>(null);
-  const [polling, setPolling] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [models, setModels] = useState<ProviderModelOption[] | null>(null);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [hasKey, setHasKey] = useState(false);
-  const [currentModel, setCurrentModel] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    listProviderCredentialsForDialog(userId, 'copilot')
-      .then(credential => {
-        if (cancelled) return;
-        setHasKey(credential?.hasApiKey ?? false);
-        setCurrentModel(credential?.model ?? '');
-      })
-      .catch(() => undefined);
-    return (): void => {
-      cancelled = true;
-    };
-  }, [userId]);
-
-  useEffect(() => {
-    if (!hasKey) return undefined;
-    let cancelled = false;
-    setModelsError(null);
-    listCopilotModelsForUser(userId)
-      .then(rows => {
-        if (!cancelled) setModels(rows);
-      })
-      .catch(err => {
-        if (!cancelled) setModelsError(errMsg(err, 'Failed to load models'));
-      });
-    return (): void => {
-      cancelled = true;
-    };
-  }, [hasKey, userId]);
-
-  useEffect(() => {
-    if (!polling || !device) return undefined;
-    let cancelled = false;
-
-    const run = async (): Promise<void> => {
-      while (!cancelled) {
-        await new Promise(resolve => setTimeout(resolve, (device.interval + 1) * 1000));
-        if (cancelled) break;
-        try {
-          const result = await pollCopilotGitHubLogin(userId);
-          if (result.status === 'approved') {
-            setPolling(false);
-            setDevice(null);
-            await onMutate();
-            toast.success('GitHub Copilot connected');
-            onClose();
-            break;
-          }
-          if (result.status === 'slow_down') {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-        } catch (err) {
-          if (!cancelled) {
-            setError(errMsg(err, 'Polling failed'));
-            setPolling(false);
-          }
-          break;
-        }
-      }
-    };
-
-    void run();
-    return (): void => {
-      cancelled = true;
-    };
-  }, [polling, device, userId, onMutate, onClose]);
-
-  const startLogin = async (): Promise<void> => {
-    setStarting(true);
-    setError(null);
-    try {
-      const nextDevice = await initiateCopilotGitHubLogin(userId);
-      setDevice(nextDevice);
-      setPolling(true);
-      window.open(nextDevice.verificationUri, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      setError(errMsg(err, 'Failed to start GitHub login'));
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const handleModelChange = async (model: string): Promise<void> => {
-    setSaving(true);
-    try {
-      await upsertProviderCredential(userId, 'copilot', { model });
-      setCurrentModel(model);
-      await onMutate();
-      toast.success('Copilot model saved');
-    } catch (err) {
-      toast.error(errMsg(err, 'Failed to save model'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDisconnect = async (): Promise<void> => {
-    setSaving(true);
-    try {
-      await deleteProviderCredential(userId, 'copilot');
-      await onMutate();
-      toast.success('GitHub Copilot disconnected');
-      onClose();
-    } catch (err) {
-      toast.error(errMsg(err, 'Disconnect failed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className='flex flex-col gap-4'>
-      {!hasKey && !device && (
-        <div className='flex flex-col gap-3'>
-          <p className='text-sm text-muted-foreground'>
-            Connect your GitHub account to use Copilot-powered code suggestions across all agents.
-          </p>
-          <Button
-            onClick={() => void startLogin()}
-            data-track-category='claw-settings'
-            data-track-name='START_GITHUB_LOGIN'
-            disabled={starting}
-          >
-            {starting ? <Loader2 className='size-4 animate-spin' /> : <Plug className='size-4' />}
-            {starting ? 'Starting...' : 'Log in with GitHub'}
-          </Button>
-        </div>
-      )}
-
-      {hasKey && (
-        <div className='flex flex-col gap-4'>
-          <div className='flex items-center gap-2 text-sm text-emerald-600'>
-            <CheckCircle2 className='size-4' />
-            <span>Connected via GitHub</span>
-          </div>
-
-          {models && models.length > 0 && (
-            <LabeledSelect
-              label='Model'
-              value={currentModel}
-              options={models.map(model => ({ value: model.id, label: model.name }))}
-              disabled={saving}
-              onValueChange={handleModelChange}
-            />
-          )}
-          {modelsError && <p className='text-xs text-amber-600'>{modelsError}</p>}
-
-          <div className='flex gap-2'>
-            <Button
-              variant='secondary'
-              onClick={() => void startLogin()}
-              data-track-category='claw-settings'
-              data-track-name='RESTART_GITHUB_LOGIN'
-              disabled={starting || saving}
-            >
-              <Github className='size-4' />
-              Reconnect
-            </Button>
-            <Button
-              variant='destructive'
-              onClick={() => void handleDisconnect()}
-              data-track-category='claw-settings'
-              data-track-name='DISCONNECT_GITHUB'
-              disabled={saving}
-            >
-              <Trash2 className='size-4' />
-              Disconnect
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {device && (
-        <div className='flex flex-col gap-3 rounded-xl border border-border bg-muted/40 p-4'>
-          <p className='text-sm text-muted-foreground'>Enter this code on GitHub to authorize:</p>
-          <div className='flex items-center gap-2'>
-            <code className='rounded-md border border-border bg-background px-3 py-2 font-mono text-lg tracking-widest text-foreground'>
-              {device.userCode}
-            </code>
-            <Button
-              size='iconSm'
-              variant='ghost'
-              aria-label='Copy GitHub authorization code'
-              onClick={() => void navigator.clipboard.writeText(device.userCode)}
-              data-track-category='claw-settings'
-              data-track-name='COPY_GITHUB_DEVICE_CODE'
-            >
-              <Copy className='size-4' />
-            </Button>
-          </div>
-          <a
-            href={device.verificationUri}
-            target='_blank'
-            rel='noreferrer'
-            className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
-          >
-            {device.verificationUri}
-          </a>
-          {polling && (
-            <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-              <Loader2 className='size-3.5 animate-spin' />
-              Waiting for authorization...
-            </div>
-          )}
-        </div>
-      )}
-
-      {error && <p className='text-sm text-destructive'>{error}</p>}
-    </div>
   );
 };
 
@@ -557,7 +308,7 @@ const GenericProviderConfigForm = ({
   onMutate,
   onClose,
 }: {
-  provider: Exclude<ProviderId, 'copilot'>;
+  provider: ProviderId;
   userId: string;
   onMutate: () => Promise<void>;
   onClose: () => void;

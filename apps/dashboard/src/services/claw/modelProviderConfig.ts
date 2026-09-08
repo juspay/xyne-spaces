@@ -5,14 +5,7 @@
 // updateAgent(slug, { config }); only non-model keys (tools, behaviour) are left
 // untouched on save.
 
-export const HOSTED_PROVIDERS = [
-  'codex',
-  'claude',
-  'copilot',
-  'openrouter',
-  'litellm',
-  'spaces',
-] as const;
+export const HOSTED_PROVIDERS = ['codex', 'claude', 'openrouter', 'litellm', 'spaces'] as const;
 
 export const LOCAL_HARNESS_PROVIDERS = ['claude-code', 'codex-cli'] as const;
 export type LocalHarnessProviderKey = (typeof LOCAL_HARNESS_PROVIDERS)[number];

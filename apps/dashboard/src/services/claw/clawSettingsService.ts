@@ -1,7 +1,6 @@
 import { clawRequest } from './clawRequest';
 import type {
   ClaudeModelInfo,
-  GitHubDeviceCode,
   ProviderCredential,
   ProviderCredentialPayload,
   ProviderModelOption,
@@ -80,37 +79,6 @@ export async function deleteSubagentRouting(userId: string, subagentName: string
       headers: { [USER_ID_HEADER]: userId },
     },
   );
-}
-
-export async function initiateCopilotGitHubLogin(userId: string): Promise<GitHubDeviceCode> {
-  const data = await clawRequest<{ success: boolean; data: GitHubDeviceCode }>(
-    '/api/v1/settings/copilot/github-login',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-    },
-  );
-  return data.data;
-}
-
-export async function pollCopilotGitHubLogin(userId: string): Promise<{ status: string }> {
-  const data = await clawRequest<{ success: boolean; data?: { status: string }; error?: string }>(
-    '/api/v1/settings/copilot/github-poll',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-    },
-  );
-  if (!data.success || !data.data) throw new Error(data.error ?? 'Authorization failed');
-  return data.data;
-}
-
-export async function listCopilotModelsForUser(userId: string): Promise<ProviderModelOption[]> {
-  const data = await clawRequest<{ success: boolean; data: ProviderModelOption[] }>(
-    '/api/v1/settings/copilot/models',
-    withUser(userId),
-  );
-  return data.data;
 }
 
 export async function listClaudeModelsForUser(userId: string): Promise<ClaudeModelInfo[]> {
