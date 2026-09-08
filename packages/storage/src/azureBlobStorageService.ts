@@ -40,9 +40,8 @@ function stripTrailingSlashes(value: string): string {
   return value.slice(0, end);
 }
 
-/** Paths and filenames are caller input; keep log lines to one line each. */
 function logSafe(value: string): string {
-  return value.replace(/[\r\n]+/g, ' ');
+  return String(value).replace(/\n/g, ' ').replace(/\r/g, ' ');
 }
 
 /**
@@ -118,11 +117,11 @@ export class AzureBlobStorageService implements StorageService {
     if (!options.path) throw new Error('Path is required');
     if (!options.contentType) throw new Error('Content type is required');
 
-    logger.info(`Uploading to Azure Blob: ${options.path}`, { contentType: options.contentType, size: buffer.length });
+    logger.info(`Uploading to Azure Blob: ${logSafe(options.path)}`, { contentType: options.contentType, size: buffer.length });
 
     await this.uploadBody(Readable.from(buffer), options.path, options.contentType, options.metadata, options.cacheControl, options.ifNotExists);
 
-    logger.info(`File uploaded to Azure Blob: ${options.path}`);
+    logger.info(`File uploaded to Azure Blob: ${logSafe(options.path)}`);
     return { filename: options.path, path: options.path, size: buffer.length };
   }
 
@@ -134,7 +133,7 @@ export class AzureBlobStorageService implements StorageService {
     const { body, size } = this.countingBody(stream);
     await this.uploadBody(body, options.path, options.contentType, options.metadata, undefined, options.ifNotExists, options.chunkSize);
 
-    logger.info(`Stream uploaded to Azure Blob at exact path: ${options.path}`, { size: size() });
+    logger.info(`Stream uploaded to Azure Blob at exact path: ${logSafe(options.path)}`, { size: size() });
     return { filename: options.path, path: options.path, size: size() };
   }
 
