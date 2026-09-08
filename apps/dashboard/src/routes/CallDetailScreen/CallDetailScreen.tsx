@@ -19,6 +19,7 @@ import { DetailedSummaryCanvasTab } from './DetailedSummaryCanvasTab';
 import { PrdCanvasTab } from './PrdCanvasTab';
 import { CallParticipantsPopover } from './CallParticipantsPopover';
 import { CallSummaryTemplatePicker } from './CallSummaryTemplatePicker';
+import { useCallSummaryGeneration } from './useCallSummaryGeneration';
 import { useAuth } from '../../hooks/useAuth';
 import { useAllChannels, useAllVisibleChannels } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
@@ -59,7 +60,7 @@ export default function CallDetailScreen(): ReactElement {
   const navigationCall = navState?.call;
   const [fetchedCall, fetchedCallDetails] = useCachedQuery(
     queries.callById({ callId: callIdParam ?? '' }),
-    { enabled: !navigationCall && Boolean(callIdParam) },
+    { enabled: Boolean(callIdParam) },
   );
   const call: Call | undefined = navigationCall ?? fetchedCall ?? undefined;
   const isResolvingCall =
@@ -132,7 +133,6 @@ export default function CallDetailScreen(): ReactElement {
   }, [conversationMessages, call?.externalId]);
 
   const callMessageId = callMessage?.messageId ?? null;
-
   const detailedSummaryCanvasId = useMemo<string | null>(() => {
     const meta = callMessage?.metadata as Record<string, unknown> | null | undefined;
     const fromMessage = getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
@@ -281,6 +281,8 @@ export default function CallDetailScreen(): ReactElement {
       if (labelsUpdateSeqRef.current === seq) setLabels(previousLabels);
     }
   };
+
+  const summary = useCallSummaryGeneration(call, fetchedCall);
 
   const [showShareModal, setShowShareModal] = useState(false);
 
@@ -455,9 +457,13 @@ export default function CallDetailScreen(): ReactElement {
               >
                 {hasDetailedSummaryTab && (
                   <CallSummaryTemplatePicker
-                    selectedTemplateId={call.summaryTemplateId}
+                    selectedTemplateId={summary.selectedTemplateId}
                     isActive={activeTab === 'detailed-summary'}
                     onSelect={() => setSelectedTab('detailed-summary')}
+                    {...(isCallAudience ? { onRegenerate: summary.regenerate } : {})}
+                    isRegenerating={summary.isGenerating}
+                    regeneratingTemplateId={summary.request?.templateId}
+                    regeneratingTemplateName={summary.request?.templateName}
                     className={pillClassName(activeTab === 'detailed-summary')}
                   />
                 )}
@@ -517,7 +523,10 @@ export default function CallDetailScreen(): ReactElement {
                   Loading...
                 </div>
               ) : activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
-                <DetailedSummaryCanvasTab canvasId={detailedSummaryCanvasId} />
+                <DetailedSummaryCanvasTab
+                  key={`${detailedSummaryCanvasId}:${summary.canvasNonce}`}
+                  canvasId={detailedSummaryCanvasId}
+                />
               ) : (
                 (() => {
                   const prd = prdEntries.find(e => e.id === activeTab);
