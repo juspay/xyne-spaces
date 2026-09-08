@@ -1,3 +1,15 @@
+## [1.289.0](https://github.com/juspay/xyne-spaces/compare/v1.288.0...v1.289.0) (2026-09-08)
+
+
+### Features
+
+* removing ringing sounds when on another call ([#1250](https://github.com/juspay/xyne-spaces/issues/1250)) ([bb596a4](https://github.com/juspay/xyne-spaces/commit/bb596a46e2aed6edcedda948bbb7e6b61eb31bb7))
+
+
+### Bug Fixes
+
+* Ozonetel iframe alive on modal close ([#1632](https://github.com/juspay/xyne-spaces/issues/1632)) ([98d2f5d](https://github.com/juspay/xyne-spaces/commit/98d2f5da58a0e663279726f076e995d426f05c00))
+
 ## [1.288.0](https://github.com/juspay/xyne-spaces/compare/v1.287.0...v1.288.0) (2026-09-08)
 
 
