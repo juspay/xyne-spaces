@@ -36,9 +36,9 @@ const MANIFEST_END = "REACT_ARTIFACT_END";
 /** Bumped when the on-disk artifact payload shape changes. */
 const ARTIFACT_VERSION = 1;
 
-const MAX_FILES = 20;
-const MAX_FILE_BYTES = 64 * 1024;
-const MAX_TOTAL_BYTES = 256 * 1024;
+const MAX_FILES = 50;
+const MAX_FILE_BYTES = 256 * 1024;
+const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 /** The summary is the only part the model re-reads; keep it well under the 32KB inline cap. */
 const MAX_SUMMARY_CHARS = 1000;
 const MAX_TITLE_CHARS = 120;
