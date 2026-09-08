@@ -85,6 +85,8 @@ export class PackConnection {
   #pendingBackoff: { minMs: number; maxMs: number } | undefined;
   #attempt = 0;
   #reconnectTimer: NodeJS.Timeout | null = null;
+  /** Repeating alarm while a FATAL server frame has stopped this group (C5). */
+  #fatalTimer: NodeJS.Timeout | null = null;
 
   readonly #pending = new Map<string, RowPatchOp[]>();
   /** Accumulated `gotQueriesPatch` ops per in-flight poke (hash = instanceKey). */
@@ -198,8 +200,34 @@ export class PackConnection {
   stop(): void {
     this.#closed = true;
     if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+    if (this.#fatalTimer) {
+      clearInterval(this.#fatalTimer);
+      this.#fatalTimer = null;
+    }
     this.#ws?.close();
     this.#ws = null;
+  }
+
+  /**
+   * C5 — a FATAL server frame (VersionNotSupported / SchemaVersionNotSupported) stops the group
+   * for good: admitted clients then get NOTHING while their snapshots freeze. Logging once let
+   * that vanish — after a zero-cache protocol bump (PROTOCOL_VERSION is hardcoded) the whole
+   * engine goes stale on one log line. Raise a LOUD REPEATED signal (error log + obs, re-fired on
+   * an interval) so the silent-death surfaces until the process is redeployed. Cleared in stop().
+   */
+  #raiseFatal(kind: string): void {
+    const fire = (): void => {
+      logger.error('sync_pack_fatal', {
+        clientGroupID: this.#opts.clientGroupID,
+        queryName: this.#opts.queryName,
+        kind,
+      });
+      obsEmit('tap-fatal', { clientGroupID: this.#opts.clientGroupID, kind });
+    };
+    fire();
+    if (this.#fatalTimer) clearInterval(this.#fatalTimer);
+    this.#fatalTimer = setInterval(fire, 60_000);
+    this.#fatalTimer.unref?.();
   }
 
   /**
@@ -396,7 +424,7 @@ export class PackConnection {
     logger.warn('sync_pack_server_error', { clientGroupID: this.#opts.clientGroupID, kind, message: body.message });
     if (FATAL_KINDS.has(kind)) {
       this.#stopped = true;
-      logger.error('sync_pack_fatal', { clientGroupID: this.#opts.clientGroupID, kind });
+      this.#raiseFatal(kind);
       return;
     }
     if (RESET_KINDS.has(kind)) {
