@@ -15,11 +15,10 @@ import {
 import { DisplaySearchResult } from '../../../types/search';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import UserAvatar from '../../UserAvatar/UserAvatar';
-import Avatar from '../../ui/Avatar/Avatar';
+import { UserRow } from './CommandRows';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { useUser } from '../../../hooks/useUsers';
-import { isUserDeactivated, getUserDisplayName } from '../../../utils/userDisplayName';
-import { StatusIndicator } from '../../ui/StatusIndicator';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { TicketPriority } from '@xyne/shared';
 
 interface SearchResultItemProps {
@@ -36,6 +35,9 @@ interface SearchResultItemProps {
   onSelect: (result: DisplaySearchResult) => Promise<void> | void;
   onPreview?: (result: DisplaySearchResult) => void;
   isSelected?: boolean;
+  // Unread badge for a user row whose person has an unread 1:1 DM. The parent resolves
+  // user → DM channel → unreadCounts and passes the count; other result types omit it.
+  badgeCount?: number;
   // Fires on mousedown before cmdk's click->onSelect chain so callers can
   // capture the modifier state of the gesture (cmdk's onSelect drops the event).
   onItemMouseDown?: (e: ReactMouseEvent, result: DisplaySearchResult) => void;
@@ -305,60 +307,49 @@ const AttachmentSearchResultItem = ({
   );
 };
 
+// Adapter: resolves the live user (for name / email / deactivation / status) and delegates the
+// row to the shared UserRow. title == getUserDisplayName(user) and subtitle == user.email for
+// these results, so UserRow derives both from `user` — no label/secondaryText override needed.
 const UserSearchResultItem = ({
   result,
   onSelect,
   isSelected,
   onItemMouseDown,
+  badgeCount,
 }: {
   result: DisplaySearchResult;
   onSelect: (result: DisplaySearchResult) => Promise<void> | void;
   isSelected: boolean;
   onItemMouseDown?: ((e: ReactMouseEvent, result: DisplaySearchResult) => void) | undefined;
+  badgeCount?: number;
 }): ReactElement => {
   const user = useUser(result.id);
-  const isDeactivated = isUserDeactivated(user);
+  const hasStatus = user && (user.statusEmoji || user.statusContent);
   const handleMouseDown = onItemMouseDown
     ? (e: ReactMouseEvent) => onItemMouseDown(e, result)
     : undefined;
 
   return (
-    <Command.Item
-      key={result.id}
+    <UserRow
+      user={user ?? { id: result.id, name: result.title }}
       value={`backend-${result.type}-${result.id}`}
-      data-result-id={result.id}
-      data-result-type={result.type}
-      data-item-label={result.title}
+      dataItemLabel={result.title}
+      dataResultId={result.id}
+      dataResultType={result.type}
       onSelect={() => void onSelect(result)}
-      onMouseDownCapture={handleMouseDown}
-      className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
-    >
-      <Avatar userId={result.id} size='xs' />
-      <div className='flex-1 min-w-0 flex items-center gap-2'>
-        <span
-          className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-        >
-          {result.title}
-        </span>
-        {!isDeactivated && (user?.statusEmoji || user?.statusContent) && (
-          <StatusIndicator
-            statusEmoji={user?.statusEmoji}
-            statusContent={user?.statusContent}
-            statusExpiryAt={user?.statusExpiryAt}
-            size='sm'
-          />
-        )}
-        {isDeactivated && (
-          <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-            Deactivated
-          </span>
-        )}
-        {result.subtitle && (
-          <span className='min-w-0 truncate text-xs text-muted-foreground'>{result.subtitle}</span>
-        )}
-      </div>
-      {isSelected && <SelectedBadge />}
-    </Command.Item>
+      isSelected={isSelected}
+      {...(badgeCount ? { badgeCount } : {})}
+      {...(handleMouseDown ? { onMouseDownCapture: handleMouseDown } : {})}
+      {...(hasStatus
+        ? {
+            status: {
+              statusEmoji: user.statusEmoji,
+              statusContent: user.statusContent,
+              statusExpiryAt: user.statusExpiryAt,
+            },
+          }
+        : {})}
+    />
   );
 };
 
@@ -368,6 +359,7 @@ const SearchResultItem = ({
   onSelect,
   onPreview,
   isSelected = false,
+  badgeCount,
   onItemMouseDown,
   onItemMouseEnter,
   onItemMouseLeave,
@@ -393,6 +385,7 @@ const SearchResultItem = ({
           onSelect={onSelect}
           isSelected={isSelected}
           onItemMouseDown={onItemMouseDown}
+          {...(badgeCount ? { badgeCount } : {})}
         />
       );
 

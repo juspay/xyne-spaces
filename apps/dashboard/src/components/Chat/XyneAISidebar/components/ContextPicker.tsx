@@ -8,6 +8,7 @@ import ChannelIcon from '../../ChannelIcon/ChannelIcon';
 import { useSearchMetrics } from '../../../../hooks/useSearchMetrics';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
 import { ChannelCommandItem } from '../../ChatDirectory/ChannelCommandMenu';
+import { CommandSection } from '../../ChatDirectory/CommandRows';
 import SearchResultItem from '../../ChatDirectory/SearchResultItem';
 import { ChannelCategory } from '../../ChatDirectory/ChatDirectory.types';
 import { groupChannelsByScope, getDMNames } from '../../ChatDirectory/ChatDirectory.utils';
@@ -59,10 +60,6 @@ const CATEGORY_LABELS: Record<ChannelCategory, string> = {
   [ChannelCategory.DIRECT_MESSAGES]: 'Direct Messages',
   [ChannelCategory.GROUP_DMS]: 'Group DMs',
 };
-
-/** Group-heading chrome copied from ChannelCommandMenu's Command.Group usage. */
-const GROUP_HEADING_CLASS =
-  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono';
 
 /**
  * Which pill list a picked result lands in, per tab. CALL and RECORDING run the
@@ -404,11 +401,7 @@ export const ContextPicker = ({
                 const hiddenCount = items.length - DISPLAY_LIMIT;
 
                 return (
-                  <Command.Group
-                    key={category}
-                    heading={CATEGORY_LABELS[category]}
-                    className={GROUP_HEADING_CLASS}
-                  >
+                  <CommandSection key={category} heading={CATEGORY_LABELS[category]}>
                     {displayItems.map(({ channel }) => (
                       <ChannelCommandItem
                         key={channel.id}
@@ -442,7 +435,7 @@ export const ContextPicker = ({
                         {isExpanded ? 'Show less' : `Show ${hiddenCount} more`}
                       </button>
                     )}
-                  </Command.Group>
+                  </CommandSection>
                 );
               })
             )
