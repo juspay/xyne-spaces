@@ -24,7 +24,18 @@ export const removeUnknownBlocks = <T extends { type?: string; children?: unknow
 export const knownBlockTypesOf = (schema: unknown): ReadonlySet<string> =>
   new Set(Object.keys((schema as { blockSchema: Record<string, unknown> }).blockSchema));
 
+const isAlreadyResolvableFileSource = (source: string): boolean =>
+  source.startsWith('data:') ||
+  source.startsWith('blob:') ||
+  source.startsWith('http://') ||
+  source.startsWith('https://') ||
+  source.startsWith('/');
+
 export const resolveFileUrl = async (attachmentId: string): Promise<string> => {
+  if (isAlreadyResolvableFileSource(attachmentId)) {
+    return attachmentId;
+  }
+
   try {
     const blob = await createPreviewUrl(attachmentId);
 

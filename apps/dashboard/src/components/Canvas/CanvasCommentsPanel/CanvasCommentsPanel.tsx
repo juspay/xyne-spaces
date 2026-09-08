@@ -9,7 +9,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { CanvasCommentThreadStatus } from '@xyne/shared';
+import { CanvasCommentThreadStatus, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { motion } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,15 +18,15 @@ import { toast } from 'sonner';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
+import { searchChannels, useAllChannels, useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { cn } from '../../../utils/classNames';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logger, Event } from '../../../utils/logger';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { MentionRenderer } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import { InputBox } from '../../ui/InputBox';
@@ -39,6 +39,16 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { formatRelativeCommentTime } from '../canvasCommentTime';
+import {
+  CanvasCommentBody,
+  extractCanvasCommentMentionRefsFromHtml,
+  getCanvasMentionNoAccessUserIds,
+  isCanvasCommentMentionRefRetained,
+  parseCanvasCommentMentionRef,
+  parseCanvasCommentMentionRefs,
+  type CanvasCommentMentionRef,
+  type CanvasMentionNotificationResponse,
+} from '../canvasCommentMentions';
 
 type UserLite = {
   id: string;
@@ -133,91 +143,6 @@ interface CanvasCommentThreadSectionProps {
 const getDisplayName = (user?: UserLite | null): string =>
   user?.displayName || user?.name || user?.email || 'Unknown';
 
-const extractMentionedUserIdsFromHtml = (html: string, fallbackIds: string[]): string[] => {
-  const ids = new Set<string>();
-  const mentionRegex = /data-user-id="([^"]+)"/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = mentionRegex.exec(html)) !== null) {
-    const userId = match[1];
-    if (userId) ids.add(userId);
-  }
-
-  if (ids.size === 0) {
-    fallbackIds.forEach(userId => ids.add(userId));
-  }
-
-  return [...ids];
-};
-
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const parseMentionedUserIds = (mentionedUserIds?: string | null): string[] => {
-  if (!mentionedUserIds) return [];
-  try {
-    const parsed: unknown = JSON.parse(mentionedUserIds);
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
-};
-
-const renderCommentBody = (
-  body: string,
-  mentionedUserIds: string[],
-  users: UserLite[],
-): React.ReactNode[] => {
-  if (mentionedUserIds.length === 0 || !body) return [body];
-
-  const mentionTargets = mentionedUserIds
-    .map(userId => {
-      const user = users.find(candidate => candidate.id === userId);
-      const displayName = user ? getUserDisplayName(user) : '';
-      return displayName ? { userId, token: `@${displayName}`, displayName } : null;
-    })
-    .filter((target): target is { userId: string; token: string; displayName: string } =>
-      Boolean(target),
-    )
-    .sort((a, b) => b.token.length - a.token.length);
-
-  if (mentionTargets.length === 0) return [body];
-
-  const tokenPattern = mentionTargets.map(target => escapeRegExp(target.token)).join('|');
-  const tokenRegex = new RegExp(`(${tokenPattern})`, 'g');
-  const nodes: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = tokenRegex.exec(body)) !== null) {
-    const token = match[0];
-    const start = match.index;
-    if (start > lastIndex) {
-      nodes.push(body.slice(lastIndex, start));
-    }
-
-    const target = mentionTargets.find(candidate => candidate.token === token);
-    if (target) {
-      nodes.push(
-        <MentionRenderer
-          key={`${target.userId}-${start}`}
-          userId={target.userId}
-          fallbackName={target.displayName}
-        />,
-      );
-    } else {
-      nodes.push(token);
-    }
-
-    lastIndex = start + token.length;
-  }
-
-  if (lastIndex < body.length) {
-    nodes.push(body.slice(lastIndex));
-  }
-
-  return nodes.length > 0 ? nodes : [body];
-};
-
 function CanvasCommentComposer({
   id,
   channelId,
@@ -232,10 +157,18 @@ function CanvasCommentComposer({
 }: CanvasCommentComposerProps): React.JSX.Element {
   const selectedMentionIdsRef = useRef<Set<string>>(new Set());
   const [fallbackMentionQuery, setFallbackMentionQuery] = useState('');
+  const [channelSearchQuery, setChannelSearchQuery] = useState('');
   const { results, allUsers, searchMentions } = useMentionSearch(channelId, undefined, undefined, {
     includeSpecialMentions: false,
   });
   const fallbackGroups = useUserGroupSearch(fallbackMentionQuery, 10);
+  const visibleChannels = useAllVisibleChannels();
+  const channelResults = useMemo(
+    () => searchChannels(visibleChannels, channelSearchQuery, 10),
+    [channelSearchQuery, visibleChannels],
+  );
+  const allChannels = useAllChannels();
+  const allGroups = useUserGroups();
 
   const fallbackMentionItems = useMemo<MentionResult[]>(
     () => [
@@ -271,6 +204,20 @@ function CanvasCommentComposer({
       .slice(0, 8);
   }, [channelId, currentUserId, fallbackMentionItems, fallbackMentionQuery, results]);
 
+  const channelItems = useMemo(
+    () =>
+      channelResults
+        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
+        .map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          ...(channel.description && { description: channel.description }),
+          hasAccess: true,
+        })),
+    [channelResults],
+  );
+
   const handleMentionSearch = (query: string): void => {
     setFallbackMentionQuery(query);
     searchMentions(query);
@@ -286,13 +233,10 @@ function CanvasCommentComposer({
     const body = content.trim();
     if (!body) return;
 
-    const retainedFallbackMentionIds = fallbackMentionedUserIds.filter(userId => {
-      const mention = allUsers.find(
-        candidate => candidate.type === 'user' && candidate.id === userId,
-      );
-      return mention ? body.includes(`@${mention.name}`) : true;
-    });
-    const mentionedUserIds = extractMentionedUserIdsFromHtml(html, [
+    const retainedFallbackMentionIds = fallbackMentionedUserIds.filter(mentionRef =>
+      isCanvasCommentMentionRefRetained(mentionRef, body, allUsers, allGroups, allChannels),
+    );
+    const mentionedUserIds = extractCanvasCommentMentionRefsFromHtml(html, [
       ...selectedMentionIdsRef.current,
       ...retainedFallbackMentionIds,
     ]);
@@ -309,6 +253,8 @@ function CanvasCommentComposer({
         mentionItems={mentionItems}
         onMentionSearch={handleMentionSearch}
         onMentionSelect={handleMentionSelect}
+        channelItems={channelItems}
+        onChannelSearch={setChannelSearchQuery}
         placeholder={placeholder}
         value={value}
         disabled={disabled}
@@ -480,7 +426,7 @@ function CanvasCommentThreadSection({
                 currentUserId={currentUserId}
                 placeholder='Edit comment'
                 value={comment.body}
-                fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
+                fallbackMentionedUserIds={parseCanvasCommentMentionRefs(comment.mentionedUserIds)}
                 minHeightClassName='min-h-[38px]'
                 onSubmit={payload => onUpdateComment(thread, comment, payload)}
                 actions={
@@ -505,13 +451,15 @@ function CanvasCommentThreadSection({
                   isDeleted && 'italic text-muted-foreground',
                 )}
               >
-                {isDeleted
-                  ? 'Comment deleted'
-                  : renderCommentBody(
-                      comment.body,
-                      parseMentionedUserIds(comment.mentionedUserIds),
-                      allUsers,
-                    )}
+                {isDeleted ? (
+                  'Comment deleted'
+                ) : (
+                  <CanvasCommentBody
+                    body={comment.body}
+                    mentionIds={parseCanvasCommentMentionRefs(comment.mentionedUserIds)}
+                    users={allUsers}
+                  />
+                )}
               </p>
             )}
           </div>
@@ -617,28 +565,50 @@ export function CanvasCommentsPanel({
     { value: CanvasCommentThreadStatus.RESOLVED, label: 'Resolved', count: resolvedCount },
   ];
 
+  const showNoAccessMentionWarning = useCallback(
+    (
+      response?: CanvasMentionNotificationResponse,
+      fallbackMention?: CanvasCommentMentionRef,
+    ): void => {
+      getCanvasMentionNoAccessUserIds(response, fallbackMention).forEach(mentionedUserId => {
+        const mentionedUser = allUsers.find(candidate => candidate.id === mentionedUserId);
+        const displayName = mentionedUser ? getDisplayName(mentionedUser) : 'This person';
+
+        toast.warning('Mention not sent', {
+          description: `${displayName} doesn't have access to this canvas.`,
+        });
+      });
+    },
+    [allUsers],
+  );
+
   const sendMentionNotifications = useCallback(
     (blockId: string, mentionedUserIds: string[], commentThreadId?: string): void => {
-      const uniqueMentionedUserIds = [...new Set(mentionedUserIds)].filter(
-        mentionedUserId => mentionedUserId && mentionedUserId !== user?.id,
-      );
-      if (uniqueMentionedUserIds.length === 0) return;
+      const uniqueMentionRefs = [...new Set(mentionedUserIds)].filter(mentionId => {
+        const ref = parseCanvasCommentMentionRef(mentionId);
+        return ref.id && !(ref.type === 'user' && ref.id === user?.id);
+      });
+      if (uniqueMentionRefs.length === 0) return;
 
       const path = `redirected?type=canvas&canvasId=${encodeURIComponent(canvasId)}&blockId=${encodeURIComponent(blockId)}${
         commentThreadId ? `&commentThreadId=${encodeURIComponent(commentThreadId)}` : ''
       }`;
       const slackUrl = `${window.location.origin}/launch?path=${encodeURIComponent(path)}`;
 
-      uniqueMentionedUserIds.forEach(mentionId => {
+      uniqueMentionRefs.forEach(mentionRef => {
+        const mention = parseCanvasCommentMentionRef(mentionRef);
         apiInstance
           .post(`/canvas/${canvasId}/mentions`, {
-            mentionType: 'user',
-            mentionId,
+            mentionType: mention.type,
+            mentionId: mention.id,
             blockId,
             commentThreadId,
             canvasTitle,
             mentionContext: 'comment',
             slackUrl,
+          })
+          .then(response => {
+            showNoAccessMentionWarning(response.data as CanvasMentionNotificationResponse, mention);
           })
           .catch(error => {
             logger.error(Event.API_CALL_FAILED, {
@@ -648,7 +618,7 @@ export function CanvasCommentsPanel({
           });
       });
     },
-    [canvasId, canvasTitle, user?.id],
+    [canvasId, canvasTitle, showNoAccessMentionWarning, user?.id],
   );
 
   const selectedTextAnchor =
@@ -743,7 +713,9 @@ export function CanvasCommentsPanel({
     void mutationResult.server
       .then(result => {
         if (result.type !== 'error') {
-          const previousMentionedUserIds = new Set(parseMentionedUserIds(comment.mentionedUserIds));
+          const previousMentionedUserIds = new Set(
+            parseCanvasCommentMentionRefs(comment.mentionedUserIds),
+          );
           const newlyMentionedUserIds = mentionedUserIds.filter(
             mentionedUserId => !previousMentionedUserIds.has(mentionedUserId),
           );

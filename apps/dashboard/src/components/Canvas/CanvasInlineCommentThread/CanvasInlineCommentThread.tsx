@@ -1,22 +1,21 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, RotateCcw, X } from 'lucide-react';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
-import { CanvasCommentThreadStatus } from '@xyne/shared';
+import { CanvasCommentThreadStatus, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
+import { searchChannels, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { cn } from '../../../utils/classNames';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logger, Event } from '../../../utils/logger';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { MentionRenderer } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Avatar from '../../ui/Avatar/Avatar';
 import { InputBox } from '../../ui/InputBox';
 import type { MentionResult } from '../../ui/InputBox';
@@ -25,6 +24,15 @@ import { formatRelativeCommentTime } from '../canvasCommentTime';
 import type { CanvasCommentAnchor } from '../CanvasCommentsPanel/CanvasCommentsPanel';
 import { OverlayZIndexContext } from '../../../contexts/OverlayZIndexContext';
 import type { CanvasCommentHighlightThread } from '../useCanvasCommentHighlights';
+import {
+  CanvasCommentBody,
+  extractCanvasCommentMentionRefsFromHtml,
+  getCanvasMentionNoAccessUserIds,
+  parseCanvasCommentMentionRef,
+  parseCanvasCommentMentionRefs,
+  type CanvasCommentMentionRef,
+  type CanvasMentionNotificationResponse,
+} from '../canvasCommentMentions';
 
 type UserLite = {
   id: string;
@@ -60,33 +68,6 @@ interface CanvasInlineCommentThreadProps {
   onCreateThreadFailed?: ((anchor: CanvasCommentAnchor) => void) | undefined;
 }
 
-const extractMentionedUserIdsFromHtml = (html: string, fallbackIds: string[]): string[] => {
-  const ids = new Set<string>();
-  const mentionRegex = /data-user-id="([^"]+)"/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = mentionRegex.exec(html)) !== null) {
-    const userId = match[1];
-    if (userId) ids.add(userId);
-  }
-
-  if (ids.size === 0) {
-    fallbackIds.forEach(userId => ids.add(userId));
-  }
-
-  return [...ids];
-};
-
-const parseMentionedUserIds = (mentionedUserIds?: string | null): string[] => {
-  if (!mentionedUserIds) return [];
-  try {
-    const parsed: unknown = JSON.parse(mentionedUserIds);
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
-};
-
 const getDisplayName = (user?: UserLite | null): string =>
   user?.displayName || user?.name || user?.email || 'Unknown';
 
@@ -97,35 +78,6 @@ const getCommentAuthor = (
   comment
     ? (users.find(candidate => candidate.id === comment.createdBy) ?? comment.createdByUser ?? null)
     : null;
-
-const renderCommentBody = (
-  body: string,
-  mentionedUserIds: string[],
-  users: UserLite[],
-): React.ReactNode[] => {
-  if (mentionedUserIds.length === 0 || !body) return [body];
-
-  const nodes: React.ReactNode[] = [];
-  let remaining = body;
-  mentionedUserIds.forEach(userId => {
-    const user = users.find(candidate => candidate.id === userId);
-    const displayName = user ? getUserDisplayName(user) : '';
-    const token = displayName ? `@${displayName}` : '';
-    if (!token || !remaining.includes(token)) return;
-    const [before, ...afterParts] = remaining.split(token);
-    if (before) nodes.push(before);
-    nodes.push(
-      <MentionRenderer
-        key={`${userId}-${nodes.length}`}
-        userId={userId}
-        fallbackName={displayName}
-      />,
-    );
-    remaining = afterParts.join(token);
-  });
-  if (remaining) nodes.push(remaining);
-  return nodes.length > 0 ? nodes : [body];
-};
 
 const CARD_MAX_WIDTH = 470;
 const CARD_GAP = 10;
@@ -197,12 +149,18 @@ export function CanvasInlineCommentThread({
   const [hasEntered, setHasEntered] = useState(false);
   const [createdThread, setCreatedThread] = useState<CanvasCommentHighlightThread | null>(null);
   const [mentionQuery, setMentionQuery] = useState('');
+  const [channelSearchQuery, setChannelSearchQuery] = useState('');
   const {
     results,
     allUsers: mentionUsers,
     searchMentions,
   } = useMentionSearch(channelId, undefined, undefined, { includeSpecialMentions: false });
   const fallbackGroups = useUserGroupSearch(mentionQuery, 10);
+  const visibleChannels = useAllVisibleChannels();
+  const channelResults = useMemo(
+    () => searchChannels(visibleChannels, channelSearchQuery, 10),
+    [channelSearchQuery, visibleChannels],
+  );
   const currentThread = createdThread ?? thread;
   const currentThreadId = currentThread?.id;
   const [comments = []] = useCachedQuery(
@@ -306,16 +264,48 @@ export function CanvasInlineCommentThread({
       .slice(0, 8);
   }, [channelId, fallbackGroups, mentionQuery, mentionUsers, results, user?.id]);
 
+  const channelItems = useMemo(
+    () =>
+      channelResults
+        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
+        .map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          ...(channel.description && { description: channel.description }),
+          hasAccess: true,
+        })),
+    [channelResults],
+  );
+
+  const showNoAccessMentionWarning = useCallback(
+    (
+      response?: CanvasMentionNotificationResponse,
+      fallbackMention?: CanvasCommentMentionRef,
+    ): void => {
+      getCanvasMentionNoAccessUserIds(response, fallbackMention).forEach(mentionedUserId => {
+        const mentionedUser = allUsers.find(candidate => candidate.id === mentionedUserId);
+        const displayName = mentionedUser ? getDisplayName(mentionedUser) : 'This person';
+
+        toast.warning('Mention not sent', {
+          description: `${displayName} doesn't have access to this canvas.`,
+        });
+      });
+    },
+    [allUsers],
+  );
+
   if (!currentThread && !activeAnchor) return null;
 
   const sendMentionNotifications = (
     mentionedUserIds: string[],
     options?: { blockId?: string; commentThreadId?: string },
   ): void => {
-    const uniqueMentionedUserIds = [...new Set(mentionedUserIds)].filter(
-      mentionedUserId => mentionedUserId && mentionedUserId !== user?.id,
-    );
-    if (uniqueMentionedUserIds.length === 0) return;
+    const uniqueMentionRefs = [...new Set(mentionedUserIds)].filter(mentionId => {
+      const mention = parseCanvasCommentMentionRef(mentionId);
+      return mention.id && !(mention.type === 'user' && mention.id === user?.id);
+    });
+    if (uniqueMentionRefs.length === 0) return;
 
     const blockId = options?.blockId ?? currentThread?.blockId ?? activeAnchor?.blockId;
     const commentThreadId = options?.commentThreadId ?? currentThread?.id;
@@ -324,16 +314,20 @@ export function CanvasInlineCommentThread({
     const path = `redirected?type=canvas&canvasId=${encodeURIComponent(canvasId)}&blockId=${encodeURIComponent(blockId)}&commentThreadId=${encodeURIComponent(commentThreadId)}`;
     const slackUrl = `${window.location.origin}/launch?path=${encodeURIComponent(path)}`;
 
-    uniqueMentionedUserIds.forEach(mentionId => {
+    uniqueMentionRefs.forEach(mentionRef => {
+      const mention = parseCanvasCommentMentionRef(mentionRef);
       apiInstance
         .post(`/canvas/${canvasId}/mentions`, {
-          mentionType: 'user',
-          mentionId,
+          mentionType: mention.type,
+          mentionId: mention.id,
           blockId,
           commentThreadId,
           canvasTitle,
           mentionContext: 'comment',
           slackUrl,
+        })
+        .then(response => {
+          showNoAccessMentionWarning(response.data as CanvasMentionNotificationResponse, mention);
         })
         .catch(error => {
           logger.error(Event.API_CALL_FAILED, {
@@ -396,7 +390,7 @@ export function CanvasInlineCommentThread({
   const handleReply = (content: string, html: string): void => {
     const body = content.trim();
     if (!body) return;
-    const mentionedUserIds = extractMentionedUserIdsFromHtml(html, [
+    const mentionedUserIds = extractCanvasCommentMentionRefsFromHtml(html, [
       ...selectedMentionIdsRef.current,
     ]);
     selectedMentionIdsRef.current.clear();
@@ -537,11 +531,11 @@ export function CanvasInlineCommentThread({
                 </div>
                 {isInitialComment && anchorQuote && renderAnchorQuote()}
                 <p className='ml-[33px] mt-[3px] whitespace-pre-wrap break-words text-[13.5px] leading-[1.55] text-foreground [text-wrap:pretty]'>
-                  {renderCommentBody(
-                    comment.body,
-                    parseMentionedUserIds(comment.mentionedUserIds),
-                    allUsers,
-                  )}
+                  <CanvasCommentBody
+                    body={comment.body}
+                    mentionIds={parseCanvasCommentMentionRefs(comment.mentionedUserIds)}
+                    users={allUsers}
+                  />
                 </p>
               </div>
             );
@@ -595,6 +589,8 @@ export function CanvasInlineCommentThread({
               onMentionSelect={mention => {
                 if (mention.type === 'user') selectedMentionIdsRef.current.add(mention.id);
               }}
+              channelItems={channelItems}
+              onChannelSearch={setChannelSearchQuery}
               placeholder={
                 isDraft ? 'Comment — @AI to edit the selection…' : 'Reply — @AI to edit…'
               }
