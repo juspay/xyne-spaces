@@ -181,16 +181,37 @@ export interface HostAgentStateMessage {
   };
 }
 
+/**
+ * Host → app, answering a `request`: the result of running the app's backend
+ * fetch as the current viewer (same-origin, the viewer's httpOnly cookie). Keyed
+ * by `requestId`, request/response like `mutate-result`.
+ */
+export interface HostRequestResultMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'request-result';
+  requestId: string;
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  error?: string;
+}
+
 /** App → host. */
 export interface AppArtifactMessage {
   source: 'xyne-artifact';
   v: number;
-  type: 'ready' | 'refresh' | 'mutate' | 'agent-run' | 'agent-cancel' | 'agent-attach' | 'error';
+  type: 'ready' | 'refresh' | 'mutate' | 'agent-run' | 'agent-cancel' | 'agent-attach' | 'error' | 'request';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
-  /** `mutate` only. */
+  /** `mutate` and `request`. */
   requestId?: string;
   args?: unknown;
+  /** `request` only: a backend fetch to run as the viewer (see useArtifactRequestBridge). */
+  method?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  body?: string;
   /** Agent messages: which conversation thread this concerns. */
   runKey?: string;
   /** `agent-run` only. */
@@ -215,6 +236,13 @@ export function isAppArtifactMessage(value: unknown): value is AppArtifactMessag
   if (msg.type === 'agent-run') {
     return (
       typeof msg.runKey === 'string' && typeof msg.prompt === 'string' && msg.prompt.length > 0
+    );
+  }
+  if (msg.type === 'request') {
+    return (
+      typeof msg.requestId === 'string' &&
+      typeof msg.method === 'string' &&
+      typeof msg.url === 'string'
     );
   }
   return msg.type === 'mutate' && typeof msg.requestId === 'string' && typeof msg.name === 'string';
