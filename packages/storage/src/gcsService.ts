@@ -3,6 +3,7 @@ import { isPreconditionFailed, type GcsStorageConfig } from './types.js';
 
 import { logger } from './logger.js';
 import { v4 as uuidv4 } from 'uuid';
+import type { ObjectInfo, ObjectRead } from './types.js';
 
 export interface GCSUploadOptions {
   filename: string;
@@ -394,6 +395,56 @@ export class GCSService {
 
       throw new Error('Signed URL generation failed: Unknown error');
     }
+  }
+
+  private static isNotFound(error: unknown): boolean {
+    const e = error as { code?: unknown; status?: unknown };
+    return e?.code === 404 || e?.status === 404;
+  }
+
+  private static toObjectInfo(metadata: {
+    size?: string | number;
+    contentType?: string;
+    etag?: string;
+    updated?: string;
+  }): ObjectInfo {
+    const info: ObjectInfo = {};
+    const size = typeof metadata.size === 'string' ? Number(metadata.size) : metadata.size;
+    if (size !== undefined && Number.isFinite(size)) {
+      info.size = size;
+    }
+    if (metadata.contentType) {
+      info.contentType = metadata.contentType;
+    }
+    if (metadata.etag) {
+      info.etag = metadata.etag.replace(/^W\//, '').replace(/"/g, '');
+    }
+    if (metadata.updated) {
+      info.lastModified = new Date(metadata.updated);
+    }
+    return info;
+  }
+
+  /** Metadata for one object, or null when it does not exist. */
+  async headObject(path: string): Promise<ObjectInfo | null> {
+    try {
+      const [metadata] = await this.bucket.file(path).getMetadata();
+      return GCSService.toObjectInfo(metadata);
+    } catch (error) {
+      if (GCSService.isNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** Stream one object with its metadata, or null when it does not exist. */
+  async getObject(path: string): Promise<ObjectRead | null> {
+    const info = await this.headObject(path);
+    if (!info) {
+      return null;
+    }
+    return { info, stream: this.bucket.file(path).createReadStream() };
   }
 
   async fileExists(filename: string): Promise<boolean> {
