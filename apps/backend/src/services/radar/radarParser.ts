@@ -32,6 +32,11 @@ export interface ParserOpenItem {
   context: string | null;
   requested_by: string[];
   pending_on: string[];
+  /** The message that raised this item. Sent on a reaction pass so the model
+   *  can tell "the tick is ON the ask" from "the tick is on an answer" — it
+   *  cannot infer that link, and without it a tick on the ask reads as a
+   *  message that settles nothing. */
+  source_message_id?: string;
 }
 
 export interface ParserOperation {
@@ -85,6 +90,16 @@ const TRANSITIONS_SCHEMA: Record<string, unknown> = {
   },
 };
 
+/**
+ * What "resolve" means, in one place. The window parser and the reaction
+ * matcher must agree on this or the same conversation settles differently
+ * depending on whether someone typed "done" or clicked a tick.
+ */
+const RESOLVE_MEANING =
+  'an open item is FULFILLED: the thing asked for was actually delivered (the ' +
+  'information given, the work verifiably done), the requester confirmed or ' +
+  'accepted the outcome, or the ask was explicitly withdrawn/cancelled';
+
 const SYSTEM_PROMPT = `You are the state-transition parser of Radar, an execution-tracking engine for workplace chat.
 
 Radar tracks "execution items": concrete asks or commitments inside a thread. Each item has requested_by (who is waiting on it) and pending_on (who must act next — who "holds the ball"). An item is a ball being passed, not a task board entry.
@@ -94,12 +109,13 @@ You receive one thread's current state:
 - new_messages: messages that arrived since the last parse, in chronological order. Each lists its author and the users it explicitly @mentions.
 - context_messages: the last few ALREADY-PROCESSED messages from just before new_messages, oldest first. Read them to understand what the thread is about, but they were handled in earlier passes: never cite one as a sourceMessageId, and never create an item for an ask that appears only there.
 - known_users: id -> name for everyone involved so far (authors, mentions, item participants). Use it to match a name in prose to an id.
+- reaction: present ONLY on a reaction pass (see below). Absent on an ordinary window parse.
 
 Decide which state transitions the new messages imply. Operations:
 
 1. "create" — a new concrete ask or commitment that no open item already covers. title: short imperative summary of what must happen. contextSummary: one sentence of context. requestedBy: who is asking/waiting (usually the author). pendingOn: who must act.
    An ask includes a DIRECT QUESTION aimed at a specific person: asking someone for a status, an answer, a review, an update or a decision puts the ball with them until they respond. "@dev-bot what's the status of PR 25?" IS a trackable item (pendingOn: dev-bot, title: "Share the status of PR 25").
-2. "resolve" — an open item is FULFILLED: the thing asked for was actually delivered (the information given, the work verifiably done), the requester confirmed or accepted the outcome, or the ask was explicitly withdrawn/cancelled. itemId: the open item's id.
+2. "resolve" — ${RESOLVE_MEANING}. itemId: the open item's id.
 3. "reassign" — the ball moved on an open item: it was explicitly handed to someone, someone claimed it, or the ball bounced back to the asker: a clarifying question, a dispute ("works for me", "cannot reproduce", "I don't think that's a bug"), or any reply the requester must now verify, confirm or answer before the item can close. itemId + new pendingOn (a bounce-back goes to requested_by).
 
 A reply is not fulfillment. When the assignee responds without delivering what was asked — they push back, can't reproduce, disagree, answer partially, or hand back a question — the item stays OPEN and the ball moves to whoever must act next (usually the requester, via reassign). Only the requester's confirmation, an objectively delivered result, or an explicit withdrawal closes an item.
@@ -110,6 +126,13 @@ Assignment rules:
 - An actionable ask with no inferable assignee is still tracked: create it with pendingOn: [].
 - Every operation cites sourceMessageId: the message in this window that caused it.
 - Every operation includes reason: ONE short sentence explaining why this operation follows from the messages (e.g. why this person holds the ball, or what confirmed completion).
+
+REACTION PASS. When "reaction" is present, someone put a reaction on the single message in new_messages, and open_items has already been narrowed to items that person is party to. A reaction carries no text: the emoji's NAME is the only signal of intent, and the emoji and the message decide together.
+
+The only legal operation on a reaction pass is "resolve", and an empty operations array is the normal answer. Emit one only when BOTH hold:
+  - the emoji asserts COMPLETION — a tick, a check mark, "done", "shipped", "fixed". An emoji meaning seen, received or in progress ("eyes", "on-it", "checking", "reviewing", a thumbs-up) is NOT completion; nor is a celebration, a joke or a heart. Beware negations: "not-done" is not a completion. When an emoji could plausibly mean either, treat it as acknowledgement and emit nothing.
+  - the reacted message settles ONE specific open item, per the resolve rule above. An item whose source_message_id equals the reacted message's id was RAISED BY that message: a completion emoji there is not a comment on a delivery, it is the reactor asserting that item is now finished — resolve it.
+Topical overlap is not settlement: a tick on a lunch plan settles nothing, even when the reactor holds open work in the thread. If two items fit equally well, emit nothing — a wrong close costs more than a missed one.
 
 Be conservative about chatter: greetings, acknowledgements, thanks, FYIs and status updates someone volunteers produce NO operations — an empty operations array is the normal answer for such windows. A bare @mention with no request text is a HANDOFF, not noise: tagging someone under shared content (a report, a table, a log, an error) or into a thread puts that content in front of them — create an item pending on the mentioned user, titled from what the content or thread is about (e.g. "Review the tagging coverage report"). The ONLY exception is an explicit cc: when the message itself marks the mention as informational — "cc @x", "fyi @x", "looping in @x for visibility" — it is not an ask, create nothing. But do not confuse conservatism with dropping real asks: a request or question directed at a mentioned user is never chatter. Do not create an item for something an open item already covers; do not resolve on a vague "ok" unless it clearly confirms completion.
 
@@ -196,6 +219,23 @@ function tryParseJson(raw: string): { ok: true; value: unknown } | { ok: false; 
 
 class RadarParser {
   /**
+   * Same resolution as entity extraction (entityLlmClient.ts): radar's own key
+   * when one is minted, otherwise the shared gateway key. A dedicated key keeps
+   * radar's rate limit and spend off the quota other features use.
+   */
+  private resolveAuth(): { apiKey: string; baseUrl: string; keyName: string } {
+    const apiKey = config.radar.litellmApiKey || config.litellm.apiKey;
+    const baseUrl = config.litellm.baseUrl;
+    const keyName = config.radar.litellmApiKey
+      ? 'RADAR_EXECUTION_LITELLM_API_KEY'
+      : 'LITELLM_API_KEY';
+    if (!apiKey || !baseUrl) {
+      throw new Error('LiteLLM is not configured: set LITELLM_BASE_URL and an API key');
+    }
+    return { apiKey, baseUrl, keyName };
+  }
+
+  /**
    * One parse call per drained window. Returns the model's proposed
    * transitions after schema validation with repair retries; throws when the
    * model can't produce schema-valid output (the caller treats a parser
@@ -206,18 +246,9 @@ class RadarParser {
     newMessages: ParserWindowMessage[],
     knownUsers: Record<string, string> = {},
     contextMessages: ParserWindowMessage[] = [],
+    reaction?: { by: string; emoji: string },
   ): Promise<ParsedTransitions> {
-    // Same resolution as entity extraction (entityLlmClient.ts): radar's own
-    // key when one is minted, otherwise the shared gateway key. A dedicated key
-    // keeps radar's rate limit and spend off the quota other features use.
-    const apiKey = config.radar.litellmApiKey || config.litellm.apiKey;
-    const baseUrl = config.litellm.baseUrl;
-    const keyName = config.radar.litellmApiKey
-      ? 'RADAR_EXECUTION_LITELLM_API_KEY'
-      : 'LITELLM_API_KEY';
-    if (!apiKey || !baseUrl) {
-      throw new Error('LiteLLM is not configured: set LITELLM_BASE_URL and an API key');
-    }
+    const { apiKey, baseUrl, keyName } = this.resolveAuth();
 
     const model = config.radar.parserModel;
     if (!model) {
@@ -235,6 +266,7 @@ class RadarParser {
         text: m.text.slice(0, MAX_MESSAGE_TEXT_CHARS),
       })),
       known_users: knownUsers,
+      ...(reaction ? { reaction } : {}),
     };
 
     const messages = [
