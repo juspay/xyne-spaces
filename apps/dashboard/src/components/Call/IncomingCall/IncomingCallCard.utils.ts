@@ -7,6 +7,7 @@ import {
   type User,
 } from '@xyne/shared';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { isRecordingSessionActive, type RecordingStatus } from '../../../stores/recordingStore';
 import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import type {
   IncomingCallContextVM,
@@ -76,6 +77,48 @@ export function isRingableCall(input: {
   if (call.startsAt && now < new Date(call.startsAt).getTime()) return false;
 
   return myParticipant?.response === InvitationResponse.INVITED;
+}
+
+/** Why a call that is ringing is doing so without a sound. */
+export type RingSilenceReason = 'in-call' | 'recording' | 'mic-busy';
+
+/**
+ * Whether a ringing call should stay quiet, and why.
+ *
+ * Silencing is not suppression: the card still appears and is still answerable.
+ * The problem this solves is volume, not attention — someone on a call has their
+ * output turned up to hear the other person, so a full-volume ringtone is both
+ * startling and, on speakers, audible to everyone else on the call.
+ *
+ * Sits beside `isRingableCall` because it is the same kind of thing: a product
+ * decision about ringing, kept out of the render path. Unlike that one it reads
+ * the user's own state rather than the call's, so nothing here can be derived
+ * from a `calls` row.
+ *
+ * The order is a precedence, not a set — a silenced ring is attributed to one
+ * cause in telemetry, and the nearest one wins.
+ */
+export function getRingSilenceReason(input: {
+  isInActiveCall: boolean;
+  recordingStatus: RecordingStatus;
+  /**
+   * Something outside Xyne holds the mic — Zoom, Teams, Meet, a huddle, a
+   * browser tab. Deliberately not "a meeting was identified": the ring stays
+   * quiet whether or not the app was recognised, and whether or not the user
+   * left meeting detection switched on, because the cost of getting it wrong is
+   * asymmetric — a call that arrives quietly can still be seen and answered, a
+   * ringtone in a live meeting cannot be taken back.
+   *
+   * Electron/macOS only, and it inherits that platform's bluntness: macOS
+   * reports the mic as busy per *device*, so a dictation tool or QuickTime
+   * holding it silences calls too.
+   */
+  micBusy: boolean;
+}): RingSilenceReason | null {
+  if (input.isInActiveCall) return 'in-call';
+  if (isRecordingSessionActive(input.recordingStatus)) return 'recording';
+  if (input.micBusy) return 'mic-busy';
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +335,8 @@ export function buildIncomingCallViewModel(input: {
   usersById: ReadonlyMap<string, User>;
   currentUserId: string | undefined;
   isInActiveCall: boolean;
+  /** Required rather than defaulted, so no call site can forget to decide. */
+  isSilenced: boolean;
   /** Overridable so fixtures can exercise the overflow chip cheaply. */
   maxVisibleAvatars?: number;
 }): IncomingCallViewModel {
@@ -303,6 +348,7 @@ export function buildIncomingCallViewModel(input: {
     usersById,
     currentUserId,
     isInActiveCall,
+    isSilenced,
     maxVisibleAvatars = MAX_VISIBLE_AVATARS,
   } = input;
 
@@ -360,6 +406,7 @@ export function buildIncomingCallViewModel(input: {
     // meeting's name both say what the call is about, which a roster cannot.
     subtitle: title || rosterLine || caller.email || null,
     isInActiveCall,
+    isSilenced,
     invitedBy: myParticipant?.invitedBy ?? null,
   };
 }

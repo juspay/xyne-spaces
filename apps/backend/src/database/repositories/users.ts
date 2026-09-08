@@ -467,4 +467,19 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
       select: { id: true, name: true, displayName: true },
     });
   }
+
+  /**
+   * Emails for a set of user ids, in one query. Used when a fan-out needs to
+   * address people outside Xyne — e.g. building the attendee list for a
+   * Google Calendar invite. Only ACTIVE members who have not left are
+   * returned, so a departed teammate is never re-invited.
+   */
+  async getEmailsByIds(userIds: string[]): Promise<Array<{ id: string; email: string }>> {
+    if (userIds.length === 0) return [];
+
+    return await this.db.user.findMany({
+      where: { id: { in: userIds }, status: UserStatus.ACTIVE, leftAt: null },
+      select: { id: true, email: true },
+    });
+  }
 }
