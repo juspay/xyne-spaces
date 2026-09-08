@@ -1,3 +1,21 @@
+## [1.291.0](https://github.com/juspay/xyne-spaces/compare/v1.290.0...v1.291.0) (2026-09-08)
+
+
+### Features
+
+* add Sub-tickets tab to Desk thread view ([#1541](https://github.com/juspay/xyne-spaces/issues/1541)) ([aa7a885](https://github.com/juspay/xyne-spaces/commit/aa7a88568385a797e22fe890b5f8de632e3df00e))
+* Emails tags to ticket ([#1499](https://github.com/juspay/xyne-spaces/issues/1499)) ([7377739](https://github.com/juspay/xyne-spaces/commit/73777395c82ab5db06952b8820522b78baadbf1d))
+* persist automations list and run history filters ([#1562](https://github.com/juspay/xyne-spaces/issues/1562)) ([3e7405a](https://github.com/juspay/xyne-spaces/commit/3e7405a9aef9f3e86de44f5725aa5abe4af28737))
+* persist Topics Explorer view per desk and chart the drill path ([#1528](https://github.com/juspay/xyne-spaces/issues/1528)) ([ed650b6](https://github.com/juspay/xyne-spaces/commit/ed650b65eaf57f55a2a3e1d88e323eb708dc1b45))
+* resolve radar items from completion reactions ([#1643](https://github.com/juspay/xyne-spaces/issues/1643)) ([7851db5](https://github.com/juspay/xyne-spaces/commit/7851db55cdd56dbf104b7accbd9824c1b8324a5d))
+* slack self-serve migration — Get latest messages (delta refresh… ([#1636](https://github.com/juspay/xyne-spaces/issues/1636)) ([66cac33](https://github.com/juspay/xyne-spaces/commit/66cac3326c472f44f6e999a3f8979e805d7e2146))
+
+
+### Bug Fixes
+
+* persist My Tickets column selection across remounts ([#1653](https://github.com/juspay/xyne-spaces/issues/1653)) ([3f84b7f](https://github.com/juspay/xyne-spaces/commit/3f84b7ff43e4e212983ae9a87d55768c79d772d1))
+* stop MESSAGE_RECEIVED firing twice on server-side message paths ([#1647](https://github.com/juspay/xyne-spaces/issues/1647)) ([14bdada](https://github.com/juspay/xyne-spaces/commit/14bdadab7d1bc6f4fdad5ece3657b1751f4bdd96))
+
 ## [1.290.0](https://github.com/juspay/xyne-spaces/compare/v1.289.3...v1.290.0) (2026-09-08)
 
 

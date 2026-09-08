@@ -17,9 +17,13 @@ export interface ApplyParams {
   channelId: string;
   /** Validator-approved operations only — the applier trusts its input. */
   operations: ParserOperation[];
-  /** The window's last message: items + audit + watermark commit atomically. */
-  watermark: { createdAt: Date; messageId: string };
-  actorType: 'llm' | 'manual';
+  /**
+   * The window's last message: items + audit + watermark commit atomically.
+   * Omitted by callers that settle ONE item without consuming a window — a
+   * reaction resolve must not swallow messages nobody has parsed yet.
+   */
+  watermark?: { createdAt: Date; messageId: string };
+  actorType: 'llm' | 'manual' | 'reaction';
   actorId?: string;
 }
 
@@ -133,6 +137,8 @@ class RadarApplier {
         if (auditRows.length > 0) {
           await tx.executionItemMutation.createMany({ data: auditRows });
         }
+
+        if (!watermark) return;
 
         await tx.executionThreadState.upsert({
           where: { conversationId },

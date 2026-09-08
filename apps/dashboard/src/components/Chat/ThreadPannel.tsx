@@ -29,6 +29,7 @@ import {
   FolderDefault,
   ClipboardCheck as ClipboardCheckIcon,
   ThreeDotsMenuVertical,
+  GitBranch,
 } from '@xyne/icons';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import {
@@ -64,6 +65,7 @@ import {
   ChannelScopeType,
   ChannelType,
   BaseTicketType,
+  isDeskChannelType,
   parseTicketMd,
 } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
@@ -105,7 +107,7 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'rca';
+type TabType = 'thread' | 'details' | 'files' | 'rca' | 'subtickets';
 type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
@@ -794,6 +796,10 @@ export const ThreadMessages = ({
     setUnderTicketActiveTab('replies');
   }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
+  const showSubTicketsTab = isDeskChannelType(channel?.type);
+  // The panel is reused across threads, so this tab can vanish while still selected.
+  const currentTab = !showSubTicketsTab && activeTab === 'subtickets' ? 'thread' : activeTab;
+
   const tabs = useMemo(() => {
     const allTabs = [
       { value: 'thread' as const, label: 'Messages', icon: <ChatDefault size={14} /> },
@@ -804,6 +810,9 @@ export const ThreadMessages = ({
         count: files.length,
         icon: <FolderDefault size={14} />,
       },
+      ...(showSubTicketsTab
+        ? [{ value: 'subtickets' as const, label: 'Sub-tickets', icon: <GitBranch size={14} /> }]
+        : []),
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
         : []),
@@ -811,7 +820,7 @@ export const ThreadMessages = ({
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, ticketId, derivedTicketId, isFixTicket]);
+  }, [files.length, ticketId, derivedTicketId, isFixTicket, showSubTicketsTab]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -1578,7 +1587,7 @@ export const ThreadMessages = ({
         {!simpleView && derivedTicketId ? (
           /* Ticket Thread: Header with Tabs */
           <Tabs.Root
-            value={activeTab}
+            value={currentTab}
             onValueChange={value => {
               setActiveTab(value as TabType);
               // Mirror it back, or re-opening the same tab from outside is a no-op.
@@ -1603,7 +1612,7 @@ export const ThreadMessages = ({
                         <button
                           className={cn(
                             'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg whitespace-nowrap transition-colors duration-100 cursor-pointer',
-                            activeTab === tab.value
+                            currentTab === tab.value
                               ? 'bg-muted text-foreground'
                               : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                           )}
@@ -1720,6 +1729,16 @@ export const ThreadMessages = ({
             >
               <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
             </Tabs.Content>
+
+            {/* Sub-tickets Tab Content */}
+            {showSubTicketsTab && (
+              <Tabs.Content
+                value='subtickets'
+                className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
+              >
+                <TicketDetails ticketId={derivedTicketId} subTicketsOnly />
+              </Tabs.Content>
+            )}
 
             {/* RCA Tab Content */}
             {isFixTicket && (

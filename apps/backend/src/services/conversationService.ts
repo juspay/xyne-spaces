@@ -87,6 +87,8 @@ export interface CreateConversationWithMessageParams {
   pinned?: boolean;
   /** Migration import: skip live-only side effects (MESSAGE_RECEIVED automations, meet-link extraction) so bulk-imported history never fires workflows. */
   suppressAutomations?: boolean;
+  /** Caller replays MessagesSideEffectHandler.onInsert itself, which already emits MESSAGE_RECEIVED for the initial message — don't emit it twice. */
+  emitsMessageReceivedViaSideEffects?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -340,6 +342,7 @@ export class ConversationService {
       isAddingParticipant = true,
       pinned,
       suppressAutomations = false,
+      emitsMessageReceivedViaSideEffects = false,
     } = params;
 
     // Check if channel exists
@@ -541,7 +544,7 @@ export class ConversationService {
     // new channel conversation. Which message kinds fire is a user-configured
     // trigger condition; loops are prevented by the run chain. Fire-and-forget.
     // Migration import suppresses this so bulk-imported history never fires workflows.
-    if (!suppressAutomations) {
+    if (!suppressAutomations && !emitsMessageReceivedViaSideEffects) {
       void emitMessageReceived({
         messageId: message.messageId,
         conversationId: conversation.conversationId,
