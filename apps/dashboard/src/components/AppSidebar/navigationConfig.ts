@@ -163,8 +163,6 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/sdlc',
   '/support',
   '/chat/activity',
-  '/guide',
-  '/releaseManager',
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
