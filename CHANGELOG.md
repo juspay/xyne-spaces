@@ -1,3 +1,10 @@
+## [1.296.2](https://github.com/juspay/xyne-spaces/compare/v1.296.1...v1.296.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* added index to fix the kanban query ([#1696](https://github.com/juspay/xyne-spaces/issues/1696)) ([0047789](https://github.com/juspay/xyne-spaces/commit/004778959234d6f792cf7c615979ea9e913394db))
+
 ## [1.296.1](https://github.com/juspay/xyne-spaces/compare/v1.296.0...v1.296.1) (2026-09-09)
 
 
