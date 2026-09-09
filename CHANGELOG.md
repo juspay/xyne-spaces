@@ -1,3 +1,10 @@
+## [1.297.1](https://github.com/juspay/xyne-spaces/compare/v1.297.0...v1.297.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* Modifying ci.yaml with flag to enable our own runners ([#1607](https://github.com/juspay/xyne-spaces/issues/1607)) ([4db2207](https://github.com/juspay/xyne-spaces/commit/4db22074e22a473c75e31a18137f08cc50eb54fc))
+
 ## [1.297.0](https://github.com/juspay/xyne-spaces/compare/v1.296.2...v1.297.0) (2026-09-09)
 
 
