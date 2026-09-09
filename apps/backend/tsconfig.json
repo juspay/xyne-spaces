@@ -32,6 +32,7 @@
       "#zero-internal/sql": ["../node_modules/@rocicorp/zero/out/z2s/src/sql"],
       "#zero-internal/connect": ["../node_modules/@rocicorp/zero/out/zero-protocol/src/connect"],
       "#zero-internal/query-hash": ["../node_modules/@rocicorp/zero/out/zero-protocol/src/query-hash"],
+      "#zql/*": ["../node_modules/@rocicorp/zero/out/zql/src/*"],
       "@xyne/shared": ["../../../packages/shared/dist"],
       "@xyne/storage": ["../../../packages/storage/dist"],
       "@framework": ["../../../packages/framework/dist"],
