@@ -9,10 +9,26 @@ import { Flag } from '@xyne/icons';
 import { cn } from '../../utils/classNames';
 import type { MarkedItemType } from './markedItems';
 import type { ParticipantEvent, ParticipantEventType } from './participantEvents';
+import type { RecordedSpanKind } from './recordingSpans';
 
 export const MARKER_DOT_COLOR: Record<Exclude<MarkedItemType, 'moment'>, string> = {
   decision: 'bg-yellow-500',
   action: 'bg-orange-500',
+};
+
+/**
+ * Two tokens rather than two opacities: at band height a shade apart is easy to
+ * miss. Voice stays a soft grey, screen reads solid — dark on light, light on dark.
+ */
+export const RECORDED_SPAN_COLOR: Record<RecordedSpanKind, string> = {
+  audio: 'bg-muted-foreground/40',
+  video: 'bg-foreground/70',
+};
+
+/** Names a band in its tooltip and in the legend, when the session went unnamed. */
+export const RECORDED_SPAN_NOUN: Record<RecordedSpanKind, string> = {
+  audio: 'Voice recording',
+  video: 'Screen recording',
 };
 
 /** Names the marker in its tooltip, so the kinds read apart without the legend. */
@@ -21,6 +37,9 @@ export const MARKER_NOUN: Record<MarkedItemType, string> = {
   action: 'Action',
   moment: 'Marked moment',
 };
+
+/** Stable identity, so a caller passing none doesn't hand this a new set each render. */
+const NO_RECORDED_KINDS: ReadonlySet<RecordedSpanKind> = new Set();
 
 const MARKER_INTERACTIVE =
   "cursor-pointer transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2 after:content-[''] motion-reduce:transform-none";
@@ -156,14 +175,14 @@ export const JoinLeaveRow = ({
 export const MarkerLegend = ({
   types,
   hasParticipantEvents = false,
-  hasRecordedSpans = false,
+  recordedKinds = NO_RECORDED_KINDS,
   className,
 }: {
   types: ReadonlySet<MarkedItemType>;
   /** Joins and leaves are not MarkedItems, so they announce themselves separately. */
   hasParticipantEvents?: boolean;
-  /** Nor are the shaded recording bands. */
-  hasRecordedSpans?: boolean;
+  /** Nor are the shaded recording bands, which name their own kind. */
+  recordedKinds?: ReadonlySet<RecordedSpanKind>;
   className?: string;
 }): ReactElement => (
   <div className={cn('flex items-center gap-5 pl-1 text-xs text-muted-foreground', className)}>
@@ -194,10 +213,22 @@ export const MarkerLegend = ({
         Joins &amp; leaves
       </span>
     )}
-    {hasRecordedSpans && (
+    {recordedKinds.has('audio') && (
       <span className='flex items-center gap-1.5'>
-        <span className='h-1.5 w-4 rounded-full bg-muted-foreground/50' aria-hidden='true' />
-        Recorded
+        <span
+          className={cn('h-1.5 w-4 rounded-full', RECORDED_SPAN_COLOR.audio)}
+          aria-hidden='true'
+        />
+        {RECORDED_SPAN_NOUN.audio}
+      </span>
+    )}
+    {recordedKinds.has('video') && (
+      <span className='flex items-center gap-1.5'>
+        <span
+          className={cn('h-1.5 w-4 rounded-full', RECORDED_SPAN_COLOR.video)}
+          aria-hidden='true'
+        />
+        {RECORDED_SPAN_NOUN.video}
       </span>
     )}
   </div>

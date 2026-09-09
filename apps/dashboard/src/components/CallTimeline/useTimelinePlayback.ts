@@ -6,7 +6,7 @@
  * hear stays aligned with when it happened.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { RecordedSpan } from './recordingSpans';
 
 export type TimelinePlaybackState = 'idle' | 'loading' | 'playing' | 'paused';
@@ -28,6 +28,11 @@ export interface TimelinePlayback {
   /** Move the playhead. Landing between recordings is allowed — it plays out silent. */
   seek: (seconds: number) => void;
   canPlay: boolean;
+  /**
+   * Where the video spans are mounted. Attach it to a visible surface or they play
+   * unseen; whatever sits behind it shows through wherever no video is on screen.
+   */
+  videoContainerRef: RefObject<HTMLDivElement | null>;
 }
 
 export type RecordingLoader = (recordingId: string, signal: AbortSignal) => Promise<Blob>;
@@ -40,24 +45,54 @@ function spanIndexAt(spans: readonly RecordedSpan[], seconds: number): number {
   return spans.findIndex(span => seconds >= span.startSeconds && seconds < span.endSeconds);
 }
 
+/**
+ * Audio plays fine detached; video has to be in the document to be seen, so it is
+ * mounted into the caller's surface and kept hidden until the playhead reaches it.
+ *
+ * A screen recording asked for without its picture becomes an audio element: the
+ * sound of the call is in that file too, and skipping it would leave the timeline
+ * silent over a stretch where people were talking.
+ */
+function createMediaElement(
+  span: RecordedSpan,
+  url: string,
+  container: HTMLElement | null,
+  showVideo: boolean,
+): HTMLMediaElement {
+  if (span.kind === 'audio' || !showVideo) return new Audio(url);
+
+  const video = document.createElement('video');
+  video.src = url;
+  video.preload = 'auto';
+  video.playsInline = true;
+  video.hidden = true;
+  container?.appendChild(video);
+  return video;
+}
+
 /** Resolves once the element can be seeked, and on error too — a dud must not hang play. */
-function whenSeekable(audio: HTMLAudioElement): Promise<void> {
-  if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
+function whenSeekable(media: HTMLMediaElement): Promise<void> {
+  if (media.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
   return new Promise(resolve => {
     const done = (): void => {
-      audio.removeEventListener('loadedmetadata', done);
-      audio.removeEventListener('error', done);
+      media.removeEventListener('loadedmetadata', done);
+      media.removeEventListener('error', done);
       resolve();
     };
-    audio.addEventListener('loadedmetadata', done);
-    audio.addEventListener('error', done);
+    media.addEventListener('loadedmetadata', done);
+    media.addEventListener('error', done);
   });
 }
 
+/**
+ * @param showVideo Whether the screen recordings render their picture. Either way
+ *   their audio is played, so the call is heard end to end in both modes.
+ */
 export function useTimelinePlayback(
   spans: readonly RecordedSpan[],
   spanSeconds: number,
   loadRecording: RecordingLoader | undefined,
+  showVideo: boolean,
 ): TimelinePlayback {
   const [state, setState] = useState<TimelinePlaybackState>('idle');
   const [positionSeconds, setPositionSeconds] = useState(0);
@@ -65,7 +100,8 @@ export function useTimelinePlayback(
 
   const [measuredAt, setMeasuredAt] = useState(0);
   const durationsRef = useRef(new Map<string, number>());
-  const audiosRef = useRef(new Map<string, HTMLAudioElement>());
+  const mediaRef = useRef(new Map<string, HTMLMediaElement>());
+  const videoContainerRef = useRef<HTMLDivElement | null>(null);
   const urlsRef = useRef<string[]>([]);
   const positionRef = useRef(0);
   const activeRef = useRef(-1);
@@ -92,7 +128,10 @@ export function useTimelinePlayback(
   }, []);
 
   const pauseAll = useCallback((): void => {
-    for (const audio of audiosRef.current.values()) audio.pause();
+    for (const media of mediaRef.current.values()) {
+      media.pause();
+      if (media instanceof HTMLVideoElement) media.hidden = true;
+    }
     activeRef.current = -1;
   }, []);
 
@@ -101,19 +140,22 @@ export function useTimelinePlayback(
     stopTimer();
     abortRef.current?.abort();
     abortRef.current = null;
-    for (const audio of audiosRef.current.values()) {
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
+    for (const media of mediaRef.current.values()) {
+      media.pause();
+      media.removeAttribute('src');
+      media.load();
+      // Detaches the video elements from the surface; a no-op for the audio ones.
+      media.remove();
     }
-    audiosRef.current.clear();
+    mediaRef.current.clear();
     durationsRef.current.clear();
     for (const url of urlsRef.current) URL.revokeObjectURL(url);
     urlsRef.current = [];
     activeRef.current = -1;
   }, [stopTimer]);
 
-  // Nothing survives a change of call or of the spans themselves.
+  // Nothing survives a change of call, of the spans, or of the mode — the elements
+  // themselves differ between the two.
   const releaseRef = useRef(release);
   releaseRef.current = release;
   useEffect(() => {
@@ -124,7 +166,7 @@ export function useTimelinePlayback(
       setIsInGap(false);
       setState('idle');
     };
-  }, [spans]);
+  }, [showVideo, spans]);
 
   const step = useCallback((): void => {
     const now = performance.now();
@@ -136,25 +178,30 @@ export function useTimelinePlayback(
     // Entered or left a recording: hand over to the right element.
     if (index !== activeRef.current) {
       const leaving = effectiveSpans[activeRef.current];
-      if (leaving) audiosRef.current.get(leaving.recordingId)?.pause();
+      const leavingMedia = leaving ? mediaRef.current.get(leaving.recordingId) : undefined;
+      if (leavingMedia) {
+        leavingMedia.pause();
+        if (leavingMedia instanceof HTMLVideoElement) leavingMedia.hidden = true;
+      }
       activeRef.current = index;
 
       const entering = effectiveSpans[index];
-      const audio = entering ? audiosRef.current.get(entering.recordingId) : undefined;
-      if (entering && audio) {
-        audio.currentTime = Math.max(0, positionRef.current - entering.startSeconds);
-        void audio.play().catch(() => undefined);
+      const media = entering ? mediaRef.current.get(entering.recordingId) : undefined;
+      if (entering && media) {
+        if (media instanceof HTMLVideoElement) media.hidden = false;
+        media.currentTime = Math.max(0, positionRef.current - entering.startSeconds);
+        void media.play().catch(() => undefined);
       }
     }
 
     const current = effectiveSpans[index];
-    const audio = current ? audiosRef.current.get(current.recordingId) : undefined;
-    const isSounding = Boolean(audio && !audio.paused && !audio.ended);
+    const media = current ? mediaRef.current.get(current.recordingId) : undefined;
+    const isSounding = Boolean(media && !media.paused && !media.ended);
 
     // The file is the clock while it plays. Between files — and after one that ran
     // short of its span — real time is, so the silence lasts as long as it did.
     const next = isSounding
-      ? current!.startSeconds + audio!.currentTime
+      ? current!.startSeconds + media!.currentTime
       : positionRef.current + elapsed;
 
     if (next >= spanSeconds) {
@@ -193,17 +240,17 @@ export function useTimelinePlayback(
     try {
       await Promise.all(
         spans.map(async span => {
-          if (audiosRef.current.has(span.recordingId)) return;
+          if (mediaRef.current.has(span.recordingId)) return;
           const blob = await loadRecording(span.recordingId, controller.signal);
           if (controller.signal.aborted) return;
           const url = URL.createObjectURL(blob);
           urlsRef.current.push(url);
-          const audio = new Audio(url);
-          await whenSeekable(audio);
-          if (Number.isFinite(audio.duration) && audio.duration > 0) {
-            durationsRef.current.set(span.recordingId, audio.duration);
+          const media = createMediaElement(span, url, videoContainerRef.current, showVideo);
+          await whenSeekable(media);
+          if (Number.isFinite(media.duration) && media.duration > 0) {
+            durationsRef.current.set(span.recordingId, media.duration);
           }
-          audiosRef.current.set(span.recordingId, audio);
+          mediaRef.current.set(span.recordingId, media);
         }),
       );
       if (controller.signal.aborted) return false;
@@ -213,7 +260,7 @@ export function useTimelinePlayback(
     } catch {
       return false;
     }
-  }, [loadRecording, spans]);
+  }, [loadRecording, showVideo, spans]);
 
   const seek = useCallback(
     (seconds: number): void => {
@@ -281,5 +328,14 @@ export function useTimelinePlayback(
     })();
   }, [canPlay, pauseAll, preload, spanSeconds, startTimer, state, stopTimer]);
 
-  return { spans: effectiveSpans, state, positionSeconds, isInGap, toggle, seek, canPlay };
+  return {
+    spans: effectiveSpans,
+    state,
+    positionSeconds,
+    isInGap,
+    toggle,
+    seek,
+    canPlay,
+    videoContainerRef,
+  };
 }

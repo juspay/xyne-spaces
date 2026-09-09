@@ -4,13 +4,15 @@
  * marker opens the transcript there.
  *
  * Plays too, when given a loader: the recordings run in order against the call's own
- * clock, so an unrecorded stretch is crossed in silence rather than skipped. Unlike
+ * clock, so an unrecorded stretch is crossed in silence rather than skipped. Two
+ * modes, picked from the play button's menu — voice alone, or everything with the
+ * screen recordings shown on a surface above the track. Unlike
  * the Scribe bar (LiveRecordingControlBar) it cannot be scrubbed. They share only the
  * marker glyphs, via ./TimelineMarkers.
  */
 
-import { useMemo, type ReactElement } from 'react';
-import { Loader2, Pause, Play } from 'lucide-react';
+import { useMemo, useState, type ReactElement } from 'react';
+import { ChevronDown, Loader2, Pause, Play } from 'lucide-react';
 import { formatElapsedTime } from '../../utils/recordingUtils';
 import { cn } from '../../utils/classNames';
 import { parseMarkedItems, type MarkedItem } from './markedItems';
@@ -21,11 +23,19 @@ import {
   MarkerDot,
   MarkerLegend,
   MomentFlag,
+  RECORDED_SPAN_COLOR,
+  RECORDED_SPAN_NOUN,
 } from './TimelineMarkers';
 import { clusterParticipantEvents, type ParticipantEvent } from './participantEvents';
 import type { RecordedSpan } from './recordingSpans';
 import { useTimelinePlayback, type RecordingLoader } from './useTimelinePlayback';
 import Tooltip from '../ui/Tooltip/Tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
 
 /** Stable identity, so a caller passing none doesn't hand this a new array each render. */
 const NO_PARTICIPANT_EVENTS: readonly ParticipantEvent[] = [];
@@ -33,6 +43,18 @@ const NO_RECORDED_SPANS: readonly RecordedSpan[] = [];
 
 /** Narrow enough to still read as a band rather than a mark. */
 const MIN_SPAN_WIDTH = '3px';
+
+/**
+ * Both modes play every recording, so the call is heard end to end either way — a
+ * screen recording carries the same conversation as a voice one. They differ only in
+ * whether its picture is shown, and so in whether the card grows a video surface.
+ */
+type PlaybackMode = 'audio' | 'video';
+
+const PLAY_LABEL: Record<PlaybackMode, string> = {
+  audio: 'Play audio only',
+  video: 'Play with video',
+};
 
 export interface CallTimelineBarProps {
   /** Raw `Call.markedItems` — untyped JSON, validated by parseMarkedItems. */
@@ -80,40 +102,100 @@ export function CallTimelineBar({
     lastRecordedSeconds,
   );
 
+  const [pickedMode, setPickedMode] = useState<PlaybackMode>('audio');
+  const hasVideo = useMemo(
+    () => recordedSpans.some(span => span.kind === 'video'),
+    [recordedSpans],
+  );
+  // With no screen recording there is nothing to show, so no choice to offer.
+  const mode: PlaybackMode = hasVideo ? pickedMode : 'audio';
+
   // Hooks run before the gate below, so playback is armed with whatever span the
   // markers settled on.
-  const playback = useTimelinePlayback(recordedSpans, spanSeconds, onLoadRecording);
+  const playback = useTimelinePlayback(
+    recordedSpans,
+    spanSeconds,
+    onLoadRecording,
+    mode === 'video',
+  );
 
   // Calls predating the extraction pipeline have nothing to show; skip the bar
   // rather than draw an empty track.
   if (!hasContent || spanSeconds <= 0) return null;
 
   const markedTypes = new Set(items.map(item => item.type));
+  const recordedKinds = new Set(recordedSpans.map(span => span.kind));
+  // Playback holds every span, trimmed to what each file actually runs once loaded.
+  const bands = playback.spans;
   const playheadPercent = Math.min((playback.positionSeconds / spanSeconds) * 100, 100);
   const clusters = clusterParticipantEvents(participantEvents, spanSeconds);
 
   return (
     <div className={cn('rounded-2xl border border-border bg-card px-5 py-4', className)}>
+      {mode === 'video' && (
+        <div className='relative mx-auto mb-4 aspect-video w-full max-w-2xl overflow-hidden rounded-xl bg-black'>
+          {/* Sits behind the picture, so a stretch nobody screen-recorded reads as
+              blank rather than as the last frame left standing. */}
+          <span className='absolute inset-0 grid place-items-center px-4 text-center text-xs text-white/50'>
+            {playback.state === 'idle'
+              ? 'Press play to watch the screen recordings'
+              : 'No screen recording at this point'}
+          </span>
+          {/* Kept free of React children: the player mounts its video elements here. */}
+          <div
+            ref={playback.videoContainerRef}
+            className='absolute inset-0 [&>video]:absolute [&>video]:inset-0 [&>video]:size-full [&>video]:object-contain'
+          />
+        </div>
+      )}
+
       <div className='flex min-h-11 items-center gap-4'>
         {playback.canPlay && (
-          <button
-            type='button'
-            onClick={playback.toggle}
-            disabled={playback.state === 'loading'}
-            data-track-category='CallTimeline'
-            data-track-name={playback.state === 'playing' ? 'pause_timeline' : 'play_timeline'}
-            title={playback.state === 'playing' ? 'Pause' : 'Play recordings'}
-            aria-label={playback.state === 'playing' ? 'Pause' : 'Play recordings'}
-            className='shrink-0 text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
-          >
-            {playback.state === 'loading' ? (
-              <Loader2 className='size-4 animate-spin' />
-            ) : playback.state === 'playing' ? (
-              <Pause className='size-4' />
-            ) : (
-              <Play className='size-4 translate-x-[0.5px]' />
+          <div className='flex shrink-0 items-center gap-0.5'>
+            <button
+              type='button'
+              onClick={playback.toggle}
+              disabled={playback.state === 'loading'}
+              data-track-category='CallTimeline'
+              data-track-name={playback.state === 'playing' ? 'pause_timeline' : 'play_timeline'}
+              title={playback.state === 'playing' ? 'Pause' : PLAY_LABEL[mode]}
+              aria-label={playback.state === 'playing' ? 'Pause' : PLAY_LABEL[mode]}
+              className='text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
+            >
+              {playback.state === 'loading' ? (
+                <Loader2 className='size-4 animate-spin' />
+              ) : playback.state === 'playing' ? (
+                <Pause className='size-4' />
+              ) : (
+                <Play className='size-4 translate-x-[0.5px]' />
+              )}
+            </button>
+
+            {hasVideo && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    title='Choose what to play'
+                    aria-label='Choose what to play'
+                    data-track-category='CallTimeline'
+                    data-track-name='timeline_playback_mode'
+                    className='rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  >
+                    <ChevronDown className='size-3.5' />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='start'>
+                  <DropdownMenuItem onSelect={(): void => setPickedMode('audio')}>
+                    {PLAY_LABEL.audio}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={(): void => setPickedMode('video')}>
+                    {PLAY_LABEL.video}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
-          </button>
+          </div>
         )}
 
         <span className='w-12 shrink-0 text-right font-mono text-xs text-muted-foreground'>
@@ -138,17 +220,18 @@ export function CallTimelineBar({
             />
           )}
 
-          {playback.spans.map((span, index) => {
+          {bands.map(span => {
             const left = (span.startSeconds / spanSeconds) * 100;
             const width = ((span.endSeconds - span.startSeconds) / spanSeconds) * 100;
-            const label = `${span.name?.trim() || 'Recording'} · ${formatElapsedTime(
+            const name = span.name?.trim() || RECORDED_SPAN_NOUN[span.kind];
+            const label = `${name} · ${formatElapsedTime(
               span.startSeconds * 1000,
             )}–${formatElapsedTime(span.endSeconds * 1000)}`;
 
             return (
               <span
-                key={index}
-                className='absolute inset-y-0 rounded-full bg-muted-foreground/50'
+                key={span.recordingId}
+                className={cn('absolute inset-y-0 rounded-full', RECORDED_SPAN_COLOR[span.kind])}
                 style={{ left: `${left}%`, width: `${width}%`, minWidth: MIN_SPAN_WIDTH }}
                 title={label}
               />
@@ -257,7 +340,7 @@ export function CallTimelineBar({
       <MarkerLegend
         types={markedTypes}
         hasParticipantEvents={clusters.length > 0}
-        hasRecordedSpans={recordedSpans.length > 0}
+        recordedKinds={recordedKinds}
         className={clusters.length > 0 ? 'mt-7' : 'mt-3'}
       />
     </div>
