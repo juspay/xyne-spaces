@@ -205,6 +205,7 @@ import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
+  fetchConnectedEmail,
 } from '../../hooks/useChannelConnectedEmail';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
@@ -1592,6 +1593,26 @@ const SupportScreen = (): ReactElement => {
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
+  const [socialSourceTypes, setSocialSourceTypes] = useState<Record<string, string | null>>({});
+  const socialChannelIds = useMemo(
+    () => sortedEmailChannels.filter(c => c.type === ChannelType.SOCIAL_MEDIA).map(c => c.id),
+    [sortedEmailChannels],
+  );
+  useEffect(() => {
+    if (socialChannelIds.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      socialChannelIds.map(id =>
+        fetchConnectedEmail(id).then(info => [id, info.sourceType] as const),
+      ),
+    ).then(entries => {
+      if (cancelled) return;
+      setSocialSourceTypes(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [socialChannelIds]);
   const userChannelStatuses = useUserChannelStatuses();
   // Both star and joined state live on channel_user_status (per-user). A row
   // in that list for a given channelId means the user has joined the channel;
@@ -2429,10 +2450,15 @@ const SupportScreen = (): ReactElement => {
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
           : c.type === ChannelType.SOCIAL_MEDIA
-            ? {
-                label: 'Instagram',
-                className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
-              }
+            ? socialSourceTypes[c.id] === 'instagram'
+              ? {
+                  label: 'Instagram',
+                  className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
+                }
+              : {
+                  label: 'Social',
+                  className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                }
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
@@ -5681,15 +5707,6 @@ export const SupportTicketDetail = ({
                         }
                       }}
                     />
-                    {channel?.type === ChannelType.SOCIAL_MEDIA && (
-                      <InstagramCustomerHistory
-                        channelId={channelId}
-                        conversationId={conversationId}
-                        onTicketClick={xyneId => {
-                          void navigate(`${supportBase}/${channelId}/${xyneId}`);
-                        }}
-                      />
-                    )}
                   </>
                 ) : (
                   <div className='h-full flex items-center justify-center'>
