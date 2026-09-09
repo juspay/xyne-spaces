@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Plus, Globe } from 'lucide-react';
+import { AlertTriangle, Globe } from 'lucide-react';
 import {
   CheckTickCircle as CircleCheck,
   LinkChainHorizontal as LinkIcon,
@@ -13,9 +13,13 @@ import {
 } from '../../../hooks/useTicketFieldSearch';
 import { queries } from '../../../zero/queries';
 import { cn } from '../../../utils/classNames';
-import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
+import { SubTicketModal } from '../SubTicketModal/SubTicketModal';
 import { TicketLinkChip } from './TicketLinkChip';
-import { TicketLinkPicker, type TicketLinkHighlight } from './TicketLinkPicker';
+import {
+  TicketLinkPicker,
+  type ExistingSubTicketOption,
+  type TicketLinkHighlight,
+} from './TicketLinkPicker';
 import {
   extractTicketRefFromUrl,
   formatShortDate,
@@ -23,6 +27,14 @@ import {
   looksLikeXyneId,
   type PastedTicketRef,
 } from './ticketLinkUtils';
+
+type TicketLinkHighlightValue = Exclude<TicketLinkHighlight, null>;
+
+const isSameHighlight = (a: TicketLinkHighlightValue, b: TicketLinkHighlightValue): boolean => {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'create' || b.kind === 'create') return true;
+  return a.index === b.index;
+};
 
 interface ExistingSubEntry {
   mappingId: string;
@@ -62,8 +74,8 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [highlight, setHighlight] = useState<TicketLinkHighlight>(null);
   const [resolveTarget, setResolveTarget] = useState<PastedTicketRef | null>(null);
@@ -74,6 +86,9 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
     initialDescription?: string;
   }>({});
   const hasPrefilledRef = useRef(false);
+  // Set when the input is about to mount (opened from the chip or after clear);
+  // focuses it once the dropdown renders.
+  const shouldFocusInputRef = useRef(false);
 
   // ── Parent ticket + board context ──────────────────────────────────────────
   const [parentTicket] = useCachedQuery(queries.ticketRowById({ ticketId: parentTicketId }), {
@@ -117,6 +132,19 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
     });
     return rows.sort((a, b) => b.addedAt - a.addedAt);
   }, [subTicketMappings]);
+
+  // Selectable form of the existing sub-tickets, shown inside the dropdown so
+  // they stay pickable (single-select) whenever it is open — including right
+  // after clearing the current selection.
+  const existingSubTicketOptions = useMemo<ExistingSubTicketOption[]>(
+    () =>
+      existingSubEntries.map(entry => ({
+        value: entry.ticket.xyneId || entry.ticket.id,
+        title: entry.ticket.title || entry.ticket.xyneId || entry.ticket.id,
+        addedAt: entry.addedAt,
+      })),
+    [existingSubEntries],
+  );
 
   // ── Value modes ────────────────────────────────────────────────────────────
   // The stored value is the ticket's xyneId ("TOKEN-4127") — what users search
@@ -193,19 +221,36 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
 
   const [pendingResolveUrl, setPendingResolveUrl] = useState('');
 
-  // Close the dropdown/sub-picker when the user clicks outside the field.
+  // Close the dropdown when the user clicks outside the field.
   useEffect(() => {
-    if (!isDropdownOpen && !isPickerOpen) return;
+    if (!isDropdownOpen) return;
     const handleDocumentMouseDown = (event: MouseEvent): void => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
         setIsDropdownOpen(false);
-        setIsPickerOpen(false);
         setHighlight(null);
       }
     };
     document.addEventListener('mousedown', handleDocumentMouseDown);
     return (): void => document.removeEventListener('mousedown', handleDocumentMouseDown);
-  }, [isDropdownOpen, isPickerOpen]);
+  }, [isDropdownOpen]);
+
+  // Focus the freshly mounted input when the dropdown was opened from the chip
+  // or via the clear (×) button — at click time the input is not yet rendered.
+  useEffect(() => {
+    if (!shouldFocusInputRef.current || !isDropdownOpen) return;
+    shouldFocusInputRef.current = false;
+    inputRef.current?.focus();
+  }, [isDropdownOpen]);
+
+  // The dropdown is in-flow; when the field sits low in the modal, bring the
+  // freshly opened dropdown into the visible area.
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+    const frame = requestAnimationFrame(() => {
+      dropdownRef.current?.scrollIntoView({ block: 'nearest' });
+    });
+    return (): void => cancelAnimationFrame(frame);
+  }, [isDropdownOpen]);
 
   useEffect(() => {
     if (!resolveTarget) return;
@@ -266,9 +311,9 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
   };
 
   const openSearch = useCallback((): void => {
-    setIsPickerOpen(false);
-    setIsDropdownOpen(true);
     inputRef.current?.focus();
+    if (!inputRef.current) shouldFocusInputRef.current = true;
+    setIsDropdownOpen(true);
   }, []);
 
   const handleSelectSearchOption = (ticket: TicketFieldSearchResult): void => {
@@ -279,12 +324,24 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
     handleSearchChange('');
   };
 
+  const handleSelectExistingSubTicket = (option: ExistingSubTicketOption): void => {
+    onChange(option.value);
+    setIsDropdownOpen(false);
+    setHighlight(null);
+    setInputValue('');
+    handleSearchChange('');
+  };
+
   const handleClear = (): void => {
+    // An explicit removal stops the auto-prefill from re-selecting a sub-ticket.
+    hasPrefilledRef.current = true;
     onChange(null);
     setInputValue('');
     handleSearchChange('');
     setResolveErrorUrl(null);
-    setIsDropdownOpen(false);
+    // Show the search input again with the existing sub-tickets ready to pick.
+    shouldFocusInputRef.current = true;
+    setIsDropdownOpen(true);
   };
 
   const openCreateTicket = useCallback(
@@ -292,12 +349,20 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
       if (!parentTicket?.channelId) return;
       setCreateSeed(seed);
       setIsDropdownOpen(false);
-      setIsPickerOpen(false);
       setResolveErrorUrl(null);
       setIsCreateModalOpen(true);
     },
     [parentTicket?.channelId],
   );
+
+  // Keyboard order: create row → existing sub-tickets → search results.
+  const buildHighlightSequence = useCallback((): TicketLinkHighlightValue[] => {
+    const sequence: TicketLinkHighlightValue[] = [];
+    if (parentChannelId) sequence.push({ kind: 'create' });
+    existingSubTicketOptions.forEach((_, index) => sequence.push({ kind: 'sub', index }));
+    searchResults.forEach((_, index) => sequence.push({ kind: 'result', index }));
+    return sequence;
+  }, [parentChannelId, existingSubTicketOptions, searchResults]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     if (!isDropdownOpen && (event.key === 'ArrowDown' || event.key === 'Enter')) {
@@ -309,39 +374,48 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
     }
 
     switch (event.key) {
-      case 'ArrowDown':
+      case 'ArrowDown': {
         event.preventDefault();
-        setHighlight(previous =>
-          previous === null
-            ? parentChannelId
-              ? 'create'
-              : 0
-            : previous === 'create'
-              ? 0
-              : Math.min(previous + 1, searchResults.length - 1),
-        );
+        const sequence = buildHighlightSequence();
+        if (sequence.length === 0) break;
+        const currentIndex =
+          highlight === null ? -1 : sequence.findIndex(item => isSameHighlight(item, highlight));
+        const nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, sequence.length - 1);
+        setHighlight(sequence[nextIndex] ?? null);
         break;
-      case 'ArrowUp':
+      }
+      case 'ArrowUp': {
         event.preventDefault();
-        setHighlight(previous =>
-          previous === null
-            ? searchResults.length - 1
-            : previous === 0
-              ? parentChannelId
-                ? 'create'
-                : searchResults.length - 1
-              : previous === 'create'
-                ? searchResults.length - 1
-                : previous - 1,
-        );
+        const sequence = buildHighlightSequence();
+        if (sequence.length === 0) break;
+        const currentIndex =
+          highlight === null ? -1 : sequence.findIndex(item => isSameHighlight(item, highlight));
+        const nextIndex = currentIndex <= 0 ? sequence.length - 1 : currentIndex - 1;
+        setHighlight(sequence[nextIndex] ?? null);
         break;
+      }
       case 'Enter': {
         event.preventDefault();
-        if (highlight === 'create') {
+        const active: TicketLinkHighlight =
+          highlight ??
+          (existingSubTicketOptions.length > 0
+            ? { kind: 'sub', index: 0 }
+            : searchResults.length > 0
+              ? { kind: 'result', index: 0 }
+              : parentChannelId
+                ? { kind: 'create' }
+                : null);
+        if (!active) return;
+        if (active.kind === 'create') {
           openCreateTicket(inputValue.trim() ? { initialTitle: inputValue.trim() } : {});
           return;
         }
-        const target = highlight === null ? searchResults[0] : searchResults[highlight];
+        if (active.kind === 'sub') {
+          const option = existingSubTicketOptions[active.index];
+          if (option) handleSelectExistingSubTicket(option);
+          return;
+        }
+        const target = searchResults[active.index];
         if (target) {
           handleSelectSearchOption(target);
         } else if (parentChannelId) {
@@ -381,8 +455,8 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
         ) : null}
       </div>
 
-      {/* ── Linked ticket (Design 1b/2a) ── */}
-      {linkedValue ? (
+      {/* ── Linked ticket (Design 1b/2a) — hidden while the dropdown is open ── */}
+      {linkedValue && !isDropdownOpen ? (
         <>
           <TicketLinkChip
             xyneId={linkedTicket?.xyneId || linkedValue}
@@ -391,18 +465,7 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
             statusV2={linkedTicket?.statusV2}
             removable={!disabled}
             onClear={disabled ? undefined : handleClear}
-            onClick={
-              disabled
-                ? undefined
-                : (): void => {
-                    if (existingSubEntries.length > 1) {
-                      setIsPickerOpen(previous => !previous);
-                      setIsDropdownOpen(false);
-                    } else {
-                      openSearch();
-                    }
-                  }
-            }
+            onClick={disabled ? undefined : openSearch}
           />
           {manualLinksAllowed ? (
             <p className='mt-1 flex items-center gap-1 text-xs text-muted-foreground'>
@@ -474,8 +537,10 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
         </div>
       ) : null}
 
-      {/* ── Search input (Design 1a/1d/1e) + paste-error state (1h) ── */}
-      {!linkedValue && !externalUrl && !isResolving ? (
+      {/* ── Search input (Design 1a/1d/1e) + paste-error state (1h) ──
+          Also rendered while a value is linked and the dropdown is open, so
+          clicking the chip (or ×) swaps the chip for the searchable picker. */}
+      {!externalUrl && !isResolving && (!linkedValue || isDropdownOpen) ? (
         <>
           <div
             className={cn(
@@ -565,105 +630,42 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
           ) : null}
 
           {isDropdownOpen ? (
-            <TicketLinkPicker
-              query={searchQuery}
-              results={searchResults}
-              isLoading={isSearchLoading}
-              hasMore={hasMore}
-              totalCount={totalCount}
-              boardsSearched={boardsSearched}
-              highlight={highlight}
-              onHighlight={setHighlight}
-              onSelect={handleSelectSearchOption}
-              onScrollEnd={handleScrollEnd}
-              onCreateTicket={() =>
-                openCreateTicket(inputValue.trim() ? { initialTitle: inputValue.trim() } : {})
-              }
-              canCreateTicket={Boolean(parentChannelId)}
-            />
+            <div ref={dropdownRef}>
+              <TicketLinkPicker
+                query={searchQuery}
+                results={searchResults}
+                existingSubTickets={existingSubTicketOptions}
+                selectedValue={linkedValue}
+                isLoading={isSearchLoading}
+                hasMore={hasMore}
+                totalCount={totalCount}
+                boardsSearched={boardsSearched}
+                highlight={highlight}
+                onHighlight={setHighlight}
+                onSelect={handleSelectSearchOption}
+                onSelectExisting={handleSelectExistingSubTicket}
+                onScrollEnd={handleScrollEnd}
+                onCreateTicket={() =>
+                  openCreateTicket(inputValue.trim() ? { initialTitle: inputValue.trim() } : {})
+                }
+                canCreateTicket={Boolean(parentChannelId)}
+              />
+            </div>
           ) : null}
         </>
       ) : null}
 
-      {/* ── Sub-ticket chooser (Design 2b/1c) ── */}
-      {isPickerOpen && existingSubEntries.length > 1 ? (
-        <div className='mt-1 rounded-lg border border-border bg-background'>
-          <p className='px-3 pt-2 text-[10px] uppercase tracking-wide text-muted-foreground'>
-            If there is more than one
-          </p>
-          <ul className='py-1'>
-            {existingSubEntries.map((entry, index) => {
-              const checked = entry.ticket.id === value;
-              return (
-                <li key={entry.mappingId}>
-                  <button
-                    type='button'
-                    onClick={() => {
-                      if (entry.ticket.xyneId || entry.ticket.id) {
-                        onChange(entry.ticket.xyneId || entry.ticket.id);
-                      }
-                      setIsPickerOpen(false);
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-3 px-3 py-2 text-left transition-colors',
-                      checked ? 'bg-accent/60' : 'hover:bg-muted',
-                    )}
-                    data-track-category='Tickets'
-                    data-track-name={`${trackName}PickExistingSubTicket`}
-                    data-track-metadata={JSON.stringify({ ticketId: entry.ticket.id })}
-                  >
-                    <span
-                      className={cn(
-                        'flex size-4 shrink-0 items-center justify-center rounded-full border',
-                        checked ? 'border-blue-600' : 'border-input',
-                      )}
-                    >
-                      {checked ? <span className='size-2 rounded-full bg-blue-600' /> : null}
-                    </span>
-                    <span className='w-[96px] shrink-0 truncate font-mono text-[13px] text-muted-foreground'>
-                      {entry.ticket.xyneId || entry.ticket.id}
-                    </span>
-                    <span className='min-w-0 flex-1 truncate text-sm text-foreground'>
-                      {entry.ticket.title || entry.ticket.xyneId || entry.ticket.id}
-                    </span>
-                    <span className='shrink-0 text-[11px] text-muted-foreground'>
-                      {index === 0 ? 'most recent' : formatShortDate(entry.addedAt)}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          <button
-            type='button'
-            onClick={openSearch}
-            className='flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted'
-            data-track-category='Tickets'
-            data-track-name={`${trackName}LinkDifferentTicket`}
-          >
-            <Plus className='size-4 shrink-0' />
-            Link a different ticket instead
-          </button>
-          <p className='px-3 pb-2.5 pt-1 text-xs text-muted-foreground'>
-            The newest sub-ticket is filled in; pick another if this move is waiting on that one
-            instead.
-          </p>
-        </div>
-      ) : null}
-
-      {isCreateModalOpen && parentTicket?.channelId ? (
-        <CreateTicketModal
+      {isCreateModalOpen ? (
+        <SubTicketModal
           isOpen
           onClose={() => setIsCreateModalOpen(false)}
-          channelId={parentTicket.channelId}
-          {...(parentProjectId ? { projectId: parentProjectId } : {})}
-          parentTicketId={parentTicketId}
+          ticketId={parentTicketId}
+          conversationId={parentTicket?.conversationId ?? ''}
           {...(createSeed.initialTitle ? { initialTitle: createSeed.initialTitle } : {})}
           {...(createSeed.initialDescription
             ? { initialDescription: createSeed.initialDescription }
             : {})}
-          onTicketCreated={created => {
-            setIsCreateModalOpen(false);
+          onSuccess={created => {
             onChange(created.xyneId || created.id);
           }}
         />
