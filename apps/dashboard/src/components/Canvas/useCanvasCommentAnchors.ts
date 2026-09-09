@@ -4,7 +4,7 @@ import type {
   InlineContentSchema,
   StyleSchema,
 } from '@blocknote/core';
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 type CanvasEditorLike = BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>;
 
@@ -104,26 +104,32 @@ interface UseCanvasCommentAnchorsOptions {
   refreshKey?: unknown;
 }
 
+/** Shared "nothing is lost" value, so a reset cannot churn consumers with a new identity. */
+const NO_LOST_THREAD_IDS: Set<string> = new Set();
+
 export interface CanvasCommentAnchors {
   /**
-   * Thread ids whose anchor mark is still in the document, or `null` while that cannot be known
-   * yet. Callers treat `null` as "show everything".
+   * Threads whose anchor mark was seen in this document and is now gone — the commented text
+   * was deleted. Callers hide these and show everything else.
    */
-  anchoredThreadIds: Set<string> | null;
-  /**
-   * Records an anchor the caller just wrote into the document, so a brand new thread is never
-   * hidden for the one debounce window before the next scan sees its mark.
-   */
-  trackAnchoredThreadId: (threadId: string) => void;
+  lostThreadIds: Set<string>;
 }
 
 /**
- * Tracks which comment threads still have their anchor in the document.
+ * Tracks comment threads whose anchor has been deleted from the document.
  *
  * The anchor mark lives in the document itself, so deleting the commented text takes the mark
  * with it and undo puts it back. Deriving comment visibility from the mark therefore gives a
  * comment exactly the lifetime of the text it annotates — including undo — without a second
  * source of truth that could disagree with the document.
+ *
+ * The rule is deliberately "hide what was observed to disappear", not "show only what carries
+ * a mark". A missing mark has two causes that a scan cannot tell apart: the text was deleted,
+ * or the mark was never in this document to begin with — a thread predating the mark, or one
+ * whose write never reached the server because the debounced save was blocked by the content
+ * size limit or dropped by a reload. Hiding on the second cause loses the comment everywhere
+ * (panel, highlights and badge count) with nothing said, while the row still exists. So a
+ * thread is only ever hidden once this hook has actually watched its mark go.
  */
 export const useCanvasCommentAnchors = ({
   canvasId,
@@ -132,7 +138,10 @@ export const useCanvasCommentAnchors = ({
   enabled = true,
   refreshKey,
 }: UseCanvasCommentAnchorsOptions): CanvasCommentAnchors => {
-  const [anchoredThreadIds, setAnchoredThreadIds] = useState<Set<string> | null>(null);
+  const [lostThreadIds, setLostThreadIds] = useState<Set<string>>(NO_LOST_THREAD_IDS);
+
+  /** Threads whose mark this document has carried at least once — the only ones losable. */
+  const everAnchoredRef = useRef<Set<string>>(new Set());
 
   /**
    * An editor that has not loaded its content yet is indistinguishable from one whose text was
@@ -145,29 +154,24 @@ export const useCanvasCommentAnchors = ({
   const getEditorRef = useRef(getEditor);
   getEditorRef.current = getEditor;
 
+  /** Set while the scan effect is mounted; lets a document change nudge it without a rebuild. */
+  const scheduleScanRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     hasHeldTextRef.current = false;
-    setAnchoredThreadIds(null);
+    everAnchoredRef.current = new Set();
+    setLostThreadIds(NO_LOST_THREAD_IDS);
   }, [canvasId]);
-
-  const trackAnchoredThreadId = useCallback((threadId: string): void => {
-    setAnchoredThreadIds(current => {
-      if (!current || current.has(threadId)) return current;
-      const next = new Set(current);
-      next.add(threadId);
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') {
-      setAnchoredThreadIds(null);
+      scheduleScanRef.current = null;
+      setLostThreadIds(NO_LOST_THREAD_IDS);
       return;
     }
 
-    // Reset on every document change, so the deadline means "quiet for this long", not "this
-    // long after mount". Emptying the canvas therefore settles once the user stops deleting.
     let hasSettled = false;
+    let settleTimeout: number | null = null;
 
     const scan = (): void => {
       const scanned = scanCanvasCommentAnchors(getEditorRef.current());
@@ -175,17 +179,29 @@ export const useCanvasCommentAnchors = ({
       if (scanned.hasText) hasHeldTextRef.current = true;
       if (!hasHeldTextRef.current && !hasSettled) return;
 
-      setAnchoredThreadIds(current =>
-        current && isSameThreadIdSet(current, scanned.anchoredThreadIds)
-          ? current
-          : scanned.anchoredThreadIds,
-      );
+      const everAnchored = everAnchoredRef.current;
+      scanned.anchoredThreadIds.forEach(threadId => everAnchored.add(threadId));
+
+      const nextLost = new Set<string>();
+      everAnchored.forEach(threadId => {
+        if (!scanned.anchoredThreadIds.has(threadId)) nextLost.add(threadId);
+      });
+
+      setLostThreadIds(current => (isSameThreadIdSet(current, nextLost) ? current : nextLost));
     };
 
-    const settleTimeout = window.setTimeout(() => {
-      hasSettled = true;
-      scan();
-    }, EMPTY_DOCUMENT_SETTLE_MS);
+    // Restarted by every document change, so the deadline means "quiet for this long", not
+    // "this long after mount". Emptying the canvas therefore settles once the user stops
+    // deleting, while a document still loading is never mistaken for an empty one.
+    const restartSettleTimer = (): void => {
+      hasSettled = false;
+      if (settleTimeout !== null) window.clearTimeout(settleTimeout);
+      settleTimeout = window.setTimeout(() => {
+        settleTimeout = null;
+        hasSettled = true;
+        scan();
+      }, EMPTY_DOCUMENT_SETTLE_MS);
+    };
 
     let debounceTimeout: number | null = null;
     const scheduleScan = (): void => {
@@ -196,17 +212,19 @@ export const useCanvasCommentAnchors = ({
       }, SCAN_DEBOUNCE_MS);
     };
 
-    scheduleScan();
-    const retryTimeouts = SCAN_RETRY_DELAYS_MS.map(delay => window.setTimeout(scan, delay));
-
     // A remote collaborator's edit reaches the document without a local change event, so watch
     // the rendered anchors too rather than relying on the editor's onChange alone.
-    const container = containerRef.current;
-    const observer =
-      container && typeof MutationObserver !== 'undefined'
-        ? new MutationObserver(scheduleScan)
-        : null;
-    if (observer && container) {
+    //
+    // Attaching is retried rather than done once: this effect no longer re-runs on every
+    // document change, so a container that was not mounted yet at setup would otherwise never
+    // be observed.
+    let observer: MutationObserver | null = null;
+    const ensureObserver = (): void => {
+      if (observer || typeof MutationObserver === 'undefined') return;
+      const container = containerRef.current;
+      if (!container) return;
+
+      observer = new MutationObserver(scheduleScan);
       observer.observe(container, {
         childList: true,
         subtree: true,
@@ -214,15 +232,41 @@ export const useCanvasCommentAnchors = ({
         attributes: true,
         attributeFilter: ['data-canvas-comment-thread-id'],
       });
-    }
+    };
+    ensureObserver();
+
+    restartSettleTimer();
+    scheduleScan();
+    const retryTimeouts = SCAN_RETRY_DELAYS_MS.map(delay =>
+      window.setTimeout(() => {
+        ensureObserver();
+        scan();
+      }, delay),
+    );
+
+    scheduleScanRef.current = (): void => {
+      ensureObserver();
+      restartSettleTimer();
+      scheduleScan();
+    };
 
     return () => {
+      scheduleScanRef.current = null;
       if (debounceTimeout !== null) window.clearTimeout(debounceTimeout);
-      window.clearTimeout(settleTimeout);
+      if (settleTimeout !== null) window.clearTimeout(settleTimeout);
       retryTimeouts.forEach(timeout => window.clearTimeout(timeout));
       observer?.disconnect();
     };
-  }, [containerRef, enabled, refreshKey]);
+    // `canvasId` belongs here: without it a canvas switch keeps the previous document's
+    // settled state, and the next scan would publish an empty set over the new canvas.
+  }, [canvasId, containerRef, enabled]);
 
-  return { anchoredThreadIds, trackAnchoredThreadId };
+  // Document changes only nudge the scan that is already running. Keying the effect above on
+  // `refreshKey` instead would tear down and rebuild the MutationObserver, the observer's
+  // initial scan and every timer on each keystroke, in both editors.
+  useEffect(() => {
+    scheduleScanRef.current?.();
+  }, [refreshKey]);
+
+  return { lostThreadIds };
 };

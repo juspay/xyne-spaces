@@ -551,7 +551,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
-      anchoredCommentThreadIds,
+      lostCommentThreadIds,
       refreshCommentHighlights,
       openCommentsForCurrentBlock,
       focusCommentBlock,
@@ -813,7 +813,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                 activeBlockId={activeCommentBlockId}
                 activeThreadId={activeCommentThreadId}
                 activeAnchor={activeCommentAnchor}
-                anchoredThreadIds={anchoredCommentThreadIds}
+                lostThreadIds={lostCommentThreadIds}
                 editable={editable && !isReadOnly}
                 anchorContainerRef={containerRef}
                 onClose={() => setIsCommentsOpen(false)}

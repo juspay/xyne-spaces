@@ -493,6 +493,10 @@ const XyneAISidebar = ({
   // Track processed selection keys to avoid duplicates
   const processedSelectionKeysRef = useRef<Set<string>>(new Set());
 
+  // Read by the selection subscription below, which must not re-subscribe on every keystroke.
+  const inputValueRef = useRef(inputValue);
+  inputValueRef.current = inputValue;
+
   // Sync processedSelectionKeysRef with activeSelectionInfos to handle removals
   useEffect(() => {
     // Build the current set of active selection keys
@@ -527,12 +531,13 @@ const XyneAISidebar = ({
           setActiveSelectionInfos(prev => [...prev, ...newSelections]);
 
           // Drop the selected text into the composer so it can be edited or sent as-is.
-          // Replaces whatever was there — a new selection starts a new prompt.
+          // Only into an empty one: the selection is context for a prompt, and overwriting a
+          // half-typed question would destroy it with no way back.
           const selectedText = newSelections
             .map(selection => selection.text)
             .filter(Boolean)
             .join('\n\n');
-          if (selectedText) setInputValue(selectedText);
+          if (selectedText && !inputValueRef.current.trim()) setInputValue(selectedText);
         }
       }
     };

@@ -95,7 +95,7 @@ interface CanvasCommentsPanelProps {
    * Thread ids whose anchor mark is still in the document, or null while that is unknown.
    * A thread whose commented text was deleted drops off the list until an undo restores it.
    */
-  anchoredThreadIds?: Set<string> | null | undefined;
+  lostThreadIds?: Set<string> | undefined;
   editable: boolean;
   /** Canvas editor container, used to align each thread with the text it annotates. */
   anchorContainerRef?: React.RefObject<HTMLDivElement | null> | undefined;
@@ -262,6 +262,7 @@ function CanvasCommentBody({
 
     measure();
 
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return (): void => observer.disconnect();
@@ -646,7 +647,7 @@ export function CanvasCommentsPanel({
   activeBlockId,
   activeThreadId,
   activeAnchor,
-  anchoredThreadIds,
+  lostThreadIds,
   editable,
   anchorContainerRef,
   onClose,
@@ -664,12 +665,11 @@ export function CanvasCommentsPanel({
     enabled: Boolean(canvasId),
   }) as unknown as [CanvasCommentThread[]];
 
-  // A thread lives as long as the text it annotates: the editor drops its id from this set when
-  // the anchor is deleted and puts it back on undo.
+  // A thread lives as long as the text it annotates: the editor adds its id to this set when
+  // the anchor is deleted and removes it again on undo.
   const anchoredThreads = useMemo(
-    () =>
-      anchoredThreadIds ? threads.filter(thread => anchoredThreadIds.has(thread.id)) : threads,
-    [anchoredThreadIds, threads],
+    () => (lostThreadIds?.size ? threads.filter(thread => !lostThreadIds.has(thread.id)) : threads),
+    [lostThreadIds, threads],
   );
 
   const orderedThreads = useMemo(() => {
@@ -766,10 +766,8 @@ export function CanvasCommentsPanel({
       return;
     }
 
-    if (onBeforeCreateThread?.(threadId, selectedTextAnchor) === false) {
-      toast.error('Unable to attach comment to selected text');
-      return;
-    }
+    // A `false` here means the editor refused the anchor and has already said why.
+    if (onBeforeCreateThread?.(threadId, selectedTextAnchor) === false) return;
 
     const mutationResult = zero.mutate(
       mutators.canvasComment.createThread({
@@ -854,6 +852,10 @@ export function CanvasCommentsPanel({
 
   return (
     <motion.aside
+      // Marks the panel as part of the comment surface, so scrolling it — or the rail syncing
+      // it with the document — does not read as "the user scrolled away" and dismiss an open
+      // inline comment card. See INLINE_COMMENT_INTERACTIVE_SELECTOR.
+      data-canvas-comments-panel='true'
       className='absolute inset-y-0 right-0 z-20 flex w-full shrink-0 flex-col border-l border-border bg-background shadow-xl md:relative md:z-auto md:w-80 md:shadow-none'
       initial={{ x: 14, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}

@@ -147,6 +147,9 @@ const getDirectoryFromPath = (filePath: string): string => {
   return lastSlashIndex > -1 ? normalizedPath.slice(0, lastSlashIndex) : filePath;
 };
 
+/** Stable empty document, so memos comparing canvas content keep their identity. */
+const EMPTY_CANVAS_CONTENT: PartialBlock[] = [];
+
 const CanvasScreen: React.FC<CanvasScreenProps> = ({
   canvasId: propCanvasId,
   isFullscreen = false,
@@ -1066,25 +1069,37 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       role: p.role,
     }));
 
+  // Falls back to a shared constant rather than a fresh `[]`, so an empty canvas does not
+  // hand the memos below a new identity on every render.
   const currentContentForVersionCompare =
-    latestContentRef.current || currentContent || selectedCanvas?.content || [];
-  const isPreviewSameAsCurrent = previewVersion
-    ? stableStringifyCanvasContent(previewVersion.content) ===
-      stableStringifyCanvasContent(currentContentForVersionCompare)
-    : false;
-  const versionDiffParts = previewVersion
-    ? createCanvasContentTextDiff(currentContentForVersionCompare, previewVersion.content)
-    : [];
-  const hasVersionDiff = versionDiffParts.some(isVisibleCanvasContentDiffPart);
+    latestContentRef.current || currentContent || selectedCanvas?.content || EMPTY_CANVAS_CONTENT;
+  // Comparing two versions serializes and walks both documents in full, so it is kept off
+  // the render path: without this every unrelated re-render of the screen re-diffs them.
+  const { isPreviewSameAsCurrent, hasVersionDiff } = useMemo(() => {
+    if (!previewVersion) return { isPreviewSameAsCurrent: false, hasVersionDiff: false };
+
+    const diffParts = createCanvasContentTextDiff(
+      currentContentForVersionCompare,
+      previewVersion.content,
+    );
+    return {
+      isPreviewSameAsCurrent:
+        stableStringifyCanvasContent(previewVersion.content) ===
+        stableStringifyCanvasContent(currentContentForVersionCompare),
+      hasVersionDiff: diffParts.some(isVisibleCanvasContentDiffPart),
+    };
+  }, [currentContentForVersionCompare, previewVersion]);
+
   // When on, the preview renders the version document with its changes highlighted inline.
   const isVersionDiffVisible = Boolean(previewVersion) && showVersionDiff && hasVersionDiff;
-  const previewContent =
-    previewVersion && isVersionDiffVisible
+  const previewContent = useMemo(() => {
+    if (!previewVersion) return null;
+    return isVersionDiffVisible
       ? buildCanvasVersionDiffContent(currentContentForVersionCompare, previewVersion.content)
-      : previewVersion
-        ? (normalizeCanvasContent(previewVersion.content) as PartialBlock[])
-        : null;
-  const displayedContent = previewContent ?? currentContent ?? selectedCanvas?.content ?? [];
+      : (normalizeCanvasContent(previewVersion.content) as PartialBlock[]);
+  }, [currentContentForVersionCompare, isVersionDiffVisible, previewVersion]);
+  const displayedContent =
+    previewContent ?? currentContent ?? selectedCanvas?.content ?? EMPTY_CANVAS_CONTENT;
   const previewUpdatedAtText = previewVersion
     ? new Date(previewVersion.updatedAt).toLocaleString(undefined, {
         month: 'short',
@@ -1681,6 +1696,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                         checked={showVersionDiff}
                         onCheckedChange={setShowVersionDiff}
                         aria-label='Highlight changes against the current canvas'
+                        data-track-category='CANVAS'
+                        data-track-name='TOGGLE_VERSION_DIFF'
                       />
                     </div>
                   )}

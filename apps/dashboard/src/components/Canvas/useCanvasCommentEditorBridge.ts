@@ -2,11 +2,17 @@ import type {
   BlockNoteEditor,
   BlockSchema,
   InlineContentSchema,
+  PartialBlock,
   StyleSchema,
 } from '@blocknote/core';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 
+import {
+  CONTENT_SIZE_EXCEEDED_DESCRIPTION,
+  CONTENT_SIZE_MAX_THRESHOLD,
+  getContentSizeBytes,
+} from '../../utils/canvasContentSize';
 import { scrollToHeading } from '../../utils/canvasUtils';
 import type { CanvasCommentAnchor } from './CanvasCommentsPanel/CanvasCommentsPanel';
 import { useCanvasCommentAnchors } from './useCanvasCommentAnchors';
@@ -148,6 +154,9 @@ const focusCommentAnchorStart = (
 
 const INLINE_COMMENT_INTERACTIVE_SELECTOR = [
   '[data-canvas-inline-comment-thread="true"]',
+  // The comments panel is part of the same surface: browsing it, or the rail syncing its
+  // scroll to the document, must not count as scrolling away from the card.
+  '[data-canvas-comments-panel="true"]',
   '[data-overlay-portal]',
   '[data-radix-popper-content-wrapper]',
   '[data-testid="user-search-results"]',
@@ -174,6 +183,10 @@ export function useCanvasCommentEditorBridge({
   const [commentHighlightVersion, setCommentHighlightVersion] = useState(0);
   const openedInitialThreadKeyRef = useRef<string | null>(null);
 
+  /** Read by the anchor-click handler, which must not be rebuilt when the panel opens. */
+  const isCommentsOpenRef = useRef(isCommentsOpen);
+  isCommentsOpenRef.current = isCommentsOpen;
+
   const refreshCommentHighlights = useCallback(() => {
     setCommentHighlightVersion(version => version + 1);
   }, []);
@@ -184,7 +197,10 @@ export function useCanvasCommentEditorBridge({
       setActiveCommentBlockId(thread.blockId);
       setActiveCommentThreadId(thread.id);
       setActiveCommentAnchor(null);
-      if (rect) {
+      // The floating card is the panel's stand-in. With the panel open the rail already shows
+      // this thread and `activeThreadId` highlights it, so also floating a card over the
+      // document would render the same thread twice.
+      if (rect && !isCommentsOpenRef.current) {
         setInlineCommentThread({
           mode: 'thread',
           thread,
@@ -196,15 +212,16 @@ export function useCanvasCommentEditorBridge({
   );
 
   // The anchor mark is part of the document, so it dies with the text it wraps and comes back
-  // with an undo. Everything that shows a comment follows this set rather than the thread rows.
-  const { anchoredThreadIds: anchoredCommentThreadIds, trackAnchoredThreadId } =
-    useCanvasCommentAnchors({
-      canvasId,
-      containerRef,
-      getEditor,
-      enabled: ready && Boolean(canvasId),
-      refreshKey: commentHighlightVersion,
-    });
+  // with an undo. Everything that shows a comment hides these ids and shows the rest — a
+  // thread is dropped only once its mark has been watched disappearing, never merely for
+  // lacking one. See useCanvasCommentAnchors.
+  const { lostThreadIds: lostCommentThreadIds } = useCanvasCommentAnchors({
+    canvasId,
+    containerRef,
+    getEditor,
+    enabled: ready && Boolean(canvasId),
+    refreshKey: commentHighlightVersion,
+  });
 
   useCanvasCommentHighlights({
     canvasId,
@@ -212,7 +229,7 @@ export function useCanvasCommentEditorBridge({
     enabled: ready && Boolean(canvasId),
     refreshKey: commentHighlightVersion,
     activeThreadId: activeCommentThreadId,
-    anchoredThreadIds: anchoredCommentThreadIds,
+    lostThreadIds: lostCommentThreadIds,
     onAnchorClick: handleCommentAnchorClick,
     onOpenCountChange: onOpenCommentCountChange,
     onThreadsChange: setCommentThreads,
@@ -220,11 +237,11 @@ export function useCanvasCommentEditorBridge({
 
   // A card left open over text that just got deleted has nothing to point at.
   useEffect(() => {
-    if (!anchoredCommentThreadIds || !activeCommentThreadId) return;
-    if (anchoredCommentThreadIds.has(activeCommentThreadId)) return;
+    if (!activeCommentThreadId) return;
+    if (!lostCommentThreadIds.has(activeCommentThreadId)) return;
     setInlineCommentThread(null);
     setActiveCommentThreadId(null);
-  }, [activeCommentThreadId, anchoredCommentThreadIds]);
+  }, [activeCommentThreadId, lostCommentThreadIds]);
 
   useEffect(() => {
     setInlineCommentThread(current => {
@@ -359,6 +376,10 @@ export function useCanvasCommentEditorBridge({
     }
   }, [getEditor]);
 
+  /**
+   * Writes the anchor mark for a new thread. Returning false aborts the thread, and every such
+   * path reports its own reason — the caller stays silent rather than guessing at one.
+   */
   const applyCommentAnchorStyle = useCallback(
     (threadId: string, anchor: CanvasCommentAnchor): boolean => {
       const editor = getEditor();
@@ -367,11 +388,27 @@ export function useCanvasCommentEditorBridge({
         typeof anchor.selectionFrom !== 'number' ||
         typeof anchor.selectionTo !== 'number'
       ) {
+        toast.error('Unable to attach comment to selected text');
         return false;
       }
+      // The anchor is a mark in the document, so it only survives a reload if the document
+      // saves. Past the size ceiling the editor stops saving, which would leave a thread row
+      // with no anchor — a comment that vanishes on the next load with nothing said. Refuse
+      // it up front instead.
+      const sizeBytes = getContentSizeBytes(editor.document as PartialBlock[]);
+      if (sizeBytes >= CONTENT_SIZE_MAX_THRESHOLD) {
+        toast.error('Content Too Large', {
+          description: CONTENT_SIZE_EXCEEDED_DESCRIPTION(sizeBytes),
+        });
+        return false;
+      }
+
       try {
         const tiptapEditor = getTiptapEditor(editor);
-        if (!tiptapEditor) return false;
+        if (!tiptapEditor) {
+          toast.error('Unable to attach comment to selected text');
+          return false;
+        }
         tiptapEditor.commands.setTextSelection({
           from: anchor.selectionFrom,
           to: anchor.selectionTo,
@@ -381,16 +418,14 @@ export function useCanvasCommentEditorBridge({
           from: anchor.selectionTo,
           to: anchor.selectionTo,
         });
-        // Claim the anchor now: the thread row lands before the next scan reads the mark, and
-        // without this the brand new comment would blink out for that window.
-        trackAnchoredThreadId(threadId);
         refreshCommentHighlights();
         return true;
       } catch {
+        toast.error('Unable to attach comment to selected text');
         return false;
       }
     },
-    [getEditor, refreshCommentHighlights, trackAnchoredThreadId],
+    [getEditor, refreshCommentHighlights],
   );
 
   const removeCommentAnchorStyle = useCallback(
@@ -490,7 +525,7 @@ export function useCanvasCommentEditorBridge({
     activeCommentBlockId,
     activeCommentThreadId,
     activeCommentAnchor,
-    anchoredCommentThreadIds,
+    lostCommentThreadIds,
     refreshCommentHighlights,
     openCommentsForCurrentBlock,
     focusCommentBlock,

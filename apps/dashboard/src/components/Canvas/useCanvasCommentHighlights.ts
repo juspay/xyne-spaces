@@ -20,11 +20,11 @@ interface UseCanvasCommentHighlightsOptions {
   refreshKey?: unknown;
   activeThreadId?: string | null | undefined;
   /**
-   * Thread ids whose anchor mark is still in the document, or null while that is unknown.
-   * A thread outside the set had its commented text deleted, so it gets no highlight and no
-   * badge until an undo brings the anchor back.
+   * Thread ids whose anchor mark was in the document and has since gone: their commented text
+   * was deleted, so they get no highlight and no badge until an undo brings the anchor back.
+   * Threads outside this set are shown, including any that never carried a mark here.
    */
-  anchoredThreadIds?: Set<string> | null | undefined;
+  lostThreadIds?: Set<string> | undefined;
   onAnchorClick?: ((thread: CanvasCommentHighlightThread, rect?: DOMRect) => void) | undefined;
   onOpenCountChange?: ((count: number) => void) | undefined;
   onThreadsChange?: ((threads: CanvasCommentHighlightThread[]) => void) | undefined;
@@ -178,7 +178,7 @@ export const useCanvasCommentHighlights = ({
   enabled = true,
   refreshKey,
   activeThreadId,
-  anchoredThreadIds,
+  lostThreadIds,
   onAnchorClick,
   onOpenCountChange,
   onThreadsChange,
@@ -190,9 +190,8 @@ export const useCanvasCommentHighlights = ({
     },
   ) as unknown as [CanvasCommentHighlightThread[]];
   const anchoredThreads = useMemo(
-    () =>
-      anchoredThreadIds ? threads.filter(thread => anchoredThreadIds.has(thread.id)) : threads,
-    [anchoredThreadIds, threads],
+    () => (lostThreadIds?.size ? threads.filter(thread => !lostThreadIds.has(thread.id)) : threads),
+    [lostThreadIds, threads],
   );
   const openThreads = useMemo(
     () => anchoredThreads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN),

@@ -92,6 +92,16 @@ export const useCanvasCommentRail = ({
 
   const isAlignmentActive = enabled && isWideViewport;
 
+  /**
+   * Alignment only means anything once an anchor for one of the threads on screen has been
+   * located. Until then the cards have nothing to line up with, so the panel stays a plain
+   * list and must not borrow the document's scroll position either — doing so drives it
+   * straight to its bottom. Measured against the current threads rather than the whole map,
+   * so a filter change cannot keep alignment alive on the previous selection's anchors.
+   */
+  const isAligned =
+    isAlignmentActive && threads.some(thread => anchorTops[thread.id] !== undefined);
+
   useEffect(() => {
     if (!isAlignmentActive || typeof window === 'undefined') return;
 
@@ -217,7 +227,7 @@ export const useCanvasCommentRail = ({
    * can be browsed without dragging the document along. The next canvas scroll re-levels them.
    */
   useEffect(() => {
-    if (!isAlignmentActive || typeof window === 'undefined') return;
+    if (!isAligned || typeof window === 'undefined') return;
 
     const container = anchorContainerRef?.current;
     const railElement = railScrollRef.current;
@@ -233,7 +243,7 @@ export const useCanvasCommentRail = ({
 
     documentElement.addEventListener('scroll', handleDocumentScroll, { passive: true });
     return () => documentElement.removeEventListener('scroll', handleDocumentScroll);
-  }, [anchorContainerRef, isAlignmentActive, railScrollRef]);
+  }, [anchorContainerRef, isAligned, railScrollRef]);
 
   const getCardObserver = useCallback((): ResizeObserver | null => {
     if (typeof ResizeObserver === 'undefined') return null;
@@ -286,16 +296,20 @@ export const useCanvasCommentRail = ({
   );
 
   const { cardTops, contentBottom } = useMemo(() => {
-    const ordered = [...threads]
-      .filter(thread => anchorTops[thread.id] !== undefined)
-      .sort((a, b) => (anchorTops[a.id] ?? 0) - (anchorTops[b.id] ?? 0));
+    // An anchor that has not been measured yet still needs a slot: dropping it here while
+    // `isAligned` is already true would leave its card without a `top` and pile every such
+    // card on top of the first one. Unmeasured threads sort last and simply stack.
+    const orderKey = (threadId: string): number => anchorTops[threadId] ?? Number.MAX_SAFE_INTEGER;
+    const ordered = [...threads].sort((a, b) => orderKey(a.id) - orderKey(b.id));
 
     const tops: Record<string, number> = {};
-    let previousBottom = Number.NEGATIVE_INFINITY;
+    // Starts one gap above zero so the first card sits at its anchor, or at 0 when unmeasured.
+    let previousBottom = -CARD_GAP;
     let lowestBottom = 0;
 
     ordered.forEach(thread => {
-      const top = Math.max(anchorTops[thread.id] ?? 0, previousBottom + CARD_GAP);
+      const minimumTop = previousBottom + CARD_GAP;
+      const top = Math.max(anchorTops[thread.id] ?? minimumTop, minimumTop);
       tops[thread.id] = top;
       previousBottom = top + (cardHeights[thread.id] ?? ESTIMATED_CARD_HEIGHT);
       lowestBottom = previousBottom;
@@ -305,7 +319,7 @@ export const useCanvasCommentRail = ({
   }, [anchorTops, cardHeights, threads]);
 
   return {
-    isAligned: isAlignmentActive && Object.keys(cardTops).length > 0,
+    isAligned,
     // Sized to the cards, but floored at the document's scroll range so both columns always
     // have the same travel — otherwise a filter showing a single card leaves the panel with no
     // scroll range, pinning that card while the canvas scrolls away beneath its anchor. Never
