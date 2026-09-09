@@ -1,3 +1,17 @@
+## [1.298.0](https://github.com/juspay/xyne-spaces/compare/v1.297.2...v1.298.0) (2026-09-09)
+
+
+### Features
+
+* Add remove option for decision items ([#1699](https://github.com/juspay/xyne-spaces/issues/1699)) ([2b38c76](https://github.com/juspay/xyne-spaces/commit/2b38c76f3226e1341cab310b95a55d900f0b29b9))
+
+
+### Bug Fixes
+
+* include mentions in canvas search ([#1695](https://github.com/juspay/xyne-spaces/issues/1695)) ([6a93eaa](https://github.com/juspay/xyne-spaces/commit/6a93eaaca924aef5e7390420743cc16820466943))
+* render DM add/remove system message names as plain text ([#1705](https://github.com/juspay/xyne-spaces/issues/1705)) ([ac31028](https://github.com/juspay/xyne-spaces/commit/ac31028a84954fb2bd250c5975731f2fb278aa41)), closes [#690](https://github.com/juspay/xyne-spaces/issues/690)
+* show board stages whenever a single board is in scope ([#1707](https://github.com/juspay/xyne-spaces/issues/1707)) ([a10c0f4](https://github.com/juspay/xyne-spaces/commit/a10c0f444f6035f9693d693a5294da82f2048961))
+
 ## [1.297.2](https://github.com/juspay/xyne-spaces/compare/v1.297.1...v1.297.2) (2026-09-09)
 
 
