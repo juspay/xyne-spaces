@@ -120,7 +120,7 @@ export const SupportKanbanBoard = ({
   // first row below.
   const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV3({
+    queries.supportTicketsFilteredV4({
       channelId,
       isMember,
       ...restTicketFilter,

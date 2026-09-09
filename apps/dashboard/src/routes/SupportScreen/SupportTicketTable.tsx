@@ -80,7 +80,7 @@ export const SupportTicketTable = ({
 
   const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV3({
+    queries.supportTicketsFilteredV4({
       channelId,
       isMember,
       ...restTicketFilter,
@@ -176,7 +176,7 @@ export const SupportTicketTable = ({
     if (dynamicallyFilteredTickets) onTicketsLoaded?.(dynamicallyFilteredTickets as Ticket[]);
   }, [dynamicallyFilteredTickets, onTicketsLoaded]);
 
-  // supportTicketsFilteredV3 already relates tagMappings on every row, so unlike
+  // supportTicketsFilteredV4 already relates tagMappings on every row, so unlike
   // Board's ticketsQueryV2 there's no fallback path needed here.
   const tagsByTicketId = useMemo(() => {
     const map = new Map<string, TicketTag[]>();
