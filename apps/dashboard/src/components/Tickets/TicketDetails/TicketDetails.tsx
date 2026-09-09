@@ -1886,6 +1886,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     [zero],
   );
 
+  // Reset the per-field save guards when the viewed ticket changes. The refs
+  // track the last value dispatched for THIS ticket; without this, saving "X" on
+  // ticket A would make the auto-save skip an identical "X" typed on ticket B,
+  // since TicketDetails is not keyed by ticket id at its call sites.
+  useEffect(() => {
+    lastSavedTitleRef.current = null;
+    lastSavedDescriptionRef.current = null;
+  }, [ticket?.id]);
+
   // Debounced auto-save while editing — persist the title as the user types
   // rather than only on blur/exit. The blur/Enter handler still flushes an
   // immediate save; leaving edit mode flips `editingTitle`, whose cleanup clears
@@ -1899,11 +1908,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (trimmed === lastSavedTitleRef.current) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
+      // Optimistically mark this value as dispatched so the effect re-arming on
+      // the resulting `ticket.updatedAt` change doesn't re-send it. Clear the
+      // guard if the save is rejected so the exact same text can be retried.
       lastSavedTitleRef.current = trimmed;
       void applyTicketUpdate(
         { id: ticketId, title: trimmed, updatedAt: Date.now() },
         'Failed to update title',
-      );
+      ).then((saved) => {
+        if (!saved && lastSavedTitleRef.current === trimmed) {
+          lastSavedTitleRef.current = null;
+        }
+      });
     }, FIELD_AUTOSAVE_DEBOUNCE_MS);
     return (): void => clearTimeout(timeoutId);
   }, [titleValue, editingTitle, isEmailDeskTicket, ticket, applyTicketUpdate]);
@@ -1921,7 +1937,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       void applyTicketUpdate(
         { id: ticketId, description: next, updatedAt: Date.now() },
         'Failed to update description',
-      );
+      ).then((saved) => {
+        if (!saved && lastSavedDescriptionRef.current === next) {
+          lastSavedDescriptionRef.current = null;
+        }
+      });
     }, FIELD_AUTOSAVE_DEBOUNCE_MS);
     return (): void => clearTimeout(timeoutId);
   }, [descriptionValue, editingDescription, ticket, applyTicketUpdate]);
