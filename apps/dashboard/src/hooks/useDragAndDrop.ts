@@ -28,6 +28,7 @@ interface UseDragAndDropProps {
   setLocalTickets: React.Dispatch<React.SetStateAction<Ticket[]>>;
   zero: Zero;
   stages: Stage[];
+  stagesByBoardId?: Map<string, Stage[]>;
   mode: 'stage' | 'status'; // 'stage' for board view, 'status' for project/all view
   canReorder: boolean;
   onStageFormRequired?: (data: {
@@ -54,6 +55,7 @@ export const useDragAndDrop = ({
   setLocalTickets,
   zero,
   stages,
+  stagesByBoardId,
   mode,
   canReorder,
   onStageFormRequired,
@@ -175,7 +177,12 @@ export const useDragAndDrop = ({
       if (mode === 'stage') {
         // Board view: Update stageName
         const newStageId = overTicket?.stageName || over.id;
-        const targetStage = stages.find(s => s.id === newStageId || s.name === newStageId);
+        const columnStage = stages.find(s => s.id === newStageId || s.name === newStageId);
+        const boardStages = stagesByBoardId?.get(activeTicket.boardId ?? '');
+        const targetStage =
+          boardStages && columnStage
+            ? boardStages.find(s => s.name === columnStage.name)
+            : columnStage;
 
         const newStageName = targetStage?.name;
         const newStatus = targetStage?.defaultTicketStatusV2;
@@ -186,7 +193,7 @@ export const useDragAndDrop = ({
             toast.info('Ticket stages are updated by the SDLC workflow');
             return;
           }
-          const currentStage = stages.find(s => s.name === activeTicket.stageName);
+          const currentStage = (boardStages ?? stages).find(s => s.name === activeTicket.stageName);
 
           if (currentStage && targetStage) {
             if (transitions) {
@@ -268,9 +275,11 @@ export const useDragAndDrop = ({
             // Used for linear boards without explicitly defined transitions.
             if (!isNonLinearBoard && (!transitions || transitions.length === 0)) {
               const boardHasStagesWithApproval =
-                stages.some(s => s.approvers && s.approvers.length > 0) ?? false;
+                (boardStages ?? stages).some(s => s.approvers && s.approvers.length > 0) ?? false;
               // Check if board has any stage with forms
-              const boardHasStagesWithForms = stageFormMap.size > 0;
+              const boardHasStagesWithForms = boardStages
+                ? boardStages.some(s => !!s.formId)
+                : stageFormMap.size > 0;
               // Enforce sequential movement if board has EITHER approvers OR forms
               const shouldEnforceSequentialMovement =
                 boardHasStagesWithApproval || boardHasStagesWithForms;
@@ -680,6 +689,7 @@ export const useDragAndDrop = ({
       setLocalTickets,
       zero,
       stages,
+      stagesByBoardId,
       mode,
       canReorder,
       computeNewPosition,

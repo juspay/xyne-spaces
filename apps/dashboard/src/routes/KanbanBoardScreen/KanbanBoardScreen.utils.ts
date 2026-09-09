@@ -11,7 +11,13 @@ import { TicketStatusV2 } from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
-import { FormFieldType, type FieldEnumOption, type FormFields } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  type FieldEnumOption,
+  type FormFields,
+} from '@xyne/shared';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 import { matchesDynamicFieldValue } from '../../utils/board/dynamicFieldFilters';
 
@@ -89,6 +95,64 @@ export const getStatusColumns = (): Stage[] => {
       defaultTicketStatusV2: TicketStatusV2.CANCELLED,
     },
   ];
+};
+
+interface BoardStageRow {
+  id: string;
+  boardId: string;
+  name: string;
+  sequenceNumber: number;
+  defaultTicketStatusV2: TicketStatusV2;
+  approvers?: Stage['approvers'];
+  formContextMappings?: ReadonlyArray<{
+    contextType: FormContextType;
+    entityType: FormEntityType;
+    formId: string;
+  }>;
+}
+
+export const groupStagesByBoard = (
+  stageRows: ReadonlyArray<BoardStageRow>,
+): Map<string, Stage[]> => {
+  const stagesByBoard = new Map<string, Stage[]>();
+  stageRows.forEach(row => {
+    const boardStages = stagesByBoard.get(row.boardId) ?? [];
+    if (!boardStages.some(s => s.name === row.name)) {
+      boardStages.push({
+        id: row.id,
+        name: row.name,
+        color: getStageColor(row.name),
+        sequenceNumber: row.sequenceNumber,
+        defaultTicketStatusV2: row.defaultTicketStatusV2,
+        formId:
+          row.formContextMappings?.find(
+            m => m.contextType === FormContextType.STAGE && m.entityType === FormEntityType.TICKET,
+          )?.formId ?? null,
+        ...(row.approvers && { approvers: row.approvers }),
+      });
+      stagesByBoard.set(row.boardId, boardStages);
+    }
+  });
+  return stagesByBoard;
+};
+
+export const getSharedBoardStages = (
+  boardIds: string[],
+  stagesByBoard: Map<string, Stage[]>,
+): Stage[] | null => {
+  const signature = (boardStages: Stage[]): string =>
+    boardStages
+      .map(stage => stage.name)
+      .sort()
+      .join('\n');
+  const perBoard = [...boardIds].sort().map(id => stagesByBoard.get(id));
+  const [first] = perBoard;
+  if (!first) return null;
+  const firstSignature = signature(first);
+  if (perBoard.some(boardStages => !boardStages || signature(boardStages) !== firstSignature)) {
+    return null;
+  }
+  return first;
 };
 
 /**
