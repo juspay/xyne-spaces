@@ -118,7 +118,10 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
-    runs-on: ubuntu-latest
+    # TEMPORARY: routed to mini-max for one final end-to-end test of all
+    # three self-hosted scale sets together. Move back to ubuntu-latest
+    # after this confirms clean.
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
 
