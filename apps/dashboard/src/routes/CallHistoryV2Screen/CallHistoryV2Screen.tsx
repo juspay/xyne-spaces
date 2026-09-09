@@ -5,6 +5,7 @@ import {
   PhoneDefault,
   PlusDefault as Plus,
   FilterFunnel,
+  SearchDefault as SearchIcon,
 } from '@xyne/icons';
 import { format } from 'date-fns';
 import {
@@ -838,6 +839,7 @@ const CallHistoryV2Screen = (): ReactElement => {
               ) : hasCallSearch ? (
                 <NoFiltredCalls
                   isShortTitleSearch={titleSearchQuery.length > 0 && titleSearchQuery.length < 4}
+                  searchQuery={titleSearchQuery}
                 />
               ) : (
                 <EmptyState
@@ -992,12 +994,31 @@ const EmptyState = ({ title, description }: EmptyStateProps): ReactElement => {
   );
 };
 
-const NoFiltredCalls = ({ isShortTitleSearch }: { isShortTitleSearch: boolean }): ReactElement => {
+const NoFiltredCalls = ({
+  isShortTitleSearch,
+  searchQuery,
+}: {
+  isShortTitleSearch: boolean;
+  searchQuery: string;
+}): ReactElement => {
   return (
-    <div className='flex flex-col items-center justify-center h-full px-6 py-12'>
-      <h2 className='text-lg text-foreground font-medium mb-1'>
-        {isShortTitleSearch ? 'Type at least 4 letters to search call titles' : 'No calls found'}
+    <div className='flex min-h-[200px] flex-col items-center justify-center gap-2.5 rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-12 text-center'>
+      <span className='flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground/70'>
+        <SearchIcon className='size-4' />
+      </span>
+      <span className='text-[10px] font-semibold tracking-widest text-muted-foreground/60 uppercase'>
+        {isShortTitleSearch ? 'Keep typing' : '0 results'}
+      </span>
+      <h2 className='text-base font-semibold text-foreground'>
+        {isShortTitleSearch
+          ? 'Type at least 4 letters to search call titles'
+          : searchQuery
+            ? `No calls match "${searchQuery}"`
+            : 'No calls found'}
       </h2>
+      <p className='max-w-sm text-xs text-muted-foreground'>
+        Try a name, a channel, or part of a call title.
+      </p>
     </div>
   );
 };
@@ -1018,6 +1039,7 @@ const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): R
         side='top'
         align='center'
         sideOffset={10}
+        container={document.body}
         className='w-80 rounded-2xl p-1.5'
         trigger={
           <Button
@@ -1025,7 +1047,7 @@ const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): R
             data-testid='new-call-button'
             data-track-category='CALLS'
             data-track-name='start-a-call-pill'
-            className='gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background shadow-lg hover:bg-foreground/90'
+            className='gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background shadow-lg hover:bg-foreground/90 cursor-pointer z-60'
           >
             <PhoneDefault variant='Solid' className='size-3.5' />
             Start a call
