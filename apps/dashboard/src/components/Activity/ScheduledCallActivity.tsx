@@ -1,8 +1,11 @@
 import { ReactElement } from 'react';
+import { format } from 'date-fns';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
+import { usePlatform } from '../../hooks/usePlatform';
+import { xyneCalendarActor } from '../../machines/xyneCalendarMachine';
 import { CalendarTimer, NotificationBellOn, CalendarCheck, CalendarCancel } from '@xyne/icons';
 
 export const ScheduledCallActivity = ({
@@ -13,6 +16,7 @@ export const ScheduledCallActivity = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const actor = useUser(activity.actorId ?? '');
+  const { isMobile } = usePlatform();
 
   if (!actor) return null;
 
@@ -20,9 +24,24 @@ export const ScheduledCallActivity = ({
   const isUpdated = activity.actorAction === 'call_updated';
   const isMeetingAccepted = activity.actorAction === 'meeting_accepted';
   const isMeetingDeclined = activity.actorAction === 'meeting_declined';
+
   const targetPath = activity.callId
     ? `/calls?tab=upcoming&callId=${activity.callId}`
     : '/calls?tab=upcoming';
+
+  const openInCalendarSidebar =
+    !isMobile && activity.callId && activity.call
+      ? (): void => {
+          const call = activity.call!;
+          const day = new Date(call.startsAt ?? call.startedAt ?? Date.now());
+          xyneCalendarActor.send({ type: 'OPEN', date: format(day, 'yyyy-MM-dd') });
+          xyneCalendarActor.send({
+            type: 'SELECT_CALL',
+            callId: activity.callId!,
+            callFallback: call,
+          });
+        }
+      : undefined;
 
   const description = isReminder ? (
     <span className='text-muted-foreground text-sm'>reminded you about a scheduled call in</span>
@@ -66,6 +85,7 @@ export const ScheduledCallActivity = ({
       isExpanded={isExpanded}
       actorAction={activity.actorAction}
       className='flex items-start'
+      {...(openInCalendarSidebar ? { onCustomAction: openInCalendarSidebar } : {})}
     >
       <div className='text-sm line-clamp-1 truncate whitespace-normal break-all'>
         {isReminder
