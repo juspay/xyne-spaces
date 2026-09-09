@@ -1,6 +1,7 @@
 import { app, BrowserWindow, net } from 'electron';
 import { createWriteStream, existsSync, mkdirSync, rmSync, renameSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { pipeline } from 'stream/promises';
+import { createHash } from 'crypto';
 import path from 'path';
 import log from 'electron-log/main';
 import {config} from '../app/config';
@@ -329,6 +330,43 @@ export async function checkForUIUpdate(): Promise<UpdateCheckResult> {
 }
 
 /**
+ * Verify the extracted OTA bundle against the signed release manifest.
+ *
+ * The Airborne manifest pins a raw SHA-256 (hex) of the bundle's index file at
+ * `package.index.checksum` / `package.index.file_path`. We recompute it over the extracted
+ * file and reject on any mismatch — an unverifiable or tampered bundle must never be staged.
+ * Throws (aborting the update) on a missing checksum, missing/escaping index file, or mismatch.
+ */
+function verifyBundleChecksum(bundlePath: string, remoteConfig: ReleaseConfig): void {
+  const expected = remoteConfig.package.index.checksum?.trim().toLowerCase();
+  const indexRelPath = remoteConfig.package.index.file_path?.trim();
+
+  if (!expected || !indexRelPath) {
+    throw new Error('Release manifest is missing an index checksum/path; refusing unverifiable update');
+  }
+
+  // The file_path comes from a remote manifest — resolve it and confirm it stays inside the
+  // bundle so a crafted "../.." path cannot point the hash at an arbitrary file.
+  const bundleRoot = path.resolve(bundlePath);
+  const indexAbsPath = path.resolve(bundleRoot, indexRelPath);
+  if (indexAbsPath !== bundleRoot && !indexAbsPath.startsWith(bundleRoot + path.sep)) {
+    throw new Error(`Manifest index file_path escapes the bundle directory: ${indexRelPath}`);
+  }
+  if (!existsSync(indexAbsPath)) {
+    throw new Error(`UI bundle is missing its index file (${indexRelPath}); cannot verify integrity`);
+  }
+
+  const actual = createHash('sha256').update(readFileSync(indexAbsPath)).digest('hex');
+  if (actual !== expected) {
+    throw new Error(
+      `UI bundle checksum mismatch for ${indexRelPath}: expected ${expected}, got ${actual}`,
+    );
+  }
+
+  log.info('[UIUpdater] Bundle checksum verified:', indexRelPath);
+}
+
+/**
  * Download UI update to staging directory
  */
 export async function downloadUIUpdate(): Promise<boolean> {
@@ -421,6 +459,13 @@ export async function downloadUIUpdate(): Promise<boolean> {
       }
     }
     
+    // Integrity gate: verify the downloaded bundle against the signed release manifest
+    // BEFORE staging it. The manifest pins a SHA-256 of the bundle's index file
+    // (package.index.file_path, e.g. .vite/manifest.json). A mismatch means the bytes we
+    // fetched are not the release the manifest describes — tampered CDN, MITM, or a
+    // truncated download — so we refuse the update rather than run untrusted UI code.
+    verifyBundleChecksum(uiBundlePath, remoteConfig);
+
     // Move UI bundle to staging
     renameSync(uiBundlePath, stagingPath);
     

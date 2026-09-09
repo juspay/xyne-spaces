@@ -279,11 +279,11 @@ const RadarPanel = (): ReactElement => {
     return `#${channel.name}`;
   };
 
-  const openThread = (card: RadarThreadCard, messageId?: string) => {
-    const path = `/chat/dir/radar/${card.channelId}/${card.conversationId}`;
-    void navigate(
-      messageId ? `${path}#origin=${card.conversationId}&messageId=${messageId}` : path,
-    );
+  // The conversation is the ITEM's, not the card's: a DM card groups the whole
+  // channel, so its items live in different threads and each has to open its own.
+  const openThread = (card: RadarThreadCard, conversationId: string, messageId?: string) => {
+    const path = `/chat/dir/radar/${card.channelId}/${conversationId}`;
+    void navigate(messageId ? `${path}#origin=${conversationId}&messageId=${messageId}` : path);
   };
 
   const openOnClick = (open: () => void) => ({
@@ -373,7 +373,7 @@ const RadarPanel = (): ReactElement => {
             className='text-left font-bold text-foreground hover:underline text-[15px]'
             onClick={e => {
               e.stopPropagation();
-              openThread(card, item.sourceMessageId);
+              openThread(card, item.conversationId, item.sourceMessageId);
             }}
           >
             {index !== null ? `${index + 1}. ${item.title}` : item.title}
@@ -387,7 +387,7 @@ const RadarPanel = (): ReactElement => {
                 className='group/bullet flex items-start gap-2 text-sm text-muted-foreground rounded cursor-pointer hover:text-foreground'
                 data-track-category='RADAR'
                 data-track-name='OPEN_SOURCE_MESSAGE'
-                {...openOnClick(() => openThread(card, item.sourceMessageId))}
+                {...openOnClick(() => openThread(card, item.conversationId, item.sourceMessageId))}
               >
                 <span className='mt-[7px] size-1 rounded-full bg-muted-foreground shrink-0' />
                 <span>{item.contextSummary}</span>
@@ -447,7 +447,7 @@ const RadarPanel = (): ReactElement => {
   };
 
   const renderCard = (card: RadarThreadCard, kind: 'pending' | 'waiting') => {
-    const key = `${kind}:${card.conversationId}`;
+    const key = `${kind}:${card.scopeKey}`;
     const busy = busyKey === key;
     const multi = card.items.length > 1;
     const dismissable = selfId ? card.items.filter(i => i.pendingOn.includes(selfId)).length : 0;
@@ -471,7 +471,13 @@ const RadarPanel = (): ReactElement => {
           : {
               'data-track-category': 'RADAR',
               'data-track-name': 'OPEN_THREAD_FROM_CARD',
-              ...openOnClick(() => openThread(card, card.items[0]?.sourceMessageId)),
+              ...openOnClick(() =>
+                openThread(
+                  card,
+                  card.items[0]?.conversationId ?? card.conversationId,
+                  card.items[0]?.sourceMessageId,
+                ),
+              ),
             })}
       >
         <div className='px-6 pt-5 flex items-center gap-3'>
@@ -563,7 +569,7 @@ const RadarPanel = (): ReactElement => {
                         data-track-name='RESOLVE_ALL_ITEMS'
                         onClick={() => {
                           setCardMenu(null);
-                          void withBusy(key, () => resolveAllRadarItems(card.conversationId));
+                          void withBusy(key, () => resolveAllRadarItems(card.scopeKey));
                         }}
                       >
                         <span className='flex items-center gap-2 text-sm font-medium'>
@@ -583,7 +589,7 @@ const RadarPanel = (): ReactElement => {
                         data-track-name='DISMISS_ALL_ITEMS'
                         onClick={() => {
                           setCardMenu(null);
-                          void withBusy(key, () => dismissAllRadarItems(card.conversationId));
+                          void withBusy(key, () => dismissAllRadarItems(card.scopeKey));
                         }}
                       >
                         <span className='flex items-center gap-2 text-sm font-medium'>

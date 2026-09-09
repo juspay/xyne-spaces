@@ -19,6 +19,9 @@ export interface RadarFeedItem {
 }
 
 export interface RadarThreadCard {
+  /** A thread, or a whole DM. Bulk actions address the card through this. */
+  scopeKey: string;
+  /** Representative conversation only — open an item by its own conversationId. */
   conversationId: string;
   channelId: string;
   threadPreview: string | null;
@@ -133,10 +136,10 @@ export function resolveRadarItem(itemId: string): Promise<RadarApplyResult> {
   );
 }
 
-export function resolveAllRadarItems(conversationId: string): Promise<RadarApplyResult> {
+export function resolveAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
   return unwrap(
     apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
-      `/radar/threads/${encodeURIComponent(conversationId)}/resolve-all`,
+      `/radar/threads/${encodeURIComponent(scopeKey)}/resolve-all`,
     ),
   );
 }
@@ -150,10 +153,10 @@ export function dismissRadarItem(itemId: string): Promise<RadarApplyResult> {
   );
 }
 
-export function dismissAllRadarItems(conversationId: string): Promise<RadarApplyResult> {
+export function dismissAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
   return unwrap(
     apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
-      `/radar/threads/${encodeURIComponent(conversationId)}/dismiss-all`,
+      `/radar/threads/${encodeURIComponent(scopeKey)}/dismiss-all`,
     ),
   );
 }
