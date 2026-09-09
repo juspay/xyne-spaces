@@ -104,6 +104,7 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
+import { useScope } from '../../../shortcuts';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -203,6 +204,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const [selectedCanvas, setSelectedCanvas] = useState<Canvas | null>(null);
   const [openCommentCount, setOpenCommentCount] = useState(0);
+  useScope('canvas', Boolean(canvasId));
+
   useEffect(() => {
     setOpenCommentCount(0);
   }, [selectedCanvas?.id]);
@@ -432,6 +435,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     }
   }, [
     singleCanvas,
+    singleCanvasDetails.type,
     user?.id,
     canvasId,
     state,

@@ -21,6 +21,7 @@ interface BlockContent {
   type?: string;
   text?: string;
   content?: BlockContent[];
+  props?: Record<string, unknown>;
 }
 
 interface TableCell {
@@ -42,6 +43,9 @@ const getBlockText = (content: BlockContent[]): string => {
 
   return content
     .map(item => {
+      if (item.type === 'mention') {
+        return getMentionDisplayText(item);
+      }
       if (item.type === 'text' && item.text) {
         return item.text;
       }
@@ -54,6 +58,15 @@ const getBlockText = (content: BlockContent[]): string => {
       return '';
     })
     .join('');
+};
+
+const getMentionDisplayText = (item: BlockContent): string => {
+  const props = item.props || {};
+  const groupId = typeof props['groupId'] === 'string' ? props['groupId'] : '';
+  const groupName = typeof props['groupName'] === 'string' ? props['groupName'] : '';
+  const username = typeof props['username'] === 'string' ? props['username'] : '';
+
+  return groupId && groupName ? groupName : username;
 };
 
 const getTableText = (tableContent: TableContent): string => {
@@ -145,6 +158,7 @@ const getDomPosition = (
   targetOffset: number,
 ): { node: Text; offset: number } | null => {
   let currentGlobalOffset = 0;
+  let lastTextNode: Text | null = null;
 
   for (const node of textNodes) {
     const rawText = node.textContent || '';
@@ -159,6 +173,9 @@ const getDomPosition = (
     }
 
     const validCharsInNode = mapping.length;
+    if (validCharsInNode > 0) {
+      lastTextNode = node;
+    }
 
     if (targetOffset < currentGlobalOffset + validCharsInNode) {
       const localCleanIndex = targetOffset - currentGlobalOffset;
@@ -173,7 +190,18 @@ const getDomPosition = (
     currentGlobalOffset += validCharsInNode;
   }
 
+  if (targetOffset === currentGlobalOffset && lastTextNode) {
+    return { node: lastTextNode, offset: lastTextNode.textContent?.length ?? 0 };
+  }
+
   return null;
+};
+
+const isSearchableTextNode = (node: Text): boolean => {
+  const parent = node.parentElement;
+  if (!parent) return false;
+
+  return !parent.closest('[data-slot="avatar"]');
 };
 
 export const applyHighlights = (
@@ -214,8 +242,13 @@ export const applyHighlights = (
       const walker = document.createTreeWalker(blockElement, NodeFilter.SHOW_TEXT, null);
       let node: Node | null;
       while ((node = walker.nextNode())) {
-        if (node.textContent && node.textContent.length > 0) {
-          textNodes.push(node as Text);
+        const textNode = node as Text;
+        if (
+          textNode.textContent &&
+          textNode.textContent.length > 0 &&
+          isSearchableTextNode(textNode)
+        ) {
+          textNodes.push(textNode);
         }
       }
 
