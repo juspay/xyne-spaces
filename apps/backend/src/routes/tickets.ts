@@ -10,7 +10,7 @@ import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
 import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
-import { authorize } from '@/middleware/authorize';
+import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 import { FlowRunExportController } from '@/controllers/flowRunExportController';
 
@@ -60,9 +60,10 @@ router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
 router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
+// Gated like the other release-manager AI actions (suggest/analyze), not plain TICKETS WRITE.
 router.post(
   '/:ticketId/release-insights',
-  authorize('TICKETS', AccessType.WRITE),
+  authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE),
   releaseInsightsController.generate,
 );
 router.post(

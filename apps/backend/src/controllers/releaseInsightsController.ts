@@ -10,6 +10,9 @@ import { logger } from '@/utils/logger';
 const isAssigned = (value: string | null | undefined): boolean =>
   !!value && value.trim().length > 0 && value.trim().toLowerCase() !== 'unassigned';
 
+// A stuck in-flight flag older than this is treated as abandoned so retries proceed.
+const INSIGHTS_STALE_MS = 5 * 60 * 1000;
+
 export class ReleaseInsightsController {
   private ticketRepository = new TicketRepository();
   private releaseReportService = new ReleaseReportService();
@@ -39,19 +42,33 @@ export class ReleaseInsightsController {
         res.status(400).json({ success: false, error: 'Not a release ticket' });
         return;
       }
-      if (
-        (ticket.metadata as { isGeneratingReleaseInsights?: boolean } | null)
-          ?.isGeneratingReleaseInsights === true
-      ) {
-        res.status(409).json({
-          success: false,
-          error: 'Insights are already being generated for this release',
+      // In-flight guard; a flag older than the stale window is treated as abandoned.
+      const meta = ticket.metadata as {
+        isGeneratingReleaseInsights?: boolean;
+        insightsGenerationStartedAt?: string;
+      } | null;
+      if (meta?.isGeneratingReleaseInsights === true) {
+        const startedAt = meta.insightsGenerationStartedAt
+          ? Date.parse(meta.insightsGenerationStartedAt)
+          : NaN;
+        const isStale =
+          !Number.isFinite(startedAt) || Date.now() - startedAt > INSIGHTS_STALE_MS;
+        if (!isStale) {
+          res.status(409).json({
+            success: false,
+            error: 'Insights are already being generated for this release',
+          });
+          return;
+        }
+        logger.warn('[ReleaseInsights] stale in-flight flag, allowing retry', {
+          ticketId,
+          startedAt: meta.insightsGenerationStartedAt ?? null,
         });
-        return;
       }
 
       await this.ticketRepository.updateTicketMetadata(ticketId, {
         isGeneratingReleaseInsights: true,
+        insightsGenerationStartedAt: new Date().toISOString(),
       });
 
       try {
@@ -131,11 +148,15 @@ export class ReleaseInsightsController {
         await this.ticketRepository.updateTicketMetadata(ticketId, {
           releaseInsights,
           isGeneratingReleaseInsights: false,
+          insightsGenerationStartedAt: null,
         });
         res.json({ success: true });
       } finally {
         await this.ticketRepository
-          .updateTicketMetadata(ticketId, { isGeneratingReleaseInsights: false })
+          .updateTicketMetadata(ticketId, {
+            isGeneratingReleaseInsights: false,
+            insightsGenerationStartedAt: null,
+          })
           .catch(err =>
             logger.warn('[ReleaseInsights] failed to clear generating flag', {
               ticketId,

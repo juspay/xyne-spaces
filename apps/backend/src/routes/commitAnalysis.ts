@@ -169,6 +169,10 @@ router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER',
 
 // AI-suggest services + env/migration paths from the repo's file tree, to
 // prefill the release-config wizard. Supports GitHub and Bitbucket Server.
+// Scope note: repoUrl is caller-supplied and listing uses the org-wide token, so
+// any RELEASE-MANAGER WRITE holder can list any repo that token can read. This is
+// intentional — the wizard prefills repos not yet configured, so it can't be
+// restricted to existing applications; the VCS host is pinned to config (no SSRF).
 router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
   const { repoUrl, projectId: rawProjectId } = req.body as { repoUrl?: string; projectId?: unknown };
   const projectId = typeof rawProjectId === 'string' && rawProjectId ? rawProjectId : null;
