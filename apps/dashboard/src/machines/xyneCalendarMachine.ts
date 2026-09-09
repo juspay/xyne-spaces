@@ -1,5 +1,6 @@
 import { setup, createActor, assign } from 'xstate';
 import { logger, Event as LogEvent } from '../utils/logger';
+import type { Call } from '../routes/CallHistoryScreen/callHistoryItem.utils';
 
 export type XyneCalendarState = 'closed' | 'open';
 
@@ -8,13 +9,15 @@ export interface XyneCalendarContext {
   /** ISO day string (yyyy-MM-dd) — the day the timeline is showing. */
   selectedDate: string;
   selectedCallId: string | null;
+  /** Caller-provided call snapshot, used when the id isn't in either query pool (e.g. gone ACTIVE/CANCELLED). */
+  selectedCallFallback: Call | null;
 }
 
 export type XyneCalendarEvent =
   | { type: 'OPEN'; date?: string }
   | { type: 'CLOSE' }
   | { type: 'SELECT_DATE'; date: string }
-  | { type: 'SELECT_CALL'; callId: string | null };
+  | { type: 'SELECT_CALL'; callId: string | null; callFallback?: Call };
 
 const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
@@ -116,6 +119,7 @@ export const xyneCalendarMachine = setup({
         xyneCalendarState: 'open' as XyneCalendarState,
         selectedDate: date,
         selectedCallId: null,
+        selectedCallFallback: null,
       };
     }),
     setClosed: assign(({ context }) => {
@@ -129,7 +133,7 @@ export const xyneCalendarMachine = setup({
     }),
     setSelectedCall: assign(({ event }) => {
       if (event.type !== 'SELECT_CALL') return {};
-      return { selectedCallId: event.callId };
+      return { selectedCallId: event.callId, selectedCallFallback: event.callFallback ?? null };
     }),
   },
 }).createMachine({
@@ -137,6 +141,7 @@ export const xyneCalendarMachine = setup({
     xyneCalendarState: 'closed',
     selectedDate: todayIso(),
     selectedCallId: null,
+    selectedCallFallback: null,
   }),
   id: 'xyneCalendarMachine',
   initial: 'closed',
@@ -148,6 +153,7 @@ export const xyneCalendarMachine = setup({
     },
     open: {
       on: {
+        OPEN: { actions: 'resetView' },
         CLOSE: { target: 'closed', actions: 'setClosed' },
         SELECT_DATE: { actions: 'setSelectedDate' },
         SELECT_CALL: { actions: 'setSelectedCall' },

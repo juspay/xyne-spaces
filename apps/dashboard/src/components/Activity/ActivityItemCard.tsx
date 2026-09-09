@@ -48,6 +48,7 @@ interface ActivityItemCardProps {
   useActivityCutoff?: boolean;
   focusThread?: boolean;
   unresolvedChannelLabel?: string;
+  onCustomAction?: () => void;
 }
 
 export const ActivityItemCard = ({
@@ -70,6 +71,7 @@ export const ActivityItemCard = ({
   useActivityCutoff = true,
   focusThread = false,
   unresolvedChannelLabel = 'Unknown Channel',
+  onCustomAction,
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
@@ -111,6 +113,11 @@ export const ActivityItemCard = ({
     // let the browser handle it and do not navigate the card
     const target = e.target as HTMLElement;
     if (target.closest('a')) {
+      return;
+    }
+
+    if (onCustomAction) {
+      onCustomAction();
       return;
     }
 

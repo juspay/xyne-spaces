@@ -49,6 +49,10 @@ const isoToDate = (iso: string): Date => new Date(`${iso}T00:00:00`);
 const XyneCalendarSidebarComponent = (): ReactElement => {
   const selectedDateIso = useSelector(xyneCalendarActor, state => state.context.selectedDate);
   const selectedCallId = useSelector(xyneCalendarActor, state => state.context.selectedCallId);
+  const selectedCallFallback = useSelector(
+    xyneCalendarActor,
+    state => state.context.selectedCallFallback,
+  );
   const selectedDate = useMemo(() => isoToDate(selectedDateIso), [selectedDateIso]);
 
   const handleDateChange = useCallback((date: Date): void => {
@@ -80,6 +84,7 @@ const XyneCalendarSidebarComponent = (): ReactElement => {
       <XyneCalendarSidebarTimeline
         selectedDate={selectedDate}
         selectedCallId={selectedCallId}
+        selectedCallFallback={selectedCallFallback}
         onSelectCall={handleSelectCall}
         onClearSelectedCall={handleClearSelectedCall}
         onDateChange={handleDateChange}
@@ -197,6 +202,7 @@ XyneCalendarSidebarHeader.displayName = 'XyneCalendarSidebarHeader';
 interface XyneCalendarSidebarTimelineProps {
   selectedDate: Date;
   selectedCallId: string | null;
+  selectedCallFallback: Call | null;
   onSelectCall: (callId: string) => void;
   onClearSelectedCall: () => void;
   onDateChange: (date: Date) => void;
@@ -309,6 +315,7 @@ const XyneCalendarSidebarTimeline = memo(
   ({
     selectedDate,
     selectedCallId,
+    selectedCallFallback,
     onSelectCall,
     onClearSelectedCall,
     onDateChange,
@@ -530,10 +537,16 @@ const XyneCalendarSidebarTimeline = memo(
       return (): void => window.cancelAnimationFrame(frameId);
     }, [callPositions, isCallDetailOpen, isLoading, isScheduledCallsLoading, selectedDate]);
 
-    const queriedSelectedCall = useMemo(
-      () => dailyCalls.find(call => call.id === selectedCallId) ?? null,
-      [dailyCalls, selectedCallId],
-    );
+    // Not `dailyCalls`: that list requires `startsAt` (getCallsOverlappingDay) and only
+    // covers SCHEDULED/ended-history statuses — selectedCallFallback covers what neither finds.
+    const queriedSelectedCall = useMemo(() => {
+      if (!selectedCallId) return null;
+      return (
+        calls?.find(call => call.id === selectedCallId) ??
+        calendarScheduledCalls?.find(call => call.id === selectedCallId) ??
+        (selectedCallFallback?.id === selectedCallId ? selectedCallFallback : null)
+      );
+    }, [calls, calendarScheduledCalls, selectedCallId, selectedCallFallback]);
 
     useEffect(() => {
       if (queriedSelectedCall) selectedCallSnapshotRef.current = queriedSelectedCall;
