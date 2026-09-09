@@ -58,6 +58,11 @@ export interface SummaryTemplateSection {
   id: string;
   title: string;
   description: string;
+  /**
+   * Only meaningful on the reserved Decisions / Action Items sections. A Scribe admin can
+   * switch one off; it stays on the template but is dropped from summary generation.
+   */
+  disabled?: boolean;
 }
 
 export type SummaryTemplateInput = Pick<

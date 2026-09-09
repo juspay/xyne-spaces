@@ -1297,11 +1297,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Fetch stages for filtered single board (when exactly one board is in filter)
   // In board view, the path param boardId IS the single board context
-  const filteredSingleBoardId = useMemo(() => {
+  const explicitBoardId = useMemo(() => {
     if (viewMode === 'board' && boardId) return boardId;
     if (filters.boards && filters.boards.length === 1) return filters.boards[0];
     return null;
   }, [viewMode, boardId, filters.boards]);
+
+  // A project/channel scope holding exactly one board is that board, even under "All Boards".
+  const [scopeBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: effectiveProjectId || '' }),
+    { enabled: !!effectiveProjectId && !explicitBoardId && !filters.boards?.length },
+  );
+
+  const soleScopeBoardId =
+    !filters.boards?.length && scopeBoards?.length === 1 ? scopeBoards[0]?.id : undefined;
+
+  const filteredSingleBoardId = explicitBoardId ?? soleScopeBoardId ?? null;
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
   // In my-tickets/user-tickets/group-tickets, fetch ALL boards (no project filter) since tickets can span projects
@@ -1560,7 +1571,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const isAllBoardsSelected = !filters.boards || filters.boards.length === 0;
 
     // If "All Boards" is selected, always use status columns
-    if (isAllBoardsSelected && channelId && viewMode === 'project') {
+    if (isAllBoardsSelected && !filteredSingleBoardId && channelId && viewMode === 'project') {
       return getStatusColumns();
     }
 
@@ -1570,10 +1581,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
 
     // If single board selected in filter, use its stages.
-    // Workspace-views always group by status (shouldUseStatusColumns), so never
-    // return board stage UUIDs here or columns/counts/drag mode would mismatch.
     if (
-      !isWorkspaceView &&
       filteredSingleBoardId &&
       stagesDataForFilteredBoard &&
       stagesDataForFilteredBoard.length > 0
@@ -1700,7 +1708,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ];
   }, [
     viewMode,
-    isWorkspaceView,
     shouldShowBoardWiseView,
     filteredSingleBoardId,
     stagesDataForFilteredBoard,
@@ -3079,10 +3086,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     });
   }, [flowTicketNodes]);
 
-  const shouldUseStatusColumns =
-    isWorkspaceView ||
-    (!filteredSingleBoardId && ['project', 'my-tickets'].includes(viewMode)) ||
-    (channelId && viewMode === 'project' && channelViewType !== 'stage');
+  const shouldUseStatusColumns = !filteredSingleBoardId || !stagesDataForFilteredBoard?.length;
 
   const navBaseArgs = useMemo<KanbanTicketsPageBaseArgs>(
     () => ({
@@ -3298,14 +3302,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   // Use drag and drop hook
-  const dragDropMode = useMemo(() => {
-    // For channel tickets: use view type to determine mode
-    if (channelId && viewMode === 'project') {
-      return channelViewType === 'stage' ? 'stage' : 'status';
-    }
-    // For other views
-    return viewMode === 'board' || filteredSingleBoardId ? 'stage' : 'status';
-  }, [channelId, viewMode, channelViewType, filteredSingleBoardId]);
+  const dragDropMode = shouldUseStatusColumns ? 'status' : 'stage';
 
   const canReorder = !!filteredSingleBoardId;
   const setDragLocalTickets = useCallback<React.Dispatch<React.SetStateAction<Ticket[]>>>(value => {
