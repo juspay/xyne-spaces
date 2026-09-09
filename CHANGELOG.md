@@ -1,3 +1,11 @@
+## [1.297.2](https://github.com/juspay/xyne-spaces/compare/v1.297.1...v1.297.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* sync stage icons on ticket surfaces with the board definition ([#1523](https://github.com/juspay/xyne-spaces/issues/1523)) ([7d5f242](https://github.com/juspay/xyne-spaces/commit/7d5f2425ebf854a7a2b0117acd0c81b6707ab9a9))
+* word split fix in subject contains and body contains … ([#1644](https://github.com/juspay/xyne-spaces/issues/1644)) ([3f48772](https://github.com/juspay/xyne-spaces/commit/3f48772c976dbb7d33218ec1cdfaaa845744b149))
+
 ## [1.297.1](https://github.com/juspay/xyne-spaces/compare/v1.297.0...v1.297.1) (2026-09-09)
 
 
