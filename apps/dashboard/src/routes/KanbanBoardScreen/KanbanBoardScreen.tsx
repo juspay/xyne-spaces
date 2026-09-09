@@ -35,6 +35,7 @@ import {
   SearchDefault as Search,
   KanbanBoard as SquareKanban,
   GridTable,
+  EyeOff,
 } from '@xyne/icons';
 import { CalendarView } from '../../components/Tickets/CalendarView';
 import TicketReportsScreen from '../../routes/TicketReportsScreen/TicketReportsScreen';
@@ -72,6 +73,8 @@ import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
+import { HiddenColumnsPanel } from '../../components/Tickets/HiddenColumnsPanel/HiddenColumnsPanel';
+import { useHiddenKanbanColumns } from './useHiddenKanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
 import {
@@ -3702,6 +3705,50 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     el.scrollIntoView({ block: 'start' });
   }, [expandedGroups, processedGroups]);
 
+  const kanbanLayoutScope = `${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`;
+  const { hiddenColumnIds, hideColumn, unhideColumn, showAllColumns } = useHiddenKanbanColumns(
+    [kanbanLayoutScope, ...stages.map(stage => stage.id).sort()].join('|'),
+  );
+  const hiddenStages = useMemo(
+    () => stages.filter(stage => hiddenColumnIds.includes(stage.id)),
+    [stages, hiddenColumnIds],
+  );
+  const allColumnsHidden = stages.length > 0 && hiddenStages.length === stages.length;
+  const kanbanGroups = allColumnsHidden ? [] : processedGroups;
+
+  // Mirrors what a column header shows: server counts, unless a search has left
+  // them stale, in which case only the rows actually loaded can be counted.
+  const columnCountsAreReliable = !(canUseKanbanColumnPagination && hasSearchTerm);
+  const countStageInGroup = useCallback(
+    (group: (typeof processedGroups)[number], stage: Stage): number => {
+      const loaded = group.columnData[stage.id]?.length ?? 0;
+      if (!columnCountsAreReliable) return loaded;
+      return group.stageCounts?.[stage.id] ?? group.stageCounts?.[stage.name] ?? loaded;
+    },
+    [columnCountsAreReliable],
+  );
+  const countHiddenInGroup = useCallback(
+    (group: (typeof processedGroups)[number]): number =>
+      hiddenStages.reduce((total, stage) => total + countStageInGroup(group, stage), 0),
+    [countStageInGroup, hiddenStages],
+  );
+  const getHiddenColumnCount = useCallback(
+    (stage: Stage): number =>
+      processedGroups.reduce((total, group) => total + countStageInGroup(group, stage), 0),
+    [countStageInGroup, processedGroups],
+  );
+
+  const handleHideColumn = useCallback(
+    (stageId: string) => {
+      const stageName = stages.find(stage => stage.id === stageId)?.name ?? 'Column';
+      hideColumn(stageId);
+      toast.success(`${stageName} hidden — its tickets left every count.`, {
+        action: { label: 'Undo', onClick: () => unhideColumn(stageId) },
+      });
+    },
+    [hideColumn, stages, unhideColumn],
+  );
+
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
@@ -5236,24 +5283,48 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         </div>
       ) : (
         /* Accordion-style Kanban View */
-        <div
-          className={`flex-1 min-h-0 overflow-auto relative ${groupBy !== 'none' ? 'p-4' : 'p-0'}`}
-        >
+        <div className='flex-1 min-h-0 flex'>
           <DndContext
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={event => void handleDragEnd(event)}
             sensors={sensors}
           >
-            <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
-              {processedGroups.map(group => {
+            <div
+              className={`flex-1 min-w-0 h-full overflow-auto relative flex flex-col space-y-5 ${
+                groupBy !== 'none' ? 'p-4 pb-16' : 'p-0'
+              }`}
+            >
+              {allColumnsHidden && (
+                <div className='flex h-full flex-col items-center justify-center gap-3.5 text-center'>
+                  <div className='flex size-[52px] items-center justify-center rounded-2xl bg-muted text-muted-foreground'>
+                    <EyeOff className='size-6' />
+                  </div>
+                  <p className='text-base font-semibold text-foreground'>Every column is hidden</p>
+                  <p className='max-w-[340px] text-[13.5px] leading-[1.6] text-muted-foreground'>
+                    Hidden columns keep their tickets out of the board and out of every count.
+                    Unhide one from the panel on the right.
+                  </p>
+                  <button
+                    type='button'
+                    onClick={showAllColumns}
+                    className='flex h-[34px] items-center rounded-[9px] bg-primary px-[15px] text-[13.5px] font-medium text-primary-foreground transition-colors hover:bg-blue-700'
+                    data-track-category='Tickets'
+                    data-track-name='ShowAllKanbanColumns'
+                  >
+                    Show all columns
+                  </button>
+                </div>
+              )}
+              {kanbanGroups.map(group => {
                 const isExpanded = expandedGroups.has(group.key);
                 const showGroupHeader = groupBy !== 'none';
                 const serverCountGroup = isKanbanLayout
                   ? kanbanCounts.groupsByKey.get(group.key)
                   : undefined;
                 const stageCounts = group.stageCounts ?? serverCountGroup?.stages;
-                const groupCount = group.count;
+                const hiddenInGroup = countHiddenInGroup(group);
+                const groupCount = Math.max(0, group.count - hiddenInGroup);
                 const paginatedColumnConfig = canUseKanbanColumnPagination
                   ? {
                       columnType: shouldUseStatusColumns ? ('status' as const) : ('stage' as const),
@@ -5313,8 +5384,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                               {group.displayName}
                             </h3>
                           </div>
-                          <span className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'>
+                          <span
+                            className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'
+                            title={
+                              hiddenInGroup > 0
+                                ? `${groupCount} of ${group.count} shown — ${hiddenInGroup} in hidden columns`
+                                : undefined
+                            }
+                          >
                             {groupCount}
+                            {hiddenInGroup > 0 && (
+                              <span className='text-muted-foreground/60'>{` / ${group.count}`}</span>
+                            )}
                           </span>
                         </div>
                       </button>
@@ -5329,13 +5410,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       >
                         <KanbanColumns
                           stages={stages}
+                          hiddenColumnIds={hiddenColumnIds}
+                          onHideColumn={handleHideColumn}
                           ticketsByStage={group.columnData}
                           {...(stageCounts ? { stageCounts } : {})}
                           onTicketClick={handleTicketClick}
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
                           keyPrefix={`${group.key}::`}
-                          layoutScope={`${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`}
+                          layoutScope={kanbanLayoutScope}
                           searchActive={hasSearchTerm}
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={group.allTickets}
@@ -5385,6 +5468,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               )}
             </DragOverlay>
           </DndContext>
+
+          <HiddenColumnsPanel
+            stages={hiddenStages}
+            getCount={getHiddenColumnCount}
+            onUnhide={unhideColumn}
+          />
         </div>
       )}
 
