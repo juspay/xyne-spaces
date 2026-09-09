@@ -46,7 +46,12 @@ interface ExistsCond {
     subquery: { table: string; where?: Cond };
   };
 }
-export type Cond = SimpleCond | BoolCond | ExistsCond;
+/** Synthetic node: a per-row admission arm the shared path cannot serve, replaced by
+ *  `excludePerRowArms` so it never grants (evalCond returns false). See buildAclGate. */
+interface ExcludedCond {
+  type: 'excluded';
+}
+export type Cond = SimpleCond | BoolCond | ExistsCond | ExcludedCond;
 
 /**
  * A grant table the gate reads, classified for the two-plane partition (final plan):
@@ -71,6 +76,11 @@ export interface AclGate {
   grantSources: GrantSource[];
   /** Distinct grant tables (for the evaluator's snapshot lookups). */
   grantTables: string[];
+  /** True if the ACL had a top-level per-row arm (a data-row column bound to the subscriber, e.g.
+   *  `createdBy==me`) that was EXCLUDED from the gate. The shared per-scope instance serves scope-join
+   *  admission only; the allowlist must assert this exclusion is safe for the query (e.g. attachments:
+   *  the createdBy arm only covers unlinked drafts, which never enter a channel-scoped instance). */
+  perRowExcluded: boolean;
   /**
    * Is `userId` (in `workspaceId`) granted a row of the root scope? `rootRow` is the
    * scope binding (the root table's key columns, e.g. `{ channelId }`); `snapshot`
@@ -104,13 +114,19 @@ function buildAclGate(rootTable: string): AclGate {
   // silently (a table that never admits). Refuse the subscribe instead.
   if (where) validateGateAst(where);
   const grantSources = where ? collectGrantSources(where) : [];
+  // Exclude top-level per-row arms (a data-row column bound to the subscriber, e.g. createdBy==me):
+  // the shared per-scope instance admits at SCOPE granularity, so a per-row predicate can't be a
+  // scope-level boolean — drop it (fail-closed: it never grants). scope-join leaves (SENTINEL_USER
+  // INSIDE a whereExists) are untouched — that's the legit membership check.
+  const gated = where ? excludePerRowArms(where) : undefined;
   return {
     rootTable,
     grantSources,
     grantTables: [...new Set(grantSources.map((s) => s.table))],
+    perRowExcluded: gated?.excluded ?? false,
     evaluate(rootRow, userId, workspaceId, snapshot) {
       // No ACL predicate = unrestricted at the row level (workspace backstop lives outside canSelect).
-      return where ? evalCond(where, rootRow, { userId, workspaceId }, snapshot) : true;
+      return gated ? evalCond(gated.cond, rootRow, { userId, workspaceId }, snapshot) : true;
     },
   };
 }
@@ -146,6 +162,34 @@ export function validateGateAst(cond: Cond): void {
 }
 
 /**
+ * Replace top-level per-row arms — a data-row `simple` bound to SENTINEL_USER (e.g. `createdBy==me`)
+ * — with an `excluded` node (never grants). Descends and/or but NOT into correlatedSubquery: a
+ * SENTINEL_USER simple INSIDE a whereExists is the membership leaf and must stay. Returns whether
+ * anything was excluded (for the allowlist's per-query safety assertion).
+ */
+function excludePerRowArms(cond: Cond): { cond: Cond; excluded: boolean } {
+  switch (cond.type) {
+    case 'simple':
+      return (cond.op === '=' || cond.op === 'IS') && cond.right.value === SENTINEL_USER
+        ? { cond: { type: 'excluded' }, excluded: true }
+        : { cond, excluded: false };
+    case 'and':
+    case 'or': {
+      let excluded = false;
+      const conditions = cond.conditions.map((c) => {
+        const r = excludePerRowArms(c);
+        excluded = excluded || r.excluded;
+        return r.cond;
+      });
+      return { cond: { type: cond.type, conditions }, excluded };
+    }
+    case 'correlatedSubquery':
+    case 'excluded':
+      return { cond, excluded: false };
+  }
+}
+
+/**
  * The column a whereExists subquery binds to SENTINEL_USER, or null if it does not pin the row to
  * the subscriber. `and` binds if ANY conjunct does (the row then pertains to the subscriber); `or`
  * binds ONLY if EVERY arm binds on the SAME column (a non-binding arm would grant regardless of the
@@ -176,6 +220,7 @@ export function boundColumnOf(where: Cond | undefined): string | null {
       return col;
     }
     case 'correlatedSubquery':
+    case 'excluded':
       return null;
   }
 }
@@ -228,6 +273,8 @@ function evalCond(cond: Cond, row: Row, b: Bindings, snapshot: SnapshotProvider)
       return cond.conditions.some((c) => evalCond(c, row, b, snapshot));
     case 'simple':
       return compare(row[cond.left.name], cond.op, resolveValue(cond.right.value, b));
+    case 'excluded':
+      return false; // a per-row arm the shared path doesn't serve — never grants
     case 'correlatedSubquery': {
       const { correlation, subquery } = cond.related;
       const parentValue = row[correlation.parentField[0]];

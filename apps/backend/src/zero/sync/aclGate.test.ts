@@ -57,7 +57,10 @@ test('message_attachments: grant tables span the 3-hop chain', () => {
   );
 });
 
-test('message_attachments: own attachment (createdBy) admitted regardless of channel', () => {
+test('message_attachments: createdBy arm is EXCLUDED on the shared path (creator-not-member denied)', () => {
+  // Was "own attachment admitted regardless of channel" — P3(a) excludes the per-row createdBy arm
+  // (a shared per-scope instance can't serve partial admission; the arm covers unlinked drafts that
+  // never enter a channel-scoped instance). So a creator who is NOT a channel member is now DENIED.
   const gate = deriveAclGate('message_attachments');
   const scope = { conversationId: 'CONV1', createdBy: 'U1', workspaceId: 'W1' };
   const snapshot = snap({
@@ -65,7 +68,7 @@ test('message_attachments: own attachment (createdBy) admitted regardless of cha
     channels: [{ id: 'C1', workspaceId: 'W1', visibility: 'PRIVATE' }],
     channel_participants: [{ channelId: 'C1', userId: 'U2' }],
   });
-  assert.equal(gate.evaluate(scope, 'U1', 'W1', snapshot), true);
+  assert.equal(gate.evaluate(scope, 'U1', 'W1', snapshot), false);
 });
 
 test('message_attachments: non-owner admitted via channel participation (3 hops)', () => {
@@ -146,6 +149,27 @@ test('validateGateAst: unsupported op nested in a subquery where is rejected', (
     },
   } as unknown as Cond;
   assert.throws(() => validateGateAst(ast), /unsupported operator '>'/);
+});
+
+// ---- P3(a): per-row arm exclusion (a data-row `createdBy==me` can't be a scope-level boolean) ----
+
+test('message_attachments: top-level createdBy==me arm is EXCLUDED (perRowExcluded)', () => {
+  const gate = deriveAclGate('message_attachments');
+  assert.equal(gate.perRowExcluded, true, 'the createdBy per-row arm must be excluded');
+  // Admission now depends ONLY on the scope-join chain — a non-owner participant is admitted;
+  // a non-member is denied EVEN IF they created the row (createdBy is excluded, not evaluated).
+  const scope = { conversationId: 'CONV1', createdBy: 'U9', workspaceId: 'W1' };
+  const snapshot = snap({
+    conversations: [{ conversationId: 'CONV1', channelId: 'C1' }],
+    channels: [{ id: 'C1', workspaceId: 'W1', visibility: 'PRIVATE' }],
+    channel_participants: [{ channelId: 'C1', userId: 'U2' }],
+  });
+  assert.equal(gate.evaluate(scope, 'U2', 'W1', snapshot), true, 'member admitted via the channel chain');
+  assert.equal(gate.evaluate(scope, 'U9', 'W1', snapshot), false, 'creator (U9) NOT admitted — createdBy arm excluded, and U9 is not a member');
+});
+
+test('conversations (channelLatest): no top-level per-row arm → perRowExcluded false', () => {
+  assert.equal(deriveAclGate('conversations').perRowExcluded, false);
 });
 
 test('real allowlisted ACLs derive without over-rejecting', () => {
