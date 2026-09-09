@@ -30,6 +30,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleDot,
+  EllipsisVertical,
   FileText,
   Folder,
   GitBranch,
@@ -65,6 +66,7 @@ import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { TicketToken } from '@xyne/icons';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
+import CompactActionsMenu from '../../components/ui/CompactActionsMenu';
 import Input from '../../components/ui/Input';
 import Textarea from '../../components/ui/Textarea';
 import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
@@ -196,6 +198,21 @@ function actionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Action failed';
 }
 
+// Mirrors the `updateTrack` / `createTrack` mutator schemas in packages/shared.
+const TRACK_NAME_MAX_LENGTH = 120;
+const TRACK_DESCRIPTION_MAX_LENGTH = 2000;
+
+/**
+ * A track card is itself a button, so events coming from a control layered on top of it — the
+ * status select, the actions menu, and the listbox/menu they portal — must not open the track.
+ * Radix portals still bubble through the React tree, hence the `role` selectors.
+ */
+const TRACK_CARD_IGNORE_SELECTOR =
+  '[data-status-select], [data-card-menu], [role="listbox"], [role="option"], [role="menu"], [role="menuitem"]';
+
+const shouldIgnoreTrackCardEvent = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest(TRACK_CARD_IGNORE_SELECTOR) !== null;
+
 export default function SdlcScreen(): ReactElement {
   const {
     workspaceId,
@@ -271,6 +288,8 @@ export default function SdlcScreen(): ReactElement {
   const [renameTypeName, setRenameTypeName] = useState('');
   const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null);
   const [trackDialog, setTrackDialog] = useState(false);
+  // Set when the track dialog is editing an existing track instead of creating one.
+  const [trackEditId, setTrackEditId] = useState<string | null>(null);
   const [trackName, setTrackName] = useState('');
   const [trackDescription, setTrackDescription] = useState('');
   const [artifactTrack, setArtifactTrack] = useState<{ id: string; name: string } | null>(null);
@@ -1480,6 +1499,60 @@ export default function SdlcScreen(): ReactElement {
     if (response.type === 'error') throw new Error(response.error.message);
   };
 
+  /**
+   * Closing only flips `open`. The mode and the field values are left alone so the dialog keeps
+   * rendering what it was rendering through Radix's 200ms exit animation, and so dismissing the
+   * create dialog does not silently throw away a draft.
+   */
+  const closeTrackDialog = (): void => {
+    setTrackDialog(false);
+  };
+
+  const openTrackCreateDialog = (): void => {
+    // Coming from an edit the shared fields hold that track's values, not a create draft.
+    if (trackEditId) {
+      setTrackName('');
+      setTrackDescription('');
+    }
+    setTrackEditId(null);
+    setTrackDialog(true);
+  };
+
+  const openTrackEditDialog = (track: {
+    id: string;
+    name: string;
+    description?: string | null;
+  }): void => {
+    setTrackEditId(track.id);
+    setTrackName(track.name);
+    setTrackDescription(track.description ?? '');
+    setTrackDialog(true);
+  };
+
+  const updateTrackDetailsAction = async (trackId: string): Promise<void> => {
+    const description = trackDescription.trim();
+    await runTrackMutation(
+      zero.mutate(
+        mutators.sdlc.updateTrack({
+          trackId,
+          name: trackName.trim(),
+          description: description ? description : null,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
+    closeTrackDialog();
+  };
+
+  const trimmedTrackName = trackName.trim();
+  const trackNameLength = trimmedTrackName.length;
+  const trackDescriptionLength = trackDescription.trim().length;
+  // `maxLength` only caps typing, so a name loaded from an existing track can still be over the
+  // mutator's limit. Surface it on the field instead of letting the server reject the submit.
+  const trackNameTooLong = trackNameLength > TRACK_NAME_MAX_LENGTH;
+  const trackDescriptionTooLong = trackDescriptionLength > TRACK_DESCRIPTION_MAX_LENGTH;
+  const trackDialogInvalid = !trimmedTrackName || trackNameTooLong || trackDescriptionTooLong;
+
   const createTrackAction = async (): Promise<void> => {
     if (!repo || !channel) return;
     const id = uuidv4();
@@ -1495,9 +1568,10 @@ export default function SdlcScreen(): ReactElement {
         }),
       ),
     );
-    setTrackDialog(false);
+    // The draft has been consumed — unlike a dismissal, this one should not come back.
     setTrackName('');
     setTrackDescription('');
+    closeTrackDialog();
     if (repoId) {
       navigateWithinSdlc(`/sdlc/${channelId}/tracks`, `?track=${encodeURIComponent(id)}`);
     }
@@ -1527,6 +1601,48 @@ export default function SdlcScreen(): ReactElement {
     ACTIVE: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
     COMPLETED: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
     ARCHIVED: 'bg-muted text-muted-foreground',
+  };
+
+  const renderTrackActionsMenu = (
+    track: { id: string; name: string; description?: string | null },
+    align: 'start' | 'end',
+  ): ReactElement => {
+    const trackMetadata = JSON.stringify({ trackId: track.id });
+    return (
+      <div data-card-menu='' className='shrink-0'>
+        <CompactActionsMenu
+          // The Edit item opens a modal Dialog; a modal menu would keep it inert and covered.
+          modal={false}
+          preventCloseAutoFocus
+          contentAlign={align}
+          contentClassName='min-w-[9rem]'
+          trigger={
+            <button
+              type='button'
+              aria-label='Track actions'
+              className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'
+              data-track-category='SdlcHub'
+              data-track-name='TrackActionsOpened'
+              data-track-metadata={trackMetadata}
+            >
+              <EllipsisVertical size={16} />
+            </button>
+          }
+          items={[
+            {
+              icon: <Pencil className='size-3.5' />,
+              label: 'Edit',
+              onSelect: () => openTrackEditDialog(track),
+              dataAttributes: {
+                'data-track-category': 'SdlcHub',
+                'data-track-name': 'TrackEditOpened',
+                'data-track-metadata': trackMetadata,
+              },
+            },
+          ]}
+        />
+      </div>
+    );
   };
 
   const renderTracks = (): ReactElement => {
@@ -1652,7 +1768,7 @@ export default function SdlcScreen(): ReactElement {
           description='Workstreams that group PRDs and their conversations.'
           action={
             <Button
-              onClick={() => setTrackDialog(true)}
+              onClick={openTrackCreateDialog}
               data-track-category='SdlcHub'
               data-track-name='NewTrackOpened'
             >
@@ -1669,15 +1785,11 @@ export default function SdlcScreen(): ReactElement {
                 role='button'
                 tabIndex={0}
                 onClick={event => {
-                  const target = event.target as HTMLElement;
-                  if (target.closest('[data-status-select], [role="listbox"], [role="option"]'))
-                    return;
+                  if (shouldIgnoreTrackCardEvent(event.target)) return;
                   openTrack(track.id);
                 }}
                 onKeyDown={event => {
-                  const target = event.target as HTMLElement;
-                  if (target.closest('[data-status-select], [role="listbox"], [role="option"]'))
-                    return;
+                  if (shouldIgnoreTrackCardEvent(event.target)) return;
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     openTrack(track.id);
@@ -1692,35 +1804,38 @@ export default function SdlcScreen(): ReactElement {
                   <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
                     <Layers size={18} />
                   </div>
-                  <div data-status-select=''>
-                    <Select
-                      value={track.status}
-                      onValueChange={value =>
-                        void call(
-                          `track-status-${track.id}`,
-                          () => setTrackStatusAction(track.id, value),
-                          'Track updated',
-                        )
-                      }
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          'h-7 w-auto gap-1 rounded-full border-none px-2.5 text-xs font-medium shadow-none focus:ring-0',
-                          TRACK_STATUS_STYLES[track.status] ?? TRACK_STATUS_STYLES['ACTIVE'],
-                        )}
-                        onClick={event => event.stopPropagation()}
-                        onKeyDown={event => event.stopPropagation()}
-                        data-track-category='SdlcHub'
-                        data-track-name='TrackStatusChanged'
+                  <div className='flex items-center gap-1'>
+                    <div data-status-select=''>
+                      <Select
+                        value={track.status}
+                        onValueChange={value =>
+                          void call(
+                            `track-status-${track.id}`,
+                            () => setTrackStatusAction(track.id, value),
+                            'Track updated',
+                          )
+                        }
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value='ACTIVE'>Active</SelectItem>
-                        <SelectItem value='COMPLETED'>Completed</SelectItem>
-                        <SelectItem value='ARCHIVED'>Archived</SelectItem>
-                      </SelectContent>
-                    </Select>
+                        <SelectTrigger
+                          className={cn(
+                            'h-7 w-auto gap-1 rounded-full border-none px-2.5 text-xs font-medium shadow-none focus:ring-0',
+                            TRACK_STATUS_STYLES[track.status] ?? TRACK_STATUS_STYLES['ACTIVE'],
+                          )}
+                          onClick={event => event.stopPropagation()}
+                          onKeyDown={event => event.stopPropagation()}
+                          data-track-category='SdlcHub'
+                          data-track-name='TrackStatusChanged'
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value='ACTIVE'>Active</SelectItem>
+                          <SelectItem value='COMPLETED'>Completed</SelectItem>
+                          <SelectItem value='ARCHIVED'>Archived</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {renderTrackActionsMenu(track, 'end')}
                   </div>
                 </div>
                 <h3 className='mt-4 truncate font-semibold'>{track.name}</h3>
@@ -2218,6 +2333,7 @@ export default function SdlcScreen(): ReactElement {
                 </button>
                 <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
                 <h1 className='truncate font-semibold'>{selectedTrack.name}</h1>
+                {renderTrackActionsMenu(selectedTrack, 'start')}
               </>
             ) : (
               <h1 className='font-semibold'>
@@ -2668,17 +2784,24 @@ export default function SdlcScreen(): ReactElement {
 
       <Dialog
         open={trackDialog}
-        onOpenChange={open => !open && setTrackDialog(false)}
-        title='New Track'
+        onOpenChange={open => !open && closeTrackDialog()}
+        title={trackEditId ? 'Edit Track' : 'New Track'}
+        zIndexClassName='z-[70]'
       >
         <form
           className='p-6'
           onSubmit={event => {
             event.preventDefault();
+            if (trackDialogInvalid) return;
+            const editId = trackEditId;
+            if (editId) {
+              void call('track-update', () => updateTrackDetailsAction(editId), 'Track updated');
+              return;
+            }
             void call('track-create', createTrackAction, 'Track created');
           }}
         >
-          <h2 className='text-lg font-semibold'>New Track</h2>
+          <h2 className='text-lg font-semibold'>{trackEditId ? 'Edit Track' : 'New Track'}</h2>
           <label htmlFor='sdlc-track-name' className='mt-5 block text-sm font-medium'>
             Name
           </label>
@@ -2687,12 +2810,23 @@ export default function SdlcScreen(): ReactElement {
             autoFocus
             value={trackName}
             onChange={event => setTrackName(event.target.value)}
-            maxLength={120}
-            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
+            maxLength={TRACK_NAME_MAX_LENGTH}
+            aria-invalid={trackNameTooLong}
+            aria-describedby={trackNameTooLong ? 'sdlc-track-name-error' : undefined}
+            className={cn(
+              'mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring',
+              trackNameTooLong && 'border-destructive focus:ring-destructive',
+            )}
             placeholder='e.g. Payments revamp'
             data-track-category='SdlcHub'
             data-track-name='TrackNameChanged'
           />
+          {trackNameTooLong && (
+            <p id='sdlc-track-name-error' className='mt-1.5 text-xs text-destructive'>
+              Name must be {TRACK_NAME_MAX_LENGTH} characters or fewer — it is currently{' '}
+              {trackNameLength}.
+            </p>
+          )}
           <label htmlFor='sdlc-track-description' className='mt-4 block text-sm font-medium'>
             Description <span className='font-normal text-muted-foreground'>(optional)</span>
           </label>
@@ -2700,24 +2834,35 @@ export default function SdlcScreen(): ReactElement {
             id='sdlc-track-description'
             value={trackDescription}
             onChange={event => setTrackDescription(event.target.value)}
-            maxLength={2000}
-            className='mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring'
+            maxLength={TRACK_DESCRIPTION_MAX_LENGTH}
+            aria-invalid={trackDescriptionTooLong}
+            aria-describedby={trackDescriptionTooLong ? 'sdlc-track-description-error' : undefined}
+            className={cn(
+              'mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring',
+              trackDescriptionTooLong && 'border-destructive focus:ring-destructive',
+            )}
             placeholder='What is this workstream about?'
             data-track-category='SdlcHub'
             data-track-name='TrackDescriptionChanged'
           />
+          {trackDescriptionTooLong && (
+            <p id='sdlc-track-description-error' className='mt-1.5 text-xs text-destructive'>
+              Description must be {TRACK_DESCRIPTION_MAX_LENGTH} characters or fewer — it is
+              currently {trackDescriptionLength}.
+            </p>
+          )}
           <div className='mt-6 flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={() => setTrackDialog(false)}>
+            <Button type='button' variant='outline' onClick={closeTrackDialog}>
               Cancel
             </Button>
             <Button
               type='submit'
-              loading={busy === 'track-create'}
-              disabled={!trackName.trim()}
+              loading={busy === (trackEditId ? 'track-update' : 'track-create')}
+              disabled={trackDialogInvalid}
               data-track-category='SdlcHub'
-              data-track-name='TrackCreated'
+              data-track-name={trackEditId ? 'TrackEdited' : 'TrackCreated'}
             >
-              Create Track
+              {trackEditId ? 'Save Changes' : 'Create Track'}
             </Button>
           </div>
         </form>
