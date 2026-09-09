@@ -21,7 +21,27 @@ import {
  */
 const PAGE_SIZE = 200;
 
+/**
+ * Sustained write budget for a backfill. The binding constraint is not raw DB
+ * load: `conversation_labels`, `conversation_label_mappings` and
+ * `ticket_user_mailbox` are all Zero-synced, so every committed write is a
+ * replication event that fans out a CVR diff to every connected client. A tight
+ * loop over a large desk would burst the shared replication stream.
+ *
+ * Expressed as a rate rather than a fixed delay so the pacing holds regardless of
+ * how many writes a given rule's applies actually commit.
+ */
+const TARGET_DB_WRITES_PER_SECOND = 18;
+const WRITES_PER_APPLY = 2;
+const WRITES_PER_ARCHIVE = 1;
+
+const LOOKBACK_DAYS = 365;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 export interface DeskLabelBackfillProgress {
+  /** Emails in range at the moment the run started — the denominator for progress. */
+  total: number;
   scanned: number;
   matched: number;
   labeled: number;
@@ -58,6 +78,7 @@ interface ScannedEmail {
 
 function emptyProgress(): DeskLabelBackfillProgress {
   return {
+    total: 0,
     scanned: 0,
     matched: 0,
     labeled: 0,
@@ -187,28 +208,25 @@ async function loadEmailIdsWithAttachments(
 }
 
 /**
- * Conversations from `conversationIds` that do NOT already carry THIS rule's label.
+ * Which of `conversationIds` already carry THIS rule's label.
  *
  * Scoped to the one labelId on purpose: labels are additive, so a thread already
- * carrying other labels still needs this one. Purely an optimisation to avoid no-op
- * writes — applyConversationLabel is idempotent on (conversationId, labelId) and
- * would return alreadyPresent anyway.
+ * carrying other labels still needs this one. This drops the label writes for a
+ * thread that already has it — applyConversationLabel is idempotent on
+ * (conversationId, labelId) and would return alreadyPresent anyway — but it is
+ * never a reason to skip the thread, which may still owe an archive.
  */
-async function filterAlreadyLabeled(
+async function findAlreadyLabeled(
   labelId: string,
   conversationIds: readonly string[],
-): Promise<{ pending: string[]; alreadyLabeled: number }> {
-  if (conversationIds.length === 0) return { pending: [], alreadyLabeled: 0 };
+): Promise<Set<string>> {
+  if (conversationIds.length === 0) return new Set();
 
   const existing = await db.conversationLabelMapping.findMany({
     where: { labelId, conversationId: { in: [...conversationIds] } },
     select: { conversationId: true },
   });
-  const labeled = new Set(existing.map(row => row.conversationId));
-  return {
-    pending: conversationIds.filter(id => !labeled.has(id)),
-    alreadyLabeled: labeled.size,
-  };
+  return new Set(existing.map(row => row.conversationId));
 }
 
 /**
@@ -223,11 +241,25 @@ async function filterAlreadyLabeled(
  */
 export async function runDeskLabelBackfill(
   rule: ResolvedBackfillRule,
-  onProgress?: (progress: DeskLabelBackfillProgress) => void,
+  onProgress?: (progress: DeskLabelBackfillProgress) => Promise<void>,
 ): Promise<DeskLabelBackfillProgress> {
   const progress = emptyProgress();
   const needsIsReply = rule.filters['onlyNewThreads'] === true || rule.filters['onlyReplies'] === true;
   const needsAttachments = rule.filters['hasAttachments'] === true;
+
+  const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const scanWhere = {
+    channelId: rule.channelId,
+    // The live emitter drops everything that is not inbound mail
+    // (emitEmailReceived), so a replay has to drop it too.
+    type: EmailType.DEFAULT,
+    createdAt: { gte: since },
+  };
+
+  // One indexed count up front so the rules list can show "N of M" and derive an
+  // ETA instead of a spinner with no end in sight.
+  progress.total = await db.email.count({ where: scanWhere });
+  await onProgress?.({ ...progress });
 
   let lastId: string | undefined;
   let hasMore = true;
@@ -247,10 +279,7 @@ export async function runDeskLabelBackfill(
 
     const emails: ScannedEmail[] = await db.email.findMany({
       where: {
-        channelId: rule.channelId,
-        // The live emitter drops everything that is not inbound mail
-        // (emitEmailReceived), so a replay has to drop it too.
-        type: EmailType.DEFAULT,
+        ...scanWhere,
         ...(lastId ? { id: { gt: lastId } } : {}),
       },
       select: {
@@ -302,23 +331,36 @@ export async function runDeskLabelBackfill(
       conversationIds.push(email.conversationId);
     }
 
-    const { pending, alreadyLabeled } = await filterAlreadyLabeled(rule.labelId, conversationIds);
-    progress.alreadyLabeled += alreadyLabeled;
+    const alreadyLabeled = await findAlreadyLabeled(rule.labelId, conversationIds);
+    progress.alreadyLabeled += alreadyLabeled.size;
 
-    for (const conversationId of pending) {
+    for (const conversationId of conversationIds) {
+      const needsLabel = !alreadyLabeled.has(conversationId);
+      if (!needsLabel && rule.keepInInbox) continue;
+
+      // Pace from what THIS thread commits rather than a per-page average: a fresh
+      // thread on an archiving rule writes three rows, an already-labeled one
+      // writes one, and both draw on the same budget.
+      const writes =
+        (needsLabel ? WRITES_PER_APPLY : 0) + (rule.keepInInbox ? 0 : WRITES_PER_ARCHIVE);
+      const intervalMs = Math.ceil((writes * 1000) / TARGET_DB_WRITES_PER_SECOND);
+      const startedAt = Date.now();
+
       try {
-        const applied = await db.$transaction(async tx => {
-          const result = await applyConversationLabel(
-            {
-              conversationId,
-              channelId: rule.channelId,
-              labelName: rule.labelName,
-              createdById: rule.ownerId,
-              color: rule.color,
-              labelId: rule.labelId,
-            },
-            tx,
-          );
+        const labelResult = await db.$transaction(async tx => {
+          const result = needsLabel
+            ? await applyConversationLabel(
+                {
+                  conversationId,
+                  channelId: rule.channelId,
+                  labelName: rule.labelName,
+                  createdById: rule.ownerId,
+                  color: rule.color,
+                  labelId: rule.labelId,
+                },
+                tx,
+              )
+            : null;
           if (!rule.keepInInbox) {
             await archiveConversationMailbox(
               {
@@ -333,9 +375,18 @@ export async function runDeskLabelBackfill(
           return result;
         });
 
-        if (applied.applied) progress.labeled += 1;
-        else progress.alreadyLabeled += 1;
+        // null when the label was skipped as already present — counted up front.
+        if (labelResult) {
+          if (labelResult.applied) progress.labeled += 1;
+          else progress.alreadyLabeled += 1;
+        }
         if (!rule.keepInInbox) progress.archived += 1;
+
+        // Sleep only the remainder, so the budget is the real rate rather than a
+        // nominal one the work's own duration silently eats into. Only successful
+        // commits are paced — a failure rolls back and commits nothing to throttle.
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < intervalMs) await sleep(intervalMs - elapsed);
       } catch (err) {
         progress.skipped += 1;
         const code = (err as { code?: string } | null)?.code;
@@ -352,7 +403,7 @@ export async function runDeskLabelBackfill(
       }
     }
 
-    onProgress?.({ ...progress });
+    await onProgress?.({ ...progress });
   }
 
   return progress;

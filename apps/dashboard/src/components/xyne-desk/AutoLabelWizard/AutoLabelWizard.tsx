@@ -180,10 +180,22 @@ export function AutoLabelWizard({
         );
       }
       if (applyToExisting) {
-        if (data.backfill) {
-          toast.info('Applying the label to older emails — this runs in the background.');
-        } else {
-          toast.error('Rule saved, but older emails could not be queued. Try again from Rules.');
+        // Every non-null result is NOT a queued run: create() dedupes onto an
+        // existing rule, and enqueue() then declines on cooldown or a live job.
+        switch (data.backfill) {
+          case 'enqueued':
+            toast.info('Applying the label to older emails — this runs in the background.');
+            break;
+          case 'already-running':
+            toast.info('This rule is already being applied to older emails.');
+            break;
+          case 'cooldown':
+            toast.warning(
+              'This rule ran over older emails recently. Re-run it from Rules in a few minutes.',
+            );
+            break;
+          default:
+            toast.error('Rule saved, but older emails could not be queued. Try again from Rules.');
         }
       }
       void queryClient.invalidateQueries({
@@ -195,10 +207,6 @@ export function AutoLabelWizard({
     onError: (err: unknown) => {
       const response = (err as { response?: { status?: number; data?: { error?: string } } })
         ?.response;
-      if (response?.status === 409) {
-        toast.error(`A label named “${labelName.trim()}” already exists in this channel.`);
-        return;
-      }
       const message =
         response?.data?.error ||
         (err instanceof Error ? err.message : 'Failed to create auto-label rules');

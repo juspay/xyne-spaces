@@ -373,6 +373,13 @@ router.post('/desk-label-rules/:id/backfill', async (req: Request<{ id: string }
       res.status(503).json({ success: false, error: 'Backfill queue is unavailable' });
       return;
     }
+    if (result === 'cooldown') {
+      res.status(429).json({
+        success: false,
+        error: 'This rule ran over existing emails recently. Try again in a few minutes.',
+      });
+      return;
+    }
     res.status(result === 'enqueued' ? 202 : 200).json({
       success: true,
       data: { backfill: result },

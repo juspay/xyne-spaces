@@ -4,12 +4,30 @@ import { runAsServiceActor } from '@/database/tenant/context';
 import {
   resolveBackfillRule,
   runDeskLabelBackfill,
+  type DeskLabelBackfillProgress,
 } from '../services/desk-label-backfill.service';
 import {
   DESK_LABEL_BACKFILL_JOB,
   deskLabelBackfillQueue,
   type DeskLabelBackfillJobData,
 } from './desk-label-backfill.queue';
+
+/**
+ * Progress is a UI convenience, never a reason to fail a run whose labels are
+ * already committed — a Redis blip must not become an unhandled rejection that
+ * takes the worker down, nor a job failure that re-scans the whole channel.
+ */
+async function publishProgress(
+  job: Bull.Job<DeskLabelBackfillJobData>,
+  progress: DeskLabelBackfillProgress,
+): Promise<void> {
+  return job.progress(progress).catch((err: unknown) => {
+    logger.warn(
+      `[DESK-LABEL-BACKFILL-WORKER] progress write failed for job ${job.id}:`,
+      err,
+    );
+  });
+}
 
 class DeskLabelBackfillWorker {
   private isInitialized = false;
@@ -55,14 +73,12 @@ class DeskLabelBackfillWorker {
     // Background job → no HTTP tenant scope. Open one from the rule's workspace so
     // every write in the run gets workspaceId stamped.
     const progress = await runAsServiceActor('desk-label-backfill', rule.workspaceId, () =>
-      runDeskLabelBackfill(rule, next => {
-        void job.progress(next);
-      }),
+      runDeskLabelBackfill(rule, next => publishProgress(job, next)),
     );
 
-    // The final progress is what the rules list reads back, so publish it even
-    // when the run stopped short.
-    void job.progress(progress);
+    // The final progress is what the rules list reads back, so it has to land
+    // before the job completes — awaited, unlike the per-page updates.
+    await publishProgress(job, progress);
 
     logger.info(
       `[DESK-LABEL-BACKFILL-WORKER] ${progress.stoppedEarly ? 'Stopped early' : 'Completed'} automation=${workflowId} scanned=${progress.scanned} matched=${progress.matched} labeled=${progress.labeled} alreadyLabeled=${progress.alreadyLabeled} archived=${progress.archived} skipped=${progress.skipped}`,

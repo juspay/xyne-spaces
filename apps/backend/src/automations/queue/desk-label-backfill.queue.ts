@@ -25,7 +25,13 @@ export interface DeskLabelBackfillRun {
   failedReason: string | null;
 }
 
-export type EnqueueBackfillResult = 'enqueued' | 'already-running';
+export type EnqueueBackfillResult = 'enqueued' | 'already-running' | 'cooldown';
+
+const STALE_WAITING_MS = 5 * 60 * 1000;
+const COOLDOWN_SECONDS = 10 * 60;
+
+const cooldownKey = (workflowId: string): string =>
+  `autolabel:backfill:cooldown:${workflowId}`;
 
 function isProgress(value: unknown): value is DeskLabelBackfillProgress {
   return typeof value === 'object' && value !== null && 'scanned' in value;
@@ -47,10 +53,7 @@ class DeskLabelBackfillQueue {
           lazyConnect: false,
         },
         defaultJobOptions: {
-          // A retry restarts the scan from the beginning. Every apply is
-          // idempotent so that is safe, just wasted work — hence a low cap.
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 5000 },
+          attempts: 1,
           // Completed runs are kept briefly so the rules list can show the
           // result of the run the user just started.
           removeOnComplete: { age: 60 * 60, count: 200 },
@@ -83,6 +86,8 @@ class DeskLabelBackfillQueue {
         `[DESK-LABEL-BACKFILL-QUEUE] Job ${job?.id} failed — automation ${job?.data?.workflowId}:`,
         err,
       );
+      const workflowId = job?.data?.workflowId;
+      if (workflowId) void this.clearCooldown(workflowId);
     });
     this.queue.on('stalled', job => {
       logger.warn(
@@ -109,7 +114,7 @@ class DeskLabelBackfillQueue {
    * Queue a backfill for one rule.
    *
    * Bull silently ignores an add whose jobId already exists, and this queue keeps
-   * failed jobs — so a terminal or finished run has to be cleared first, or it
+   * failed jobs — so a finished or abandoned run has to be cleared first, or it
    * would block every later backfill for the same rule while callers still see
    * success. Live jobs are left alone so a second click coalesces onto them.
    */
@@ -117,27 +122,60 @@ class DeskLabelBackfillQueue {
     const queue = this.getQueue();
     const jobId = deskLabelBackfillJobId(workflowId);
 
+    if (await redisService.exists(cooldownKey(workflowId))) {
+      logger.info(`[DESK-LABEL-BACKFILL-QUEUE] Backfill for ${workflowId} is in cooldown`);
+      return 'cooldown';
+    }
+
     const existing = await queue.getJob(jobId);
     if (existing) {
-      const [failed, completed] = await Promise.all([
-        existing.isFailed(),
-        existing.isCompleted(),
-      ]);
-      if (!failed && !completed) return 'already-running';
+      if (!(await this.isReclaimable(existing))) return 'already-running';
       try {
         await existing.remove();
       } catch (err) {
-        logger.error(
-          `[DESK-LABEL-BACKFILL-QUEUE] Could not clear finished job ${jobId}:`,
+        logger.warn(
+          `[DESK-LABEL-BACKFILL-QUEUE] Could not reclaim job ${jobId}; treating as live:`,
           err,
         );
-        throw new Error(`Could not clear the previous backfill run for ${workflowId}`);
+        return 'already-running';
       }
     }
 
     await queue.add(DESK_LABEL_BACKFILL_JOB, { workflowId }, { jobId });
+    // Only after a real enqueue — a rejected request must not extend the window.
+    await redisService
+      .set(cooldownKey(workflowId), String(Date.now()), COOLDOWN_SECONDS, true)
+      .catch(err =>
+        logger.warn(`[DESK-LABEL-BACKFILL-QUEUE] Could not set cooldown for ${workflowId}:`, err),
+      );
     logger.info(`[DESK-LABEL-BACKFILL-QUEUE] Queued backfill for automation ${workflowId}`);
     return 'enqueued';
+  }
+
+  /**
+   * Release the cooldown after a run that produced nothing.
+   *
+   * Called from the 'failed' listener so a failed run does not hold the window
+   * against the retry it invites. Safe to call for a key that is already gone.
+   */
+  async clearCooldown(workflowId: string): Promise<void> {
+    await redisService
+      .del(cooldownKey(workflowId))
+      .catch(err =>
+        logger.warn(`[DESK-LABEL-BACKFILL-QUEUE] Could not clear cooldown for ${workflowId}:`, err),
+      );
+  }
+
+  private async isReclaimable(job: Bull.Job<DeskLabelBackfillJobData>): Promise<boolean> {
+    const [failed, completed, active] = await Promise.all([
+      job.isFailed(),
+      job.isCompleted(),
+      job.isActive(),
+    ]);
+    if (failed || completed) return true;
+    if (active) return false;
+
+    return Date.now() - job.timestamp > STALE_WAITING_MS;
   }
 
   /** Latest known run for a rule, or null once it has aged out of the queue. */

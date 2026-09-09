@@ -571,6 +571,13 @@ class WorkerService {
         await aiProvisioningWorker.shutdown();
       }
 
+      if (appConfig.enableAutomationWorker) {
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        await deskLabelBackfillWorker.shutdown();
+      }
+
       await autoDraftWorker.shutdown();
       if (appConfig.enableSdlcWorker) await sdlcWorker.stop();
 

@@ -50,39 +50,39 @@ function BackfillStatus({ automationId }: { automationId: string }): React.React
   const run = data?.backfill;
   if (!run) return null;
 
-  // Owns its own top margin: the row renders this unconditionally, so an empty wrapper
-  // would still push every rule down by a couple of pixels.
-  const line = (content: React.ReactNode): React.ReactElement => (
-    <div className='mt-0.5'>{content}</div>
-  );
-
   if (run.state === 'failed') {
-    return line(
-      <span className='text-[11px] text-destructive'>Applying to older emails failed</span>,
-    );
+    return <span className='text-[11px] text-destructive'>Applying to older emails failed</span>;
   }
 
   const progress = run.progress;
   const labeled = (progress?.labeled ?? 0) + (progress?.alreadyLabeled ?? 0);
+  const skipped = progress?.skipped ?? 0;
+  // Skips are the difference between "nothing matched" and "everything errored" —
+  // without them a run where every apply threw reads as a clean "0 threads".
+  const skippedNote = skipped > 0 ? `, ${skipped} skipped` : '';
 
   if (run.state === 'completed') {
     const threads = `${labeled} older ${labeled === 1 ? 'thread' : 'threads'}`;
-    return line(
-      <span className='text-[11px] text-muted-foreground'>
+    return (
+      <span className={cn('text-[11px]', skipped > 0 ? 'text-amber-600' : 'text-muted-foreground')}>
         {progress?.stoppedEarly
-          ? `Stopped after ${threads} — rule is no longer active`
-          : `Applied to ${threads}`}
-      </span>,
+          ? `Stopped after ${threads}${skippedNote} — rule is no longer active`
+          : `Applied to ${threads}${skippedNote}`}
+      </span>
     );
   }
 
-  return line(
+  const total = progress?.total ?? 0;
+  const scanned = progress?.scanned ?? 0;
+  const scanNote = total > 0 ? ` — ${Math.min(scanned, total)} of ${total} emails` : '';
+
+  return (
     <span className='inline-flex items-center gap-1 text-[11px] text-muted-foreground'>
       <Loader2 className='size-3 animate-spin' />
       {run.state === 'queued'
         ? 'Queued for older emails…'
-        : `Scanning older emails — ${labeled} labeled`}
-    </span>,
+        : `Labeled ${labeled}${skippedNote}${scanNote}`}
+    </span>
   );
 }
 
@@ -125,7 +125,13 @@ export function MyAutoLabelRules({
           : 'Applying to older emails — this runs in the background.',
       );
     },
-    onError: err => toast.error(err instanceof Error ? err.message : 'Could not start backfill'),
+    onError: (err: unknown) => {
+      const res = (err as { response?: { status?: number; data?: { error?: string } } }).response;
+      // 429 is the cooldown, not a failure — the rule already ran over older mail recently.
+      toast[res?.status === 429 ? 'info' : 'error'](
+        res?.data?.error ?? (err instanceof Error ? err.message : 'Could not start backfill'),
+      );
+    },
   });
 
   const archiveMutation = useMutation({
@@ -197,6 +203,8 @@ export function MyAutoLabelRules({
             statusMutation.isPending && statusMutation.variables?.item.id === item.id;
           const isArchiving =
             archiveMutation.isPending && archiveMutation.variables?.id === item.id;
+          const isBackfilling =
+            backfillMutation.isPending && backfillMutation.variables?.id === item.id;
 
           return (
             <li key={item.id} className='flex min-h-14 items-center gap-3 py-3'>
@@ -238,13 +246,13 @@ export function MyAutoLabelRules({
                     type='button'
                     variant='ghost'
                     size='iconSm'
-                    disabled={!isActive || backfillMutation.isPending}
+                    disabled={!isActive || isBackfilling}
                     onClick={() => backfillMutation.mutate(item)}
                     data-track-category='xyne-desk'
                     data-track-name='auto-label-backfill-rule'
                     aria-label='Apply to existing emails'
                   >
-                    {backfillMutation.isPending && backfillMutation.variables?.id === item.id ? (
+                    {isBackfilling ? (
                       <Loader2 className='size-4 animate-spin' />
                     ) : (
                       <History className='size-4' />

@@ -243,9 +243,10 @@ export interface DeskLabelRulesPayload {
   applyToExisting?: boolean;
 }
 
-export type DeskLabelBackfillEnqueue = 'enqueued' | 'already-running';
+export type DeskLabelBackfillEnqueue = 'enqueued' | 'already-running' | 'cooldown';
 
 export interface DeskLabelBackfillProgress {
+  total: number;
   scanned: number;
   matched: number;
   labeled: number;
