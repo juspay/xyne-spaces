@@ -14,11 +14,21 @@ export interface S3StorageConfig {
   secretAccessKey?: string;
 }
 
+export interface AzureStorageConfig {
+  accountName?: string;
+  endpoint?: string;
+  connectionString?: string;
+  containerName: string;
+  sasToken?: string;
+  anonymous?: boolean;
+}
+
 /** Provider is selected by config (STORAGE_PROVIDER env in each app). */
 export interface StorageConfig {
-  provider: 'gcs' | 's3';
+  provider: 'gcs' | 's3' | 'azure';
   gcs?: GcsStorageConfig;
   s3?: S3StorageConfig;
+  azure?: AzureStorageConfig;
 }
 
 export interface UploadOptions {
@@ -46,6 +56,20 @@ export interface FileMetadata {
   size?: number | string;
   metadata?: Record<string, string>;
   lastModified?: Date;
+}
+
+/** Read-path metadata for one object, as returned by headObject / getObject. */
+export interface ObjectInfo {
+  size?: number;
+  contentType?: string;
+  etag?: string;
+  lastModified?: Date;
+}
+
+/** One object's metadata plus a readable stream of its content. */
+export interface ObjectRead {
+  info: ObjectInfo;
+  stream: NodeJS.ReadableStream;
 }
 
 export interface ListedFile {
@@ -80,6 +104,8 @@ export interface StorageService {
   getFileBuffer(path: string, maxRetries?: number): Promise<Buffer>;
   downloadFile(remotePath: string, localPath: string): Promise<void>;
   createReadStream(path: string, options?: { start?: number; end?: number }): Promise<NodeJS.ReadableStream>;
+  headObject(path: string): Promise<ObjectInfo | null>;
+  getObject(path: string): Promise<ObjectRead | null>;
   listFiles(prefix: string): Promise<ListedFile[]>;
   moveFile(sourcePath: string, destinationPath: string): Promise<void>;
   ensureBucketExists(): Promise<void>;
@@ -100,6 +126,7 @@ export function isPreconditionFailed(err: unknown): boolean {
     e?.status === 412 ||
     e?.statusCode === 412 ||
     e?.$metadata?.httpStatusCode === 412 ||
-    e?.name === 'PreconditionFailed'
+    e?.name === 'PreconditionFailed' ||
+    e?.code === 'BlobAlreadyExists'
   );
 }
