@@ -29,6 +29,7 @@ import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
 import { WorkflowStorageAdapter } from './adapters/storage';
+import { KataSandboxAdapter } from './adapters/sandbox';
 import { XyneWorkflowAuthorizer } from './authorizer';
 import { DEFAULT_CRON_TIMEZONE } from './constants';
 import type { XyneCtx, XyneFilter } from './types';
@@ -46,6 +47,20 @@ export const persistence = new PrismaPersistenceAdapter();
 export const eventBus = new ExecutionEventBus();
 
 const storage = new WorkflowStorageAdapter();
+
+/**
+ * Sandbox adapter — code execution over the Kata microVM fleet. Capability-gated the
+ * same way RUN_AGENT is: with no KATA_ROUTER_URL the adapter is simply absent, so the
+ * built-in `run_code` tool (and a future CODE step) is unavailable rather than present
+ * and failing mid-run. Requires the host process's ServiceAccount to hold RBAC for
+ * sandboxclaims/sandboxes in the kata namespace — see the workflows deploy notes.
+ */
+const sandbox = config.kata.routerUrl ? new KataSandboxAdapter() : undefined;
+if (sandbox) {
+  logger.info('[workflows] sandbox adapter registered (kata microVM fleet)');
+} else {
+  logger.warn('[workflows] kata not configured — run_code / CODE sandbox will not be available');
+}
 const services = new ServiceRegistry();
 const steps = new StepRegistry();
 const triggers = new TriggerRegistry();
@@ -86,6 +101,7 @@ const executor = new WorkflowExecutor(persistence, steps, triggers, services, {
   eventBus,
   baseUrl: BASE_URL,
   storage,
+  sandbox,
   logger: sdkLogger,
 });
 
@@ -98,6 +114,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
   triggers,
   executor,
   storage,
+  sandbox,
   eventBus,
   authorizer: new XyneWorkflowAuthorizer(),
   logger: sdkLogger,
