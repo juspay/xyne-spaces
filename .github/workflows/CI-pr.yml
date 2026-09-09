@@ -23,8 +23,6 @@ concurrency:
 
 jobs:
   ci:
-    # TEMPORARY: pinned to fix/flag-for-runners to test the USE_SELF_HOSTED_CI
-    # toggle in ci.yml — revert to @main before merging.
-    uses: juspay/xyne-spaces/.github/workflows/ci.yml@fix/flag-for-runners
+    uses: juspay/xyne-spaces/.github/workflows/ci.yml@main
     permissions:
       contents: read
