@@ -154,6 +154,30 @@ export class AttachmentController {
       }
     }
 
+    if (attachment.entityType === AttachmentEntityType.CANVAS_COMMENT) {
+      const comment = await db.canvasComment.findUnique({
+        where: { id: attachment.entityId },
+        select: { canvasId: true, deletedAt: true },
+      });
+      if (!comment || comment.deletedAt) {
+        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+      }
+
+      try {
+        await canvasAuthService.requireViewAccess(comment.canvasId, userId);
+        return { ok: true };
+      } catch (error) {
+        logger.warn(
+          `Unauthorized canvas comment attachment access: user ${userId} -> ${attachment.id} (comment ${attachment.entityId}): ${error instanceof Error ? error.message : 'denied'}`,
+        );
+        return {
+          ok: false,
+          status: 403,
+          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+        };
+      }
+    }
+
     // 3) Conversation-backed (chat/DM/transcript) attachments — must participate.
     if (attachment.conversationId) {
       const conversation = await this.conversationRepository.findById(attachment.conversationId);
@@ -574,6 +598,7 @@ export class AttachmentController {
       const allowedEntityTypes: AttachmentEntityType[] = [
         AttachmentEntityType.IMPACT,
         AttachmentEntityType.FORM_ENTITY_VALUE,
+        AttachmentEntityType.CANVAS_COMMENT,
       ];
       if (!allowedEntityTypes.includes(entityType)) {
         res.status(400).json({
@@ -590,10 +615,61 @@ export class AttachmentController {
         res.status(400).json({ error: 'Missing workspaceId' });
         return;
       }
-      const entityWorkspaceId =
-        entityType === AttachmentEntityType.IMPACT
-          ? (await db.impact.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId
-          : (await db.formEntityValues.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId;
+      let entityWorkspaceId: string | undefined;
+      if (entityType === AttachmentEntityType.IMPACT) {
+        entityWorkspaceId = (
+          await db.impact.findUnique({ where: { id: entityId }, select: { workspaceId: true } })
+        )?.workspaceId;
+      } else if (entityType === AttachmentEntityType.FORM_ENTITY_VALUE) {
+        entityWorkspaceId = (
+          await db.formEntityValues.findUnique({
+            where: { id: entityId },
+            select: { workspaceId: true },
+          })
+        )?.workspaceId;
+      } else if (entityType === AttachmentEntityType.CANVAS_COMMENT) {
+        const comment = await db.canvasComment.findUnique({
+          where: { id: entityId },
+          select: {
+            id: true,
+            canvasId: true,
+            createdBy: true,
+            deletedAt: true,
+            thread: {
+              select: {
+                canvas: {
+                  select: {
+                    workspaceId: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        if (!comment || comment.deletedAt) {
+          res.status(404).json({ error: 'Entity not found' });
+          return;
+        }
+
+        if (comment.createdBy !== userId) {
+          res.status(403).json({ error: 'Only the comment author can add attachments' });
+          return;
+        }
+
+        try {
+          await canvasAuthService.requireEditAccess(comment.canvasId, userId);
+        } catch (error) {
+          logger.warn(
+            `[AttachmentController] Permission denied for comment attachment upload by user ${userId} on canvas ${comment.canvasId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          );
+          res.status(403).json({ error: 'Permission denied' });
+          return;
+        }
+
+        entityWorkspaceId = comment.thread.canvas.workspaceId;
+      }
+
       if (!entityWorkspaceId) {
         // FORM_ENTITY_VALUE ids are minted client-side before the row exists; upload runs first,
         // then createV2 creates/verifies the row, so a missing row is legitimate and must not 404.

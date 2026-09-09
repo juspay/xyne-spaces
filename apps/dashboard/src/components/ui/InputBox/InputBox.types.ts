@@ -68,6 +68,8 @@ export interface InputBoxProps {
   disableEnterToSend?: boolean;
   hideSendButton?: boolean;
   hideComposerTools?: boolean;
+  showAttachButtonWhenToolsHidden?: boolean;
+  attachmentMenuMode?: 'full' | 'filesOnly';
   hideVoiceInput?: boolean;
   compact?: boolean;
   sendDisabled?: boolean;
