@@ -41,10 +41,22 @@ export interface SpecialMentions {
 }
 
 /**
+ * Drop <pre>/<code> regions before scanning for mentions. A mention that lives
+ * inside code is a false positive — e.g. `@Juspay` inside the email
+ * `guruprasad.bhosale@Juspay.in` in a SQL snippet — and must not notify.
+ */
+function stripCodeRegions(content: string): string {
+  return content
+    .replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, ' ')
+    .replace(/<code[^>]*>[\s\S]*?<\/code>/gi, ' ');
+}
+
+/**
  * Extract mentions from message content
  * Handles both zero-width space delimited mentions and HTML span mentions
  */
-export async function extractMentionsFromContent(content: string): Promise<ExtractedMention[]> {
+export async function extractMentionsFromContent(rawContent: string): Promise<ExtractedMention[]> {
+  const content = stripCodeRegions(rawContent);
   const mentions: ExtractedMention[] = [];
   const processedUserIds = new Set<string>(); // Prevent duplicates
 
@@ -180,9 +192,10 @@ export function hasMentions(content: string): boolean {
  * Handles both HTML span group mentions and zero-width space group mentions
  */
 export async function extractGroupMentionsFromContent(
-  content: string,
+  rawContent: string,
   workspaceId: string
 ): Promise<ExtractedGroupMention[]> {
+  const content = stripCodeRegions(rawContent);
   const groupMentions: ExtractedGroupMention[] = [];
   const processedGroupIds = new Set<string>(); // Prevent duplicates
 
@@ -514,9 +527,7 @@ export function extractSpecialMentions(content: string): SpecialMentions {
     logger.info('✅ [SPECIAL-MENTION] Found @here mention (HTML span)');
   }
 
-  const contentWithoutCode = content
-    .replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, '')
-    .replace(/<code[^>]*>[\s\S]*?<\/code>/gi, '');
+  const contentWithoutCode = stripCodeRegions(content);
   // Fallback: Check for plain text @channel or @here (case-insensitive)
   // Match @channel or @here as whole words (not part of other words)
   const plainChannelRegex = /@channel\b/i;
