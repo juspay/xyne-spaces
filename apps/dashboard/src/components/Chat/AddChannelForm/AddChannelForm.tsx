@@ -139,7 +139,6 @@ function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput
 export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE';
 
 export interface AppStoreDeskInput {
-  issuerId: string;
   keyId: string;
   privateKey: string;
   applications: Array<{ bundleId: string }>;
@@ -154,8 +153,6 @@ function createAppStoreApplication(): AppStoreApplicationRow {
   return { id: crypto.randomUUID(), bundleId: '' };
 }
 
-const APP_STORE_ISSUER_ID_PATTERN =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const APP_STORE_KEY_ID_PATTERN = /^[A-Z0-9]{10}$/;
 
 // Apple never shows the .p8 again after download, so the only check we can make is shape.
@@ -219,7 +216,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [appStoreApplications, setAppStoreApplications] = useState<AppStoreApplicationRow[]>([
     createAppStoreApplication(),
   ]);
-  const [appStoreIssuerId, setAppStoreIssuerId] = useState('');
   const [appStoreKeyId, setAppStoreKeyId] = useState('');
   const [appStorePrivateKey, setAppStorePrivateKey] = useState('');
 
@@ -227,8 +223,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     if (!boardId) return false;
     return socialProvider === 'GOOGLE_PLAY'
       ? areGooglePlayApplicationsValid(googlePlayApplications)
-      : APP_STORE_ISSUER_ID_PATTERN.test(appStoreIssuerId.trim()) &&
-          APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()) &&
+      : APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()) &&
           isAppStorePrivateKey(appStorePrivateKey) &&
           areAppStoreApplicationsValid(appStoreApplications);
   };
@@ -386,7 +381,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 }
               : {
                   appStore: {
-                    issuerId: appStoreIssuerId.trim(),
                     keyId: appStoreKeyId.trim(),
                     privateKey: appStorePrivateKey.trim(),
                     applications: appStoreApplications.map(application => ({
@@ -497,8 +491,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         if (!boardIdValue) return 'Please select a board';
       }
       if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'APP_STORE') {
-        if (!APP_STORE_ISSUER_ID_PATTERN.test(appStoreIssuerId.trim()))
-          return 'Enter the Issuer ID from App Store Connect (a UUID)';
         if (!APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()))
           return 'Enter the 10-character Key ID';
         if (!isAppStorePrivateKey(appStorePrivateKey))
@@ -995,22 +987,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           )}
           {socialProvider === 'APP_STORE' && (
             <div className='space-y-3'>
-              <div className='space-y-2'>
-                <label htmlFor='app-store-issuer-id' className='text-sm text-foreground'>
-                  Issuer ID <span className='text-muted-foreground'>*</span>
-                </label>
-                <Input
-                  id='app-store-issuer-id'
-                  value={appStoreIssuerId}
-                  onChange={event => setAppStoreIssuerId(event.target.value.trim())}
-                  placeholder='57246542-96fe-1a63-e053-0824d011072a'
-                  autoComplete='off'
-                  aria-invalid={
-                    Boolean(appStoreIssuerId) &&
-                    !APP_STORE_ISSUER_ID_PATTERN.test(appStoreIssuerId.trim())
-                  }
-                />
-              </div>
               <div className='space-y-2'>
                 <label htmlFor='app-store-key-id' className='text-sm text-foreground'>
                   Key ID <span className='text-muted-foreground'>*</span>

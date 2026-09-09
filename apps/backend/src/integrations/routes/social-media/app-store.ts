@@ -27,7 +27,6 @@ const TAG = '[AppStoreRoutes]';
 const router = express.Router();
 
 const credentialsSchema = z.object({
-  issuerId: z.string().trim().uuid(),
   keyId: z
     .string()
     .trim()
@@ -209,7 +208,6 @@ router.post(
       if (duplicateName) throw new AppStoreConnectError(409, 'A channel with that name exists');
 
       const credentials: AppStoreCredentials = {
-        issuerId: input.issuerId,
         keyId: input.keyId,
         privateKey: input.privateKey,
       };
