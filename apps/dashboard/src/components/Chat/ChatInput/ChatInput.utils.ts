@@ -57,15 +57,19 @@ const convertPlainTextMentionsToSpans = (htmlContent: string, users: MentionResu
 
   // Escape names for regex and join with '|' to create one pattern
   const patternParts = allCleanNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  // Require a boundary before '@' (start-of-string, whitespace, ZWSP, '(', or a
-  // tag close '>') so an '@' embedded in an email/word — e.g. "user@Juspay.in" —
-  // is never treated as a mention. Mirrors the composer's mention trigger regex.
-  const pattern = new RegExp(`(^|[\\s\\u200B(>])@(${patternParts.join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`, 'gi');
+  // Require a boundary before '@' (start-of-string, whitespace, ZWSP, '(', a tag
+  // close '>', or an &nbsp; entity — TipTap serializes leading/repeated spaces as
+  // &nbsp;) so an '@' embedded in an email/word — e.g. "user@Juspay.in" — is never
+  // treated as a mention. Mirrors the composer's mention trigger regex.
+  const pattern = new RegExp(`(^|[\\s\\u200B(>]|&nbsp;)@(${patternParts.join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`, 'gi');
 
   // Perform a single replace operation
   return htmlContent.replace(pattern, (match, leadingChar: string, capturedName: string, offset: number) => {
-    // Check if the match is inside an existing mention span using the correct offset
-    const beforeMatch = htmlContent.substring(0, offset);
+    // Check if the match is inside an existing mention span using the correct offset.
+    // `offset` points at the captured boundary char, so skip past it to reach the
+    // '@' — otherwise a match right after `</span>` truncates the closing tag and
+    // is misread as being inside that span.
+    const beforeMatch = htmlContent.substring(0, offset + leadingChar.length);
     const lastOpenSpan = beforeMatch.lastIndexOf('<span');
     const lastCloseSpan = beforeMatch.lastIndexOf('</span>');
 
