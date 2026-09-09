@@ -4919,6 +4919,7 @@ export const SupportTicketDetail = ({
                         ticketId={ticket.id}
                         stageName={ticket.stageName}
                         stageLabel={ticket.stageName || 'To Do'}
+                        statusV2={ticket.statusV2}
                         boardId={boardId}
                       />
                     </div>
