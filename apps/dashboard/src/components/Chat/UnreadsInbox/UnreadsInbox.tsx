@@ -13,6 +13,7 @@ import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import Button from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
+import UnreadDigestPanel from './UnreadDigestPanel';
 
 const UnreadsInbox = (): ReactElement => {
   const channelData = useAllVisibleChannels();
@@ -98,6 +99,12 @@ const UnreadsInbox = (): ReactElement => {
           <h1 className='text-lg font-semibold tracking-tight'>Unreads</h1>
         </div>
       </div>
+
+      {unreadItems.length > 0 && (
+        <div className='shrink-0 px-6 py-3 border-b border-border/40 bg-background'>
+          <UnreadDigestPanel />
+        </div>
+      )}
 
       <div className='relative z-0 flex-1 isolate overflow-y-auto overflow-x-hidden px-4 pb-4 pt-0'>
         {unreadItems.length === 0 ? (
