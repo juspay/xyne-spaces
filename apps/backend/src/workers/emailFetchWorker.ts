@@ -90,7 +90,7 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     try {
       const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
         catchUpFromCursor(source, adapter, cursor),
@@ -139,7 +139,7 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     if (!adapter.refetch) {
       logger.warn(
         `[EMAIL-FETCH-WORKER] Adapter ${source.name} does not support fetch — skipping`,
