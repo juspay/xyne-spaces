@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -10,6 +11,7 @@ import {
 } from '@/services/radar/radarParser';
 import { validateTransitions } from '@/services/radar/radarValidator';
 import { radarApplier } from '@/services/radar/radarApplier';
+import type { RadarScope } from '@/services/radar/radarScope';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -68,11 +70,53 @@ interface RunLogDraft {
   error?: string;
 }
 
+/** An open item plus the conversation it was raised in. conversationId never
+ *  reaches the model — it is swapped for the window's thread label first. */
+type OpenItemRow = ParserOpenItem & { conversationId: string };
+
+/**
+ * Short thread labels for one parse. The parser is handed a flat transcript
+ * ordered by time, and in a DM that transcript spans every conversation in the
+ * channel — so a reply and the message before it are often unrelated. Labelling
+ * each conversation restores the grouping the flattening destroyed.
+ *
+ * A conversation with a single message in view and no open item stays unlabelled:
+ * that message was posted into the main flow rather than into any thread, and
+ * saying so is more useful than inventing a thread of one.
+ */
+const buildThreadLabels = (
+  ordered: Array<{ conversationId: string }>,
+  itemConversationIds: Set<string>,
+  isDmChannel: boolean,
+): Map<string, string> => {
+  // Only a flattened window needs labels. A thread-scoped window IS one
+  // conversation, so leaving a message unlabelled there would assert it was
+  // "posted into the main flow" — which the prompt takes literally, and which
+  // is false for every reply in a thread.
+  if (!isDmChannel) return new Map();
+  const counts = new Map<string, number>();
+  for (const m of ordered) counts.set(m.conversationId, (counts.get(m.conversationId) ?? 0) + 1);
+
+  const labels = new Map<string, string>();
+  for (const m of ordered) {
+    if (labels.has(m.conversationId)) continue;
+    const threaded = (counts.get(m.conversationId) ?? 0) > 1 || itemConversationIds.has(m.conversationId);
+    if (threaded) labels.set(m.conversationId, `T${labels.size + 1}`);
+  }
+  return labels;
+};
+
 class RadarExecutionService {
-  async processThread(conversationId: string): Promise<void> {
+  async processThread(scope: RadarScope): Promise<void> {
+    const { conversationId } = scope;
+    // A DM's window spans the channel's conversations; a thread's is itself.
+    const messageScope = scope.isDmChannel
+      ? { conversation: { channelId: scope.channelId } }
+      : { conversationId };
+
     for (;;) {
       const state = await prisma.executionThreadState.findUnique({
-        where: { conversationId },
+        where: { conversationId: scope.key },
       });
 
       const floor = state
@@ -81,7 +125,7 @@ class RadarExecutionService {
 
       const window = await prisma.message.findMany({
         where: {
-          conversationId,
+          ...messageScope,
           isDeleted: false,
           msgType: { not: 'SYSTEM' },
           // Private-visibility messages never enter Radar: items cite thread
@@ -100,6 +144,11 @@ class RadarExecutionService {
           content: true,
           createdAt: true,
           workspaceId: true,
+          // Needed per message, not per window: a DM window spans several
+          // conversations and each item must be stamped with its own.
+          conversationId: true,
+          // Which message opened the thread, so a reply can be told from a root.
+          conversation: { select: { initialMessageId: true } },
           sender: { select: { name: true } },
         },
       });
@@ -108,10 +157,12 @@ class RadarExecutionService {
         return; // drained — the job may complete
       }
 
-      // Gate: two deterministic branches — a tracked thread (any reply may
-      // move a ball), or an untracked one with a resolved @mention. No
-      // heuristics; the only probabilistic judgment belongs to the parser.
-      const openItems = await this.loadOpenItems(conversationId);
+      // Gate: three deterministic branches — a tracked scope (any reply may move
+      // a ball), an untracked one with a resolved @mention, or a two-person DM.
+      // No heuristics; the only probabilistic judgment belongs to the parser.
+      const openItems = await this.loadOpenItems(scope, [
+        ...new Set(window.map(m => m.conversationId)),
+      ]);
       const tracked = openItems.length > 0;
 
       // Per-message mentions feed both the gate and the parser's closed
@@ -120,16 +171,37 @@ class RadarExecutionService {
         window.map(m => [m.messageId, extractUserMentions(m.content)]),
       );
       const mentionedUserIds = [...new Set([...mentionsByMessage.values()].flat())];
-      const gatePassed = tracked || mentionedUserIds.length > 0;
+
+      // In a 1:1 DM every message is addressed to the other person, so the
+      // counterpart is an implicit mention. Without this a DM can never
+      // bootstrap: tracked needs an item to already exist and nobody @mentions
+      // in a two-person thread, so the first ask in any DM was invisible.
+      //
+      // Exactly two, not "at least two": a self-DM has nobody to hand a ball to,
+      // and a DM-scoped channel with three participants — which this workspace
+      // has — would make "the counterpart" two people at once.
+      const dmParticipants = scope.isDmChannel
+        ? await this.dmParticipants(scope.channelId)
+        : [];
+      const isOneToOneDm = dmParticipants.length === 2;
+      const gatePassed = tracked || mentionedUserIds.length > 0 || isOneToOneDm;
 
       // Debug trail for the Radar debug panel: one row per drain pass,
       // written best-effort — observability must never break the pipeline.
       const startedAt = Date.now();
       const run: RunLogDraft = {
         workspaceId: window[0].workspaceId,
-        conversationId,
+        // Keyed by scope, so a DM's passes stay together instead of scattering
+        // across the sibling conversations its messages happen to start.
+        conversationId: scope.key,
         gatePassed,
-        gateReason: gatePassed ? (tracked ? 'tracked-thread' : 'new-mention') : 'skip',
+        gateReason: gatePassed
+          ? tracked
+            ? 'tracked-thread'
+            : mentionedUserIds.length > 0
+              ? 'new-mention'
+              : 'dm-counterpart'
+          : 'skip',
         windowSize: window.length,
         parserRan: false,
       };
@@ -150,7 +222,7 @@ class RadarExecutionService {
           run.parserRan = true;
           // Already-consumed messages just below the watermark, sent as
           // read-only context so the model understands mid-thread windows.
-          const context = await this.loadContextMessages(conversationId, floor);
+          const context = await this.loadContextMessages(messageScope, floor);
           const contextMentions = new Map(
             context.map(m => [m.messageId, extractUserMentions(m.content)]),
           );
@@ -184,11 +256,22 @@ class RadarExecutionService {
             ...window.map(m => m.messageId),
             ...context.map(m => m.messageId),
           ]);
+          // Context first: labels follow the transcript the model reads, so T1
+          // is the oldest thread in view rather than an arbitrary one.
+          const threadLabels = buildThreadLabels(
+            [...context, ...window],
+            new Set(openItems.map(i => i.conversationId)),
+            scope.isDmChannel,
+          );
           const transitions = await radarParser.parseWindow(
-            openItems,
-            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage),
+            openItems.map(({ conversationId, ...item }) =>
+              threadLabels.size > 0
+                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
+                : item,
+            ),
+            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
             knownUsers,
-            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage),
+            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
           );
           run.proposedOps = transitions.operations;
           run.assessment = transitions.assessment;
@@ -197,15 +280,24 @@ class RadarExecutionService {
           // involved in the thread's open items or the context tail — the
           // parser may infer an assignee from that history (user decision,
           // Aug 27).
-          const candidateUserIds = [
-            ...new Set([
-              ...mentionedUserIds,
-              ...window.map(m => m.senderId),
-              ...openItems.flatMap(i => [...i.requested_by, ...i.pending_on]),
-              ...context.map(m => m.senderId).filter((id): id is string => id !== null),
-              ...[...contextMentions.values()].flat(),
-            ]),
-          ];
+          // A DM's legal assignees are its two participants and nobody else.
+          // Not merely added to the derived set but REPLACING it: a third party
+          // named in a DM cannot see that channel, so an item pending on them
+          // is filtered out of their own feed and nobody ever actions it.
+          // Deriving it would also leave the counterpart out entirely whenever
+          // they have not spoken in the window, and directDmOwnerless would then
+          // fall back to the author — filing the ask against whoever asked.
+          const candidateUserIds = scope.isDmChannel
+            ? dmParticipants
+            : [
+                ...new Set([
+                  ...mentionedUserIds,
+                  ...window.map(m => m.senderId),
+                  ...openItems.flatMap(i => [...i.requested_by, ...i.pending_on]),
+                  ...context.map(m => m.senderId).filter((id): id is string => id !== null),
+                  ...[...contextMentions.values()].flat(),
+                ]),
+              ];
           const allowedUserIds = await this.realWorkspaceUsers(
             window[0].workspaceId,
             candidateUserIds,
@@ -218,18 +310,17 @@ class RadarExecutionService {
             // this workspace before they can land in the ledger.
             allowedUserIds,
           });
-          await this.directDmOwnerless(valid, conversationId, windowSenders, allowedUserIds);
+          await this.directDmOwnerless(valid, scope, windowSenders, allowedUserIds);
           run.validOps = valid;
           run.droppedOps = dropped;
           const last = window[window.length - 1];
-          const conversation = await prisma.conversation.findUniqueOrThrow({
-            where: { conversationId },
-            select: { channelId: true },
-          });
           const applied = await radarApplier.apply({
             workspaceId: last.workspaceId,
             conversationId,
-            channelId: conversation.channelId,
+            scope,
+            conversationBySourceMessage: new Map(
+              window.map(m => [m.messageId, m.conversationId]),
+            ),
             operations: valid,
             watermark: { createdAt: last.createdAt, messageId: last.messageId },
             actorType: 'llm',
@@ -261,13 +352,13 @@ class RadarExecutionService {
               error: run.error,
             });
             run.error = `${run.error} (window skipped after ${failures} consecutive failures)`;
-            await this.saveWatermark(conversationId, last, 0);
+            await this.saveWatermark(scope.key, last, 0);
             await this.recordRun(run, startedAt);
             continue;
           }
 
           await this.saveWatermark(
-            conversationId,
+            scope.key,
             { workspaceId: last.workspaceId, createdAt: floor.createdAt, messageId: floor.messageId },
             failures,
           );
@@ -284,7 +375,7 @@ class RadarExecutionService {
 
       // Consume the window either way, or it is re-scanned forever. On a gate
       // pass the advance happens inside the applier's transaction instead.
-      await this.saveWatermark(conversationId, window[window.length - 1], 0);
+      await this.saveWatermark(scope.key, window[window.length - 1], 0);
       await this.recordRun(run, startedAt);
     }
   }
@@ -299,14 +390,14 @@ class RadarExecutionService {
    * records a failure without consuming the window, keeping retries safe.
    */
   private async saveWatermark(
-    conversationId: string,
+    scopeKey: string,
     at: { workspaceId: string; createdAt: Date; messageId: string },
     consecutiveFailures: number,
   ): Promise<void> {
     await prisma.executionThreadState.upsert({
-      where: { conversationId },
+      where: { conversationId: scopeKey },
       create: {
-        conversationId,
+        conversationId: scopeKey,
         workspaceId: at.workspaceId,
         watermarkCreatedAt: at.createdAt,
         watermarkMsgId: at.messageId,
@@ -356,29 +447,26 @@ class RadarExecutionService {
    */
   private async directDmOwnerless(
     valid: Array<{ op: string; sourceMessageId: string; pendingOn?: string[] }>,
-    conversationId: string,
+    scope: RadarScope,
     windowSenders: Map<string, string>,
     allowedUserIds: Set<string>,
   ): Promise<void> {
+    if (!scope.isDmChannel) return;
     const ownerless = valid.filter(
       op => op.op === 'create' && (op.pendingOn ?? []).length === 0,
     );
     if (ownerless.length === 0) return;
 
-    const conversation = await prisma.conversation.findUnique({
-      where: { conversationId },
-      select: {
-        channel: {
-          select: { scopeType: true, participants: { select: { userId: true } } },
-        },
-      },
+    const channel = await prisma.channel.findUnique({
+      where: { id: scope.channelId },
+      select: { participants: { select: { userId: true } } },
     });
-    if (conversation?.channel?.scopeType !== 'DM') return;
+    if (!channel) return;
 
     // This runs AFTER validateTransitions, so it has to re-apply the same
     // allow-list itself — otherwise a stale participant row would be the one
     // id that reaches the ledger unverified.
-    const participants = conversation.channel.participants
+    const participants = channel.participants
       .map(p => p.userId)
       .filter(id => allowedUserIds.has(id));
     for (const op of ownerless) {
@@ -396,13 +484,13 @@ class RadarExecutionService {
    * any operation citing these ids, so context cannot produce transitions.
    */
   private async loadContextMessages(
-    conversationId: string,
+    messageScope: Prisma.MessageWhereInput,
     floor: { createdAt: Date; messageId: string },
   ) {
     if (CONTEXT_MESSAGES <= 0) return [];
     const rows = await prisma.message.findMany({
       where: {
-        conversationId,
+        ...messageScope,
         isDeleted: false,
         msgType: { not: 'SYSTEM' },
         visibleTo: null,
@@ -419,6 +507,8 @@ class RadarExecutionService {
         content: true,
         createdAt: true,
         workspaceId: true,
+        conversationId: true,
+        conversation: { select: { initialMessageId: true } },
         sender: { select: { name: true } },
       },
     });
@@ -443,11 +533,36 @@ class RadarExecutionService {
     return new Set(users.map(u => u.id));
   }
 
-  private async loadOpenItems(conversationId: string): Promise<ParserOpenItem[]> {
+  /** The DM's participants. The allow-list still runs over these, so a stale
+   *  participant row or a deactivated account cannot reach the ledger. */
+  private async dmParticipants(channelId: string): Promise<string[]> {
+    const rows = await prisma.channelParticipant.findMany({
+      where: { channelId },
+      select: { userId: true },
+    });
+    return [...new Set(rows.map(r => r.userId))];
+  }
+
+  private async loadOpenItems(
+    scope: RadarScope,
+    conversationIdsInWindow: string[] = [],
+  ): Promise<OpenItemRow[]> {
     // Newest first and bounded: every parse carries these, and a long-lived
     // thread accumulates open items faster than anyone resolves them.
+    //
+    // A DM reads its whole channel. Scoped to the conversation it would always
+    // come back empty — the ask and the reply that settles it start separate
+    // conversations — so no DM would ever count as tracked.
+    // MAX_OPEN_ITEMS used to bound one thread; under DM scope it bounds a whole
+    // channel, and newest-first alone would drop the items this window is about
+    // as soon as a DM carries more than the cap. Items raised in a conversation
+    // present in this window come first and are never squeezed out by a busier
+    // sibling; the rest of the budget goes to the newest.
+    const inWindow = new Set(conversationIdsInWindow);
     const items = await prisma.executionItem.findMany({
-      where: { conversationId, status: 'OPEN' },
+      where: scope.isDmChannel
+        ? { channelId: scope.channelId, status: 'OPEN' }
+        : { conversationId: scope.conversationId, status: 'OPEN' },
       orderBy: { updatedAt: 'desc' },
       take: MAX_OPEN_ITEMS,
       select: {
@@ -456,14 +571,40 @@ class RadarExecutionService {
         contextSummary: true,
         requestedBy: true,
         pendingOn: true,
+        conversationId: true,
       },
     });
-    return items.map(i => ({
+    const relevant =
+      inWindow.size > 0 && items.length === MAX_OPEN_ITEMS
+        ? await prisma.executionItem.findMany({
+            where: {
+              channelId: scope.channelId,
+              status: 'OPEN',
+              conversationId: { in: [...inWindow] },
+            },
+            orderBy: { updatedAt: 'desc' },
+            take: MAX_OPEN_ITEMS,
+            select: {
+              id: true,
+              title: true,
+              contextSummary: true,
+              requestedBy: true,
+              pendingOn: true,
+              conversationId: true,
+            },
+          })
+        : [];
+    const merged = [...relevant, ...items.filter(i => !relevant.some(r => r.id === i.id))].slice(
+      0,
+      MAX_OPEN_ITEMS,
+    );
+    return merged.map(i => ({
       id: i.id,
       title: i.title,
       context: i.contextSummary,
       requested_by: i.requestedBy,
       pending_on: i.pendingOn,
+      conversationId: i.conversationId,
     }));
   }
 
@@ -509,11 +650,14 @@ class RadarExecutionService {
       senderId: string | null;
       content: string;
       createdAt: Date;
+      conversationId: string;
+      conversation: { initialMessageId: string } | null;
       sender: { name: string } | null;
     }>,
     mentionsByMessage: Map<string, string[]>,
     nameById: Map<string, string>,
     attachmentsByMessage: Map<string, string[]>,
+    threadLabels: Map<string, string>,
   ): ParserWindowMessage[] {
     return window.map(m => ({
       id: m.messageId,
@@ -526,6 +670,18 @@ class RadarExecutionService {
         name: nameById.get(id) ?? id,
       })),
       timestamp_iso: m.createdAt.toISOString(),
+      // Absent, not null. null is a CLAIM — the prompt reads it as "posted into
+      // the main flow, not into any thread" — and only a flattened window is in
+      // a position to make it. A thread-scoped window is one conversation, so it
+      // says nothing about threads at all.
+      ...(threadLabels.size > 0
+        ? {
+            thread: threadLabels.get(m.conversationId) ?? null,
+            thread_role: (m.conversation && m.messageId === m.conversation.initialMessageId
+              ? 'root'
+              : 'reply') as 'root' | 'reply',
+          }
+        : {}),
     }));
   }
 }
