@@ -5325,7 +5325,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           layoutScope={`${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`}
                           searchActive={hasSearchTerm}
                           onTicketsChange={handleKanbanTicketsChange}
-                          allKnownTickets={localTickets ?? []}
+                          allKnownTickets={group.allTickets}
                           {...(paginatedColumnConfig ? { paginatedColumnConfig } : {})}
                           {...(canCreateTicket &&
                           channel &&

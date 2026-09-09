@@ -371,6 +371,21 @@ const PaginatedStageList: React.FC<{
       // according to client-side grouping - skip it
     }
 
+    // Add-side reconciliation: a ticket whose LIVE status/stage now matches this
+    // column must render here even if this column's (async, possibly stale) fetch
+    // has not surfaced it yet. Right after a status change under a Vespa-backed
+    // filter, the moved ticket is dropped from its old column above but the search
+    // index has not yet returned it for the new column; without this loop the card
+    // disappears from every column until Vespa reindexes.
+    // allKnownTickets is scoped to THIS swimlane's tickets (group.allTickets), so
+    // a ticket is only reconciled into its own group's column, never duplicated
+    // across swimlanes when a groupBy is active.
+    for (const knownTicket of allKnownTickets) {
+      if (renderedTicketsById.has(knownTicket.id)) continue;
+      if (!ticketBelongsToColumn(knownTicket, columnType, columnValue, columnStatus)) continue;
+      renderedTicketsById.set(knownTicket.id, knownTicket);
+    }
+
     return [...renderedTicketsById.values()];
   }, [
     allKnownTickets,
