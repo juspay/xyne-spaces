@@ -49,6 +49,9 @@ export function serializeCalendarCredentials(
   return encrypt(JSON.stringify(credentials));
 }
 
+/** Mailbox-level source types that can carry a desk's email history (apps excluded). */
+export const MAILBOX_SOURCE_TYPES = ['google', 'microsoft', 'zoho'] as const;
+
 export class ExternalSourceRepository {
   private db = DatabaseClient.getInstance();
 
@@ -226,6 +229,22 @@ export class ExternalSourceRepository {
         ...(opts.requireActive ? { isActive: true } : {}),
       },
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  /**
+   * List all of a channel's email-family sources (oldest first).
+   * findChannelSource is findFirst; the sources-listing endpoint needs them all.
+   */
+  async listChannelEmailSources(channelId: string, opts?: { activeOnly?: boolean }) {
+    return await this.db.externalSource.findMany({
+      where: {
+        channelId,
+        sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
+        NOT: { name: { startsWith: 'google-dl-sync' } },
+        ...(opts?.activeOnly ? { isActive: true } : {}),
+      },
+      orderBy: { createdAt: 'asc' },
     });
   }
 
