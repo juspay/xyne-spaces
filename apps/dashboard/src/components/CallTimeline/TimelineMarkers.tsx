@@ -156,11 +156,14 @@ export const JoinLeaveRow = ({
 export const MarkerLegend = ({
   types,
   hasParticipantEvents = false,
+  hasRecordedSpans = false,
   className,
 }: {
   types: ReadonlySet<MarkedItemType>;
   /** Joins and leaves are not MarkedItems, so they announce themselves separately. */
   hasParticipantEvents?: boolean;
+  /** Nor are the shaded recording bands. */
+  hasRecordedSpans?: boolean;
   className?: string;
 }): ReactElement => (
   <div className={cn('flex items-center gap-5 pl-1 text-xs text-muted-foreground', className)}>
@@ -189,6 +192,12 @@ export const MarkerLegend = ({
           <JoinLeaveGlyph type='leave' size={8} />
         </span>
         Joins &amp; leaves
+      </span>
+    )}
+    {hasRecordedSpans && (
+      <span className='flex items-center gap-1.5'>
+        <span className='h-1.5 w-4 rounded-full bg-muted-foreground/50' aria-hidden='true' />
+        Recorded
       </span>
     )}
   </div>

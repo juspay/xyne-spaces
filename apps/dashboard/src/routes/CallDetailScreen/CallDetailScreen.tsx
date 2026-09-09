@@ -5,7 +5,6 @@ import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucid
 import { Hashtag, EnvelopeDefault, File02Text } from '@xyne/icons';
 import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
-import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { useCallPRD } from '../../hooks/useCallPRD';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -40,6 +39,8 @@ import { GoogleDocPreviewModal } from '../RecordingDetailV2Screen/components/Goo
 import { useCallGoogleDocExport } from './useCallGoogleDocExport';
 import { CallTimelineBar } from '../../components/CallTimeline/CallTimelineBar';
 import { buildParticipantEvents } from '../../components/CallTimeline/participantEvents';
+import { buildRecordedSpans } from '../../components/CallTimeline/recordingSpans';
+import { useCallRecordingSessions } from './useCallRecordingSessions';
 import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
@@ -160,16 +161,6 @@ export default function CallDetailScreen(): ReactElement {
   const summaryFormat = callSummaryFormat(call?.aiSummary);
   const isOwner = Boolean(user?.id && call?.createdByUserId === user.id);
 
-  const hasRecording = useMemo<boolean>(() => {
-    if (!conversationMessages || !call?.externalId) return false;
-    return conversationMessages.some(m =>
-      (m.attachments ?? []).some(a => {
-        const meta = a.metadata as Record<string, unknown> | null;
-        return meta?.['type'] === 'recording' && meta?.['callId'] === call.externalId;
-      }),
-    );
-  }, [conversationMessages, call?.externalId]);
-
   const durationMs =
     call?.startedAt && call?.endedAt
       ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
@@ -213,6 +204,22 @@ export default function CallDetailScreen(): ReactElement {
   // drawn now would span nothing but the viewer's own arrival.
   const timelineSpanMs =
     call && hasCallEnded(call) ? new Date(call.endedAt).getTime() - call.startedAt : null;
+
+  // Not in Zero, so fetched — and only once the call has settled, which is also the
+  // only time the bar is drawn.
+  const recordingSessions = useCallRecordingSessions(call?.externalId, timelineSpanMs !== null);
+
+  // Fetched per recording, on the first press of play.
+  const handleLoadRecording = useCallback(
+    (recordingId: string, signal: AbortSignal): Promise<Blob> =>
+      recordingService.downloadCallRecordingBlob(call?.externalId ?? '', recordingId, signal),
+    [call?.externalId],
+  );
+
+  const recordedSpans = useMemo(
+    () => (callStartedAtMs === null ? [] : buildRecordedSpans(recordingSessions, callStartedAtMs)),
+    [recordingSessions, callStartedAtMs],
+  );
 
   // Same side panel a summary citation opens. A moment already has a divider there,
   // so only decisions and actions need the highlight to be findable.
@@ -551,21 +558,11 @@ export default function CallDetailScreen(): ReactElement {
                 markedItems={call.markedItems}
                 spanMs={timelineSpanMs}
                 participantEvents={participantEvents}
+                recordedSpans={recordedSpans}
+                onLoadRecording={handleLoadRecording}
                 onMarkerSelect={handleMarkerSelect}
                 className='mt-3.5'
               />
-            )}
-
-            {/* Recording */}
-            {hasRecording && (
-              <div className='mt-3.5 max-w-md rounded-xl border border-border bg-muted/40 px-3 py-2'>
-                <AudioPlayer
-                  onLoad={signal => recordingService.downloadRecordingBlob(call.externalId, signal)}
-                  initialDurationSec={durationMs ? durationMs / 1000 : undefined}
-                  trackCategory='CallDetail'
-                  showToastOnError
-                />
-              </div>
             )}
 
             {/* Tabs + primary action */}
