@@ -1,15 +1,13 @@
 import type { Prisma } from '@prisma/client';
+import { MANDATORY_SUMMARY_SECTION_IDS } from '@xyne/shared';
 
 /**
- * Reserved ids for the two sections the template editor always includes. They are
- * stored in the regular `sections` payload; a Scribe admin can flag one as
- * `disabled` so it is dropped from generation without being removed from the
- * template, letting it be switched back on later.
+ * The two reserved sections the template editor always includes are stored in the
+ * regular `sections` payload; a Scribe admin can flag one as `disabled` so it is
+ * dropped from generation without being removed from the template, letting it be
+ * switched back on later.
  */
-export const MANDATORY_SUMMARY_SECTION_IDS = {
-  decisions: 'mandatory-decisions',
-  actionItems: 'mandatory-action-items',
-} as const;
+export { MANDATORY_SUMMARY_SECTION_IDS };
 
 export interface MandatorySummarySectionState {
   decisions: boolean;

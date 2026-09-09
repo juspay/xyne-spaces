@@ -33,7 +33,7 @@ import {
   UserTwo,
 } from '@xyne/icons';
 import { toast } from 'sonner';
-import { DefaultOutlet } from '@xyne/shared';
+import { DefaultOutlet, MANDATORY_SUMMARY_SECTION_IDS } from '@xyne/shared';
 import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
@@ -106,7 +106,7 @@ const EMPTY_SECTION = (): SummaryTemplateSection => ({
 
 const MANDATORY_SECTIONS = [
   {
-    id: 'mandatory-decisions',
+    id: MANDATORY_SUMMARY_SECTION_IDS.decisions,
     key: 'decisions',
     title: '✅ Decisions',
     displayTitle: 'Decisions',
@@ -116,7 +116,7 @@ const MANDATORY_SECTIONS = [
     dotClassName: 'bg-primary',
   },
   {
-    id: 'mandatory-action-items',
+    id: MANDATORY_SUMMARY_SECTION_IDS.actionItems,
     key: 'action items',
     title: '📋 Action Items',
     displayTitle: 'Action items',
