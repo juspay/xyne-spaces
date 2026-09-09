@@ -45,6 +45,7 @@ export const MessageReceivedOutputSchema = z.object({
   message: z.object({
     id: z.string(),
     content: z.string().nullable(),
+    rawContent: z.string().nullable(),
     conversationId: z.string(),
     channelId: z.string(),
     createdAt: z.coerce.date(),
@@ -142,7 +143,11 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
       const matchResults: boolean[] = [];
 
       if (contentFilterConfigured) {
-        const contentPasses = !!(p.message.content && p.message.content.toLowerCase().includes(cfg.contentContains!.toLowerCase()));
+        // Decoded text and the stored blob: a filter written against a FlowJSON
+        // card title or button label must keep firing after the decode.
+        const needle = cfg.contentContains!.toLowerCase();
+        const contentPasses = [p.message.content, p.message.rawContent]
+          .some(text => !!text && text.toLowerCase().includes(needle));
         matchResults.push(contentPasses);
       }
 
@@ -296,6 +301,7 @@ async function hydrateMessageReceivedPayload(
     message: {
       id: messageId,
       content: toReadableMessageContent(messageRow?.content),
+      rawContent: messageRow?.content ?? null,
       conversationId,
       channelId,
       createdAt: messageRow?.createdAt ?? new Date(),
