@@ -1,7 +1,7 @@
 import { Copy, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { copyHtmlToClipboard } from '../../../utils/clipboardUtils';
-import { buildCallInviteHtml } from '../../../utils/callControls';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { buildCallInviteText } from '../../../utils/callControls';
 import { useUser } from '../../../hooks/useUsers';
 import { DropdownMenuItem } from '../../ui/dropdown-menu';
 import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
@@ -39,7 +39,7 @@ export function UpcomingCallActionsMenuItems({
       toast.error('No link available');
       return;
     }
-    const html = buildCallInviteHtml({
+    const text = buildCallInviteText({
       title: call.title,
       hostName: hostUser?.name,
       roomLink: call.roomLink,
@@ -50,7 +50,7 @@ export function UpcomingCallActionsMenuItems({
       endedAt: call.endedAt,
       timezone: call.timezone,
     });
-    copyHtmlToClipboard(html)
+    copyTextToClipboard(text)
       .then(() => toast.success('Invite copied to clipboard'))
       .catch(() => toast.error('Failed to copy link'));
   };

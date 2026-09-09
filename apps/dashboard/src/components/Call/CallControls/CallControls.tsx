@@ -40,13 +40,13 @@ import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { InvitationResponse, type Call, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
 import {
-  buildCallInviteHtml,
+  buildCallInviteText,
   getAiButtonColorClass,
   getAiButtonDisabled,
   getAiButtonTitle,
   handleAiButtonClick,
 } from '../../../utils/callControls';
-import { copyHtmlToClipboard } from '../../../utils/clipboardUtils';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,7 +70,7 @@ type ActiveCallForControls = Pick<
   | 'endedAt'
   | 'timezone'
 > & {
-  participants?: Array<{ response?: string | null }>;
+  participants?: Array<{ userId: string; displayName?: string | null; response?: string | null }>;
 };
 
 interface CallControlsProps {
@@ -199,13 +199,12 @@ export function CallControls({
     return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
   }, [activeCalls, externalId]);
   const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
-  // Same room.metadata.createdBy lookup as ParticipantTile/FullCallView's hostName.
+
   const hostName = useMemo(() => {
     const hostId = currentCall?.createdByUserId;
-    if (!room || !hostId) return null;
-    if (hostId === room.localParticipant.identity) return room.localParticipant.name ?? null;
-    return room.remoteParticipants.get(hostId)?.name ?? null;
-  }, [room, currentCall?.createdByUserId]);
+    if (!hostId) return null;
+    return currentCall?.participants?.find(p => p.userId === hostId)?.displayName ?? null;
+  }, [currentCall?.createdByUserId, currentCall?.participants]);
   // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
     return (
@@ -343,7 +342,7 @@ export function CallControls({
 
   const handleCopyInviteLink = (): void => {
     if (!roomLink) return;
-    const html = buildCallInviteHtml({
+    const text = buildCallInviteText({
       title: currentCall?.title,
       hostName,
       roomLink,
@@ -354,7 +353,7 @@ export function CallControls({
       endedAt: currentCall?.endedAt,
       timezone: currentCall?.timezone,
     });
-    void copyHtmlToClipboard(html).then(() => {
+    void copyTextToClipboard(text).then(() => {
       setShowCopied(true);
       setTimeout(() => setShowCopied(false), 2000);
     });

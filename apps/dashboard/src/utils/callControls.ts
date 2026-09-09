@@ -1,6 +1,5 @@
 import { CallStatus } from '@xyne/shared';
 import { formatRelativeTime } from './dateUtils';
-import { escapeHtml } from './clipboardUtils';
 
 interface AiControllerLike {
   id: string;
@@ -98,7 +97,7 @@ interface CallInviteInfo {
   timezone?: string | null | undefined;
 }
 
-export function buildCallInviteHtml({
+export function buildCallInviteText({
   title,
   hostName,
   roomLink,
@@ -142,14 +141,14 @@ export function buildCallInviteHtml({
 
   const heading = title || (hostName ? `${hostName} is inviting you to join the call` : null);
   const lines = [
-    ...(heading ? [`<b>${escapeHtml(heading)}</b>`] : []),
-    ...(title && hostName ? [`Hosted by ${escapeHtml(hostName)}`] : []),
-    ...scheduleLines.map(escapeHtml),
+    ...(heading ? [heading] : []),
+    ...(title && hostName ? [`Hosted by ${hostName}`] : []),
+    ...scheduleLines,
     '',
     'Xyne Call joining info',
-    `Video call link: ${escapeHtml(roomLink)}`,
+    `Video call link: ${roomLink}`,
   ];
-  return lines.join('<br>');
+  return lines.join('\n');
 }
 
 export function handleAiButtonClick({
