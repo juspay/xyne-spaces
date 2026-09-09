@@ -38,6 +38,7 @@ import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
 import { Popover } from '../../../components/ui/Popover';
+import { Switch } from '../../../components/ui/Switch';
 import { useHasResourceAccess } from '../../../hooks/usePermissions';
 import { useUser } from '../../../hooks/useUsers';
 import {
@@ -150,6 +151,9 @@ const isMandatorySection = (section: Pick<SummaryTemplateSection, 'id'>): boolea
  * Mandatory sections are stored in the regular sections payload so summary generation keeps
  * using the existing API contract. Runtime checks use reserved IDs rather than editable titles,
  * so a custom section named "Decisions" remains a normal editable section.
+ *
+ * A Scribe admin can switch a mandatory section off; the `disabled` flag is the only part of
+ * these sections that persists from the incoming payload, so title/description stay canonical.
  */
 const withMandatorySections = (sections: SummaryTemplateSection[]): SummaryTemplateSection[] => {
   const editableSections = sections.filter(section => !isMandatorySection(section));
@@ -157,10 +161,21 @@ const withMandatorySections = (sections: SummaryTemplateSection[]): SummaryTempl
     id: definition.id,
     title: definition.title,
     description: definition.description,
+    ...(sections.find(section => section.id === definition.id)?.disabled === true
+      ? { disabled: true }
+      : {}),
   }));
 
   return [...editableSections, ...mandatorySections];
 };
+
+/** Sections handed to the AI helpers: everything the summary will actually contain. */
+const toAiSections = (
+  sections: SummaryTemplateSection[],
+): Array<Pick<SummaryTemplateSection, 'title' | 'description'>> =>
+  sections
+    .filter(section => section.disabled !== true)
+    .map(({ title, description }) => ({ title, description }));
 
 // The default template is a static string so it can be used in the backend service to generate
 const normalizeIncomingSections = (
@@ -605,6 +620,25 @@ export function SummaryTemplatesModal({
     });
   };
 
+  // Only a Scribe admin editing their own template can switch Decisions / Action Items
+  // off (or back on); the backend enforces the same rule.
+  const canToggleMandatorySections = Boolean(draft?.canEdit) && isScribeAdmin;
+  const toggleMandatorySection = (sectionId: string, enabled: boolean): void => {
+    if (!canToggleMandatorySections) return;
+    setDraft(current =>
+      current
+        ? {
+            ...current,
+            sections: current.sections.map(section => {
+              if (section.id !== sectionId || !isMandatorySection(section)) return section;
+              const { disabled: _disabled, ...rest } = section;
+              return enabled ? rest : { ...rest, disabled: true };
+            }),
+          }
+        : current,
+    );
+  };
+
   const handleSectionDragEnd = ({ active, over }: DragEndEvent): void => {
     if (!over || active.id === over.id) return;
 
@@ -770,7 +804,7 @@ export function SummaryTemplatesModal({
       const context = await recordingService.draftSummaryTemplateContext({
         name: draft.name.trim() || 'Untitled template',
         meetingContext: draft.autoTriggerPrompt,
-        sections: draft.sections.map(({ title, description }) => ({ title, description })),
+        sections: toAiSections(draft.sections),
       });
       setDraft(current => (current ? { ...current, autoTriggerPrompt: context } : current));
     } catch (error) {
@@ -789,7 +823,7 @@ export function SummaryTemplatesModal({
       const sections = await recordingService.suggestSummaryTemplateSections({
         name: draft.name.trim() || 'Untitled template',
         meetingContext: draft.autoTriggerPrompt,
-        sections: draft.sections.map(({ title, description }) => ({ title, description })),
+        sections: toAiSections(draft.sections),
       });
       setDraft(current =>
         current ? { ...current, sections: normalizeIncomingSections(sections, true) } : current,
@@ -810,7 +844,7 @@ export function SummaryTemplatesModal({
       const systemPrompt = await recordingService.generateSummaryTemplateSystemPrompt({
         name: draft.name.trim() || 'Untitled template',
         meetingContext: draft.autoTriggerPrompt,
-        sections: draft.sections.map(({ title, description }) => ({ title, description })),
+        sections: toAiSections(draft.sections),
       });
       setDraft(current => (current ? { ...current, systemPrompt } : current));
     } catch (error) {
@@ -1241,30 +1275,69 @@ export function SummaryTemplatesModal({
                 )}
 
                 <div className='flex w-full flex-col gap-2.5 pt-1'>
-                  {MANDATORY_SECTIONS.map(section => (
-                    <div
-                      key={section.key}
-                      aria-disabled='true'
-                      className='flex flex-col gap-1.5 rounded-xl border border-dashed border-border bg-muted/35 px-4 py-3.5'
-                    >
-                      <div className='flex flex-wrap items-center gap-2'>
-                        <span
-                          className={cn('size-2 shrink-0 rounded-full', section.dotClassName)}
-                          aria-hidden='true'
-                        />
-                        <span className='text-sm font-semibold text-foreground'>
-                          {section.displayTitle}
-                        </span>
-                        <span className='inline-flex h-5 items-center gap-0.5 rounded-md border border-border bg-background/70 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60'>
-                          <Lock02Close className='size-3' strokeWidth={2.5} aria-hidden='true' />
-                          Always included
-                        </span>
+                  {MANDATORY_SECTIONS.map(section => {
+                    const isSectionEnabled =
+                      draft?.sections.find(candidate => candidate.id === section.id)?.disabled !==
+                      true;
+                    // Only admins (who can switch it back on) see a disabled section at all.
+                    if (!isSectionEnabled && !canToggleMandatorySections) return null;
+                    return (
+                      <div
+                        key={section.key}
+                        aria-disabled={!canToggleMandatorySections}
+                        className={cn(
+                          'flex flex-col gap-1.5 rounded-xl border border-dashed border-border bg-muted/35 px-4 py-3.5',
+                          !isSectionEnabled && 'opacity-60',
+                        )}
+                      >
+                        <div className='flex flex-wrap items-center gap-2'>
+                          <span
+                            className={cn(
+                              'size-2 shrink-0 rounded-full',
+                              isSectionEnabled ? section.dotClassName : 'bg-muted-foreground/40',
+                            )}
+                            aria-hidden='true'
+                          />
+                          <span
+                            className={cn(
+                              'text-sm font-semibold text-foreground',
+                              !isSectionEnabled && 'line-through text-muted-foreground',
+                            )}
+                          >
+                            {section.displayTitle}
+                          </span>
+                          {/* Admins get the switch instead of a status badge. */}
+                          {!canToggleMandatorySections && (
+                            <span className='inline-flex h-5 items-center gap-0.5 rounded-md border border-border bg-background/70 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60'>
+                              <Lock02Close
+                                className='size-3'
+                                strokeWidth={2.5}
+                                aria-hidden='true'
+                              />
+                              Always included
+                            </span>
+                          )}
+                          {canToggleMandatorySections && (
+                            <Switch
+                              checked={isSectionEnabled}
+                              onCheckedChange={enabled =>
+                                toggleMandatorySection(section.id, enabled)
+                              }
+                              aria-label={`${isSectionEnabled ? 'Disable' : 'Enable'} ${section.displayTitle} section`}
+                              className='ml-auto'
+                              data-track-category='SummaryTemplates'
+                              data-track-name='ToggleMandatorySection'
+                            />
+                          )}
+                        </div>
+                        <p className='pl-4 text-sm leading-normal text-muted-foreground'>
+                          {isSectionEnabled
+                            ? section.description
+                            : `This section is switched off for this template. Summaries generated with it will not include ${section.displayTitle.toLowerCase()}.`}
+                        </p>
                       </div>
-                      <p className='pl-4 text-sm leading-normal text-muted-foreground'>
-                        {section.description}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
 
