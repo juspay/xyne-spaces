@@ -193,7 +193,10 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   const nonPreviewableFiles = fileAttachments.filter(a => !hasDocumentThumbnail(a));
 
   // Check if we need to use FilePill for all files (mixed types)
-  const useFilePillForAllFiles = nonPreviewableFiles.length > 0;
+  // Collapse to compact pills whenever there is more than one document file,
+  // so multiple Office/Excel/PDF files render as a clean grid instead of a row
+  // of large preview cards. A single file keeps its rich preview.
+  const useFilePillForAllFiles = nonPreviewableFiles.length > 0 || fileAttachments.length > 1;
 
   const handleFileClick = (attachment: AttachmentType) => {
     // Build attachment refs for the viewer (same order as rendered)
@@ -359,7 +362,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
           {/* Non-previewable files - use FilePill component */}
           {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
           {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
-            <div className='flex flex-col gap-2'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
               {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).map(attachment => (
                 <FilePill
                   key={attachment.id}
