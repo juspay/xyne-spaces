@@ -14,11 +14,16 @@
  * false positive (e.g. `@name` inside an email in a SQL snippet) and must NOT
  * produce a notification. Kept as a string transform (no DOM) so it works in
  * both the browser and Node/worker contexts that share this module.
+ *
+ * The attribute class excludes '<' as well as '>': message bodies are attacker
+ * controlled, and `[^>]*` lets a run of unterminated '<pre' re-scan the tail
+ * from every position (js/polynomial-redos). A real tag's attributes cannot
+ * contain a raw '<', so nothing valid is lost.
  */
 export function stripCodeRegions(htmlContent: string): string {
   return htmlContent
-    .replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, ' ')
-    .replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi, ' ');
+    .replace(/<pre\b[^<>]*>[\s\S]*?<\/pre>/gi, ' ')
+    .replace(/<code\b[^<>]*>[\s\S]*?<\/code>/gi, ' ');
 }
 
 export function extractUserMentions(htmlContent: string): string[] {
