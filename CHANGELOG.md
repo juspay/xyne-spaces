@@ -1,3 +1,10 @@
+## [1.294.1-release-20260909.1](https://github.com/juspay/xyne-spaces/compare/v1.294.0...v1.294.1-release-20260909.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* bump next override to 16.3.3 (CVE-2026-75604 Trivy CRITICAL) ([#1691](https://github.com/juspay/xyne-spaces/issues/1691)) ([fe3442e](https://github.com/juspay/xyne-spaces/commit/fe3442e4c9dc723c3963d61a1198bbe5b6feea66))
+
 ## [1.294.0](https://github.com/juspay/xyne-spaces/compare/v1.293.0...v1.294.0) (2026-09-08)
 
 
