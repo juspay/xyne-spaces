@@ -221,7 +221,7 @@ export class Fanout {
    * delta's regate always flips last. (This is what makes cross-grant-stream ordering
    * structural rather than resting on a fragile shared-FIFO-read invariant.)
    */
-  async #regate(client: ClientSub, cache?: Map<string, Record<string, unknown>[]>): Promise<void> {
+  async #regate(client: ClientSub, cache?: Map<string, CompactedRow[]>): Promise<void> {
     // A regate is always a queued job holding a direct client reference; the client may
     // have unsubscribed (removeClient dropped it from the set) before the job runs. Never
     // re-gate or hydrate a client no longer subscribed — else the subscribe-time regate
@@ -235,14 +235,17 @@ export class Fanout {
     for (const grantKey of client.grantByTable.values()) {
       if (!this.#grantHydrated.has(grantKey)) return;
     }
+    // A struct instance (transitive ACL chain) holds rows of MULTIPLE tables under one key
+    // (conversations + channels), so cache the raw snapshot per grantKey and split by tableName.
+    // For a flat grant every row is `table`, so the filter is identity.
     const grantRows = new Map<string, Record<string, unknown>[]>();
     for (const [table, grantKey] of client.grantByTable) {
-      let rows = cache?.get(grantKey);
-      if (!rows) {
-        rows = (await this.#store.snapshot(grantKey)).map((c) => c.row);
-        cache?.set(grantKey, rows);
+      let snap = cache?.get(grantKey);
+      if (!snap) {
+        snap = await this.#store.snapshot(grantKey);
+        cache?.set(grantKey, snap);
       }
-      grantRows.set(table, rows);
+      grantRows.set(table, snap.filter((c) => c.tableName === table).map((c) => c.row));
     }
     let admitted: boolean;
     try {
@@ -468,7 +471,7 @@ export class Fanout {
       ? this.#byUser.get(dataKey)?.get(targetUserId)
       : this.#dataSubs.get(dataKey);
     if (!subs || subs.size === 0) return;
-    const grantCache = new Map<string, Record<string, unknown>[]>();
+    const grantCache = new Map<string, CompactedRow[]>();
     for (const client of subs) {
       try {
         await this.#regate(client, grantCache);

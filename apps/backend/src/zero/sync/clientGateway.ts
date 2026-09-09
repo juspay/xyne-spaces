@@ -6,7 +6,7 @@ import { fanout, type SyncSocket } from './fanout';
 import { hashOfNameAndArgs } from './protocol';
 import { deriveAclGate } from './aclGate';
 import { queryMetaFor } from './queryMeta';
-import { grantQueryName, grantArgs } from './grantQueries';
+import { grantQueryName, grantArgs, structQueryName, structArgs } from './grantQueries';
 import { obsEmit } from './obs';
 
 /**
@@ -160,7 +160,27 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     }
     const grantByTable = new Map<string, string>();
     const grantInstanceKeys: string[] = [];
+    // A transitive per-scope chain (attachments' conversation→channel) can't be materialized as one
+    // flat grant per table — the inner table's key isn't a query arg. Subscribe ONE `.related()`
+    // structure instance for the whole chain, keyed by the data partition value; each chain table
+    // reads its rows from that instance's snapshot (split by tableName in fanout).
+    const chainTables = new Set(gate.structureChains.flatMap((c) => c.tables));
+    for (const chain of gate.structureChains) {
+      const relationships = chain.links.map((l) => l.relationship);
+      const sk = syncEngine.subscribe(
+        structQueryName(chain.rootTable),
+        structArgs(chain.rootScopeColumn, partitionValue, relationships),
+        connId,
+      );
+      if (sk) {
+        for (const t of chain.tables) grantByTable.set(t, sk);
+        grantInstanceKeys.push(sk);
+      }
+    }
     for (const gs of gate.grantSources) {
+      // Tables covered by a structure instance are already subscribed above — don't also open a
+      // (mis-scoped) flat grant for them.
+      if (chainTables.has(gs.table)) continue;
       // Two-plane partition (final plan): a PER-USER grant materializes ALL of U's rows
       // (`__grant__channel_participants{userId:U}`), shared across every channel U views and
       // warm for the session; a PER-SCOPE grant is the scope-root row for THIS channel

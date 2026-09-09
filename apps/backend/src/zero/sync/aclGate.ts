@@ -43,8 +43,17 @@ interface ExistsCond {
   op: 'EXISTS' | 'NOT EXISTS';
   related: {
     correlation: { parentField: string[]; childField: string[] };
-    subquery: { table: string; where?: Cond };
+    /** `alias` = `zsubq_<relationshipName>` — the SCHEMA relationship traversed, which can differ
+     *  from the table name (rel `channel` → table `channels`). Needed to rebuild `.related(rel)`. */
+    subquery: { table: string; alias?: string; where?: Cond };
   };
+}
+
+/** Zero encodes an exists-subquery's relationship in its alias as `zsubq_<relationship>`
+ *  (zero-protocol/src/ast.ts `SUBQ_PREFIX`; not re-exported from the package root). */
+const SUBQ_PREFIX = 'zsubq_';
+function relationshipOf(alias: string | undefined, fallbackTable: string): string {
+  return alias?.startsWith(SUBQ_PREFIX) ? alias.slice(SUBQ_PREFIX.length) : fallbackTable;
 }
 /** Synthetic node: a per-row admission arm the shared path cannot serve, replaced by
  *  `excludePerRowArms` so it never grants (evalCond returns false). See buildAclGate. */
@@ -78,6 +87,8 @@ export interface StructureLink {
   childTable: string;
   /** the child row's key the FK points at (correlation.childField). */
   childColumn: string;
+  /** the SCHEMA relationship name to traverse via `.related(relationship)` (may differ from childTable). */
+  relationship: string;
 }
 
 /**
@@ -337,6 +348,7 @@ function deriveStructureChains(root: Cond): StructureChain[] {
         parentColumn: next.related.correlation.parentField[0],
         childTable: next.related.subquery.table,
         childColumn: next.related.correlation.childField[0],
+        relationship: relationshipOf(next.related.subquery.alias, next.related.subquery.table),
       });
       tables.push(next.related.subquery.table);
       curTable = next.related.subquery.table;

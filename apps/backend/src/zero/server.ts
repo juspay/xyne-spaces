@@ -35,7 +35,7 @@ import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
 import { verifySyncServiceToken } from './sync/serviceIdentity';
 import { resolveSharedBase } from './sync/baseQueries';
-import { isGrantQuery, buildGrantBase } from './sync/grantQueries';
+import { isSyntheticQuery, buildGrantBase } from './sync/grantQueries';
 import { obsEmit } from './sync/obs';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
@@ -399,9 +399,9 @@ export async function handleQueries(request: Request): Promise<any> {
     return handleQueryRequest(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (queryName, args): any => {
-        const grant = isGrantQuery(queryName);
-        obsEmit('zero-query', { principal: 'sync', queryName, mode: grant ? 'grant' : 'base' });
-        const base = grant
+        const synthetic = isSyntheticQuery(queryName);
+        obsEmit('zero-query', { principal: 'sync', queryName, mode: synthetic ? 'grant' : 'base' });
+        const base = synthetic
           ? buildGrantBase(queryName, args)
           : resolveSharedBase(queryName, syncCtx, args);
         if (!base) {

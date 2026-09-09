@@ -23,3 +23,16 @@ test('queryMetaFor: order-independent — user-first then channel is also correc
   assert.equal(byUser?.partitionColumn, 'userId');
   assert.equal(byChannel?.partitionColumn, 'channelId');
 });
+
+// P3(c): a structure instance is `conversations.where(conversationId,C).related('channel')`. Its
+// packing meta must derive from the `.related()` AST: partition on the scope column, and a childLink
+// for the transitive hop (so the demux attributes channels rows to the conversation's instance). The
+// `__rel` arg key must NOT be read as the partition column.
+test('queryMetaFor: struct instance derives partition + childLink from the .related() AST', () => {
+  const meta = queryMetaFor('__struct__conversations', { conversationId: 'CONV1', __rel: ['channel'] });
+  assert.equal(meta?.rootTable, 'conversations');
+  assert.equal(meta?.partitionColumn, 'conversationId', 'scope column, not __rel');
+  assert.equal(meta?.tables.includes('channels'), true, 'the related child table is covered');
+  const link = meta?.childLinks.find((l) => l.childTable === 'channels');
+  assert.deepEqual(link, { childTable: 'channels', childColumn: 'id', parentColumn: 'channelId' });
+});

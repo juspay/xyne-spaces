@@ -198,6 +198,7 @@ test('message_attachments: conversation→channel is transitive → ONE structur
     parentColumn: 'channelId',
     childTable: 'channels',
     childColumn: 'id',
+    relationship: 'channel', // the SCHEMA relationship name (≠ table 'channels') for .related()
   }, 'the demux childLink for the transitive hop');
 });
 
