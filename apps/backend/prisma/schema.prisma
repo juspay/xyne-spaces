@@ -4802,6 +4802,7 @@ model ExecutionItem {
   // conversationId, or an id, so the planner drives off that and applies
   // workspaceId as a filter. Leading with it produced write cost for nothing.
   @@index([conversationId, status]) // gate: tracked-thread check + resolve-all
+  @@index([channelId, status]) // DM scope: open items, debug, bulk actions
   @@index([pendingOn], type: Gin) // feed: Pending Me membership
   @@index([requestedBy], type: Gin) // feed: Waiting On membership
   @@map("execution_items")
