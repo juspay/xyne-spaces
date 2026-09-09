@@ -1,4 +1,5 @@
 import { logger, Event as LogEvent } from './logger';
+import { getCanvasMentionDisplayText } from './canvasMentionUtils';
 import type {
   BlockNoteEditor,
   BlockSchema,
@@ -44,7 +45,7 @@ const getBlockText = (content: BlockContent[]): string => {
   return content
     .map(item => {
       if (item.type === 'mention') {
-        return getMentionDisplayText(item);
+        return getCanvasMentionDisplayText(item.props);
       }
       if (item.type === 'text' && item.text) {
         return item.text;
@@ -58,15 +59,6 @@ const getBlockText = (content: BlockContent[]): string => {
       return '';
     })
     .join('');
-};
-
-const getMentionDisplayText = (item: BlockContent): string => {
-  const props = item.props || {};
-  const groupId = typeof props['groupId'] === 'string' ? props['groupId'] : '';
-  const groupName = typeof props['groupName'] === 'string' ? props['groupName'] : '';
-  const username = typeof props['username'] === 'string' ? props['username'] : '';
-
-  return groupId && groupName ? groupName : username;
 };
 
 const getTableText = (tableContent: TableContent): string => {
