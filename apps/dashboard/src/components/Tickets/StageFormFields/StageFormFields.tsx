@@ -173,7 +173,7 @@ export const StageFormFields = ({
                 <p className='text-xs font-medium leading-4 text-muted-foreground'>
                   {field.fieldName}
                 </p>
-                <p className='mt-1 text-sm font-semibold leading-5 text-foreground'>
+                <p className='mt-1 break-all text-sm font-semibold leading-5 text-foreground'>
                   {displayValue}
                 </p>
               </div>

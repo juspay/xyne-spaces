@@ -317,7 +317,7 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
         <div
           className={
             embedded
-              ? `min-h-0 flex-1 overflow-y-auto ${submittedHeader && !isEditing ? 'px-3 py-3' : 'p-4'}`
+              ? `min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${submittedHeader && !isEditing ? 'px-3 py-3' : 'p-4'}`
               : 'p-4'
           }
         >

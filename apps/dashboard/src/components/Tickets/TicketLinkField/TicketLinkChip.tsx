@@ -67,7 +67,9 @@ export const TicketLinkChip: React.FC<TicketLinkChipProps> = ({
       data-track-metadata={JSON.stringify({ xyneId })}
     >
       {statusIconFor(statusV2)}
-      <span className='shrink-0 font-mono text-[13px] text-muted-foreground'>{xyneId}</span>
+      <span className='max-w-[45%] shrink-0 truncate font-mono text-[13px] text-muted-foreground'>
+        {xyneId}
+      </span>
       <span className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>{title}</span>
       {assignedTo ? (
         <UserAvatar userId={assignedTo} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />

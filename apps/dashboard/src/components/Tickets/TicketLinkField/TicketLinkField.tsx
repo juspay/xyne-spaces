@@ -564,7 +564,7 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
               onFocus={() => setIsDropdownOpen(true)}
               onKeyDown={handleKeyDown}
               placeholder='Search, paste a link, or create a ticket'
-              className='w-full bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed'
+              className='min-w-0 flex-1 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed'
               data-track-category='Tickets'
               data-track-name={trackName}
             />
@@ -686,9 +686,19 @@ const ExternalLinkBits: React.FC<{ url: string }> = ({ url }) => {
   }
   return (
     <>
-      <span className='shrink-0 text-sm font-medium text-foreground'>{host}</span>
+      <span
+        title={host}
+        className='min-w-0 max-w-[60%] shrink-0 truncate text-sm font-medium text-foreground'
+      >
+        {host}
+      </span>
       {path && path !== '/' ? (
-        <span className='min-w-0 truncate font-mono text-[12px] text-muted-foreground'>{path}</span>
+        <span
+          title={path}
+          className='min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground'
+        >
+          {path}
+        </span>
       ) : null}
     </>
   );

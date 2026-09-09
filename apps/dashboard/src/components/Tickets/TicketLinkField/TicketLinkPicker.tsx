@@ -106,7 +106,7 @@ export const TicketLinkPicker: React.FC<TicketLinkPickerProps> = ({
       ) : null}
 
       {/* Options area: up to half the screen; the modal scrolls beyond that. */}
-      <div className='max-h-[50vh] overflow-y-auto' onScroll={handleScroll}>
+      <div className='max-h-[50vh] overflow-x-hidden overflow-y-auto' onScroll={handleScroll}>
         {hasSubTickets ? (
           <>
             <p className='px-3 pt-2 text-[11px] uppercase tracking-wide text-muted-foreground'>
