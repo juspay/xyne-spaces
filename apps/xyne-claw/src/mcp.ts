@@ -7,6 +7,7 @@ import { writeAttachmentToContext } from "./attachment-write.js";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve as resolvePath, isAbsolute, sep } from "node:path";
 import crypto from "node:crypto";
+import { Agent } from "undici";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("mcp");
@@ -105,17 +106,29 @@ export class McpAuthServiceError extends Error {
   }
 }
 
+// `/mcp/call` returns a single JSON response only when the remote tool
+// FINISHES. For a long-running MCP server (e.g. hypersage, an agent-based
+// debugger that can run 5-15 min) no response byte arrives for minutes, so
+// undici's DEFAULT headersTimeout/bodyTimeout (300s) severs the socket at ~5
+// min with UND_ERR_HEADERS_TIMEOUT. That is a Node-internal timer, so no
+// Envoy/LB/nginx timeout raise can fix it. Disable both idle timers on this
+// dispatcher (same pattern as consume-claw-stream.ts / userMemoryCuratorClient.ts);
+// the real ceiling stays the MCP request timeout enforced in claw-auth.
+const authDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
+
 async function authFetch<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
   const url = `${SERVER.authServiceUrl}${path}`;
   const res = await fetch(url, {
     ...init,
+    // `dispatcher` is an undici extension not in the DOM RequestInit type.
+    dispatcher: authDispatcher,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
       "x-s2s-key": SERVER.s2sKey,
       ...init?.headers,
     },
-  });
+  } as unknown as RequestInit);
   const body = (await res.json()) as AuthResponse<T>;
   if (!body.success || body.data === undefined) {
     throw new McpAuthServiceError(body.error ?? `Auth service error: ${res.status}`, res.status);
