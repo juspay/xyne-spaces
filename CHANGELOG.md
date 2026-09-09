@@ -1,3 +1,15 @@
+## [1.274.0-release-20260904.4](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.3...v1.274.0-release-20260904.4) (2026-09-09)
+
+
+### Features
+
+* integrated workflow-sdk ([#1291](https://github.com/juspay/xyne-spaces/issues/1291)) ([#1694](https://github.com/juspay/xyne-spaces/issues/1694)) ([085ff64](https://github.com/juspay/xyne-spaces/commit/085ff64fd43a7a6065485597b683dc345cedfe47)), closes [#1687](https://github.com/juspay/xyne-spaces/issues/1687)
+
+
+### Bug Fixes
+
+* added index to fix the kanban query ([#1696](https://github.com/juspay/xyne-spaces/issues/1696)) ([#1697](https://github.com/juspay/xyne-spaces/issues/1697)) ([2763b83](https://github.com/juspay/xyne-spaces/commit/2763b8399eb8c617c5df8ca7f663906848b7fd20))
+
 ## [1.274.0-release-20260904.3](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.2...v1.274.0-release-20260904.3) (2026-09-08)
 
 
