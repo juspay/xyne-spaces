@@ -12,9 +12,15 @@ import {
   subWeeks,
 } from 'date-fns';
 import { CallStatus } from '@xyne/shared';
+import type { Channel } from '@xyne/shared';
 import type { User } from '@xyne/shared/machines';
+import { matchesAllTokens } from '@xyne/shared/utils';
 import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
-import type { RecordingTitleInput } from '../../../utils/recordingUtils';
+import {
+  DEFAULT_RECORDING_TITLE,
+  getRecordingParticipantIds,
+  type RecordingTitleInput,
+} from '../../../utils/recordingUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export type RecordingDatePreset =
@@ -269,6 +275,52 @@ export function filterRecordingsByLabels(
 
   const wanted = new Set(selectedLabels);
   return recordings.filter(recording => recording.labels.some(label => wanted.has(label)));
+}
+
+export interface RecordingSearchContext {
+  usersById: Map<string, User>;
+  channelsById: Map<string, Channel>;
+  resolveLabel: (label: string) => string;
+  isResolved: (label: string) => boolean;
+  isManualLabel: (label: string) => boolean;
+}
+
+export function filterRecordingsBySearchQuery(
+  recordings: OatsRecordingEntry[],
+  query: string,
+  context: RecordingSearchContext,
+): OatsRecordingEntry[] {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return recordings;
+
+  const { usersById, channelsById, resolveLabel, isResolved, isManualLabel } = context;
+
+  return recordings.filter(recording => {
+    const participantNames = getRecordingParticipantIds(
+      recording.createdByUserId,
+      recording.recordingParticipants,
+    )
+      .map(id => usersById.get(id))
+      .filter((user): user is NonNullable<typeof user> => !!user)
+      .map(user => getUserDisplayName(user))
+      .join(' ');
+    const channelName = recording.channelId
+      ? (channelsById.get(recording.channelId)?.name ?? '')
+      : '';
+    const labelNames = recording.labels
+      .filter(isResolved)
+      .filter(isManualLabel)
+      .map(resolveLabel)
+      .join(' ');
+    const searchableText = [
+      recording.title || DEFAULT_RECORDING_TITLE,
+      participantNames,
+      channelName,
+      labelNames,
+    ].join(' ');
+
+    return matchesAllTokens(searchableText, trimmedQuery);
+  });
 }
 
 /**

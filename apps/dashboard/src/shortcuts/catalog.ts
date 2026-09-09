@@ -346,6 +346,16 @@ export const shortcuts = {
     preventDefault: true,
   },
 
+  // ===== RECORDINGS SHORTCUTS =====
+  'recordings.search': {
+    keys: 'mod+f',
+    scope: 'recordings',
+    allowInInputs: true,
+    preventDefault: true,
+    description: 'Search recordings',
+    category: 'Recordings',
+  },
+
   // ===== CANVAS SHORTCUTS =====
   'canvas.save': {
     keys: 'mod+s',
