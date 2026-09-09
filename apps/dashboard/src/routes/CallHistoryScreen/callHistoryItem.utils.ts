@@ -347,6 +347,11 @@ export function isScheduledCallJoinable(call: Call, now = Date.now()): boolean {
   return now >= new Date(call.startsAt).getTime();
 }
 
+export function hasCallEnded(call: Call): call is Call & { endedAt: NonNullable<Call['endedAt']> } {
+  if (call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS) return false;
+  return Boolean(call.endedAt);
+}
+
 export function canJoinCall(call: Call): boolean {
   return (
     call.status === CallStatus.SCHEDULED ||

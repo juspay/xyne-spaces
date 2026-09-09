@@ -39,6 +39,7 @@ import {
 } from './recordingSummaryTemplates';
 import {
   extractMarkedItemsFromRecordingSummary,
+  mergeRecordingSummaryMarkedItems,
   stripRecordingSummaryMarkedItemAnnotations,
   type RecordingSummaryMarkedItem,
 } from './recordingSummaryMarkedItems';
@@ -481,6 +482,16 @@ MARKDOWN TEMPLATE:
 - For very short calls, the "Consolidated Outcomes" section may be the most valuable part
 - In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
+
+**MARKED DECISIONS AND ACTIONS:**
+- Prefix every concrete decision bullet with the exact private annotation \`[xyne-decision]\` immediately after the bullet marker.
+- Prefix every concrete action-item bullet with the exact private annotation \`[xyne-action]\` immediately after the bullet marker.
+- Every annotated bullet MUST end with at least one supporting transcript citation. The first citation must identify the moment most closely associated with that decision or action.
+- Never use these annotations for takeaways, discussion points, open questions, blockers, or other bullets.
+- The annotations are internal metadata and will be removed before the summary is displayed.
+- Examples:
+  - \`- [xyne-decision] The team approved the consolidated pipeline [clf-12]\`
+  - \`- [xyne-action] @Mayank Bansal will update the backend [clf-18]\`
 
 **CITATIONS (ACCURACY IS CRITICAL):**
 - Each transcript line is prefixed with a segment number in square brackets, e.g. "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
@@ -2175,6 +2186,40 @@ A comprehensive detailed summary has been generated from this call.
   }
 
   /**
+   * Persist a summary's annotated decisions and actions as timeline markers.
+   *
+   * The merge keeps the moments the user flagged mid-call, which share the column —
+   * a regenerated summary must not drop them. Timestamps come from the segment map
+   * the citations resolve against, so an unresolvable bullet is dropped, not guessed.
+   *
+   * Best-effort: the summary is the deliverable, so a failure here is swallowed.
+   */
+  private async persistCallMarkedItems(
+    callId: string,
+    annotatedMarkdown: string,
+    segments: CitationContext['segments'],
+  ): Promise<void> {
+    try {
+      const generated = extractMarkedItemsFromRecordingSummary(annotatedMarkdown, segments);
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) return;
+
+      const merged = mergeRecordingSummaryMarkedItems(call.markedItems, generated);
+      await repositories.calls.update(call.id, {
+        markedItems: merged as Prisma.InputJsonValue[],
+      });
+      logger.info(`[${callId}] call_marked_items_persisted`, {
+        generated_count: generated.length,
+        total_count: merged.length,
+      });
+    } catch (error) {
+      logger.warn(`[${callId}] call_marked_items_persist_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Generate and post detailed summary to conversation
    */
   async generateAndPostDetailedSummary(
@@ -2269,16 +2314,20 @@ A comprehensive detailed summary has been generated from this call.
       const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
 
       if (existingCanvas) {
-        const detailedSummaryMarkdown = await this.generateDetailedSummary(
+        const annotatedMarkdown = await this.generateDetailedSummary(
           numberedTranscript,
           callId,
           customPrompt,
           channel.callSummaryPrompt ?? undefined,
         );
-        if (!detailedSummaryMarkdown) {
+        if (!annotatedMarkdown) {
           logDetailedSummaryFailed(callId, 'generation_failed');
           return { success: false, error: 'Failed to generate detailed summary' };
         }
+
+        await this.persistCallMarkedItems(callId, annotatedMarkdown, citationCtx.segments);
+        const detailedSummaryMarkdown =
+          stripRecordingSummaryMarkedItemAnnotations(annotatedMarkdown);
 
         // A rerun keeps its existing title; only wait on concurrent title
         // generation when the call has no title yet, so a present title does
@@ -2454,8 +2503,11 @@ A comprehensive detailed summary has been generated from this call.
           DETAILED_SUMMARY_PROMPT,
           DEFAULT_SUMMARY_FIELDS,
           async (accumulated: string) => {
-            latestMarkdown = accumulated;
-            await ensureStreamingCanvas(accumulated);
+            // Stripped from every delta, partial ones included, so `[xyne-action]`
+            // is never briefly visible mid-stream.
+            const visibleMarkdown = stripRecordingSummaryMarkedItemAnnotations(accumulated);
+            latestMarkdown = visibleMarkdown;
+            await ensureStreamingCanvas(visibleMarkdown);
           },
         );
       } finally {
@@ -2478,6 +2530,10 @@ A comprehensive detailed summary has been generated from this call.
         }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
+
+      // Markers come off the ANNOTATED copy; everything downstream renders stripped.
+      await this.persistCallMarkedItems(callId, detailedSummaryMarkdown, citationCtx.segments);
+      detailedSummaryMarkdown = stripRecordingSummaryMarkedItemAnnotations(detailedSummaryMarkdown);
 
       // Defensive fallback for providers that return final content without any
       // content delta. The response is already complete, so initialize the
