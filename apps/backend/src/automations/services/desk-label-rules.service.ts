@@ -55,11 +55,13 @@ export interface DeskLabelRulesPage {
   };
 }
 
+export type DeskLabelBackfillOutcome = EnqueueBackfillResult | 'inactive';
+
 export interface DeskLabelRulesCreateResult {
   automations: AutomationView[];
   created: boolean;
   /** Set only when the caller asked to replay the rule over existing mail. */
-  backfill: EnqueueBackfillResult | null;
+  backfill: DeskLabelBackfillOutcome | null;
 }
 
 type DeskRulesDbClient = typeof db | Prisma.TransactionClient;
@@ -248,9 +250,16 @@ class DeskLabelRulesService {
     // the DB, so a job started inside the transaction could find nothing there.
     // A duplicate rule still backfills: "apply this rule to my old mail" is a
     // valid ask even when the rule itself already existed.
-    const workflowId = result.automations[0]?.id;
-    if (!workflowId) return result;
-    return { ...result, backfill: await this.enqueueBackfill(workflowId) };
+    const rule = result.automations[0];
+    if (!rule) return result;
+    if (rule.status !== AutomationStatus.ACTIVE) {
+      logger.info(
+        `[automations] desk-label-rule backfill skipped automation=${rule.id} status=${rule.status}`,
+      );
+      return { ...result, backfill: 'inactive' };
+    }
+
+    return { ...result, backfill: await this.enqueueBackfill(rule.id) };
   }
 
   private async createRule(

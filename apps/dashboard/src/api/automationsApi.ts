@@ -245,6 +245,12 @@ export interface DeskLabelRulesPayload {
 
 export type DeskLabelBackfillEnqueue = 'enqueued' | 'already-running' | 'cooldown';
 
+/**
+ * Create can also decline before reaching the queue: 'inactive' means it deduped
+ * onto a disabled rule, which a backfill has nothing to run against.
+ */
+export type DeskLabelBackfillOutcome = DeskLabelBackfillEnqueue | 'inactive';
+
 export interface DeskLabelBackfillProgress {
   total: number;
   scanned: number;
@@ -266,7 +272,7 @@ export interface DeskLabelBackfillRun {
 export interface DeskLabelRulesCreateResult {
   automations: Automation[];
   created: boolean;
-  backfill: DeskLabelBackfillEnqueue | null;
+  backfill: DeskLabelBackfillOutcome | null;
 }
 
 export interface DeskLabelRulesPage {

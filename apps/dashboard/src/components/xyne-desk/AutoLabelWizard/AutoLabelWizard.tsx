@@ -17,7 +17,7 @@ import {
   type Automation,
 } from '../../../api/automationsApi';
 import { EmailReceivedFilterForm } from '../../Automation/AutomationBuilder/TriggerCard/EmailReceivedFilterForm';
-import type { JsonSchema } from '../../Automation/Automation.types';
+import { AutomationStatusValues, type JsonSchema } from '../../Automation/Automation.types';
 import { deskLabelRulesQueryKey, MyAutoLabelRules } from './AutoLabelRules';
 
 const LABEL_COLORS = [
@@ -171,7 +171,15 @@ export function AutoLabelWizard({
     onSuccess: data => {
       const count = data.automations.length;
       if (!data.created) {
-        toast.info('A matching auto-label rule already exists');
+        // Saving deduped onto a rule the user already had. If that rule is switched
+        // off, say so: a bare "already exists" reads as "you're covered", when in
+        // fact nothing is being labeled and the fix is one toggle away in Rules.
+        const existing = data.automations[0];
+        toast.info(
+          existing && existing.status !== AutomationStatusValues.ACTIVE
+            ? 'A matching auto-label rule already exists, but it is switched off. Activate it from Rules.'
+            : 'A matching auto-label rule already exists',
+        );
       } else {
         toast.success(
           count === 1
@@ -193,6 +201,9 @@ export function AutoLabelWizard({
             toast.warning(
               'This rule ran over older emails recently. Re-run it from Rules in a few minutes.',
             );
+            break;
+          case 'inactive':
+            toast.warning('Older emails were not touched — activate the rule first.');
             break;
           default:
             toast.error('Rule saved, but older emails could not be queued. Try again from Rules.');
