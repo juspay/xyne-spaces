@@ -3735,9 +3735,13 @@ export const queries = defineQueries({
     zql.channels
       .where('type', ChannelType.SDLC)
       .where('isArchived', false)
-      // The channels ACL lets workspace admins and public channels through; a hub
-      // is only usable by its participants, and every write re-checks that.
-      .whereExists('participants', participant => participant.where('userId', ctx.userID))
+      .where(helpers =>
+        helpers.or(
+          helpers.cmp('visibility', ChannelVisibility.PUBLIC),
+          helpers.exists('participants', participant => participant.where('userId', ctx.userID)),
+        ),
+      )
+      .related('participants')
       .related('sdlcEntityLinks', link =>
         link
           .where('relationType', SDLC_MEMBERSHIP_RELATION)

@@ -79,6 +79,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { SdlcChatPanel } from './SdlcChatPanel';
 import { CallTriggerModal } from '../../components/Call/CallTriggerModal/CallTriggerModal';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -250,6 +251,7 @@ export default function SdlcScreen(): ReactElement {
   const repoId = repo?.id;
   const zero = useZero();
   const [busy, setBusy] = useState<string | null>(null);
+  const [joiningHub, setJoiningHub] = useState(false);
   const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
   const [relatedCanvasIds, setRelatedCanvasIds] = useState<string[]>([]);
   const [relatedSearchQuery, setRelatedSearchQuery] = useState('');
@@ -292,10 +294,15 @@ export default function SdlcScreen(): ReactElement {
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
 
   useEffect(() => {
-    if (!channelId && Array.isArray(channels) && channels[0]) {
-      void navigate(`/sdlc/${channels[0].id}/overview`, { replace: true });
-    }
-  }, [navigate, channelId, channels]);
+    if (channelId || !Array.isArray(channels) || !channels[0]) return;
+    // Public hubs are listed to the whole workspace now, so prefer one the viewer
+    // actually belongs to over whichever sorts first by name.
+    const landing =
+      channels.find(candidate =>
+        candidate.participants?.some(participant => participant.userId === auth.userID),
+      ) ?? channels[0];
+    void navigate(`/sdlc/${landing.id}/overview`, { replace: true });
+  }, [navigate, channelId, channels, auth.userID]);
 
   const canvases = useMemo(() => {
     if (!channel) return [];
@@ -799,6 +806,35 @@ export default function SdlcScreen(): ReactElement {
       participant => participant.userId === auth.userID && participant.role === ChannelRole.ADMIN,
     ),
   );
+
+  // A public hub is listed to the whole workspace, so this screen can be opened by
+  // someone who has not joined it yet.
+  const isHubMember = Boolean(
+    channel?.participants?.some(participant => participant.userId === auth.userID),
+  );
+
+  const joinHub = async (): Promise<void> => {
+    if (!channel || joiningHub) return;
+    setJoiningHub(true);
+    try {
+      const joined = await surfaceMutationError(
+        zero.mutate(
+          mutators.channel.joinChannel({
+            channelId: channel.id,
+            channelParticipantId: uuidv4(),
+            channelUserStatusId: uuidv4(),
+            timestamp: Date.now(),
+          }),
+        ),
+        'Could not join this hub.',
+      );
+      if (joined) toast.success(`Joined ${channel.name}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not join this hub.');
+    } finally {
+      setJoiningHub(false);
+    }
+  };
 
   const call = async (
     key: string,
@@ -2267,6 +2303,30 @@ export default function SdlcScreen(): ReactElement {
             minSize='45%'
           >
             <main className='flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background'>
+              {/* The hub renders as it always has; joining is offered inline rather
+                  than as a gate in front of it. */}
+              {!isHubMember && (
+                <div className='flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-primary/5 px-5 py-3'>
+                  <Users className='size-4 shrink-0 text-primary' />
+                  <div className='min-w-0 flex-1'>
+                    <p className='text-sm font-medium'>You have not joined {channel.name}</p>
+                    <p className='text-xs text-muted-foreground'>
+                      This hub is open to your workspace. Join it to take part.
+                    </p>
+                  </div>
+                  <Button
+                    size='sm'
+                    loading={joiningHub}
+                    disabled={joiningHub}
+                    onClick={() => void joinHub()}
+                    data-track-category='SdlcHub'
+                    data-track-name='PublicHubJoined'
+                    data-track-metadata={JSON.stringify({ channelId: channel.id })}
+                  >
+                    Join hub
+                  </Button>
+                </div>
+              )}
               {selectedCanvasId ? (
                 <div className='min-h-0 flex-1 overflow-hidden bg-background'>
                   <StableCanvasScreen

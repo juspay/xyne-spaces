@@ -1,13 +1,17 @@
-import { ReactElement } from 'react';
+import { ReactElement, useState } from 'react';
 import { Button, ButtonType, ButtonSize } from '@juspay/blend-design-system';
 import { UserPlus } from 'lucide-react';
+import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { v4 as uuidv4 } from 'uuid';
 
 interface JoinChannelProps {
   channelId: string;
   channelTitle?: string;
+  /** Runs after a join the server accepted — e.g. to reveal the joined surface. */
+  onJoined?: () => void;
 }
 
 /**
@@ -15,18 +19,34 @@ interface JoinChannelProps {
  * @param channelId - The ID of the channel to join
  * @param channelTitle - Optional title of the channel for display
  */
-const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElement => {
+const JoinChannel = ({ channelId, channelTitle, onJoined }: JoinChannelProps): ReactElement => {
   const zero = useZero();
+  const [joining, setJoining] = useState(false);
 
-  const handleJoinChannel = (): void => {
-    zero.mutate(
-      mutators.channel.joinChannel({
-        channelId,
-        channelParticipantId: uuidv4(),
-        channelUserStatusId: uuidv4(),
-        timestamp: Date.now(),
-      }),
-    );
+  const handleJoinChannel = async (): Promise<void> => {
+    if (joining) return;
+    setJoining(true);
+    try {
+      // Both halves have to be awaited: the client mutator rejects for a state the
+      // optimistic pass already knows is invalid ("already a member"), while the
+      // server's verdict arrives as a resolved error object, not a rejection.
+      const joined = await surfaceMutationError(
+        zero.mutate(
+          mutators.channel.joinChannel({
+            channelId,
+            channelParticipantId: uuidv4(),
+            channelUserStatusId: uuidv4(),
+            timestamp: Date.now(),
+          }),
+        ),
+        'Could not join this channel.',
+      );
+      if (joined) onJoined?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not join this channel.');
+    } finally {
+      setJoining(false);
+    }
   };
 
   return (
@@ -52,6 +72,8 @@ const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElemen
         onClick={() => {
           void handleJoinChannel();
         }}
+        disabled={joining}
+        loading={joining}
         leadingIcon={<UserPlus className='w-4 h-4' />}
         buttonType={ButtonType.PRIMARY}
         size={ButtonSize.MEDIUM}
