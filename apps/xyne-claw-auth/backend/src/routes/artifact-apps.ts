@@ -291,8 +291,11 @@ artifactAppsRouter.post("/:id/versions/upload", async (req: Request<{ id: string
         createdBy: requesterId,
       },
     });
-    // HEAD moves forward to the pushed build.
-    await prisma.artifactApp.update({ where: { id: app.id }, data: { headVersionId: version.id } });
+    // HEAD moves forward to the pushed build, and the app's name follows the
+    // pushed manifest title — otherwise the app keeps its creation-time name and
+    // owners can't find it in the list after renaming (e.g. "Release Command
+    // Center" still listed as its birth-time "xyne-apps").
+    await prisma.artifactApp.update({ where: { id: app.id }, data: { headVersionId: version.id, title: built.title } });
     res.status(201).json({ success: true, version });
   } catch (err) {
     // A concurrent/retried push can lose the check-then-insert race: the unique
