@@ -2052,6 +2052,19 @@ mark.chat-text-highlight,
   @apply my-1;
 }
 
+/* Block Kit flows render inside .jp-message-html, so the generic list rules
+   above apply to them too — and at (0,1,1) they outrank any utility class set
+   on the element itself, which makes per-item spacing unfixable from the
+   component. Slack renders a bullet run as plain lines with no per-item gap, so
+   drop both the block and item margins for flows; a blank line still reads as
+   a break through the layout gap between components, without a bullet run
+   costing a margin on every line. */
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)
+  :is(.flow-ui-container, .flow-ui-compact)
+  :is(ul, ol, li) {
+  @apply my-0;
+}
+
 /* Inline the first <p> inside an <li> so the marker shares a line with the text
    instead of sitting alone above it. */
 :is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary)

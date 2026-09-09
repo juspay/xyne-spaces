@@ -96,6 +96,9 @@ router.post('/:callId/generate-prd', callController.generatePRD);
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
 router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
 
+// Rewrite a call's detailed summary with a chosen summary template
+router.post('/:callId/generate-summary', callController.regenerateRecordingSummary);
+
 // Invite users to call (creates call_participants for notifications)
 router.post('/:callId/invite', callController.inviteUsers);
 
