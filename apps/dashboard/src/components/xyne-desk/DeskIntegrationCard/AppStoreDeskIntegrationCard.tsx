@@ -45,7 +45,6 @@ export const AppStoreDeskIntegrationCard = ({
   const [showAddApps, setShowAddApps] = useState(false);
   const [showRotateKey, setShowRotateKey] = useState(false);
   const [bundleIdRows, setBundleIdRows] = useState<BundleIdRow[]>([createBundleIdRow()]);
-  const [issuerId, setIssuerId] = useState('');
   const [keyId, setKeyId] = useState('');
   const [privateKey, setPrivateKey] = useState('');
   const [isBusy, setIsBusy] = useState(false);
@@ -63,10 +62,7 @@ export const AppStoreDeskIntegrationCard = ({
     normalizedBundleIds.length > 0 &&
     normalizedBundleIds.every(bundleId => IOS_BUNDLE_ID_PATTERN.test(bundleId)) &&
     new Set(normalizedBundleIds).size === normalizedBundleIds.length;
-  const canRotateKey =
-    issuerId.trim().length > 0 &&
-    keyId.trim().length > 0 &&
-    privateKey.includes('BEGIN PRIVATE KEY');
+  const canRotateKey = keyId.trim().length > 0 && privateKey.includes('BEGIN PRIVATE KEY');
 
   const handleDisconnect = async (): Promise<void> => {
     try {
@@ -113,13 +109,11 @@ export const AppStoreDeskIntegrationCard = ({
     setIsBusy(true);
     try {
       await rotateAppStoreCredentials(channelId, {
-        issuerId: issuerId.trim(),
         keyId: keyId.trim(),
         privateKey: privateKey.trim(),
       });
       clearChannelConnectedEmailCache(channelId);
       setShowRotateKey(false);
-      setIssuerId('');
       setKeyId('');
       setPrivateKey('');
       toast.success('App Store Connect key replaced.');
@@ -285,12 +279,6 @@ export const AppStoreDeskIntegrationCard = ({
         description='Paste a new key. It is verified against every app on this desk before it is stored.'
       >
         <div className='flex flex-col gap-3'>
-          <Input
-            value={issuerId}
-            onChange={event => setIssuerId(event.target.value.trim())}
-            placeholder='Issuer ID'
-            autoComplete='off'
-          />
           <Input
             value={keyId}
             onChange={event => setKeyId(event.target.value.trim().toUpperCase())}

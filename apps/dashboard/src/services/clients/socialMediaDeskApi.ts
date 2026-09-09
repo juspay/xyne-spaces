@@ -74,7 +74,6 @@ export async function reconnectSocialMediaDesk(
 }
 
 export interface AppStoreCredentialsInput {
-  issuerId: string;
   keyId: string;
   privateKey: string;
 }

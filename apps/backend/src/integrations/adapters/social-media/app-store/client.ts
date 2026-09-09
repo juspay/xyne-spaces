@@ -14,7 +14,6 @@ import {
 const TAG = '[AppStoreClient]';
 
 export interface AppStoreCredentials {
-  issuerId: string;
   keyId: string;
   privateKey: string;
 }
@@ -92,13 +91,13 @@ export class AppStoreClient {
       throw new Error('App Store credentials were removed when this desk was disconnected');
     }
     const parsed = JSON.parse(decrypt(encryptedCredentials)) as Partial<AppStoreCredentials>;
-    if (!parsed.issuerId || !parsed.keyId || !parsed.privateKey) {
+    if (!parsed.keyId || !parsed.privateKey) {
       throw new Error('App Store credentials are incomplete');
     }
     return parsed as AppStoreCredentials;
   }
 
-  /** Team-key JWT. Individual keys use `sub` instead of `iss` and are not supported. */
+  /** Individual-key JWT: Apple requires `sub: "user"` and no issuer id. */
   mintToken(credentials: AppStoreCredentials, cacheKey?: string): string {
     const nowSeconds = Math.floor(Date.now() / 1000);
     if (cacheKey) {
@@ -108,7 +107,7 @@ export class AppStoreClient {
 
     const token = jwt.sign(
       {
-        iss: credentials.issuerId,
+        sub: 'user',
         iat: nowSeconds,
         exp: nowSeconds + APP_STORE_TOKEN_TTL_SECONDS,
         aud: APP_STORE_JWT_AUDIENCE,

@@ -2005,7 +2005,6 @@ const SupportScreen = (): ReactElement => {
       socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE';
       applications?: Array<{ displayName: string; packageName: string }>;
       appStore?: {
-        issuerId: string;
         keyId: string;
         privateKey: string;
         applications: Array<{ bundleId: string }>;
@@ -2041,7 +2040,6 @@ const SupportScreen = (): ReactElement => {
         }
         void connectAppStoreDesk({
           channelName: rest.name,
-          issuerId: appStore.issuerId,
           keyId: appStore.keyId,
           privateKey: appStore.privateKey,
           applications: appStore.applications,
