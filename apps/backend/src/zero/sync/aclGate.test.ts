@@ -177,6 +177,38 @@ test('real allowlisted ACLs derive without over-rejecting', () => {
   assert.doesNotThrow(() => deriveAclGate('message_attachments'));
 });
 
+// ---- P3(b): structure-chain derivation (transitive per-scope hops → one .related() instance) ----
+
+test('conversations (channelLatest): channels is directly scoped → NO structure chain', () => {
+  // channelLatest's only per-scope table is `channels`, keyed by the data partition (channelId).
+  // No transitive hop ⇒ the flat grant suffices ⇒ no structure instance.
+  assert.deepEqual(deriveAclGate('conversations').structureChains, []);
+});
+
+test('message_attachments: conversation→channel is transitive → ONE structure chain', () => {
+  const chains = deriveAclGate('message_attachments').structureChains;
+  assert.equal(chains.length, 1, 'one chain for the conversation→channel hop');
+  const chain = chains[0];
+  assert.equal(chain.rootTable, 'conversations');
+  assert.equal(chain.rootScopeColumn, 'conversationId', 'keyed by the data partition value');
+  assert.deepEqual(chain.tables, ['conversations', 'channels'], 'per-scope tables only — NOT the per-user leaf');
+  assert.equal(chain.links.length, 1);
+  assert.deepEqual(chain.links[0], {
+    parentTable: 'conversations',
+    parentColumn: 'channelId',
+    childTable: 'channels',
+    childColumn: 'id',
+  }, 'the demux childLink for the transitive hop');
+});
+
+test('message_attachments: channel_participants (per-user leaf) is NOT folded into the chain', () => {
+  const chain = deriveAclGate('message_attachments').structureChains[0];
+  assert.equal(chain.tables.includes('channel_participants'), false);
+  // and it is still present as a per-user grant source
+  const parts = deriveAclGate('message_attachments').grantSources.find((s) => s.table === 'channel_participants');
+  assert.equal(parts?.kind, 'per-user');
+});
+
 // ---- P1(a): per-user vs per-scope grant classification (drives the two-plane partition) ----
 
 test('conversations: channel_participants is PER-USER (bound on userId); channels is PER-SCOPE', () => {

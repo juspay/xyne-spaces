@@ -192,7 +192,11 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       socket: emitter,
       userId,
       workspaceId,
-      scope: { [meta.partitionColumn]: partitionValue },
+      // Carry workspaceId so a top-level `workspaceId==ctx.workspaceId` conjunct (attachments) can
+      // evaluate. Workspace is ENFORCED structurally by the in-subquery `channel.workspaceId==ws`
+      // check (identical to channelLatest); this satisfies the redundant top-level data-row mirror.
+      // The allowlist (P3e) asserts an equivalent in-subquery workspace check exists.
+      scope: { [meta.partitionColumn]: partitionValue, workspaceId },
       gate,
       dataInstanceKey,
       grantByTable,

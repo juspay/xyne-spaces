@@ -70,6 +70,37 @@ export interface GrantSource {
   boundColumn?: string;
 }
 
+/** One parent→child hop between two per-scope grant tables (the demux's childLink). */
+export interface StructureLink {
+  parentTable: string;
+  /** the parent row's FK column (correlation.parentField). */
+  parentColumn: string;
+  childTable: string;
+  /** the child row's key the FK points at (correlation.childField). */
+  childColumn: string;
+}
+
+/**
+ * A chain of ≥2 nested PER-SCOPE grant tables where the inner table's scope is TRANSITIVE — its
+ * key isn't known at subscribe time (e.g. attachments: `conversation.channelId` → `channels.id`,
+ * and channelId is a column of the conversation row, not of the query args). One flat grant per
+ * table can't materialize the inner table (we'd key `__grant__channels{id: <conversationId>}` → ∅).
+ *
+ * Instead the whole chain is ONE structure instance rooted at the first hop, keyed by `rootScopeColumn`
+ * (= the data partition value), with the remaining hops as `.related()` children — Zero resolves the
+ * join and re-emits when an FK changes. The demux attributes root + related rows via `links` (its
+ * childLinks); the evaluator reads each table's rows from the instance snapshot split by table.
+ * The per-USER leaf (channel_participants{userId:U}) is NOT part of the chain — it stays per-user.
+ */
+export interface StructureChain {
+  rootTable: string;
+  /** how the structure instance is keyed = the data partition value (correlation childField at the first hop). */
+  rootScopeColumn: string;
+  links: StructureLink[];
+  /** every per-scope table the chain covers (for the evaluator's per-table snapshot split). */
+  tables: string[];
+}
+
 export interface AclGate {
   rootTable: string;
   /** Grant sources to materialize as live instances (table + scope column), from the ACL's whereExists chain. */
@@ -81,6 +112,9 @@ export interface AclGate {
    *  admission only; the allowlist must assert this exclusion is safe for the query (e.g. attachments:
    *  the createdBy arm only covers unlinked drafts, which never enter a channel-scoped instance). */
   perRowExcluded: boolean;
+  /** Transitive per-scope chains needing a `.related()` structure instance (empty for direct-scoped
+   *  ACLs like channelLatest). See StructureChain. */
+  structureChains: StructureChain[];
   /**
    * Is `userId` (in `workspaceId`) granted a row of the root scope? `rootRow` is the
    * scope binding (the root table's key columns, e.g. `{ channelId }`); `snapshot`
@@ -124,6 +158,7 @@ function buildAclGate(rootTable: string): AclGate {
     grantSources,
     grantTables: [...new Set(grantSources.map((s) => s.table))],
     perRowExcluded: gated?.excluded ?? false,
+    structureChains: where ? deriveStructureChains(where) : [],
     evaluate(rootRow, userId, workspaceId, snapshot) {
       // No ACL predicate = unrestricted at the row level (workspace backstop lives outside canSelect).
       return gated ? evalCond(gated.cond, rootRow, { userId, workspaceId }, snapshot) : true;
@@ -252,6 +287,65 @@ function collectGrantSources(root: Cond): GrantSource[] {
       ? { table: e.table, scopeColumn: e.scopeColumn, kind: 'per-user' as const, boundColumn: e.boundColumn }
       : { table: e.table, scopeColumn: e.scopeColumn, kind: 'per-scope' as const },
   );
+}
+
+/** A correlatedSubquery is a PER-SCOPE hop when its own where doesn't bind the subscriber
+ *  (`boundColumnOf === null`); a SENTINEL_USER-bound subquery (channel_participants.userId) is the
+ *  per-user LEAF and ends the chain — it is never folded into a structure instance. */
+function isPerScopeHop(cond: Cond): cond is ExistsCond {
+  return cond.type === 'correlatedSubquery' && boundColumnOf(cond.related.subquery.where) === null;
+}
+
+/** Find the first per-scope correlatedSubquery reachable through and/or from `where` (the next
+ *  structural hop); null if the only nested exists is the per-user leaf. */
+function findChildScopeHop(where: Cond | undefined): ExistsCond | null {
+  if (!where) return null;
+  if (isPerScopeHop(where)) return where;
+  if (where.type === 'and' || where.type === 'or') {
+    for (const c of where.conditions) {
+      const hit = findChildScopeHop(c);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/**
+ * Derive transitive per-scope chains (see StructureChain). Starting at each top-level per-scope
+ * hop, descend nested per-scope hops linearly until the per-user leaf. A chain is emitted only when
+ * it has ≥1 link (≥2 per-scope tables) — a single directly-scoped per-scope table (channelLatest's
+ * `channels`) needs no structure instance and stays a flat grant.
+ */
+function deriveStructureChains(root: Cond): StructureChain[] {
+  const chains: StructureChain[] = [];
+  const visit = (cond: Cond): void => {
+    if (cond.type === 'and' || cond.type === 'or') {
+      cond.conditions.forEach(visit);
+      return;
+    }
+    if (!isPerScopeHop(cond)) return;
+    // Build the linear chain of per-scope hops rooted at this exists.
+    const rootTable = cond.related.subquery.table;
+    const rootScopeColumn = cond.related.correlation.childField[0];
+    const links: StructureLink[] = [];
+    const tables = [rootTable];
+    let curTable = rootTable;
+    let curWhere = cond.related.subquery.where;
+    for (let next = findChildScopeHop(curWhere); next; next = findChildScopeHop(curWhere)) {
+      links.push({
+        parentTable: curTable,
+        parentColumn: next.related.correlation.parentField[0],
+        childTable: next.related.subquery.table,
+        childColumn: next.related.correlation.childField[0],
+      });
+      tables.push(next.related.subquery.table);
+      curTable = next.related.subquery.table;
+      curWhere = next.related.subquery.where;
+    }
+    if (links.length >= 1) chains.push({ rootTable, rootScopeColumn, links, tables });
+  };
+  visit(root);
+  return chains;
 }
 
 interface Bindings {
