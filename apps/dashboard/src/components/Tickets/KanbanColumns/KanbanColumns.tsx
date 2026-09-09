@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  Circle,
-  DragableSixDots,
-  EyeOff,
-  PlusDefault as Plus,
-  ThreeDotsMenuHorizontal,
-} from '@xyne/icons';
+import { DragableSixDots, EyeOff, PlusDefault as Plus, ThreeDotsMenuHorizontal } from '@xyne/icons';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -33,7 +27,11 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { cn } from '../../../utils/classNames';
-import { StatusOptions } from '../TicketTable/TicketTableHelper';
+import { KanbanIcon } from './KanbanIcon';
+import { HiddenColumnsPanel } from '../HiddenColumnsPanel/HiddenColumnsPanel';
+
+// Re-exported for the many call sites that already import it from here.
+export { KanbanIcon };
 
 const VIRTUAL_ROW_HEIGHT = 130;
 const VIRTUAL_OVERSCAN = 25;
@@ -459,6 +457,7 @@ interface KanbanColumnsProps {
   hiddenColumnIds?: string[];
   /** Omitted when the board has no hidden-columns panel to park a column in. */
   onHideColumn?: (stageId: string) => void;
+  onUnhideColumn?: (stageId: string) => void;
   ticketsByStage: Record<string, Ticket[]>;
   stageCounts?: Record<string, number>;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
@@ -501,21 +500,11 @@ interface KanbanColumnsProps {
   userNamesById?: Map<string, string>;
 }
 
-export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
-  if (!status) {
-    return <Circle className='w-4 h-4 text-muted-foreground' />;
-  }
-  const statusOption = StatusOptions.find(opt => (opt.value as TicketStatusV2) === status);
-  if (statusOption) {
-    return <>{statusOption.icon}</>;
-  }
-  return <Circle className='w-4 h-4 text-muted-foreground' />;
-};
-
 export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   stages,
   hiddenColumnIds,
   onHideColumn,
+  onUnhideColumn,
   ticketsByStage,
   stageCounts,
   onTicketClick,
@@ -586,6 +575,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   const visibleStages = hiddenColumnIds?.length
     ? stages.filter(stage => !hiddenColumnIds.includes(stage.id))
     : stages;
+  const hiddenStages = hiddenColumnIds?.length
+    ? stages.filter(stage => hiddenColumnIds.includes(stage.id))
+    : [];
   const orderedStages = columnOrder.length ? [...visibleStages].sort(bySavedOrder) : visibleStages;
 
   const moveColumnTo = (targetStageId: string): void => {
@@ -728,6 +720,14 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
           </DroppableStage>
         );
       })}
+
+      {onUnhideColumn && (
+        <HiddenColumnsPanel
+          stages={hiddenStages}
+          getCount={stage => stageCountById[stage.id] ?? 0}
+          onUnhide={onUnhideColumn}
+        />
+      )}
     </div>
   );
 };

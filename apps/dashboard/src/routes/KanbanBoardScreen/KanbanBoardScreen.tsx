@@ -73,7 +73,6 @@ import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
-import { HiddenColumnsPanel } from '../../components/Tickets/HiddenColumnsPanel/HiddenColumnsPanel';
 import { useHiddenKanbanColumns } from './useHiddenKanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
@@ -3732,12 +3731,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       hiddenStages.reduce((total, stage) => total + countStageInGroup(group, stage), 0),
     [countStageInGroup, hiddenStages],
   );
-  const getHiddenColumnCount = useCallback(
-    (stage: Stage): number =>
-      processedGroups.reduce((total, group) => total + countStageInGroup(group, stage), 0),
-    [countStageInGroup, processedGroups],
-  );
-
   const handleHideColumn = useCallback(
     (stageId: string) => {
       const stageName = stages.find(stage => stage.id === stageId)?.name ?? 'Column';
@@ -5283,18 +5276,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         </div>
       ) : (
         /* Accordion-style Kanban View */
-        <div className='flex-1 min-h-0 flex'>
+        <div
+          className={`flex-1 min-h-0 overflow-auto relative ${groupBy !== 'none' ? 'p-4' : 'p-0'}`}
+        >
           <DndContext
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={event => void handleDragEnd(event)}
             sensors={sensors}
           >
-            <div
-              className={`flex-1 min-w-0 h-full overflow-auto relative flex flex-col space-y-5 ${
-                groupBy !== 'none' ? 'p-4 pb-16' : 'p-0'
-              }`}
-            >
+            <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
               {allColumnsHidden && (
                 <div className='flex h-full flex-col items-center justify-center gap-3.5 text-center'>
                   <div className='flex size-[52px] items-center justify-center rounded-2xl bg-muted text-muted-foreground'>
@@ -5412,6 +5403,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           stages={stages}
                           hiddenColumnIds={hiddenColumnIds}
                           onHideColumn={handleHideColumn}
+                          onUnhideColumn={unhideColumn}
                           ticketsByStage={group.columnData}
                           {...(stageCounts ? { stageCounts } : {})}
                           onTicketClick={handleTicketClick}
@@ -5468,12 +5460,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               )}
             </DragOverlay>
           </DndContext>
-
-          <HiddenColumnsPanel
-            stages={hiddenStages}
-            getCount={getHiddenColumnCount}
-            onUnhide={unhideColumn}
-          />
         </div>
       )}
 

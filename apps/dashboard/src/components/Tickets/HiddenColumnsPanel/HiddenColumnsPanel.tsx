@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronDown, EyeOn, ThreeDotsMenuHorizontal } from '@xyne/icons';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
-import { KanbanIcon } from '../KanbanColumns/KanbanColumns';
+import { KanbanIcon } from '../KanbanColumns/KanbanIcon';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +16,7 @@ const HiddenColumnRow: React.FC<{
   count: number;
   onUnhide: (stageId: string) => void;
 }> = ({ stage, count, onUnhide }) => (
-  <div className='relative flex h-[52px] items-center gap-[11px] border-b border-border pl-3 pr-1.5 transition-colors hover:bg-muted'>
+  <div className='flex h-[52px] items-center gap-[11px] border-b border-border pl-2 pr-1 transition-colors hover:bg-muted'>
     <KanbanIcon status={stage.defaultTicketStatusV2} />
     <span className='min-w-0 flex-1 truncate text-[13.5px] text-foreground'>{stage.name}</span>
     <span className='text-[13px] tabular-nums text-muted-foreground'>{count}</span>
@@ -49,58 +49,66 @@ const HiddenColumnRow: React.FC<{
   </div>
 );
 
+/**
+ * Sits at the end of the column strip and scrolls with it, so it never covers a
+ * column. Its header uses the same padding and type as a column header, which is
+ * what keeps the two aligned.
+ */
 export const HiddenColumnsPanel: React.FC<HiddenColumnsPanelProps> = ({
   stages,
   getCount,
   onUnhide,
 }) => {
-  const [isOpen, setIsOpen] = React.useState(true);
-
-  // Nothing to park: the rail would only take width away from the board.
-  if (stages.length === 0) return null;
+  const [isOpen, setIsOpen] = React.useState(false);
 
   return (
-    <div
-      className={cn(
-        'shrink-0 self-start sticky top-0 pr-5 pl-1.5 pt-2 sm:pt-3',
-        isOpen ? 'w-[300px]' : 'w-auto',
-      )}
-    >
+    <div className={cn('flex shrink-0 flex-col', isOpen ? 'w-72' : 'w-auto')}>
       <button
         type='button'
         onClick={() => setIsOpen(open => !open)}
         aria-expanded={isOpen}
-        aria-label={isOpen ? 'Collapse hidden columns' : 'Show hidden columns'}
-        className={cn(
-          'flex h-9 items-center gap-[7px] rounded-[9px] px-1.5 text-left transition-colors hover:bg-muted',
-          isOpen ? 'w-full' : 'whitespace-nowrap',
-        )}
+        className='flex w-full items-center gap-2 px-4 pt-3 pb-1 text-left'
         data-track-category='Tickets'
         data-track-name='ToggleHiddenColumnsPanel'
       >
         <ChevronDown
-          className={cn('size-3.5 shrink-0 text-muted-foreground', !isOpen && '-rotate-90')}
+          className={cn(
+            'w-4 h-4 shrink-0 text-muted-foreground transition-transform',
+            !isOpen && '-rotate-90',
+          )}
         />
-        <span className='flex-1 text-[13px] font-medium text-muted-foreground'>Hidden columns</span>
-        <span className='text-[12.5px] tabular-nums text-muted-foreground'>{stages.length}</span>
+        <h3 className='text-xs font-medium uppercase whitespace-nowrap text-foreground'>
+          Hidden columns
+        </h3>
+        <span className='text-xs px-2 py-0.5 rounded-full text-muted-foreground bg-muted-foreground/10'>
+          {stages.length}
+        </span>
       </button>
 
       {isOpen && (
-        <>
-          <div className='flex flex-col border-t border-border'>
-            {stages.map(stage => (
-              <HiddenColumnRow
-                key={stage.id}
-                stage={stage}
-                count={getCount(stage)}
-                onUnhide={onUnhide}
-              />
-            ))}
-          </div>
-          <p className='mt-3 px-1.5 text-[11.5px] leading-[1.6] text-muted-foreground'>
+        <div className='min-h-0 flex-1 overflow-y-auto px-4 pt-2'>
+          {stages.length > 0 ? (
+            <div className='flex flex-col border-t border-border'>
+              {stages.map(stage => (
+                <HiddenColumnRow
+                  key={stage.id}
+                  stage={stage}
+                  count={getCount(stage)}
+                  onUnhide={onUnhide}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className='text-[12.5px] leading-[1.6] text-muted-foreground'>
+              Nothing hidden. Hide a column from its{' '}
+              <span className='font-semibold text-foreground'>⋯</span> menu to park it here without
+              changing any counts.
+            </p>
+          )}
+          <p className='mt-3 text-[11.5px] leading-[1.6] text-muted-foreground'>
             Tickets in hidden columns are excluded from column and group counts.
           </p>
-        </>
+        </div>
       )}
     </div>
   );
