@@ -45,7 +45,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("credentials-loader");
 
 export interface EffectiveCredentials {
-  source: "agent" | "user" | "global";
+  source: "subagent" | "agent" | "user" | "global";
   connectionId: string;
   credentials: Record<string, unknown>;
   /** True iff the user owns this connection (admin/health code uses this to
@@ -142,6 +142,10 @@ export async function loadEffectiveCredentials(
   agentSlug?: string,
   instanceSlug?: string,
   agentOrgId?: string,
+  // SubagentDefinition.id when the tool call originates from a subagent's
+  // nested run. When set, a SubagentMcpConnection is consulted ABOVE the
+  // agent/user/global cascade below; a `nonOverridable` row short-circuits it.
+  subagentId?: string,
 ): Promise<EffectiveCredentials | null> {
   // google / microsoft: per-user OAuth connectors (never agent-pinned or
   // global), executed as claw-auth-hosted stdio MCP servers. Resolve a fresh
@@ -241,6 +245,57 @@ export async function loadEffectiveCredentials(
     }
     log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no spacesAppToken on agent; cannot resolve`);
     return null;
+  }
+
+  // 0. Subagent-pinned creds resolve ABOVE the agent/user/global cascade.
+  //    Only consulted when the caller passes a subagentId (the tool call
+  //    originates from a subagent's nested run). When the matched row is
+  //    `nonOverridable` (the default) it SHORT-CIRCUITS the cascade: no agent,
+  //    user, or global credential can shadow it — the subagent always
+  //    authenticates as this pinned identity. A soft pin (nonOverridable=false)
+  //    is preferred but falls through to the normal cascade on a miss. This
+  //    sits AFTER the OAuth / live-session short-circuits above by design:
+  //    those server types (google, xyne-dashboard, xyne-spaces-app-tools) have
+  //    no per-row secret to pin, so a subagent pin only applies to
+  //    secret-backed servers.
+  if (subagentId) {
+    let subConn = null;
+    if (instanceSlug) {
+      subConn = await prisma.subagentMcpConnection.findFirst({
+        where: { subagentDefinitionId: subagentId, mcpServer: { type: serverType }, slug: instanceSlug },
+      });
+    } else {
+      subConn = await prisma.subagentMcpConnection.findFirst({
+        where: { subagentDefinitionId: subagentId, mcpServer: { type: serverType }, slug: "default" },
+      });
+      if (!subConn) {
+        subConn = await prisma.subagentMcpConnection.findFirst({
+          where: { subagentDefinitionId: subagentId, mcpServer: { type: serverType } },
+          orderBy: { createdAt: "asc" },
+        });
+      }
+    }
+    if (subConn) {
+      try {
+        const decrypted = decrypt(subConn.encryptedCreds, subConn.iv, subConn.authTag, CONFIG.encryptionKey);
+        log.info(
+          `[creds-loader] ${serverType} userId=${userId} subagent=${subagentId} instance=${subConn.slug} nonOverridable=${subConn.nonOverridable} → subagent hit (connId=${subConn.id})`,
+        );
+        return {
+          source: "subagent",
+          connectionId: subConn.id,
+          credentials: JSON.parse(decrypted) as Record<string, unknown>,
+          isUserOwned: false,
+        };
+      } catch (err) {
+        // A pinned-but-undecryptable credential is a config error. When the pin
+        // is non-overridable we must NOT fall through to a weaker identity —
+        // that would silently defeat the "cannot be overridden" contract — so
+        // we fail the resolution. A soft pin falls through to the cascade.
+        log.error(`[creds-loader] ${serverType} subagent=${subagentId} → decrypt failed: ${errMsg(err)}`);
+        if (subConn.nonOverridable) return null;
+      }
+    }
   }
 
   // 1. Agent-pinned creds win when present. Only checked if the caller

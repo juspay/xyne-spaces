@@ -1505,6 +1505,11 @@ enum AgentAuditEvent {
   SUBAGENT_CREATED
   SUBAGENT_UPDATED
   MCP_SERVER_CREATED
+  // Subagent-level MCP credential writes. Added by migration
+  // 20260909120000_subagent_mcp_connections (ALTER TYPE ADD VALUE) —
+  // kept here so a fresh `prisma generate` accepts them.
+  SUBAGENT_MCP_UPDATED
+  SUBAGENT_MCP_DELETED
 }
 
 model AgentAuditLog {
@@ -1691,6 +1696,7 @@ model McpServer {
   agentConnections     AgentMcpConnection[]
   globalCredentials    GlobalMcpCredentials[]
   editRequests         McpConnectorEditRequest[]
+  subagentConnections  SubagentMcpConnection[]
 
   @@unique([type])
   @@index([enabled])
@@ -1922,6 +1928,7 @@ model SubagentDefinition {
   org              Organization    @relation(fields: [orgId], references: [id], onDelete: Restrict)
   skills           SubagentSkill[]
   shares           SubagentShare[]
+  mcpConnections   SubagentMcpConnection[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -1955,6 +1962,44 @@ model SubagentSkill {
 
   @@unique([subagentDefinitionId, skillId])
   @@map("subagent_skills")
+}
+
+// Per-subagent MCP credential. Companion to AgentMcpConnection, but owned by a
+// SubagentDefinition instead of an Agent. When present it resolves ABOVE the
+// agent/user/global cascade in credentials-loader. When `nonOverridable` is
+// true (the default) it SHORT-CIRCUITS that cascade — no user or agent
+// credential can shadow it — which is the whole point of the feature: a
+// subagent that must always authenticate as a specific identity (e.g. one
+// Nammayatri MID per subagent). `slug` mirrors AgentMcpConnection so one
+// subagent can hold several instances of the same server type.
+model SubagentMcpConnection {
+  id                   String             @id @default(cuid())
+  subagentDefinitionId String
+  subagent             SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
+  mcpServerId          String
+  mcpServer            McpServer          @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  /// Stable short identifier for this instance, scoped to (subagent, server).
+  /// Matched against SubagentDefinition.mcpInstanceMap at runtime. Defaults to
+  /// 'default'. Allowed chars: lowercase alnum + hyphen.
+  slug                 String             @default("default")
+  /// Optional human-readable label shown in the subagent editor.
+  displayName          String?
+  /// When true, this credential short-circuits the agent/user/global cascade
+  /// so it cannot be overridden by any lower-priority connection. When false
+  /// it is a soft pin: preferred, but normal fallback still applies if the
+  /// decrypt/lookup yields nothing.
+  nonOverridable       Boolean            @default(true)
+  encryptedCreds       String
+  iv                   String
+  authTag              String
+  /// User who pasted the creds — used in audit logs.
+  createdByUserId      String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([subagentDefinitionId, mcpServerId, slug])
+  @@index([subagentDefinitionId])
+  @@map("subagent_mcp_connections")
 }
 
 model PendingMemoryReview {

@@ -279,6 +279,12 @@ export async function loadMcpToolsForUser(
   // from omitting or replacing trusted run bindings.
   trustedToolBindings?: TrustedMcpToolBindings,
   onConnectorBlocked?: (serverType: string, status: number) => void,
+  // When these MCP tools are being built for a SPECIFIC subagent's palette,
+  // pass that SubagentDefinition.id here. It is forwarded in the /mcp/call
+  // body so claw-auth's credentials-loader can resolve a SubagentMcpConnection
+  // (a per-subagent pinned identity) above the agent/user/global cascade.
+  // Undefined for the main-agent loader — unchanged behaviour.
+  subagentId?: string,
 ): Promise<{
   groups: McpToolGroup[];
   cleanup: () => Promise<void>;
@@ -374,6 +380,7 @@ export async function loadMcpToolsForUser(
                 params: callParams,
                 permission,
                 agentSlug,
+                ...(subagentId ? { subagentId } : {}),
               }),
             },
             server.serverType,
