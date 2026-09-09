@@ -1,3 +1,10 @@
+## [1.274.0-release-20260904.5](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.4...v1.274.0-release-20260904.5) (2026-09-09)
+
+
+### Features
+
+* Add remove option for decision items (cherry-pick to release-20260904) ([#1710](https://github.com/juspay/xyne-spaces/issues/1710)) ([719df9c](https://github.com/juspay/xyne-spaces/commit/719df9c2251226c1d738095730a3b57e49070adf))
+
 ## [1.274.0-release-20260904.4](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.3...v1.274.0-release-20260904.4) (2026-09-09)
 
 
