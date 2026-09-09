@@ -494,6 +494,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelId,
   conversation,
   contentOnly = false,
+  disableLinks = false,
   onClick,
   threadInfo,
   channelScopeType,
@@ -1267,6 +1268,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
                       <RenderMessageWithHTML
+                        disableLinks={disableLinks}
                         message={noteHtml}
                         showEdited={message.edited}
                         messageId={message.messageId}
@@ -1350,6 +1352,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={DOMPurify.sanitize(forwardedMessageData.optionalText)}
                             showEdited={message.edited}
                             preserveThreadRoute={context === 'thread'}
@@ -1412,6 +1415,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                               />
                             ) : (
                               <RenderMessageWithHTML
+                                disableLinks={disableLinks}
                                 message={noteHtml}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1452,6 +1456,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           ) : (
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
+                                disableLinks={disableLinks}
                                 message={resolvedForwardedContent}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1511,6 +1516,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={isWorkflowMessage ? 'Workflow created' : message.content}
                             showEdited={message.edited}
                             isSystemMessage={isSystemMessage}
