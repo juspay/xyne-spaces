@@ -1,3 +1,10 @@
+## [1.296.1](https://github.com/juspay/xyne-spaces/compare/v1.296.0...v1.296.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* harden agent-auth against process spoofing and validate ask-ai d… ([#1180](https://github.com/juspay/xyne-spaces/issues/1180)) ([c048ce6](https://github.com/juspay/xyne-spaces/commit/c048ce6edcf932a2120a1b1da3633179ab44dfd7)), closes [#1](https://github.com/juspay/xyne-spaces/issues/1) [#2](https://github.com/juspay/xyne-spaces/issues/2) [#3](https://github.com/juspay/xyne-spaces/issues/3)
+
 ## [1.296.0](https://github.com/juspay/xyne-spaces/compare/v1.295.0...v1.296.0) (2026-09-09)
 
 
