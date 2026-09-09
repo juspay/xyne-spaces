@@ -28,6 +28,12 @@ export interface YSweetAuthToken {
   authorization?: 'full' | 'read-only';
 }
 
+export interface CanvasAccessRequest {
+  requesterId: string;
+  requesterName: string;
+  requestedAt: number;
+}
+
 export interface CanvasFileUploadResponse {
   attachmentId: string;
   fileName: string;
@@ -112,6 +118,44 @@ export class CanvasService {
 
       throw new Error(errorMessage);
     }
+  }
+
+  async requestEditAccess(
+    canvasId: string,
+    message?: string,
+  ): Promise<{ success: boolean; alreadyRequested?: boolean }> {
+    const response = await apiInstance.post<{ success: boolean; alreadyRequested?: boolean }>(
+      `/canvas/${canvasId}/request-access`,
+      message ? { message } : {},
+    );
+    return response.data;
+  }
+
+  async listAccessRequests(canvasId: string): Promise<CanvasAccessRequest[]> {
+    const response = await apiInstance.get<{ requests: CanvasAccessRequest[] }>(
+      `/canvas/${canvasId}/access-requests`,
+    );
+    return response.data.requests ?? [];
+  }
+
+  async myAccessRequestStatus(canvasId: string): Promise<{ pending: boolean }> {
+    const response = await apiInstance.get<{ pending: boolean }>(
+      `/canvas/${canvasId}/access-requests/mine`,
+    );
+    return response.data;
+  }
+
+  async resolveAccessRequest(
+    canvasId: string,
+    requesterId: string,
+    action: 'approve' | 'decline',
+  ): Promise<{ success: boolean; granted?: boolean; alreadyResolved?: boolean }> {
+    const response = await apiInstance.post<{
+      success: boolean;
+      granted?: boolean;
+      alreadyResolved?: boolean;
+    }>(`/canvas/${canvasId}/access-requests/${requesterId}/resolve`, { action });
+    return response.data;
   }
 }
 

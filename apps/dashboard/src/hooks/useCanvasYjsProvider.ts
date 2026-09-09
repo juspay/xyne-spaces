@@ -30,6 +30,10 @@ const COLLABORATION_COLORS = [
   '#A1887F',
 ] as const;
 
+// Grace period before clearing the dirty flag once y-sweet reports the doc as synced.
+// Keeps the indicator from flickering between rapid edits.
+const SYNCED_DEBOUNCE_MS = 2000;
+
 export function generateUserColor(userId: string): string {
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
@@ -106,9 +110,10 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
 
-  useEffect(() => {
-    hasLocalChangesRef.current = hasLocalChanges;
-  }, [hasLocalChanges]);
+  const setLocalChanges = useCallback((value: boolean): void => {
+    hasLocalChangesRef.current = value;
+    setHasLocalChanges(value);
+  }, []);
 
   useEffect(() => {
     if (!awareness) return;
@@ -269,14 +274,16 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       const handleLocalChanges = (hasChanges: boolean): void => {
         if (localChangesTimerRef.current) {
           clearTimeout(localChangesTimerRef.current);
+          localChangesTimerRef.current = null;
         }
 
         if (hasChanges) {
-          setHasLocalChanges(true);
+          setLocalChanges(true);
         } else {
           localChangesTimerRef.current = setTimeout(() => {
-            setHasLocalChanges(false);
-          }, 2000);
+            localChangesTimerRef.current = null;
+            setLocalChanges(false);
+          }, SYNCED_DEBOUNCE_MS);
         }
       };
 
@@ -286,11 +293,16 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
         provider.off(EVENT_CONNECTION_STATUS, handleConnectionStatus);
         provider.off(EVENT_LOCAL_CHANGES, handleLocalChanges);
 
+        // A pending timer means y-sweet already reported the doc as synced and we were
+        // only holding the flag through the debounce window. Tearing down mid-window is
+        // not an unsaved change, so don't warn about one.
+        const syncAlreadyReported = localChangesTimerRef.current !== null;
         if (localChangesTimerRef.current) {
           clearTimeout(localChangesTimerRef.current);
+          localChangesTimerRef.current = null;
         }
 
-        const hasUnsavedChanges = hasLocalChangesRef.current;
+        const hasUnsavedChanges = hasLocalChangesRef.current && !syncAlreadyReported;
         if (hasUnsavedChanges) {
           toast.warning('Unsaved Changes', {
             description: 'Some changes may not have been saved',
@@ -363,21 +375,24 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     const handleLocalChanges = (hasChanges: boolean): void => {
       if (localChangesTimerRef.current) {
         clearTimeout(localChangesTimerRef.current);
+        localChangesTimerRef.current = null;
       }
 
       if (hasChanges) {
-        setHasLocalChanges(true);
+        setLocalChanges(true);
       } else {
         localChangesTimerRef.current = setTimeout(() => {
-          setHasLocalChanges(false);
-        }, 1000);
+          localChangesTimerRef.current = null;
+          setLocalChanges(false);
+        }, SYNCED_DEBOUNCE_MS);
       }
     };
 
     provider.on(EVENT_LOCAL_CHANGES, handleLocalChanges);
 
     const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
-      if (hasLocalChangesRef.current) {
+      // Same rule as teardown: a pending timer means the doc is already synced.
+      if (hasLocalChangesRef.current && localChangesTimerRef.current === null) {
         event.preventDefault();
       }
     };
@@ -402,7 +417,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       setAwareness(null);
       doc.destroy();
     };
-  }, [doc, canvasId, authTokenData, getAuthToken]);
+  }, [doc, canvasId, authTokenData, getAuthToken, setLocalChanges]);
 
   useEffect(() => {
     const handleDynamicHeadersChanged = (): void => {

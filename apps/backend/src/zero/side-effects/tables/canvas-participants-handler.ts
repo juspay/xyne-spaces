@@ -91,6 +91,7 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
       actorName,
       role,
       actorAction,
+      this.ctx.workspaceId,
     );
 
     await activityService.createActivities(
