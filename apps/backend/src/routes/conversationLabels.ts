@@ -4,6 +4,8 @@ import {
   conversationLabelLifecycleService,
   ConversationLabelLifecycleError,
 } from '@/automations/services/conversation-label-lifecycle.service';
+import { getLabelUnreadCounts } from '@/services/conversationLabelUnreadService';
+import { assertChannelMembership } from '@/utils/channelMembership';
 
 const router = Router();
 
@@ -34,6 +36,34 @@ function handleLifecycleError(res: Response, err: ConversationLabelLifecycleErro
     data: err.impact,
   });
 }
+
+router.get('/unread-counts', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const channelId = req.query.channelId;
+    if (typeof channelId !== 'string' || channelId.length === 0) {
+      res.status(400).json({ success: false, error: 'channelId query param is required' });
+      return;
+    }
+
+    const access = await assertChannelMembership(req, channelId);
+    if (!access.ok) {
+      res.status(access.status).json({ success: false, error: access.error });
+      return;
+    }
+
+    const counts = await getLabelUnreadCounts(auth, channelId);
+    res.json({ success: true, data: { counts }, timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('[conversation-labels] unread-counts failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to get label unread counts' });
+  }
+});
 
 router.get('/:labelId/delete-impact', async (req: Request<{ labelId: string }>, res: Response) => {
   try {
