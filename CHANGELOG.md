@@ -1,3 +1,10 @@
+## [1.296.0](https://github.com/juspay/xyne-spaces/compare/v1.295.0...v1.296.0) (2026-09-09)
+
+
+### Features
+
+* channel count correction ([#1621](https://github.com/juspay/xyne-spaces/issues/1621)) ([5c44b5d](https://github.com/juspay/xyne-spaces/commit/5c44b5db638443831b9884ea2fd8e939ccc28308))
+
 ## [1.295.0](https://github.com/juspay/xyne-spaces/compare/v1.294.0...v1.295.0) (2026-09-09)
 
 
