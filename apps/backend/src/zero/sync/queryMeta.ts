@@ -50,9 +50,25 @@ function partitionColumnOf(where: WhereNode | undefined): string | undefined {
 
 const cache = new Map<string, QueryMeta>();
 
+/**
+ * Cache key. A `__grant__<table>` is instantiated with DIFFERENT scope columns depending on the
+ * classifier — `channel_participants` per-user by `{userId}`, but the same table could be subscribed
+ * per-scope by `{channelId}` — and the two have DIFFERENT partitionColumns. Keying by queryName
+ * alone returns the first-seen meta for both → the demux mis-attributes every row (materializes 0).
+ * So a grant query's key includes its scope column (the first arg key). Registered queries have a
+ * fixed partition, so queryName suffices. (Confirmed by the P1 e2e; also the P4 entity_access case.)
+ */
+function metaCacheKey(queryName: string, sampleArgs: unknown): string {
+  if (!isGrantQuery(queryName)) return queryName;
+  const entry = (Array.isArray(sampleArgs) ? sampleArgs[0] : sampleArgs) as Record<string, unknown> | undefined;
+  const scopeCol = entry ? Object.keys(entry)[0] : undefined;
+  return scopeCol ? `${queryName}:${scopeCol}` : queryName;
+}
+
 /** Derive (and cache) a query-type's packing metadata from a sample of its args. */
 export function queryMetaFor(queryName: string, sampleArgs: unknown): QueryMeta | undefined {
-  const cached = cache.get(queryName);
+  const cacheKey = metaCacheKey(queryName, sampleArgs);
+  const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   const base = isGrantQuery(queryName)
@@ -87,6 +103,6 @@ export function queryMetaFor(queryName: string, sampleArgs: unknown): QueryMeta 
     tables: tablesOfQuery(base as { ast?: { table?: string } }),
     childLinks,
   };
-  cache.set(queryName, meta);
+  cache.set(cacheKey, meta);
   return meta;
 }
