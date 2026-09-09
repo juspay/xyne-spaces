@@ -1,3 +1,15 @@
+## [1.251.0-release-20260901.18](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.17...v1.251.0-release-20260901.18) (2026-09-09)
+
+
+### Features
+
+* questionnaire screen responsiveness fix ([#1673](https://github.com/juspay/xyne-spaces/issues/1673)) ([4d8e047](https://github.com/juspay/xyne-spaces/commit/4d8e0475e9714743df4bc3736c19eb108f1e2bc0))
+
+
+### Bug Fixes
+
+* bump next override to 16.3.3 (CVE-2026-75604 Trivy CRITICAL) ([#1693](https://github.com/juspay/xyne-spaces/issues/1693)) ([6f243fe](https://github.com/juspay/xyne-spaces/commit/6f243fe5807c5d7bfcd240b68fd0245651dd3231))
+
 ## [1.251.0-release-20260901.17](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.16...v1.251.0-release-20260901.17) (2026-09-08)
 
 
