@@ -105,9 +105,20 @@ export function useCallParticipantRoster(
     const merged = [...previewParticipants];
     const seen = new Set(merged.map(participant => participant.userId));
 
+    // Index the authoritative full roster by userId. Its live `joinedAt` must be
+    // able to OVERRIDE a possibly-stale preview `hasJoined` flag, not merely
+    // backfill participants the preview didn't already cover — otherwise a preview
+    // row whose cached flag is out of date would shadow the real join status.
+    const fullByUserId = new Map<string, MergedParticipant>();
     for (const participant of fullParticipants ?? []) {
-      if (participant.userId && !seen.has(participant.userId)) {
-        merged.push({ ...participant, isCurrentUser: participant.userId === currentUserId });
+      if (!participant.userId) continue;
+      const row: MergedParticipant = {
+        ...participant,
+        isCurrentUser: participant.userId === currentUserId,
+      };
+      fullByUserId.set(participant.userId, row);
+      if (!seen.has(participant.userId)) {
+        merged.push(row);
         seen.add(participant.userId);
       }
     }
@@ -115,6 +126,17 @@ export function useCallParticipantRoster(
     return merged.map(participant => {
       const isExternal = Boolean(participant.isExternal);
       const directoryUser = usersById.get(participant.userId);
+
+      // When the authoritative roster row is present, trust its `joinedAt`
+      // outright; only fall back to the preview flag for rows the roster does not
+      // cover (e.g. active calls where the full fetch is skipped).
+      const authoritative = fullByUserId.get(participant.userId);
+      const joinedAt = authoritative ? authoritative.joinedAt : participant.joinedAt;
+      const hasJoined = authoritative
+        ? joinedAt !== null && joinedAt !== undefined
+        : joinedAt !== null && joinedAt !== undefined
+          ? true
+          : Boolean(participant.previewHasJoined);
 
       return {
         userId: participant.userId,
@@ -124,12 +146,7 @@ export function useCallParticipantRoster(
         email: isExternal ? (participant.email ?? '') : (directoryUser?.email ?? ''),
         isExternal,
         isCurrentUser: Boolean(participant.isCurrentUser),
-        // `joinedAt` is the authoritative signal; preview-only rows fall back to
-        // the flag carried in the preview payload.
-        hasJoined:
-          participant.joinedAt !== null && participant.joinedAt !== undefined
-            ? true
-            : Boolean(participant.previewHasJoined),
+        hasJoined,
       };
     });
   }, [currentUserId, fullParticipants, previewParticipants, usersById]);
