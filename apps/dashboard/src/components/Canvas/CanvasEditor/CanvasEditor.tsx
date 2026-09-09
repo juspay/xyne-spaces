@@ -76,6 +76,11 @@ import { useCachedQuery } from '@xyne/shared/hooks';
 import { queries } from '@xyne/shared/zero/queries';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logger, Event } from '../../../utils/logger';
+import {
+  CONTENT_SIZE_EXCEEDED_DESCRIPTION,
+  CONTENT_SIZE_MAX_THRESHOLD,
+  getContentSizeBytes,
+} from '../../../utils/canvasContentSize';
 import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
@@ -93,26 +98,6 @@ const canvasDictionary = {
     default: "Write something, or press '/' for commands",
     emptyDocument: "Write something, or press '/' for commands",
   },
-};
-
-// Content size limit in bytes
-const CONTENT_SIZE_MAX_THRESHOLD = 100 * 1024; // 100KB - block save
-
-// Helper to calculate content size in bytes
-const getContentSizeBytes = (blocks: PartialBlock[]): number => {
-  try {
-    return new Blob([JSON.stringify(blocks)]).size;
-  } catch {
-    // Fallback to approximate size
-    return JSON.stringify(blocks).length * 2; // UTF-16 approximate
-  }
-};
-
-// Format bytes to human readable
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 };
 
 // Helper to deep clone blocks to prevent mutation of the original editor state.
@@ -137,6 +122,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       initialBlockIdToFocus,
       initialCommentThreadId,
       onOpenCommentCountChange,
+      onCommentsOpenChange,
       autoFocus,
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
@@ -401,6 +387,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
+      lostCommentThreadIds,
       refreshCommentHighlights,
       openCommentsForCurrentBlock,
       focusCommentBlock,
@@ -416,6 +403,11 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       initialCommentThreadId,
       onOpenCommentCountChange,
     });
+
+    // The panel lives in here, so the header above has no other way to tell that it is open.
+    useEffect(() => {
+      onCommentsOpenChange?.(isCommentsOpen);
+    }, [isCommentsOpen, onCommentsOpenChange]);
 
     // Expose presentation and comment drawer methods via ref
     useImperativeHandle(
@@ -480,6 +472,15 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     // Debounce timer ref
     const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+    /**
+     * The save the debounce is waiting to run. Held separately so unmount can run it instead of
+     * discarding it: the comment anchor is a mark in the document and reaches the server only
+     * through this save, while its thread row is committed to Zero immediately. Dropping the
+     * timer on the way out would strand the row with no anchor — a comment that is gone on the
+     * next load, everywhere, with nothing said.
+     */
+    const pendingSaveRef = useRef<(() => void) | null>(null);
+
     // Track if we've shown the exceeded message (to avoid spamming)
     const hasShownExceededRef = useRef(false);
 
@@ -492,8 +493,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           clearTimeout(debounceTimerRef.current);
         }
 
-        // Set new timer for debounced execution
-        debounceTimerRef.current = setTimeout(() => {
+        const commitChange = (): void => {
           const blocks = editor.document;
 
           // Check content size before saving
@@ -505,7 +505,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             if (!hasShownExceededRef.current) {
               hasShownExceededRef.current = true;
               toast.error('Content Too Large', {
-                description: `Canvas content (${formatBytes(sizeBytes)}) exceeds the maximum size of ${formatBytes(CONTENT_SIZE_MAX_THRESHOLD)}. Please reduce content size or use new canvas for better performance.`,
+                description: CONTENT_SIZE_EXCEEDED_DESCRIPTION(sizeBytes),
               });
             }
             return; // Don't save
@@ -521,16 +521,47 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           extractHeadings();
 
           onChange(clonedBlocks);
+        };
+
+        // Set new timer for debounced execution
+        pendingSaveRef.current = commitChange;
+        debounceTimerRef.current = setTimeout(() => {
+          debounceTimerRef.current = null;
+          pendingSaveRef.current = null;
+          commitChange();
         }, 500); // 500ms debounce delay
       }
     }, [editor, onChange, extractHeadings, refreshCommentHighlights]);
 
-    // Cleanup debounce timer on unmount
+    /**
+     * Runs a queued save now. The size check lives inside it, so an oversized document is still
+     * refused here exactly as it would have been on the timer. Reading the document is guarded:
+     * on unmount the editor may already have been torn down, and a save that cannot be taken is
+     * simply the behaviour this replaced.
+     */
+    const flushPendingSave = useCallback((): void => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      const pendingSave = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      if (!pendingSave) return;
+
+      try {
+        pendingSave();
+      } catch {
+        // Nothing to do: the editor is gone and the content cannot be read.
+      }
+    }, []);
+
+    const flushPendingSaveRef = useRef(flushPendingSave);
+    flushPendingSaveRef.current = flushPendingSave;
+
+    // Run — rather than discard — a queued save on the way out.
     useEffect(() => {
       return (): void => {
-        if (debounceTimerRef.current) {
-          clearTimeout(debounceTimerRef.current);
-        }
+        flushPendingSaveRef.current();
       };
     }, []);
 
@@ -617,7 +648,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 activeBlockId={activeCommentBlockId}
                 activeThreadId={activeCommentThreadId}
                 activeAnchor={activeCommentAnchor}
+                lostThreadIds={lostCommentThreadIds}
                 editable={editable}
+                anchorContainerRef={containerRef}
                 onClose={() => setIsCommentsOpen(false)}
                 onSelectBlock={focusCommentBlock}
                 onBeforeCreateThread={applyCommentAnchorStyle}

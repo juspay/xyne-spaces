@@ -19,6 +19,12 @@ interface UseCanvasCommentHighlightsOptions {
   enabled?: boolean;
   refreshKey?: unknown;
   activeThreadId?: string | null | undefined;
+  /**
+   * Thread ids whose anchor mark was in the document and has since gone: their commented text
+   * was deleted, so they get no highlight and no badge until an undo brings the anchor back.
+   * Threads outside this set are shown, including any that never carried a mark here.
+   */
+  lostThreadIds?: Set<string> | undefined;
   onAnchorClick?: ((thread: CanvasCommentHighlightThread, rect?: DOMRect) => void) | undefined;
   onOpenCountChange?: ((count: number) => void) | undefined;
   onThreadsChange?: ((threads: CanvasCommentHighlightThread[]) => void) | undefined;
@@ -172,6 +178,7 @@ export const useCanvasCommentHighlights = ({
   enabled = true,
   refreshKey,
   activeThreadId,
+  lostThreadIds,
   onAnchorClick,
   onOpenCountChange,
   onThreadsChange,
@@ -182,9 +189,13 @@ export const useCanvasCommentHighlights = ({
       enabled: enabled && Boolean(canvasId),
     },
   ) as unknown as [CanvasCommentHighlightThread[]];
+  const anchoredThreads = useMemo(
+    () => (lostThreadIds?.size ? threads.filter(thread => !lostThreadIds.has(thread.id)) : threads),
+    [lostThreadIds, threads],
+  );
   const openThreads = useMemo(
-    () => threads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN),
-    [threads],
+    () => anchoredThreads.filter(thread => thread.status === CanvasCommentThreadStatus.OPEN),
+    [anchoredThreads],
   );
   const openThreadIds = useMemo(() => new Set(openThreads.map(thread => thread.id)), [openThreads]);
   const threadBadgeData = useMemo(
@@ -225,8 +236,8 @@ export const useCanvasCommentHighlights = ({
     }
 
     onOpenCountChange?.(openThreads.length);
-    onThreadsChange?.(threads);
-  }, [canvasId, enabled, onOpenCountChange, onThreadsChange, openThreads.length, threads]);
+    onThreadsChange?.(anchoredThreads);
+  }, [anchoredThreads, canvasId, enabled, onOpenCountChange, onThreadsChange, openThreads.length]);
 
   useEffect(() => {
     if (!enabled || !canvasId || typeof window === 'undefined') return;

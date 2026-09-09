@@ -106,6 +106,9 @@ const EMPTY_TRANSCRIPTS: SelectedTranscript[] = [];
 const EMPTY_RECORDINGS: SelectedRecording[] = [];
 const EMPTY_ACTIVITIES: UserActivity[] = [];
 
+/** How many in-flight editor texts to remember while the parent catches up. */
+const MAX_REPORTED_TEXT_HISTORY = 20;
+
 export interface XyneAIInputBoxProps {
   channelId?: string | null;
   channelName?: string;
@@ -950,6 +953,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     };
 
+    /**
+     * Texts this editor has reported upward since the parent last agreed with it. The parent's
+     * `inputValue` trails the editor by at least a render — under fast input (voice dictation)
+     * by several — so any value already in here is a stale echo of the user's own typing and
+     * must not be written back, which would drop the characters typed since and move the caret.
+     * A value the editor never produced is a deliberate write from the parent.
+     */
+    const reportedTextsRef = useRef<string[]>([inputValue]);
+
     // TipTap editor setup
     const editor = useEditor({
       extensions: [
@@ -984,6 +996,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       content: '',
       onUpdate: ({ editor }) => {
         const text = editor.getText();
+        const reported = reportedTextsRef.current;
+        reported.push(text);
+        if (reported.length > MAX_REPORTED_TEXT_HISTORY) {
+          reported.splice(0, reported.length - MAX_REPORTED_TEXT_HISTORY);
+        }
         onInputChange(text);
       },
       editorProps: {
@@ -1149,14 +1166,26 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onAttachmentsChange?.(selectedAttachments);
     }, [selectedAttachments, onAttachmentsChange]);
 
-    // Sync inputValue changes from parent to editor (skip during voice recording)
+    // Sync deliberate parent writes into the editor, skipping stale echoes of the editor's own
+    // reports — see `reportedTextsRef`.
     useEffect(() => {
-      if (editor && !editor.isFocused) {
-        const currentText = editor.getText();
-        if (currentText !== inputValue) {
-          editor.commands.setContent(inputValue);
-        }
+      if (!editor) return;
+
+      const currentText = editor.getText();
+      if (currentText === inputValue) {
+        // The two sides agree, so nothing reported before this point can still be in flight.
+        reportedTextsRef.current = [inputValue];
+        return;
       }
+
+      // Echoes of the user's own typing are ignored. Anything the editor never reported is a
+      // deliberate write from the parent (Ask AI seeding a selection, a cleared composer) and
+      // must land even while focused, which the previous plain `!editor.isFocused` check
+      // silently dropped.
+      if (reportedTextsRef.current.includes(inputValue)) return;
+
+      reportedTextsRef.current = [inputValue];
+      editor.commands.setContent(inputValue);
     }, [inputValue, editor]);
 
     // Clear editor content and attachments when inputValue is empty (after submit)

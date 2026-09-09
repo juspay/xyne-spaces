@@ -22,10 +22,11 @@ import Input from '../../ui/Input';
 import { ChannelCanvasList } from '../ChannelCanvasList';
 import { CanvasShareModal } from '../CanvasShareModal';
 import {
-  CanvasVersionDiffPanel,
+  CanvasVersionDiffLegend,
   CanvasVersionHistory,
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
+import { buildCanvasVersionDiffContent } from '../../../utils/canvasVersionDiffContent';
 import { isBaselineCanvasType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
   AudioLines,
@@ -119,6 +120,9 @@ const getStrongestCanvasRole = (
       : strongestRole;
   }, undefined);
 
+/** Stable empty document, so memos comparing canvas content keep their identity. */
+const EMPTY_CANVAS_CONTENT: PartialBlock[] = [];
+
 const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -173,6 +177,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     setOpenCommentCount(0);
   }, [canvas?.id]);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
+  const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const titleRef = useRef('Untitled Canvas'); // Track title synchronously to avoid race conditions
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
@@ -184,7 +189,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [previewVersion, setPreviewVersion] = useState<CanvasVersionRecord | null>(null);
-  const [showVersionDiff, setShowVersionDiff] = useState(false);
+  const [showVersionDiff, setShowVersionDiff] = useState(true);
   const [restoringVersionId, setRestoringVersionId] = useState<string | undefined>(undefined);
   const [renamingVersionId, setRenamingVersionId] = useState<string | undefined>(undefined);
   const latestContentRef = useRef<PartialBlock[] | undefined>(undefined);
@@ -726,7 +731,9 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     }
     previewVersionRef.current = version;
     setPreviewVersion(version);
-    setShowVersionDiff(false);
+    // Opening a version shows its changes highlighted straight away; the toggle turns the
+    // highlighting off to read the version plain.
+    setShowVersionDiff(true);
   };
 
   const handleBackToCurrentVersion = (): void => {
@@ -762,6 +769,42 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       setView('list');
     }
   };
+
+  // Falls back to a shared constant rather than a fresh `[]`, so an empty canvas does not
+  // hand the memos below a new identity on every render.
+  const currentContentForVersionCompare =
+    latestContentRef.current || currentContent || canvas?.content || EMPTY_CANVAS_CONTENT;
+
+  // Comparing two versions serializes and walks both documents in full, so it is kept off
+  // the render path: without this every unrelated re-render of the tab re-diffs them.
+  // These hooks sit above the `view === 'list'` early return, so they also guard on the
+  // view: the list has no preview to compare and must not pay for one.
+  const isPreviewingVersion = view === 'editor' && previewVersion !== null;
+  const { isPreviewSameAsCurrent, hasVersionDiff } = useMemo(() => {
+    if (!isPreviewingVersion || !previewVersion) {
+      return { isPreviewSameAsCurrent: false, hasVersionDiff: false };
+    }
+
+    const diffParts = createCanvasContentTextDiff(
+      currentContentForVersionCompare,
+      previewVersion.content,
+    );
+    return {
+      isPreviewSameAsCurrent:
+        stableStringifyCanvasContent(previewVersion.content) ===
+        stableStringifyCanvasContent(currentContentForVersionCompare),
+      hasVersionDiff: diffParts.some(isVisibleCanvasContentDiffPart),
+    };
+  }, [currentContentForVersionCompare, isPreviewingVersion, previewVersion]);
+
+  // When on, the preview renders the version document with its changes highlighted inline.
+  const isVersionDiffVisible = isPreviewingVersion && showVersionDiff && hasVersionDiff;
+  const previewContent = useMemo(() => {
+    if (!isPreviewingVersion || !previewVersion) return null;
+    return isVersionDiffVisible
+      ? buildCanvasVersionDiffContent(currentContentForVersionCompare, previewVersion.content)
+      : (normalizeCanvasContent(previewVersion.content) as PartialBlock[]);
+  }, [currentContentForVersionCompare, isPreviewingVersion, isVersionDiffVisible, previewVersion]);
 
   if (view === 'list') {
     return (
@@ -971,19 +1014,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     );
   }
 
-  const currentContentForVersionCompare =
-    latestContentRef.current || currentContent || canvas?.content || [];
-  const displayedContent = previewVersion
-    ? (normalizeCanvasContent(previewVersion.content) as PartialBlock[])
-    : currentContent || canvas?.content || [];
-  const isPreviewSameAsCurrent = previewVersion
-    ? stableStringifyCanvasContent(previewVersion.content) ===
-      stableStringifyCanvasContent(currentContentForVersionCompare)
-    : false;
-  const versionDiffParts = previewVersion
-    ? createCanvasContentTextDiff(currentContentForVersionCompare, previewVersion.content)
-    : [];
-  const hasVersionDiff = versionDiffParts.some(isVisibleCanvasContentDiffPart);
+  const displayedContent =
+    previewContent ?? currentContent ?? canvas?.content ?? EMPTY_CANVAS_CONTENT;
   const previewUpdatedAtText = previewVersion
     ? new Date(previewVersion.updatedAt).toLocaleString(undefined, {
         month: 'short',
@@ -1019,12 +1051,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               titleRef.current = newTitle;
             }}
             readOnly={!canEdit}
+            onFocus={() => {
+              if (canEdit) setIsRenamingTitle(true);
+            }}
             onBlur={() => {
+              setIsRenamingTitle(false);
               handleTitleSave();
             }}
-            className={`text-base md:text-xl font-semibold flex-1 border-none shadow-none focus:ring-0 focus-visible:ring-0 focus-visible:border-none px-2 py-1 h-auto rounded min-w-0 ${
-              canEdit ? 'hover:bg-accent' : 'cursor-default'
-            }`}
+            onKeyDown={event => {
+              // Blur rather than save directly, so onBlur remains the single save path
+              // and the name cannot be committed twice.
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
+            className={`text-base md:text-xl font-semibold flex-1 shadow-none focus:ring-0 focus-visible:ring-0 px-2 py-1 h-auto rounded min-w-0 transition-colors ${
+              isRenamingTitle
+                ? 'border border-primary/40 bg-background ring-2 ring-primary/10 focus-visible:border-primary/40'
+                : 'border-none focus-visible:border-none'
+            } ${canEdit ? 'hover:bg-accent' : 'cursor-default'}`}
             placeholder='Untitled Canvas'
             data-testid='canvas-title-input'
             data-track-category='CANVAS'
@@ -1133,6 +1179,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               <span className='font-medium text-foreground'>{previewUpdatedAtText}</span>
             </div>
             <div className='flex items-center gap-2'>
+              {isVersionDiffVisible && <CanvasVersionDiffLegend className='mr-1 hidden sm:flex' />}
               <Button
                 variant='secondary'
                 size='sm'
@@ -1143,17 +1190,17 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 Back to current
               </Button>
               {hasVersionDiff && (
-                <Button
-                  variant={showVersionDiff ? 'default' : 'secondary'}
-                  size='sm'
-                  onClick={() => setShowVersionDiff(prev => !prev)}
-                  data-track-category='CANVAS'
-                  data-track-name='TOGGLE_VERSION_DIFF'
-                  aria-pressed={showVersionDiff}
-                >
+                <div className='flex items-center gap-2 text-sm text-muted-foreground'>
                   <GitCompare size={14} />
-                  Diff
-                </Button>
+                  <span>Diff</span>
+                  <Switch
+                    checked={showVersionDiff}
+                    onCheckedChange={setShowVersionDiff}
+                    aria-label='Highlight changes against the current canvas'
+                    data-track-category='CANVAS'
+                    data-track-name='TOGGLE_VERSION_DIFF'
+                  />
+                </div>
               )}
               {canEdit && !isPreviewSameAsCurrent && (
                 <Button
@@ -1196,10 +1243,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           </div>
         )}
 
-        {previewVersion && showVersionDiff && hasVersionDiff && (
-          <CanvasVersionDiffPanel parts={versionDiffParts} className='mx-2 mb-2 md:mx-4' />
-        )}
-
         {/* Canvas Editor */}
         <div
           ref={canvasContentRef}
@@ -1208,7 +1251,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         >
           {previewVersion ? (
             <CanvasEditor
-              key={`preview-${previewVersion.id}`}
+              key={`preview-${previewVersion.id}-${isVersionDiffVisible ? 'diff' : 'plain'}`}
               ref={editorRef}
               content={displayedContent}
               editable={false}
