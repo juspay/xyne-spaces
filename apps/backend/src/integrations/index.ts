@@ -11,6 +11,7 @@ import './adapters/microsoft';
 import './adapters/google';
 import './adapters/ozonetel';
 import './adapters/social-media';
+import './adapters/app-desk';
 
 
 // Export public API
