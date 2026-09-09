@@ -60,6 +60,7 @@ const STATUS: Record<MigrationStatus, { label: string; tone: Tone }> = {
   QUEUED: { label: 'Queued', tone: 'muted' },
   COLLECTING: { label: 'Collecting', tone: 'blue' },
   AWAITING_APPROVAL: { label: 'Awaiting approval', tone: 'amber' },
+  REFRESHING: { label: 'Fetching latest', tone: 'blue' },
   INGESTING: { label: 'Ingesting', tone: 'violet' },
   STOPPED: { label: 'Stopped', tone: 'orange' },
   FAILED: { label: 'Failed', tone: 'red' },
@@ -112,7 +113,8 @@ const TONE: Record<Tone, { pill: string; dot: string; bar: string; ring: string 
 };
 
 const isStalled = (j: MigrationJobView): boolean =>
-  (j.status === 'COLLECTING' || j.status === 'INGESTING') && Date.now() - j.heartbeatAt > STALE_MS;
+  (j.status === 'COLLECTING' || j.status === 'REFRESHING' || j.status === 'INGESTING') &&
+  Date.now() - j.heartbeatAt > STALE_MS;
 
 const ago = (ts: number): string => {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -122,6 +124,17 @@ const ago = (ts: number): string => {
   const h = Math.round(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.round(h / 24)}d ago`;
+};
+
+// Human-readable ingest duration, e.g. "7m 12s".
+const fmtDuration = (ms: number): string => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600),
+    m = Math.floor((s % 3600) / 60),
+    sec = s % 60;
+  if (h) return `${h}h ${m}m ${sec}s`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
 };
 
 // Pipeline stages; position derived from status (and phase when stopped/failed).
@@ -134,6 +147,7 @@ const activeStage = (j: MigrationJobView): number => {
     case 'QUEUED':
       return j.phase === 'ingest' ? 2 : 0; // queued to (re)run in its current phase
     case 'AWAITING_APPROVAL':
+    case 'REFRESHING':
       return j.phase === 'ingest' ? 2 : 1; // approved ⇒ ingest gate
     case 'INGESTING':
       return 2;
@@ -149,7 +163,8 @@ const activeStage = (j: MigrationJobView): number => {
 
 // ── small pieces ─────────────────────────────────────────────────────────────
 function StatusPill({ job }: { job: MigrationJobView }): React.JSX.Element {
-  const running = job.status === 'COLLECTING' || job.status === 'INGESTING';
+  const running =
+    job.status === 'COLLECTING' || job.status === 'REFRESHING' || job.status === 'INGESTING';
   const stopping = running && job.stopRequested;
   const stalled = running && !stopping && isStalled(job);
   const approvedQueued = job.status === 'AWAITING_APPROVAL' && job.phase === 'ingest';
@@ -246,6 +261,29 @@ function Stepper({ job }: { job: MigrationJobView }): React.JSX.Element {
 function PhaseProgress({ job }: { job: MigrationJobView }): React.JSX.Element | null {
   const { total, collected, ingested } = job.progress;
   if (total === 0 && job.status === 'SUBMITTED') return null;
+
+  if (job.status === 'REFRESHING') {
+    const rt = job.refreshTotal ?? 0;
+    const rd = job.refreshDone ?? 0;
+    const pct = rt > 0 ? Math.min(100, Math.round((rd / rt) * 100)) : 0;
+    return (
+      <div>
+        <div className='mb-1 flex items-center justify-between text-xs text-muted-foreground'>
+          <span>
+            Fetching latest… {rd.toLocaleString()} / {rt.toLocaleString()} conversations
+          </span>
+          <span className='tabular-nums'>{pct}%</span>
+        </div>
+        <div className='h-1.5 overflow-hidden rounded-full bg-muted'>
+          <div
+            className={cn('h-full rounded-full transition-[width] duration-500', TONE.blue.bar)}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const ingestPhase = job.phase === 'ingest' && job.status !== 'AWAITING_APPROVAL';
   const tone = TONE[job.status === 'COMPLETED' ? 'green' : ingestPhase ? 'violet' : 'blue'];
 
@@ -373,6 +411,12 @@ function JobCard({
               {job.submittedByName ? `${job.submittedByName} · ` : ''}submitted {ago(job.createdAt)}
               {job.channel?.startDate ? ` · from ${job.channel.startDate}` : ''}
             </div>
+            {(job.lastRefreshedAt ?? job.collectedAt) && (
+              <div className='text-xs text-muted-foreground'>
+                Data current as of {ago(job.lastRefreshedAt ?? job.collectedAt!)}
+                {job.refreshCount ? ` · synced ${job.refreshCount}×` : ''}
+              </div>
+            )}
             {job.channel?.announceInSlack && (
               <span className='mt-1.5 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground'>
                 <Megaphone className='size-3' />
@@ -394,6 +438,16 @@ function JobCard({
         <PhaseProgress job={job} />
       </div>
 
+      {job.status === 'COMPLETED' && typeof job.ingestDurationMs === 'number' && (
+        <div className='mt-3 flex items-start gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400'>
+          <Info className='mt-0.5 size-3.5 shrink-0' />
+          <span>
+            Ingested {job.stats.messages.toLocaleString()} messages in{' '}
+            <span className='font-medium tabular-nums'>{fmtDuration(job.ingestDurationMs)}</span>
+          </span>
+        </div>
+      )}
+
       {job.status === 'FAILED' && job.error && (
         <div className='mt-3 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive'>
           <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
@@ -413,13 +467,19 @@ function JobCard({
       )}
 
       {job.issues && job.issues.length > 0 && (
-        <div className='mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400'>
-          <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
-          <span className='break-words'>
-            {job.issues.length} conversation{job.issues.length > 1 ? 's' : ''} not fully migrated —{' '}
-            {job.issues[0]?.reason}
-            {job.issues.length > 1 ? ` (+${job.issues.length - 1} more)` : ''}
-          </span>
+        <div className='mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400'>
+          <div className='flex items-center gap-2 font-medium'>
+            <TriangleAlert className='size-3.5 shrink-0' />
+            {job.issues.length} conversation{job.issues.length > 1 ? 's' : ''} not fully migrated
+          </div>
+          <ul className='mt-1.5 space-y-1 pl-5'>
+            {job.issues.map((issue, i) => (
+              <li key={`${issue.conversationId}-${i}`} className='break-words'>
+                <span className='font-medium'>{issue.label ?? issue.conversationId}</span>
+                <span className='text-amber-600/70 dark:text-amber-400/70'> — {issue.reason}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -638,7 +698,7 @@ export default function SlackMigration(): React.JSX.Element {
   const hasActive = useMemo(
     () =>
       [...(mine ?? []), ...(all ?? [])].some(
-        j => j.status === 'COLLECTING' || j.status === 'INGESTING',
+        j => j.status === 'COLLECTING' || j.status === 'REFRESHING' || j.status === 'INGESTING',
       ),
     [mine, all],
   );
@@ -1072,7 +1132,8 @@ function OwnerActions({
     void run(fn).finally(() => setPending(null));
   };
   const canResume = job.status === 'STOPPED' || job.status === 'FAILED';
-  const canDelete = job.status !== 'COLLECTING' && job.status !== 'INGESTING';
+  const canDelete =
+    job.status !== 'COLLECTING' && job.status !== 'REFRESHING' && job.status !== 'INGESTING';
   return (
     <>
       {canResume && (
@@ -1129,6 +1190,22 @@ function AdminActions({
   const canResume = job.status === 'STOPPED' || job.status === 'FAILED';
   return (
     <>
+      {canApprove && job.canRefresh && (
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={busy}
+          loading={pending === 'refresh'}
+          trackId='slack_migration_refresh'
+          onClick={() => act('refresh', () => slackMigrationApi.refresh(job.id))}
+          data-track-category='SLACK_MIGRATION'
+          data-track-name='REFRESH_JOB'
+          title='Collect messages sent since collection before ingesting'
+        >
+          <RotateCcw className='size-3.5' />
+          Get latest messages
+        </Button>
+      )}
       {canApprove && (
         <Button
           size='sm'

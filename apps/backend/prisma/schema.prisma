@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential"]
 }
 
 datasource db {
@@ -197,6 +197,7 @@ model Ticket {
 
   @@index([isArchived, createdAt(sort: Desc), id])
   @@index([projectId, createdAt(sort: Desc), id])
+  @@index([projectId, isArchived, statusV2, createdAt(sort: Desc), id])
   @@index([workspaceId, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
@@ -436,6 +437,8 @@ model Workflow {
   eventType        String            @default("NO_OP")
   automationSeriesId String?
   scheduledAt      DateTime? // Do the deployment only after 12 AM
+  folderId         String?
+  summary          String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -499,6 +502,8 @@ model WorkflowExecutionState {
   context             String? // For child executions - initial context (JSON)
   output              String? // Execution-specific output (typed result)
   currentStepIndex    Int     @default(0)
+  pausePath           String?
+  pauseType           String?
 
   @@index([workflowExecutionId])
   @@map("workflow_execution_states")
@@ -600,6 +605,37 @@ model WorkflowKnowledge {
   createdAt           DateTime @default(now())
 
   @@map("workflow_knowledge")
+  @@schema("workflow")
+}
+
+model WorkflowFolder {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  name        String
+  metadata    String? // JSON: host metadata
+  parentId    String? // null = top-level folder
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  @@index([workspaceId])
+  @@index([workspaceId, parentId])
+  @@map("workflow_folders")
+  @@schema("workflow")
+}
+
+model WorkflowCredential {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String @id @default(cuid())
+  name        String
+  credType    String // bearer | basic | custom_header | oauth2_client_credentials
+  data        String // ENCRYPTED JSON — auth values
+  status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("workflow_credentials")
   @@schema("workflow")
 }
 
@@ -2450,6 +2486,7 @@ model Activity {
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
+  trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
   classification  String                 @default("PENDING")
@@ -2653,8 +2690,8 @@ model Notification {
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
   type              String
-  title             String?                     @default("")
-  message           String?                     @default("")
+  title             String?
+  message           String?
   status            String                      @default("UNREAD")
   deliveryMethods   String[]
   metadata          Json?                       // Additional context data
@@ -3056,6 +3093,7 @@ model CanvasVersion {
 
 model CanvasCommentThread {
   id              String                    @id @default(cuid())
+  workspaceId     String?                   // denormalized tenant key (stamped on insert; nullable during backfill release)
   canvasId        String
   blockId         String
   anchorText      String?
@@ -3073,13 +3111,14 @@ model CanvasCommentThread {
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
-  @@index([canvasId, createdAt])
+  @@index([ canvasId, createdAt])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
 
 model CanvasComment {
   id               String   @id @default(cuid())
+  workspaceId      String?  // denormalized tenant key (stamped on insert; nullable during backfill release)
   threadId         String
   canvasId         String
   body             String
@@ -4598,7 +4637,7 @@ model ThreadTypeVocabulary {
   workspaceId String
   name        String
   label       String
-  summary     String   @default("")
+  summary     String
   color       String
   description String
   status      String   @default("APPROVED")
@@ -4606,7 +4645,7 @@ model ThreadTypeVocabulary {
   createdBy   String?
   updatedBy   String?
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime
 
   @@unique([scope, scopeId, name])
   @@index([workspaceId, scope, status])
@@ -4764,6 +4803,7 @@ model ExecutionItem {
   // conversationId, or an id, so the planner drives off that and applies
   // workspaceId as a filter. Leading with it produced write cost for nothing.
   @@index([conversationId, status]) // gate: tracked-thread check + resolve-all
+  @@index([channelId, status]) // DM scope: open items, debug, bulk actions
   @@index([pendingOn], type: Gin) // feed: Pending Me membership
   @@index([requestedBy], type: Gin) // feed: Waiting On membership
   @@map("execution_items")

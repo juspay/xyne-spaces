@@ -21,7 +21,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { Button } from '../../ui/Button/Button';
+
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
   loadArtifactPayload,
@@ -36,6 +36,7 @@ import { ArtifactCodeView } from './ArtifactCodeView';
 import { useArtifactDataBridge, type PreviewClientRef } from './useArtifactDataBridge';
 import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
+import { useArtifactRequestBridge } from './useArtifactRequestBridge';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
 import { ArtifactBootOverlay } from './ArtifactBootOverlay';
 import { ArtifactErrorOverlay } from './ArtifactErrorOverlay';
@@ -143,6 +144,11 @@ const ArtifactSandpack = memo(
     // resolves them with the app's own helpers rather than letting generated
     // code join a user table and get it wrong.
     useArtifactDirectoryBridge({ currentUserId, previewRef });
+
+    // Runs the app's backend SDK / storage fetches as the current viewer: the
+    // app tunnels them here (it has no cookie), the host performs the real
+    // same-origin fetch, allow-listed to /api/sdk and /claw.
+    useArtifactRequestBridge({ previewRef, ...(appId ? { appId } : {}) });
 
     const files = useMemo(() => toSandpackFiles(payload), [payload]);
     const customSetup = useMemo(
@@ -351,9 +357,8 @@ export const ReactArtifactView = ({
             <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (
-            <Button
-              variant='ghost'
-              trackId='react_artifact_refresh_data'
+            <button
+              data-ph-capture-attribute-track-id='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -370,12 +375,11 @@ export const ReactArtifactView = ({
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
                 aria-hidden='true'
               />
-            </Button>
+            </button>
           )}
           {onSave && (
-            <Button
-              variant='ghost'
-              trackId='react_artifact_save'
+            <button
+              data-ph-capture-attribute-track-id='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
@@ -392,7 +396,7 @@ export const ReactArtifactView = ({
               ) : (
                 <Save className='h-3.5 w-3.5' aria-hidden='true' />
               )}
-            </Button>
+            </button>
           )}
           {onExpand && (
             <button

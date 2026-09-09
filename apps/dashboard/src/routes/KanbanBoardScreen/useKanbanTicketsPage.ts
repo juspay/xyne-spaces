@@ -384,6 +384,8 @@ export const useKanbanTicketsPage = (
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
   const overdueReferenceTimeRef = useRef<number | null>(null);
+  // Already the final query: any quotes were typed into the search box, and the backend
+  // reads exactness off them (`isExactMatch` in the Vespa searchService).
   const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const pageVespaTokensSet = new Set(options.dynamicFieldVespaTokens ?? []);
   const pageVespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;

@@ -159,7 +159,14 @@ export class ExternalAttachmentService {
   ): Promise<DownloadedAttachment[]> {
     if (!attachments || attachments.length === 0) return [];
 
-    logger.info(`Downloading ${attachments.length} attachments for source: ${sourceName}`);
+    // Migration attachments already live in our storage (collected earlier) — they are STREAM-COPIED bucket→bucket,
+    // not re-fetched from Slack. Say so, so the ingestion logs don't look like a second collection pass.
+    const fromStorageCount = attachments.filter((a) => a.storageSourcePath).length;
+    logger.info(
+      fromStorageCount === attachments.length
+        ? `Moving ${attachments.length} attachment(s) storage→storage (already collected — not re-downloading from Slack) for source: ${sourceName}`
+        : `Downloading ${attachments.length} attachments for source: ${sourceName}`,
+    );
 
     const source = await this.externalSourceRepo.findByName(sourceName);
     if (!source) throw new Error(`External source not found: ${sourceName}`);
@@ -224,7 +231,7 @@ export class ExternalAttachmentService {
       logger.warn(`Failed to download ${failed.length}/${attachments.length} attachments:`, failed);
     }
 
-    logger.info(`Successfully downloaded ${successful.length}/${attachments.length} attachments`);
+    logger.info(`Successfully transferred ${successful.length}/${attachments.length} attachment(s) to storage`);
     return successful;
   }
 
@@ -255,6 +262,9 @@ export class ExternalAttachmentService {
       // Read from the source bucket (gs://bucket/key from the collector); write final to default bucket.
       const { bucket, key } = parseStorageUri(attachment.storageSourcePath);
       const sourceStore = bucket ? getStorageService(bucket) : storageService;
+      logger.info('Moving attachment storage→storage (streamed, decrypted; no Slack fetch)', {
+        from: attachment.storageSourcePath, fileName, scopeId,
+      });
       const raw = await sourceStore.createReadStream(key);
       const source = attachment.storageSourceEncrypted ? decryptStream(raw) : raw;
       const gcsResult = await storageService.uploadStream(source, {

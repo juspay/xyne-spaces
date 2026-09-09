@@ -83,6 +83,10 @@ ENV VITE_POSTHOG_HOST=${VITE_POSTHOG_HOST}
 # Default workspace ID
 ENV VITE_DEFAULT_WORKSPACE_ID=6642623f-cca7-43ad-9a6b-5e49c33226b4
 
+# Slack app install URL shown on the self-serve migration page (public; baked into the bundle at build time)
+ARG VITE_SLACK_APP_INSTALL_URL="https://api.slack.com/apps/A09QL5AE5PY/install-on-team"
+ENV VITE_SLACK_APP_INSTALL_URL=${VITE_SLACK_APP_INSTALL_URL}
+
 # Build the Vite React app with increased memory
 ENV NODE_OPTIONS="--max-old-space-size=8192"
 RUN pnpm --filter xyne-spaces-dashboard run ${BUILD_SCRIPT}
@@ -92,6 +96,11 @@ RUN pnpm --filter xyne-spaces-dashboard run ${BUILD_SCRIPT}
 RUN apt-get update && apt-get install -y zip && \
     mkdir -p /repo/apps/dashboard/releases && \
     cd /repo/apps/dashboard/dist && zip -r ../releases/dashboard.zip .
+
+
+FROM scratch AS bundle
+COPY --from=builder /repo/apps/dashboard/dist /
+COPY --from=builder /repo/apps/dashboard/releases /releases
 
 # Production image with nginx
 FROM nginx:alpine AS runner

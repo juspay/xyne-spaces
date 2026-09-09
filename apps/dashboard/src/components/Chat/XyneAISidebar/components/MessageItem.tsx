@@ -20,6 +20,7 @@ import {
   Loader2,
   Bug,
   AlertTriangle,
+  X,
 } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -89,7 +90,6 @@ import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendin
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AskAiRatingButtons } from '../../../AIScreen/AskAiRatingButtons';
-import { Button } from '../../../ui/Button/Button';
 
 /**
  * v3-style inline citation chip for `[clf-<toolCallId>#<chunkIndex>]` tokens.
@@ -664,6 +664,20 @@ interface MessageActionsProps {
     | undefined;
 }
 
+/**
+ * What an edited message keeps of what was sent with it.
+ *
+ * An edit re-runs the turn, so the canvas selections and files attached to the
+ * original ride along again unless they are dropped here. Editing was the only
+ * place they could not be removed — the composer's pills are gone by the time
+ * the message exists — which left "ask about this diagram" stuck to every retry
+ * of that turn.
+ */
+export interface EditedMessageContext {
+  selectionContexts: SelectionContext[] | undefined;
+  attachments: MessageAttachment[] | undefined;
+}
+
 interface MessageItemProps {
   message: Message;
   onFeedback: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
@@ -681,7 +695,7 @@ interface MessageItemProps {
     | ((messageId: string, feedback: 0 | 1 | 2, comment?: string | null) => void)
     | undefined;
   onRegenerate?: (() => void) | undefined;
-  onEditSubmit?: ((newContent: string) => void) | undefined;
+  onEditSubmit?: ((newContent: string, context?: EditedMessageContext) => void) | undefined;
   onEditMobile?: (() => void) | undefined;
   isLatestBotMessage?: boolean | undefined;
   branchInfo?: { index: number; total: number } | undefined;
@@ -997,14 +1011,21 @@ export const AttachmentPreview = ({
 };
 
 // Selection context preview component
+/**
+ * One card of context on a user message. `onRemove` is only passed while the
+ * message is being edited — a sent message's own record of what it carried is
+ * not editable, so the card is read-only everywhere else.
+ */
 const SelectionContextPreview = ({
   selection,
   onClick,
+  onRemove,
 }: {
   selection: SelectionContext;
   onClick?: () => void;
+  onRemove?: () => void;
 }): ReactElement => {
-  return (
+  const card = (
     <button
       type='button'
       onClick={onClick}
@@ -1023,6 +1044,27 @@ const SelectionContextPreview = ({
         <span className="text-sm text-foreground font-['Inter'] truncate">{selection.preview}</span>
       </div>
     </button>
+  );
+
+  if (!onRemove) return card;
+
+  // A sibling rather than a child: the card is itself a button, and a button
+  // inside a button is neither valid markup nor reliably clickable.
+  return (
+    <div className='relative'>
+      {card}
+      <button
+        type='button'
+        onClick={onRemove}
+        className='absolute right-1 top-1 rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+        title='Remove this context'
+        aria-label='Remove this context'
+        data-track-category='XyneAI'
+        data-track-name='EDIT_REMOVE_SELECTION_CONTEXT'
+      >
+        <X size={12} />
+      </button>
+    </div>
   );
 };
 
@@ -1097,7 +1139,30 @@ export const MessageItem = React.memo(
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState('');
+    // What the edit will re-send. Seeded from the message when editing starts
+    // and narrowed by the × on each card, so cancelling leaves the sent message
+    // exactly as it was.
+    const [editSelectionContexts, setEditSelectionContexts] = useState<SelectionContext[]>([]);
+    const [editAttachments, setEditAttachments] = useState<MessageAttachment[]>([]);
     const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+    const startEditing = useCallback((): void => {
+      setEditText(message.content);
+      setEditSelectionContexts(message.selectionContexts ?? []);
+      setEditAttachments(message.attachments ?? []);
+      setIsEditing(true);
+      setTimeout(() => editTextareaRef.current?.focus(), 0);
+    }, [message.attachments, message.content, message.selectionContexts]);
+
+    const submitEdit = useCallback((): void => {
+      const trimmed = editText.trim();
+      if (!trimmed) return;
+      onEditSubmit?.(trimmed, {
+        selectionContexts: editSelectionContexts.length > 0 ? editSelectionContexts : undefined,
+        attachments: editAttachments.length > 0 ? editAttachments : undefined,
+      });
+      setIsEditing(false);
+    }, [editAttachments, editSelectionContexts, editText, onEditSubmit]);
     const navigate = useNavigate();
 
     // Resolve `@name` against this message's userTags + the live workspace
@@ -1201,9 +1266,7 @@ export const MessageItem = React.memo(
               if (onEditMobile) {
                 onEditMobile();
               } else {
-                setEditText(message.content);
-                setIsEditing(true);
-                setTimeout(() => editTextareaRef.current?.focus(), 0);
+                startEditing();
               }
             }}
             className='self-start mt-2 p-1 rounded opacity-0 group-hover/message:opacity-100 transition-opacity hover:bg-accent flex-shrink-0'
@@ -1241,6 +1304,47 @@ export const MessageItem = React.memo(
             {message.type === 'user' && isEditing ? (
               /* Inline edit mode */
               <div className='flex flex-col gap-2'>
+                {/* The context this turn was sent with, each card droppable.
+                    Shown here and nowhere else: this is the one moment the turn
+                    is about to run again and its context can still change. */}
+                {editSelectionContexts.length > 0 && (
+                  <div className='space-y-2'>
+                    {editSelectionContexts.map((selection, index) => (
+                      <SelectionContextPreview
+                        key={`${selection.canvasId}-${index}`}
+                        selection={selection}
+                        onClick={() => handleSelectionContextClick(selection.canvasId)}
+                        onRemove={() =>
+                          setEditSelectionContexts(previous =>
+                            previous.filter((_, at) => at !== index),
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                {editAttachments.length > 0 && (
+                  <div className='space-y-2'>
+                    {editAttachments.map((attachment, index) => (
+                      <div className='relative' key={`${attachment.filename}-${index}`}>
+                        <AttachmentPreview attachment={attachment} />
+                        <button
+                          type='button'
+                          onClick={() =>
+                            setEditAttachments(previous => previous.filter((_, at) => at !== index))
+                          }
+                          className='absolute right-1 top-1 rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+                          title='Remove this attachment'
+                          aria-label='Remove this attachment'
+                          data-track-category='XyneAI'
+                          data-track-name='EDIT_REMOVE_ATTACHMENT'
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   ref={editTextareaRef}
                   value={editText}
@@ -1248,10 +1352,7 @@ export const MessageItem = React.memo(
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      if (editText.trim()) {
-                        onEditSubmit?.(editText.trim());
-                        setIsEditing(false);
-                      }
+                      submitEdit();
                     }
                     if (e.key === 'Escape') {
                       setIsEditing(false);
@@ -1271,22 +1372,21 @@ export const MessageItem = React.memo(
                   >
                     Cancel
                   </button>
-                  <Button
-                    variant='ghost'
+                  <button
                     onClick={() => {
                       if (editText.trim()) {
                         onEditSubmit?.(editText.trim());
                         setIsEditing(false);
                       }
                     }}
-                    trackId='edit_message_submit'
+                    data-ph-capture-attribute-track-id='edit_message_submit'
                     disabled={!editText.trim()}
                     className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
                     data-track-category='XyneAI'
                     data-track-name='EDIT_SUBMIT'
                   >
                     Send
-                  </Button>
+                  </button>
                 </div>
               </div>
             ) : message.type === 'user' ? (
@@ -2582,10 +2682,9 @@ const MessageActions = ({
 
       {/* Regenerate Button - only on the latest bot message */}
       {onRegenerate && (
-        <Button
-          variant='ghost'
+        <button
           onClick={onRegenerate}
-          trackId='regenerate_message'
+          data-ph-capture-attribute-track-id='regenerate_message'
           className='p-1.5 rounded transition-colors hover:bg-accent'
           title='Regenerate response'
           data-track-category='XyneAI'
@@ -2593,7 +2692,7 @@ const MessageActions = ({
           data-track-metadata={JSON.stringify({ messageId: message.id })}
         >
           <RefreshCw size={16} className='text-current' />
-        </Button>
+        </button>
       )}
 
       {isV2 ? (
@@ -2608,10 +2707,9 @@ const MessageActions = ({
       ) : (
         <>
           {/* Like Button */}
-          <Button
-            variant='ghost'
+          <button
             onClick={() => onFeedback(message.id, 'LIKE')}
-            trackId='like_message'
+            data-ph-capture-attribute-track-id='like_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Like'
             data-track-category='XyneAI'
@@ -2649,13 +2747,12 @@ const MessageActions = ({
                 </clipPath>
               </defs>
             </svg>
-          </Button>
+          </button>
 
           {/* Dislike Button */}
-          <Button
-            variant='ghost'
+          <button
             onClick={() => onFeedback(message.id, 'DISLIKE')}
-            trackId='dislike_message'
+            data-ph-capture-attribute-track-id='dislike_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Dislike'
             data-track-category='XyneAI'
@@ -2698,7 +2795,7 @@ const MessageActions = ({
                 </clipPath>
               </defs>
             </svg>
-          </Button>
+          </button>
         </>
       )}
       {/* Participants avatars - shown for Summarizer messages */}

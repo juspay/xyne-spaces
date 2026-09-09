@@ -11,6 +11,7 @@ import { Outlet, useLocation, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
 import { ActivityItem } from '../ActivityItem';
+import { isCanvasActivity } from '../isCanvasActivity';
 import { NofocusRefProvider } from '../ActivityItemCard';
 import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -19,9 +20,10 @@ import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, UserUser02 } from '@xyne/icons';
-import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
+import { groupActivities, insertDateSeparators, type ActivityFeedItem } from '../activityGrouping';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
+import { DatePill } from '../../Chat/DatePill';
 import { useShortcut } from '../../../shortcuts';
 import { extractUserMentions } from '../../../utils/mentionParser';
 import {
@@ -60,7 +62,6 @@ import {
   NotificationBellOn,
 } from '@xyne/icons';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { Button } from '../../ui/Button/Button';
 
 type ActivityTab =
   | 'all'
@@ -181,7 +182,7 @@ const TABS: TabConfig[] = [
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
       activity.actorAction === 'canvas_access_revoked' ||
-      (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
+      (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity)),
   },
   {
     value: 'calls',
@@ -557,7 +558,7 @@ const ActivityListView = (): ReactElement => {
   }, [activities, activeTab, visibleTabs]);
 
   const groupedActivities = useMemo(() => {
-    return groupActivities(filteredActivities);
+    return insertDateSeparators(groupActivities(filteredActivities));
   }, [filteredActivities]);
 
   const selectedActivityIdRef = useRef<string | null>(
@@ -602,11 +603,10 @@ const ActivityListView = (): ReactElement => {
     if (!container) return;
     const handler = (e: Event) => {
       const target = e.target as HTMLElement;
-      // Skip selection stamping if the click is on "Mark as read" or "Mark as unread"
-      // buttons — those should not highlight the row as "open".
       if (
         target.closest('[data-track-name="MARK_AS_READ"]') ||
-        target.closest('[data-track-name="MARK_AS_UNREAD"]')
+        target.closest('[data-track-name="MARK_AS_UNREAD"]') ||
+        target.closest('[data-track-name="VIEW_CHANNEL"]')
       ) {
         return;
       }
@@ -778,7 +778,7 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'canvas_shared' ||
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
-        (activity.actorAction === 'mentioned_user' && activity.canvasId)
+        (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity))
       ) {
         counts.canvas++;
       }
@@ -841,19 +841,33 @@ const ActivityListView = (): ReactElement => {
                   setFetchCursor(null);
                 }
               }}
-              computeItemKey={(_, item) =>
-                item.type === 'single' ? item.activity.id : `group:${item.activities[0]!.id}`
-              }
+              computeItemKey={(_, item) => {
+                if (item.type === 'date') return `date:${item.key}`;
+                return item.type === 'single'
+                  ? item.activity.id
+                  : `group:${item.activities[0]!.id}`;
+              }}
               increaseViewportBy={1000}
               minOverscanItemCount={{ top: 5, bottom: 10 }}
               components={{ Footer: () => <div className='h-16' aria-hidden='true' /> }}
               itemsRendered={restoreSelectedRow}
               itemContent={(_, item) => {
+                if (item.type === 'date') {
+                  return (
+                    <div className='px-3 pb-0.5 pt-1.5'>
+                      <DatePill
+                        dateText={item.dateText}
+                        staticRule
+                        className='border-transparent bg-muted text-[11px] font-medium text-muted-foreground'
+                      />
+                    </div>
+                  );
+                }
                 // px wraps each row (not the scroller) and pb creates the 8px
                 // row gap — padding is used instead of margin so Virtuoso's
                 // item measurement includes it.
                 return (
-                  <div className='px-3 pb-3'>
+                  <div className='px-3 pb-1.5'>
                     {item.type === 'single' ? (
                       <ActivityItem activity={item.activity} isExpanded={isExpanded} />
                     ) : (
@@ -1002,10 +1016,9 @@ const ActivityListView = (): ReactElement => {
               {showMobileMenu && (
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                   {/* Mark as Read */}
-                  <Button
-                    variant='ghost'
-                    trackId='mark_tab_as_read'
-                    trackProps={{ tab: activeTab }}
+                  <button
+                    data-ph-capture-attribute-track-id='mark_tab_as_read'
+                    data-ph-capture-attribute-tab={activeTab}
                     onClick={() => {
                       markActiveTabUnread();
                       setShowMobileMenu(false);
@@ -1021,7 +1034,7 @@ const ActivityListView = (): ReactElement => {
                   >
                     <MarkAsRead size={16} />
                     <span>Mark as read</span>
-                  </Button>
+                  </button>
 
                   {/* Divider */}
                   <div className='border-t border-border my-1'></div>

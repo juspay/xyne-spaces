@@ -30,8 +30,10 @@ import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
 import {
   getS2SClawRunStatus,
-  listS2SClawAgents,
-  runS2SClawAgent,
+  listScopedClawAgents,
+  runScopedClawAgent,
+  ClawAgentNotAvailableError,
+  type ScopedClawIdentity,
 } from '@/services/clawAgentService';
 import { uploadMultiple } from '@/middleware/upload';
 import { config } from '@/config/env';
@@ -48,6 +50,26 @@ const draftAttachmentController = new DraftAttachmentController();
  * Build SDK auth data from req.user (set by authMiddleware).
  * Fetches orgId from the database since it's not available on req.user.
  */
+/**
+ * Who a Claw call acts as.
+ *
+ * `orgId` is passed explicitly rather than left for claw-auth to derive: it
+ * derives one from a session cookie, and a bearer-authenticated SDK caller has
+ * no cookie to derive it from. Without it the roster is not narrowed to one
+ * org and the same agent comes back once per org the user belongs to.
+ *
+ * The cookie is still forwarded when there is one, so a browser caller keeps
+ * whatever claw-auth infers from it.
+ */
+function clawIdentity(req: Request, authData: AuthData): ScopedClawIdentity {
+  return {
+    userId: authData.sub,
+    ...(authData.orgId ? { orgId: authData.orgId } : {}),
+    ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
+    ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}),
+  };
+}
+
 async function buildAuthData(req: Request): Promise<AuthData> {
   const user = req.user;
   if (!user) {
@@ -238,7 +260,8 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/claw/agents',
-    service: async () => listS2SClawAgents(),
+    // COOKIE-BASED AUTH (ACTIVE) - scoped to the acting user, see clawIdentity
+    service: async (req, authData) => listScopedClawAgents(clawIdentity(req, authData)),
   },
   {
     method: 'post',
@@ -247,7 +270,8 @@ const ROUTES: readonly DirectRoute[] = [
     // COOKIE-BASED AUTH (ACTIVE) - uses authData built from req.user
     service: async (req, authData) => {
       const input = clawRunBody.parse(req.body);
-      const result = await runS2SClawAgent({
+      const result = await runScopedClawAgent({
+        identity: clawIdentity(req, authData),
         agentSlug: input.agent,
         task: input.task,
         userId: authData.sub,
@@ -298,9 +322,14 @@ export function createDirectRouter(): Router {
           try {
             res.status(200).json(await route.service(req, authData));
           } catch (err) {
-            throw err instanceof SdkApiError
-              ? err
-              : new SdkApiError('internal', serviceMessage(err), { cause: err });
+            if (err instanceof SdkApiError) throw err;
+            // An unreachable agent is the caller's mistake, not the server's:
+            // 404 with the slug named, rather than a 500 whose message the
+            // error envelope replaces with a generic string.
+            if (err instanceof ClawAgentNotAvailableError) {
+              throw new SdkApiError('not_found', err.message, { cause: err });
+            }
+            throw new SdkApiError('internal', serviceMessage(err), { cause: err });
           }
           return;
         }

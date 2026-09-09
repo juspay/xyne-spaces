@@ -70,7 +70,6 @@ import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
-import { withTicketChannelScope } from './ticketChannelScope';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
@@ -198,9 +197,21 @@ import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
-import { readViewDraft, writeViewDraft, clearViewDraft } from './viewDraft';
+import {
+  readViewDraft,
+  writeViewDraft,
+  clearViewDraft,
+  readViewColumns,
+  writeViewColumns,
+} from './viewDraft';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../utils/apiError';
+import {
+  hasExactSearchQuotes,
+  matchesTicketSearch,
+  unwrapExactSearchQuery,
+  wrapExactSearchQuery,
+} from '../../utils/exactSearch';
 
 type SavedConfigValue = {
   id: string;
@@ -516,8 +527,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       viewModeProp === 'workspace-view' && !hasSharedSeed ? readViewDraft(viewDraftKey) : null,
     [viewModeProp, viewDraftKey, hasSharedSeed],
   );
+  const persistedColumnsKey =
+    viewModeProp === 'my-tickets' ||
+    viewModeProp === 'user-tickets' ||
+    viewModeProp === 'group-tickets'
+      ? viewModeProp
+      : null;
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
-    () => new Set(initialDraft?.columns ?? initialColumns ?? DEFAULT_VISIBLE_COLUMNS),
+    () =>
+      new Set(
+        initialDraft?.columns ??
+          (persistedColumnsKey ? readViewColumns(persistedColumnsKey) : null) ??
+          initialColumns ??
+          DEFAULT_VISIBLE_COLUMNS,
+      ),
   );
   // The tickets table always surfaces the Stage column (parity with the Support
   // desk table, which renders TicketTable with its stage-inclusive defaults).
@@ -748,7 +771,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [expandedGroupsStorageKey, groupByKey, groupBy]);
 
-  const searchTerm = searchParams.get('search') ?? '';
+  // Exact mode *is* the query being quoted — the quotes are ordinary characters in the
+  // search text, the same ones the user can type by hand and the same ones the backend
+  // reads exactness off. So there is no separate flag and nothing to keep in sync: delete
+  // a quote and the mode goes with it.
+  const searchInputValue = searchParams.get('search') ?? '';
+  // `hasExactSearchQuotes`, not `isExactSearchQuery`: the pill reports whether the quotes are
+  // there, and a bare `""` is exact mode with the phrase still to be typed.
+  const isExactSearch = hasExactSearchQuotes(searchInputValue);
+  // A bare `""` carries no query, so it counts as an empty box — no request goes out and the
+  // local filter stops narrowing, rather than searching for nothing.
+  const searchTerm = unwrapExactSearchQuery(searchInputValue).trim() ? searchInputValue.trim() : '';
   const [isBoardDropdownOpen, setIsBoardDropdownOpen] = useState(false);
   const [isSourceChannelsOpen, setIsSourceChannelsOpen] = useState(false);
   const [isFiltersDropdownOpen, setIsFiltersDropdownOpen] = useState(false);
@@ -812,6 +845,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       },
       { replace: true },
     );
+  };
+
+  // The pill edits the query rather than a flag beside it. An empty box still gets a pair,
+  // so exact mode can be armed before typing — `wrapExactSearchQuery` returns '' for empty
+  // input, which would have made the click a no-op.
+  const setIsExactSearch = (value: boolean): void => {
+    if (!value) {
+      setSearchTerm(unwrapExactSearchQuery(searchInputValue));
+      return;
+    }
+    setSearchTerm(wrapExactSearchQuery(searchInputValue) || '""');
   };
 
   // Initialize machine on mount or when dependencies change
@@ -1085,6 +1129,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         .sort(),
     [visibleColumns],
   );
+
+  useEffect(() => {
+    if (!persistedColumnsKey) return;
+    writeViewColumns(persistedColumnsKey, savableColumns);
+  }, [persistedColumnsKey, savableColumns]);
 
   const savedViewSignature = useMemo(
     () =>
@@ -1681,17 +1730,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // CENTRALIZED TICKET QUERY - fetch only tickets relevant to the current context.
   // Dynamic field filtering is done CLIENT-SIDE via applyTicketFilters.
   // When fevFieldIds is non-empty, formEntityValues are fetched as a related query.
+  // NOTE: We intentionally do NOT pass channelId to the query.
+  // The channel ticket tab should show tickets from ALL accessible channels
+  // (public + private where user is member), not just tickets from this channel.
+  // The boardId/projectId already scopes the results appropriately.
+  // Passing channelId would cause the ACL to use scalarChannelBody which
+  // restricts tickets to only that specific channel.
   const ticketsQueryParams = useMemo(() => {
     const params: FlowStepVisibilityOptions & {
       viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
-      channelId?: string;
       projectId?: string;
       boardId?: string;
       boardIds?: string[];
       userId?: string;
       groupId?: string;
       formEntityValueFieldIds?: string[];
-    } = withTicketChannelScope({ viewMode: queryViewMode }, channelId);
+    } = { viewMode: queryViewMode };
 
     // Always pass boardId if it exists (from URL param)
     // Board ID implicitly scopes to project, so no need for projectId in this case
@@ -1750,7 +1804,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
-    channelId,
   ]);
 
   const [allProjectTickets, ticketsDetails] = useCachedQuery(
@@ -2071,9 +2124,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       user?.id,
     );
 
-    // Apply search filter
+    // Apply search filter. A quoted query ("payment failed") is an exact-phrase search:
+    // the string must appear verbatim, same words, same order. Unquoted stays loose —
+    // every word must appear, in any order. Mirrors what Vespa does on the kanban path.
     if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase().trim();
       tickets = tickets.filter(ticket => {
         const searchableText = [
           ticket.title || '',
@@ -2082,11 +2136,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ticket.merchantId || '',
           ticket.statusV2 || '',
           ticket.priority || '',
-        ]
-          .join(' ')
-          .toLowerCase();
+        ].join(' ');
 
-        return searchableText.includes(searchLower);
+        return matchesTicketSearch(searchableText, searchTerm);
       });
     }
 
@@ -3293,6 +3345,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
 
+      // The hub channel is absent from the visible-channel list, so use the board's own.
+      if (channel?.type === ChannelType.SDLC) {
+        const sdlcUrl = `/sdlc/${channel.id}/tickets/${ticket.id}`;
+        if (!isMobile && isCmdClick) {
+          window.open(`${ws ? `/${ws}` : ''}${sdlcUrl}`, '_blank');
+          return;
+        }
+        void navigate(sdlcUrl);
+        return;
+      }
+
       // Desk tickets open in the Support screen, not the chat ticket panel.
       const ticketChannel = allChannels.find(c => c.id === ticket.channelId);
       if (isDeskChannelType(ticketChannel?.type) && ticket.xyneId) {
@@ -3355,7 +3418,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         );
       }
     },
-    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels],
+    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels, channelsById],
   );
 
   const openCreateForColumn = useCallback(
@@ -3709,8 +3772,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : []
               }
               selectedBoardName={selectedBoardDetail?.name ?? undefined}
-              searchValue={searchTerm}
+              searchValue={searchInputValue}
               onSearchChange={setSearchTerm}
+              isExactSearch={isExactSearch}
+              onExactSearchChange={setIsExactSearch}
               {...(channelId ? { channelId } : {})}
               groupBy={typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy}
               hasActiveView={!!selectedViewId}
@@ -5257,6 +5322,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
                           keyPrefix={`${group.key}::`}
+                          layoutScope={`${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`}
                           searchActive={hasSearchTerm}
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={localTickets ?? []}

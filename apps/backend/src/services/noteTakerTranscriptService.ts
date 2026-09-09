@@ -15,8 +15,14 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { callLabelService } from '@/services/callLabelService';
-import { TagMethod, EntityUserAccess, NotificationType, ActivityClassification } from '@xyne/shared';
+import {
+  TagMethod,
+  EntityUserAccess,
+  NotificationType,
+  ActivityClassification,
+} from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
+import { isRecording } from '@/utils/callTypeUtils';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import {
@@ -280,20 +286,23 @@ class NoteTakerTranscriptService {
    * independently and its errors are logged and swallowed.
    */
   private async notifySummaryReady(call: Call): Promise<void> {
+    const actionUrl = isRecording(call)
+      ? `/recordings/${call.externalId}`
+      : `/calls/${call.id}/detail`;
     try {
       if (!call.workspaceId) return;
       // The AI title may have landed after our `call` snapshot was taken —
       // re-read so the notification names the recording the way the UI does.
       const currentTitle =
         (await repositories.calls.findByExternalId(call.externalId))?.title ?? call.title;
-      const recordingName = currentTitle || 'your recording';
+      const recordingName = currentTitle || (isRecording(call) ? 'your recording' : 'your call');
       await notificationService.createNotification(call.createdByUserId, {
         type: NotificationType.RECORDING_SUMMARY_READY,
         title: 'Summary ready',
         message: `The summary for "${recordingName}" is ready to view`,
         relatedEntityType: 'call',
         relatedEntityId: call.externalId,
-        actionUrl: `/recordings/${call.externalId}`,
+        actionUrl,
         workspaceId: call.workspaceId,
         metadata: { callExternalId: call.externalId },
       });
@@ -561,8 +570,9 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Merge just the detailed-summary status onto Call.metadata. Used by the
-   * queue worker to publish 'pending'/'failed' transitions without touching
+   * Merge just the detailed-summary status onto Call.metadata. Used by
+   * regenerateSummary and by the CallValidationWorker stale-'pending' sweep to
+   * publish 'pending'/'failed' transitions without touching
    * detailedSummaryCanvasId or detailedSummaryReady — those are owned by the
    * success paths in processFinalTranscript and regenerateSummary and must
    * remain the source of truth for readers on older recordings.
@@ -602,11 +612,6 @@ class NoteTakerTranscriptService {
 
     await repositories.calls.update(call.id, { transcript: storagePath });
     logger.info(`[${callId}] call_record_updated`, { fields_updated: 'transcript', path: 'note_taker' });
-
-    // Fire-and-forget: translate transcript asynchronously in the background.
-    transcriptService.translateTranscriptAsync(callId, storagePath).catch((err) => {
-      logger.error(`[${callId}] background_translation_failed`, { error: err, path: 'note_taker' });
-    });
   }
 
   /**

@@ -37,14 +37,23 @@ export interface ValidationResult {
 
 /** Hard caps on model output: transaction budget and feed layout both bound. */
 const MAX_OPERATIONS = 50;
-const MAX_TITLE_CHARS = 200;
-const MAX_CONTEXT_CHARS = 500;
+const MAX_TITLE_CHARS = 300;
+const MAX_CONTEXT_CHARS = 800;
 
 export function validateTransitions(
   operations: ParserOperation[],
   ctx: ValidationContext,
 ): ValidationResult {
   const openById = new Map(ctx.openItems.map(i => [i.id, i]));
+  // A create may declare a handle so a resolve in the same response can cite the
+  // item it is creating. Real ids are minted by the database, so without this
+  // the model has no legal way to say "the thing I just created" — and what it
+  // did instead was redirect the resolve onto the nearest plausible open item.
+  // Only handles actually declared here are accepted, so an invented id is
+  // still rejected exactly as before.
+  const batchTempIds = new Set(
+    operations.filter(op => op.op === 'create' && op.tempId).map(op => op.tempId as string),
+  );
   const valid: ParserOperation[] = [];
   const dropped: DroppedOperation[] = [];
   const resolvedThisPass = new Set<string>();
@@ -97,7 +106,8 @@ export function validateTransitions(
       }
 
       case 'resolve': {
-        if (!op.itemId || !openById.has(op.itemId)) {
+        const isTempRef = !!op.itemId && batchTempIds.has(op.itemId);
+        if (!op.itemId || (!openById.has(op.itemId) && !isTempRef)) {
           dropped.push({ op, reason: 'resolve of unknown or non-open item' });
           continue;
         }
@@ -111,6 +121,12 @@ export function validateTransitions(
       }
 
       case 'reassign': {
+        if (op.itemId && batchTempIds.has(op.itemId)) {
+          // A create already states who holds the ball; reassigning it in the
+          // same breath is a contradiction, not a transition.
+          dropped.push({ op, reason: 'reassign of an item created in the same pass' });
+          continue;
+        }
         const item = op.itemId ? openById.get(op.itemId) : undefined;
         if (!item) {
           dropped.push({ op, reason: 'reassign of unknown or non-open item' });

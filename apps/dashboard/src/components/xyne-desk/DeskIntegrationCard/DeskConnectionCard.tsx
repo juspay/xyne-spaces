@@ -1,7 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { Plug, Unplug } from 'lucide-react';
 import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
-import Button from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
 
 interface DeskConnectionCardProps {
@@ -78,11 +77,10 @@ export const DeskConnectionCard = ({
           </button>
         ) : (
           onReconnect && (
-            <Button
+            <button
               type='button'
-              variant='ghost'
-              trackId='desk_reconnect_integration'
-              trackAction={handleReconnect}
+              data-ph-capture-attribute-track-id='desk_reconnect_integration'
+              onClick={() => void handleReconnect()}
               disabled={isReconnecting}
               className={cn(
                 'inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium',
@@ -94,7 +92,7 @@ export const DeskConnectionCard = ({
             >
               <Plug size={14} className='shrink-0' />
               {isReconnecting ? 'Reconnecting…' : 'Reconnect'}
-            </Button>
+            </button>
           )
         )}
       </div>

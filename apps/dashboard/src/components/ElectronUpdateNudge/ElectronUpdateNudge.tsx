@@ -4,12 +4,11 @@ import { useSelector } from '@xstate/react';
 import { RefreshCw, X } from 'lucide-react';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
-import { Button } from '../ui/Button/Button';
 
 // Kill switch for the Electron auto-update nudge. While false the component is
 // fully inert: no event listener is registered and nothing is rendered.
 // Flip to true to re-enable the feature (dashboard-only change, no Electron release needed).
-const ELECTRON_UPDATE_NUDGE_ENABLED = false;
+export const ELECTRON_UPDATE_NUDGE_ENABLED = false;
 
 const NUDGE_STORAGE_KEY = 'xyne:electron-update-nudge';
 const UPDATE_ATTEMPT_STORAGE_KEY = 'xyne:electron-update-attempt';
@@ -202,30 +201,76 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
   const activationBlocked = callBlocking || isTyping || !updateNudgeSlot;
 
   useEffect(() => {
-    const findVisibleSlot = (): HTMLElement | null => {
-      const slots = Array.from(document.querySelectorAll<HTMLElement>(UPDATE_NUDGE_SLOT_SELECTOR));
+    // Fully inert while the feature is off: no observer, no listeners, no layout reads.
+    if (!ELECTRON_UPDATE_NUDGE_ENABLED) return undefined;
+
+    const isSlotVisible = (slot: HTMLElement): boolean => {
+      // checkVisibility replaces getComputedStyle + getClientRects (two forced
+      // reflows) with one read. Pass BOTH option spellings: checkVisibilityCSS is
+      // the pre-Chromium-121 name and visibilityProperty the current one; an
+      // unknown key is silently ignored, so on older engines the wrong-named
+      // option would let visibility:hidden slip through. (A rendered zero-size box
+      // still counts as visible here, which matches the slot's usage.)
+      if (typeof slot.checkVisibility === 'function') {
+        return slot.checkVisibility({ visibilityProperty: true, checkVisibilityCSS: true });
+      }
+      const style = window.getComputedStyle(slot);
       return (
-        slots.find(slot => {
-          const style = window.getComputedStyle(slot);
-          return (
-            style.display !== 'none' &&
-            style.visibility !== 'hidden' &&
-            slot.getClientRects().length > 0
-          );
-        }) ?? null
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        slot.getClientRects().length > 0
       );
     };
 
-    const syncSlot = (): void => setUpdateNudgeSlot(findVisibleSlot());
+    const findVisibleSlot = (): HTMLElement | null => {
+      const slots = Array.from(document.querySelectorAll<HTMLElement>(UPDATE_NUDGE_SLOT_SELECTOR));
+      return slots.find(isSlotVisible) ?? null;
+    };
+
+    const syncSlot = (): void => {
+      const next = findVisibleSlot();
+      // Skip redundant re-renders when the resolved slot has not changed.
+      setUpdateNudgeSlot(current => (current === next ? current : next));
+    };
+
+    // Coalesce DOM-churn bursts (hover, tooltips, virtualizer rows) into at most
+    // one visibility read per frame instead of a synchronous reflow per mutation.
+    // Caveat: while the document is not visible the renderer may stop issuing
+    // frames, so a queued rAF could never run and leave updateNudgeSlot pointing
+    // at a detached node. That state gates the auto-update countdown, so sync
+    // synchronously whenever we are not visible.
+    let frame: number | null = null;
+    const cancelFrame = (): void => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+    };
+    const scheduleSync = (): void => {
+      if (document.visibilityState !== 'visible') {
+        cancelFrame();
+        syncSlot();
+        return;
+      }
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        syncSlot();
+      });
+    };
+
     syncSlot();
 
-    const observer = new MutationObserver(syncSlot);
+    const observer = new MutationObserver(scheduleSync);
     observer.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener('resize', syncSlot);
+    window.addEventListener('resize', scheduleSync);
+    document.addEventListener('visibilitychange', scheduleSync);
 
     return (): void => {
       observer.disconnect();
-      window.removeEventListener('resize', syncSlot);
+      window.removeEventListener('resize', scheduleSync);
+      document.removeEventListener('visibilitychange', scheduleSync);
+      cancelFrame();
     };
   }, []);
 
@@ -338,6 +383,9 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
       if (
         !nudge ||
         activationBlocked ||
+        // Re-check slot liveness at fire time: the countdown may have started while
+        // the slot was live, but the node can be detached by the time we apply.
+        !updateNudgeSlot?.isConnected ||
         isTypingNow() ||
         isCallBlockingNow() ||
         applyingRef.current
@@ -354,7 +402,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
       writeStorage(UPDATE_ATTEMPT_STORAGE_KEY, attempt);
       window.electronAPI?.applyAppUpdate();
     },
-    [activationBlocked, isTypingNow, nudge],
+    [activationBlocked, isTypingNow, nudge, updateNudgeSlot],
   );
 
   useEffect(() => {
@@ -404,18 +452,17 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         <p className='shrink-0 text-xs font-semibold text-foreground'>{title}</p>
         <p className='truncate text-xs text-muted-foreground'>{message}</p>
       </div>
-      <Button
+      <button
         type='button'
-        variant='ghost'
         onClick={() => applyUpdate('manual')}
         disabled={activationBlocked}
         className='h-auto shrink-0 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
-        trackId='electron_apply_update'
+        data-ph-capture-attribute-track-id='electron_apply_update'
         data-track-category='ElectronUpdate'
         data-track-name='UpdateNow'
       >
         Update now
-      </Button>
+      </button>
       {!nudge.autoApprovalRequired && (
         <button
           type='button'

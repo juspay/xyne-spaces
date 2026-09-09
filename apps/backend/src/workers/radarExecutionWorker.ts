@@ -5,12 +5,13 @@ import { radarExecutionQueue, type RadarExecutionJobData } from '@/queues/radarE
 import { radarExecutionService } from '@/services/radar/radarExecutionService';
 import { DatabaseClient } from '@/database/client';
 import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
+import { radarScopeFor } from '@/services/radar/radarScope';
 
 const prisma = DatabaseClient.getInstance();
 
-// Concurrency is across THREADS only: jobId = conversationId means Bull never
-// holds two live jobs for the same conversation, so each thread is processed
-// serially by construction while different threads drain in parallel.
+// Concurrency is across SCOPES only: jobId = the scope key means Bull never
+// holds two live jobs for one scope, so each thread — and each DM channel — is
+// processed serially by construction while different scopes drain in parallel.
 const CONCURRENCY = config.radar.workerConcurrency;
 
 const RUN_LOG_RETENTION_DAYS = config.radar.runLogRetentionDays;
@@ -39,8 +40,15 @@ class RadarExecutionWorker {
     });
 
     queue.on('failed', (job, err) => {
+      // Bull emits 'failed' per attempt, not once at the end. Saying
+      // "permanently" on a job Bull is about to retry reads as data loss that
+      // has not happened.
+      const attempts = job.opts.attempts ?? 1;
+      const final = job.attemptsMade >= attempts;
       logger.error(
-        `[RADAR-EXECUTION-WORKER] Job ${job.id} permanently failed — conversation ${job.data.conversationId}:`,
+        `[RADAR-EXECUTION-WORKER] Job ${job.id} ${
+          final ? 'permanently failed' : `failed (attempt ${job.attemptsMade}/${attempts}, retrying)`
+        } — conversation ${job.data.conversationId}:`,
         err,
       );
     });
@@ -112,7 +120,7 @@ class RadarExecutionWorker {
   }
 
   private async processJob(job: Bull.Job<RadarExecutionJobData>): Promise<void> {
-    const { conversationId } = job.data;
+    const { conversationId, channelId, scopeType } = job.data;
 
     // Background job → no HTTP tenant scope. Resolve the thread's workspace
     // and open a tenant context so writes get workspaceId stamped.
@@ -129,8 +137,28 @@ class RadarExecutionWorker {
       return;
     }
 
+    // Jobs already queued when this ships carry only a conversationId. Without
+    // the channel, an item create would fail on a required column and the drain
+    // would burn its retries and skip the window — losing real asks for the
+    // length of the cutover. Resolve it instead.
+    const resolved =
+      channelId && scopeType !== undefined
+        ? { channelId, scopeType }
+        : await prisma.conversation
+            .findUnique({
+              where: { conversationId },
+              select: { channelId: true, channel: { select: { scopeType: true } } },
+            })
+            .then(c => ({ channelId: c?.channelId ?? '', scopeType: c?.channel?.scopeType ?? null }));
+    if (!resolved.channelId) {
+      logger.warn('[RADAR-EXECUTION-WORKER] Conversation has no channel, skipping', {
+        conversationId,
+      });
+      return;
+    }
+    const scope = radarScopeFor(resolved.scopeType, resolved.channelId, conversationId);
     return runAsServiceActor('radar-execution-worker', conversation.workspaceId, () =>
-      radarExecutionService.processThread(conversationId),
+      radarExecutionService.processThread(scope),
     );
   }
 

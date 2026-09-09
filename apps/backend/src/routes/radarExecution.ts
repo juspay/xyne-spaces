@@ -2,7 +2,6 @@ import { Router, type Request, type Response } from 'express';
 import { logger } from '@/utils/logger';
 import { RadarActionError, radarManualActions } from '@/services/radar/radarManualActions';
 import { radarFeedService } from '@/services/radar/radarFeedService';
-import { radarTeamService } from '@/services/radar/radarTeamService';
 
 const router = Router();
 
@@ -18,9 +17,8 @@ function sendUnauthorized(res: Response): void {
 }
 
 function handleActionError(res: Response, err: RadarActionError): void {
-  res
-    .status(err.code === 'not-found' ? 404 : 400)
-    .json({ success: false, error: err.message });
+  const status = err.code === 'not-found' ? 404 : err.code === 'forbidden' ? 403 : 400;
+  res.status(status).json({ success: false, error: err.message });
 }
 
 router.post('/items/:itemId/resolve', async (req: Request<{ itemId: string }>, res: Response) => {
@@ -42,16 +40,61 @@ router.post('/items/:itemId/resolve', async (req: Request<{ itemId: string }>, r
   }
 });
 
+router.post('/items/:itemId/dismiss', async (req: Request<{ itemId: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const result = await radarManualActions.dismissItem(auth, req.params.itemId);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof RadarActionError) {
+      handleActionError(res, err);
+      return;
+    }
+    logger.error('[radar-execution] dismiss failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to dismiss execution item' });
+  }
+});
+
+// The param is a SCOPE key, not always a conversation id: a DM card covers its
+// whole channel, so "all" has to mean everything that card shows.
 router.post(
-  '/threads/:conversationId/resolve-all',
-  async (req: Request<{ conversationId: string }>, res: Response) => {
+  '/threads/:scopeKey/dismiss-all',
+  async (req: Request<{ scopeKey: string }>, res: Response) => {
     try {
       const auth = getAuthContext(req);
       if (!auth) {
         sendUnauthorized(res);
         return;
       }
-      const result = await radarManualActions.resolveAllInThread(auth, req.params.conversationId);
+      const result = await radarManualActions.dismissAllInScope(auth, req.params.scopeKey);
+      res.json({ success: true, data: result });
+    } catch (err) {
+      if (err instanceof RadarActionError) {
+        handleActionError(res, err);
+        return;
+      }
+      logger.error('[radar-execution] dismiss-all failed:', err);
+      res.status(500).json({ success: false, error: 'Failed to dismiss thread items' });
+    }
+  },
+);
+
+// The param is a SCOPE key, not always a conversation id: a DM card covers its
+// whole channel, so "all" has to mean everything that card shows.
+router.post(
+  '/threads/:scopeKey/resolve-all',
+  async (req: Request<{ scopeKey: string }>, res: Response) => {
+    try {
+      const auth = getAuthContext(req);
+      if (!auth) {
+        sendUnauthorized(res);
+        return;
+      }
+      const result = await radarManualActions.resolveAllInScope(auth, req.params.scopeKey);
       res.json({ success: true, data: result });
     } catch (err) {
       if (err instanceof RadarActionError) {
@@ -76,106 +119,6 @@ router.get('/feed/pending-me', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('[radar-execution] pending-me feed failed:', err);
     res.status(500).json({ success: false, error: 'Failed to load feed' });
-  }
-});
-
-router.get('/teams', async (req: Request, res: Response) => {
-  try {
-    const auth = getAuthContext(req);
-    if (!auth) {
-      sendUnauthorized(res);
-      return;
-    }
-    res.json({ success: true, data: { teams: await radarTeamService.listTeams(auth) } });
-  } catch (err) {
-    logger.error('[radar-execution] list teams failed:', err);
-    res.status(500).json({ success: false, error: 'Failed to list teams' });
-  }
-});
-
-router.post('/teams', async (req: Request, res: Response) => {
-  try {
-    const auth = getAuthContext(req);
-    if (!auth) {
-      sendUnauthorized(res);
-      return;
-    }
-    const { name, memberIds } = req.body as { name?: unknown; memberIds?: unknown };
-    if (typeof name !== 'string' || !Array.isArray(memberIds) || memberIds.some(id => typeof id !== 'string')) {
-      res.status(400).json({ success: false, error: 'name and memberIds[] are required' });
-      return;
-    }
-    const team = await radarTeamService.createTeam(auth, name, memberIds);
-    res.json({ success: true, data: team });
-  } catch (err) {
-    if (err instanceof RadarActionError) {
-      handleActionError(res, err);
-      return;
-    }
-    logger.error('[radar-execution] create team failed:', err);
-    res.status(500).json({ success: false, error: 'Failed to create team' });
-  }
-});
-
-router.patch('/teams/:teamId', async (req: Request<{ teamId: string }>, res: Response) => {
-  try {
-    const auth = getAuthContext(req);
-    if (!auth) {
-      sendUnauthorized(res);
-      return;
-    }
-    const { name, memberIds } = req.body as { name?: unknown; memberIds?: unknown };
-    if (typeof name !== 'string' || !Array.isArray(memberIds) || memberIds.some(id => typeof id !== 'string')) {
-      res.status(400).json({ success: false, error: 'name and memberIds[] are required' });
-      return;
-    }
-    const team = await radarTeamService.updateTeam(auth, req.params.teamId, name, memberIds);
-    res.json({ success: true, data: team });
-  } catch (err) {
-    if (err instanceof RadarActionError) {
-      handleActionError(res, err);
-      return;
-    }
-    logger.error('[radar-execution] update team failed:', err);
-    res.status(500).json({ success: false, error: 'Failed to update team' });
-  }
-});
-
-router.delete('/teams/:teamId', async (req: Request<{ teamId: string }>, res: Response) => {
-  try {
-    const auth = getAuthContext(req);
-    if (!auth) {
-      sendUnauthorized(res);
-      return;
-    }
-    await radarTeamService.deleteTeam(auth, req.params.teamId);
-    res.json({ success: true });
-  } catch (err) {
-    if (err instanceof RadarActionError) {
-      handleActionError(res, err);
-      return;
-    }
-    logger.error('[radar-execution] delete team failed:', err);
-    res.status(500).json({ success: false, error: 'Failed to delete team' });
-  }
-});
-
-router.get('/feed/team/:teamId', async (req: Request<{ teamId: string }>, res: Response) => {
-  try {
-    const auth = getAuthContext(req);
-    if (!auth) {
-      sendUnauthorized(res);
-      return;
-    }
-    const items = await radarTeamService.teamFeed(auth, req.params.teamId);
-    res.json({ success: true, data: { items } });
-  } catch (err) {
-    if (err instanceof RadarActionError) {
-      handleActionError(res, err);
-      return;
-    }
-    logger.error('[radar-execution] team feed failed:', err);
-    res.status(500).json({ success: false, error: 'Failed to load team feed' });
   }
 });
 

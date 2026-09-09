@@ -132,6 +132,7 @@ export interface RecordingSharingResult {
   shares?: Array<{ id: string; target: RecordingShareTarget; access: string }>;
   visibility?: CallVisibility;
 }
+export type DetailedSummaryStatus = 'pending' | 'ready' | 'failed' | null;
 
 /**
  * The regenerate endpoint returns 202 immediately; generation runs in the
@@ -206,7 +207,7 @@ export interface RecordingDetail extends Recording {
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
-  detailedSummaryStatus: 'pending' | 'ready' | 'failed' | null;
+  detailedSummaryStatus: DetailedSummaryStatus;
   summaryModelUsed: 'fast' | 'thinking' | null;
   citationSegments: CitationSegment[];
   visibility?: CallVisibility;
@@ -272,6 +273,9 @@ interface RecordingDetailResponse {
   success: boolean;
   recording: RecordingDetail;
 }
+
+export const callScopedPath = (callId: string, isRecording: boolean): string =>
+  isRecording ? `recordings/${callId}` : callId;
 
 class RecordingService {
   /**
@@ -377,17 +381,24 @@ class RecordingService {
   }
 
   /** `title` names the new doc; omitted, the backend falls back to the recording title. */
-  async exportGoogleDoc(callId: string, title?: string): Promise<ExportRecordingGoogleDocResult> {
+  async exportGoogleDoc(
+    callId: string,
+    title?: string,
+    isRecording = true,
+  ): Promise<ExportRecordingGoogleDocResult> {
     const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
-      `/calls/recordings/${callId}/export-google-doc`,
+      `/calls/${callScopedPath(callId, isRecording)}/export-google-doc`,
       title ? { title } : {},
     );
     return response.data;
   }
 
-  async getGoogleDocComposeContext(callId: string): Promise<RecordingGoogleDocComposeContext> {
+  async getGoogleDocComposeContext(
+    callId: string,
+    isRecording = true,
+  ): Promise<RecordingGoogleDocComposeContext> {
     const response = await apiInstance.get<{ success: true } & RecordingGoogleDocComposeContext>(
-      `/calls/recordings/${callId}/google-doc-compose-context`,
+      `/calls/${callScopedPath(callId, isRecording)}/google-doc-compose-context`,
     );
     return response.data;
   }

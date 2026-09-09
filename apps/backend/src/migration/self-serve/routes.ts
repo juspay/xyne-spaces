@@ -70,6 +70,7 @@ export function buildRouter(service: SlackMigrationService): Router {
   }));
 
   router.post('/migration-jobs/:id/approve', admin, wrap(async (req, res) => { res.json(ok(await service.approve(req.params.id, actorOf(req)))); }));
+  router.post('/migration-jobs/:id/refresh', admin, wrap(async (req, res) => { res.json(ok(await service.refresh(req.params.id, actorOf(req)))); }));
   router.post('/migration-jobs/:id/stop', admin, wrap(async (req, res) => { res.json(ok(await service.stop(req.params.id, actorOf(req)))); }));
   router.post('/migration-jobs/:id/resume', admin, wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req)))); }));
   router.delete('/migration-jobs/:id', admin, wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req)); res.json(ok({ deleted: true })); }));
