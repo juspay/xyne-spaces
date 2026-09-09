@@ -8,6 +8,9 @@ import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { redisService } from '@/services/redisService';
 import {logger} from '@/utils/logger';
+// A mention inside <pre>/<code> is a false positive — e.g. `@Juspay` inside the
+// email `guruprasad.bhosale@Juspay.in` in a SQL snippet — and must not notify.
+import { stripCodeRegions } from '@xyne/shared/utils';
 
 export interface ExtractedMention {
   userId: string;
@@ -38,17 +41,6 @@ export interface ExtractedMentionForNotification {
 export interface SpecialMentions {
   hasChannel: boolean; // @channel mentioned
   hasHere: boolean; // @here mentioned
-}
-
-/**
- * Drop <pre>/<code> regions before scanning for mentions. A mention that lives
- * inside code is a false positive — e.g. `@Juspay` inside the email
- * `guruprasad.bhosale@Juspay.in` in a SQL snippet — and must not notify.
- */
-function stripCodeRegions(content: string): string {
-  return content
-    .replace(/<pre[^>]*>[\s\S]*?<\/pre>/gi, ' ')
-    .replace(/<code[^>]*>[\s\S]*?<\/code>/gi, ' ');
 }
 
 /**

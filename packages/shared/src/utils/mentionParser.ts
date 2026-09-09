@@ -15,7 +15,7 @@
  * produce a notification. Kept as a string transform (no DOM) so it works in
  * both the browser and Node/worker contexts that share this module.
  */
-function stripCodeRegions(htmlContent: string): string {
+export function stripCodeRegions(htmlContent: string): string {
   return htmlContent
     .replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, ' ')
     .replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi, ' ');
