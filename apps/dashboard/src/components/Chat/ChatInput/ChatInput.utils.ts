@@ -57,10 +57,13 @@ const convertPlainTextMentionsToSpans = (htmlContent: string, users: MentionResu
 
   // Escape names for regex and join with '|' to create one pattern
   const patternParts = allCleanNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const pattern = new RegExp(`@(${patternParts.join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`, 'gi');
+  // Require a boundary before '@' (start-of-string, whitespace, ZWSP, '(', or a
+  // tag close '>') so an '@' embedded in an email/word — e.g. "user@Juspay.in" —
+  // is never treated as a mention. Mirrors the composer's mention trigger regex.
+  const pattern = new RegExp(`(^|[\\s\\u200B(>])@(${patternParts.join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`, 'gi');
 
   // Perform a single replace operation
-  return htmlContent.replace(pattern, (match, capturedName: string, offset: number) => {
+  return htmlContent.replace(pattern, (match, leadingChar: string, capturedName: string, offset: number) => {
     // Check if the match is inside an existing mention span using the correct offset
     const beforeMatch = htmlContent.substring(0, offset);
     const lastOpenSpan = beforeMatch.lastIndexOf('<span');
@@ -81,7 +84,7 @@ const convertPlainTextMentionsToSpans = (htmlContent: string, users: MentionResu
     const originalName = user.name.replace(/ \(you\)$/, '');
     const escapedName = escapeHtml(originalName);
     const escapedId = escapeHtml(user.id);
-    return `<span data-mention="" data-mention-type="user" data-user-id="${escapedId}" data-username="${escapedName}" class="chat-input-mention">@${escapedName}</span>`;
+    return `${leadingChar}<span data-mention="" data-mention-type="user" data-user-id="${escapedId}" data-username="${escapedName}" class="chat-input-mention">@${escapedName}</span>`;
   });
 };
 
