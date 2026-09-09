@@ -169,7 +169,17 @@ export class ChannelController {
       } else if (operationType === 'conversation_moved_target') {
         systemContent = `${actor} moved messages from a previous conversation into this one`;
       } else {
-        systemContent = `${formattedUsers} ${pills.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
+        // Add/remove participant system messages use PLAIN names, matching the
+        // channel-side generator (formatSystemGenerateMessage) so both the DM and
+        // channel add-member messages render identically. Names stay escaped.
+        const plainNames = newParticipants.map(p => esc(p.userName));
+        let plainUsers = '';
+        if (plainNames.length === 1) {
+          plainUsers = plainNames[0];
+        } else if (plainNames.length > 1) {
+          plainUsers = `${plainNames.slice(0, -1).join(', ')} and ${plainNames[plainNames.length - 1]}`;
+        }
+        systemContent = `${plainUsers} ${plainNames.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${esc(authData.name)}`;
       }
 
       // Create metadata
