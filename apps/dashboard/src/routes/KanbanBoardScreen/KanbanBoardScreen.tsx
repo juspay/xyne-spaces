@@ -3208,11 +3208,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
+  // Union of project-defined tags and tags already present on the visible
+  // tickets. In the My Tickets view the board spans multiple projects, so the
+  // label filter must include tags from every project the user has tickets in
+  // — not just the first board's project.
   const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return undefined;
-    const uniqueTags = new Set(projectTags.map(tag => tag.name));
-    return Array.from(uniqueTags).sort();
-  }, [projectTags]);
+    const uniqueTags = new Set(projectTags?.map(tag => tag.name));
+    tagsByTicketId.forEach(tags => {
+      tags.forEach(tag => {
+        uniqueTags.add(tag.name);
+      });
+    });
+    return uniqueTags.size > 0 ? Array.from(uniqueTags).sort() : undefined;
+  }, [projectTags, tagsByTicketId]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
