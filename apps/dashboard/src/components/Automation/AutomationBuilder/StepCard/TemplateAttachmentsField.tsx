@@ -17,6 +17,7 @@ import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { Dialog } from '../../../ui/Dialog/Dialog';
 import { Popover } from '../../../ui/Popover/Popover';
+
 import { cn } from '../../../../utils/classNames';
 import {
   fetchAutomationTemplateContent,
@@ -477,6 +478,7 @@ export function TemplateAttachmentsField({
               type='button'
               data-track-category='automation-builder'
               data-track-name='template-editor-apply'
+              data-ph-capture-attribute-track-id='automation_template_save'
               disabled={editorLoading || editorSaving}
               onClick={() => void saveEditor()}
               className='flex h-9 items-center gap-2 rounded-md bg-foreground px-3 text-sm text-background hover:opacity-90 disabled:opacity-50'

@@ -48,6 +48,7 @@ export const RefineInput = forwardRef<HTMLInputElement, RefineInputProps>(
           aria-label='Send refinement'
           data-track-category='AIDraft'
           data-track-name='SubmitRefinement'
+          data-ph-capture-attribute-track-id='refine_draft'
         >
           <ArrowRight size={14} />
         </button>

@@ -22,6 +22,7 @@ import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import {
+  GridDashboard01,
   LayoutGridTwoVertical as Columns3,
   TicketToken as TicketIcon,
   Hashtag,
@@ -192,6 +193,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
+import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
@@ -609,6 +611,7 @@ const SupportScreen = (): ReactElement => {
       const params = new URLSearchParams(searchParams);
       clearTicketFilterParams(params);
       params.delete('metrics');
+      params.delete('topics');
       params.delete('settings');
       const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
@@ -1240,6 +1243,7 @@ const SupportScreen = (): ReactElement => {
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
+  const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1507,6 +1511,7 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     setIsMetricsOpen(searchParams.get('metrics') === 'open');
+    setIsTopicsOpen(searchParams.get('topics') === 'open');
   }, [searchParams]);
 
   useEffect(() => {
@@ -1564,6 +1569,14 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+  // Mailbox folders are email-only, so other desk types get no folder filter on their list.
+  const selectedChannelHasMailboxFolders =
+    sortedEmailChannels.find(c => c.id === selectedChannelId)?.type === ChannelType.EMAIL;
+  // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
+  const canExploreTopics =
+    isSelectedChannelJoined &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.metricsEnabled;
 
   const metricsSelectableDesks = useMemo(
     () =>
@@ -2326,7 +2339,10 @@ const SupportScreen = (): ReactElement => {
                   className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
                 };
     const isJoined = joinedChannelIds.has(c.id);
-    const canExpandDesk = isJoined && c.type === ChannelType.EMAIL;
+    // Labels apply to email and app desks; mailbox folders (Inbox / Starred / Spam /
+    // Drafts / Sent) stay email-only. Both share this one expandable subtree.
+    const hasMailboxFolders = c.type === ChannelType.EMAIL;
+    const canExpandDesk = isJoined && (hasMailboxFolders || c.type === ChannelType.APP);
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -2408,30 +2424,34 @@ const SupportScreen = (): ReactElement => {
         </div>
         {isExpanded && (
           <div className='mt-0.5 ml-3 pl-2 border-l border-border/60 flex flex-col gap-1'>
-            <DeskMailboxSidebar
-              activeFolder={
-                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
-                  ? selectedFolder.key
-                  : null
-              }
-              onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
-            />
-            <DeskDraftSubtree
-              activeFolder={
-                selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
-                  ? selectedFolder.key === 'drafts'
-                    ? 'userDrafts'
-                    : selectedFolder.key === 'sent'
-                      ? 'userSent'
+            {hasMailboxFolders && (
+              <>
+                <DeskMailboxSidebar
+                  activeFolder={
+                    selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                      ? selectedFolder.key
                       : null
-                  : null
-              }
-              // Drafts and Sent are both folders on the ticket list (reply drafts / sent
-              // emails roll up to their tickets); route them through openMailbox for the
-              // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
-              onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
-              onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
-            />
+                  }
+                  onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
+                />
+                <DeskDraftSubtree
+                  activeFolder={
+                    selectedChannelId === c.id && viewMode === 'list' && !selectedLabel
+                      ? selectedFolder.key === 'drafts'
+                        ? 'userDrafts'
+                        : selectedFolder.key === 'sent'
+                          ? 'userSent'
+                          : null
+                      : null
+                  }
+                  // Drafts and Sent are both folders on the ticket list (reply drafts / sent
+                  // emails roll up to their tickets); route them through openMailbox for the
+                  // same rich rows as Inbox. Compose drafts (no ticket) surface via the banner.
+                  onOpenUserDrafts={() => openMailbox(c.id, 'drafts', 'Drafts')}
+                  onOpenUserSent={() => openMailbox(c.id, 'sent', 'Sent')}
+                />
+              </>
+            )}
             <DeskLabelsSidebar
               channelId={c.id}
               isMember={isJoined}
@@ -2869,6 +2889,29 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         )}
+                      {canExploreTopics && (
+                        <Tooltip content='Topics explorer' side='bottom'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              const base = `${supportBase}/${selectedChannelId}`;
+                              if (isTopicsOpen) void navigate(base, { replace: true });
+                              else void navigate(`${base}?topics=open`);
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isTopicsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenTopicsExplorer'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <GridDashboard01 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -3584,6 +3627,19 @@ const SupportScreen = (): ReactElement => {
                   channelName={selectedChannelName ?? undefined}
                 />
               )}
+              {isTopicsOpen && selectedChannelId && canExploreTopics && (
+                <TopicsExplorer
+                  open
+                  onClose={() =>
+                    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
+                  }
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
+                  supportBase={supportBase}
+                  availableAiCategories={availableAiCategories}
+                  availableStages={availableStages}
+                />
+              )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                 {!selectedChannelId ? (
                   <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
@@ -3707,7 +3763,11 @@ const SupportScreen = (): ReactElement => {
                     ) : (
                       <TicketListView
                         isMember={isSelectedChannelJoined}
-                        mailboxFolder={selectedLabel ? undefined : selectedFolder.key}
+                        mailboxFolder={
+                          selectedLabel || !selectedChannelHasMailboxFolders
+                            ? undefined
+                            : selectedFolder.key
+                        }
                         filter={{
                           channelId: selectedChannelId,
                           ...ticketFilter,
@@ -3894,6 +3954,7 @@ const SupportScreen = (): ReactElement => {
           onOpenChange={setAutoLabelWizardOpen}
           channelId={selectedChannelId}
           isMember={isSelectedChannelJoined}
+          showKeepInInbox={selectedChannelHasMailboxFolders}
         />
       )}
 
@@ -5685,7 +5746,7 @@ const EmailThreadItem = ({
       disabled={isDemerging}
       className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
       title={mergedSource ? 'Unmerge this ticket' : 'Unmerge this email to a new ticket'}
-      data-track-category='SUPPORT'
+      data-track-category='Support'
       data-track-name={mergedSource ? 'UnmergeTicket' : 'DemergeEmail'}
       data-track-metadata={JSON.stringify({
         emailId: email.id,

@@ -112,7 +112,14 @@ function CredentialsForm({
       {error && <p className='mt-3 px-3 text-xs text-destructive'>{error}</p>}
 
       <div className='mt-4 flex items-center justify-end gap-2'>
-        <Button type='button' variant='ghost' disabled={save.isPending} onClick={onCancel}>
+        <Button
+          type='button'
+          variant='ghost'
+          disabled={save.isPending}
+          onClick={onCancel}
+          data-track-category='Claw Admin'
+          data-track-name='Cancel global MCP credentials'
+        >
           Cancel
         </Button>
         <Button

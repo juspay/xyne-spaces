@@ -236,6 +236,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
             data-track-category='Support'
             data-track-name='FetchRangeConfirm'
             data-track-metadata={JSON.stringify({ mode })}
+            trackId='refetch_emails'
           >
             Fetch
           </Button>

@@ -79,6 +79,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
 import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
+import { getTicketStatusColor } from '../../Tickets/CalendarView/CompactTicketBadge/utils';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
@@ -213,7 +214,6 @@ const toVespaProjectTicket = (result: {
 });
 
 const fetchProjectTicketsPageFromVespa = async (
-  projectId: string,
   query: string,
   offset: number,
 ): Promise<{
@@ -226,7 +226,6 @@ const fetchProjectTicketsPageFromVespa = async (
     query: query || '*',
     type: 'tickets',
     apps: 'ticket',
-    projectId,
     limit: 200,
     offset,
   });
@@ -1116,14 +1115,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     setProjectTicketSearch('');
     setIsAddTicketMenuOpen(false);
     projectTicketsRequestIdRef.current += 1;
-  }, [ticket?.projectId]);
+  }, [ticket?.id]);
 
   const loadProjectTicketsPage = useCallback(
     async (offset: number, replace: boolean): Promise<void> => {
-      if (!ticket?.projectId) {
-        return;
-      }
-
       const normalizedQuery = projectTicketSearch.trim();
       const requestId = ++projectTicketsRequestIdRef.current;
       const isInitialLoad = replace || offset === 0;
@@ -1135,11 +1130,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       try {
-        const response = await fetchProjectTicketsPageFromVespa(
-          ticket.projectId,
-          normalizedQuery,
-          offset,
-        );
+        const response = await fetchProjectTicketsPageFromVespa(normalizedQuery, offset);
 
         if (requestId !== projectTicketsRequestIdRef.current) {
           return;
@@ -1172,7 +1163,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           message: String('[TicketDetails] Failed to load Vespa project tickets'),
           context: [
             {
-              projectId: ticket.projectId,
               offset,
               query: normalizedQuery || '*',
               error,
@@ -1193,11 +1183,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }
       }
     },
-    [projectTicketSearch, ticket?.projectId],
+    [projectTicketSearch],
   );
 
   useEffect(() => {
-    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+    if (!isAddTicketMenuOpen) {
       return;
     }
 
@@ -1207,7 +1197,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (projectTicketSearch.trim()) {
       void loadProjectTicketsPage(0, true);
     }
-  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+  }, [isAddTicketMenuOpen, loadProjectTicketsPage, projectTicketSearch]);
 
   const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
     setIsAddTicketMenuOpen(open);
@@ -2993,6 +2983,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <button
               type='button'
               onClick={onUnmerge}
+              data-ph-capture-attribute-track-id='unmerge_ticket'
               className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='UnmergeTicket'
@@ -3005,6 +2996,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               type='button'
               className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
+              data-ph-capture-attribute-track-id='remove_ticket_reference'
               aria-label='Remove reference'
               data-track-category='Tickets'
               data-track-name='RemoveReference'
@@ -3239,7 +3231,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         disabled={!canCreateNestedSubTicket}
         data-testid='create-sub-ticket-button'
         data-track-event='BUTTON_CLICK'
-        data-track-category='TICKETS'
+        data-track-category='Tickets'
         data-track-name='CREATE_SUB_TICKET'
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
         title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
@@ -3661,6 +3653,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             {
                               <button
                                 onClick={() => void handleRemoveTag(tag.id)}
+                                data-ph-capture-attribute-track-id='remove_ticket_tag'
                                 className={`ml-1 p-0.5 rounded transition-colors`}
                                 aria-label='Remove label'
                                 data-track-category='Tickets'
@@ -3711,6 +3704,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         {tagSearchQuery.trim() && !exactMatch && (
                           <button
                             onClick={() => void handleToggleTag(tagSearchQuery)}
+                            data-ph-capture-attribute-track-id='create_ticket_tag'
                             className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
                             data-track-category='Tickets'
                             data-track-name='CreateTag'
@@ -3730,6 +3724,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <button
                               key={tagName}
                               onClick={() => void handleToggleTag(tagName)}
+                              data-ph-capture-attribute-track-id='toggle_ticket_tag'
                               className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
                               data-track-category='Tickets'
                               data-track-name='ToggleTag'
@@ -3769,7 +3764,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   data-testid='ticket-detail-status-selector'
                   className='flex items-center gap-2'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_STATUS'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
@@ -3779,7 +3774,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   {stageReadOnly ? (
                     <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <TicketStatusIcon size={14} />
+                      <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       {ticket.stageName || 'Not set'}
                     </span>
                   ) : (
@@ -3788,7 +3783,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       selectedValue={ticket.stageName}
                       onValueChange={handleStageChange}
                       placeholder='Set Status'
-                      icon={<TicketStatusIcon size={14} />}
+                      icon={
+                        <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
+                      }
+                      getItemIcon={item =>
+                        (() => {
+                          const stage = selectorStages.find(s => s.name === item.name);
+                          const itemStatusV2 = stage?.defaultTicketStatusV2 ?? ticket.statusV2;
+                          return (
+                            <TicketStatusIcon
+                              size={14}
+                              color={getTicketStatusColor(itemStatusV2)}
+                            />
+                          );
+                        })()
+                      }
                       noBorder={true}
                       isItemDisabled={item => item.name === ticket.stageName}
                     />
@@ -3835,7 +3844,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   data-testid='ticket-detail-priority-selector'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_PRIORITY'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
@@ -4384,6 +4393,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Request submitted for approval');
                                   }}
+                                  data-ph-capture-attribute-track-id='submit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='SubmitStageRequest'
@@ -4571,6 +4581,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Stage change request resubmitted for approval');
                                   }}
+                                  data-ph-capture-attribute-track-id='resubmit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageRequest'

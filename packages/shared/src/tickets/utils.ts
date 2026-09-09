@@ -2,7 +2,10 @@ import { v5 as uuidv5 } from 'uuid';
 import { BaseTicketType, BoardType } from "../zero/types.js";
 
 export const ClassifiableTicketTypes = Object.values(BaseTicketType).filter(
-    (type) => type !== BaseTicketType.Release
+    (type) =>
+        type !== BaseTicketType.Release &&
+        type !== BaseTicketType.Support &&
+        type !== BaseTicketType.DESK
 )
 
 export type ClassifiableTicketType = typeof ClassifiableTicketTypes[number];

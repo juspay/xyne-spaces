@@ -25,6 +25,16 @@ export interface ChannelGeneratedTagItem {
   tag: string;
 }
 
+/** LLM tags carried by one conversation, used to group tickets by tag category. */
+export interface ConversationGeneratedTags {
+  conversationId: string;
+  tags: ChannelGeneratedTagItem[];
+}
+
+export interface GeneratedTagsByConversation {
+  conversations: ConversationGeneratedTags[];
+}
+
 export const tagsConfigApi = {
   getConfig: async (channelId: string): Promise<TagCategories> => {
     const res = await apiInstance.get<{ categories: TagCategories }>(
@@ -74,5 +84,23 @@ export const tagsConfigApi = {
       { params: { tags } },
     );
     return res.data.conversationIds;
+  },
+
+  /**
+   * LLM tags per conversation over a created-at window.
+   *
+   * These live in `non_zero.tags`, which Zero does not sync, so grouping by tag
+   * category has to come from the API rather than the synced ticket rows.
+   */
+  getGeneratedTagsByConversation: async (
+    channelId: string,
+    startMs: number,
+    endMs: number,
+  ): Promise<GeneratedTagsByConversation> => {
+    const res = await apiInstance.get<Partial<GeneratedTagsByConversation>>(
+      `/channels/${channelId}/tags-config/generated-tags-by-conversation`,
+      { params: { startMs, endMs } },
+    );
+    return { conversations: res.data.conversations ?? [] };
   },
 };

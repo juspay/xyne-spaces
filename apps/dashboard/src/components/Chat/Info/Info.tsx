@@ -358,6 +358,7 @@ const Info = ({
             isStarred: channelUserStatus?.isStarred,
             channelId: channel.id,
           })}
+          data-ph-capture-attribute-track-id='toggle_channel_star'
         >
           {channelUserStatus?.isStarred ? (
             <LucideStar size={16} className='text-status-pending' fill='currentColor' />
@@ -427,6 +428,7 @@ const Info = ({
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
+            data-ph-capture-attribute-track-id='leave_channel'
           >
             <LucideLogOut size={16} className='text-destructive' />
             <div className='text-destructive text-[13px]'>Leave</div>
@@ -669,6 +671,7 @@ const ParticipantListItem = ({
                       data-track-category='CHAT_INFO'
                       data-track-name='REMOVE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
+                      data-ph-capture-attribute-track-id='remove_channel_admin'
                     >
                       <LucideUserMinus size={14} />
                       <span className='text-[14px] text-foreground'>Remove admin</span>
@@ -680,6 +683,7 @@ const ParticipantListItem = ({
                       data-track-category='CHAT_INFO'
                       data-track-name='MAKE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
+                      data-ph-capture-attribute-track-id='make_channel_admin'
                     >
                       <LucideUser size={14} />
                       <span className='text-[14px] text-foreground'>Make admin</span>
@@ -691,7 +695,7 @@ const ParticipantListItem = ({
                     onClick={() =>
                       onRemove(participant.userId, getUserDisplayName(user) || 'this user')
                     }
-                    data-track-category='ChatInfo'
+                    data-track-category='CHAT_INFO'
                     data-track-name='RemoveParticipant'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >
@@ -998,6 +1002,7 @@ const ChannelMembers = ({
               data-track-category='CHAT_INFO'
               data-track-name='CONFIRM_REMOVE_PARTICIPANT'
               className='px-6'
+              trackId='remove_channel_participant'
             >
               Remove
             </Button>

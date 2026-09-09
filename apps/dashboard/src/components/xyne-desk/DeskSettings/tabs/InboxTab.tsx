@@ -469,6 +469,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       {!sig.isDefault && (
                         <button
                           type='button'
+                          data-ph-capture-attribute-track-id='set_default_signature'
                           onClick={() =>
                             zero.mutate(
                               mutators.emailSignature.setDefault({
@@ -477,7 +478,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                               }),
                             )
                           }
-                          className='text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground'
+                          className='h-auto p-0 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground hover:bg-transparent'
                           data-track-category='DeskSettings'
                           data-track-name='SetDefaultSignature'
                         >
@@ -500,8 +501,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       </button>
                       <button
                         type='button'
+                        data-ph-capture-attribute-track-id='delete_signature'
                         onClick={() => zero.mutate(mutators.emailSignature.delete({ id: sig.id }))}
-                        className='text-desk-muted transition-colors hover:text-red-500'
+                        className='size-auto p-0 text-desk-muted transition-colors hover:bg-transparent hover:text-red-500'
                         title='Delete signature'
                         aria-label='Delete signature'
                         data-track-category='DeskSettings'

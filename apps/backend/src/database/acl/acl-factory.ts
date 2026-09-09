@@ -74,6 +74,7 @@ import {
   RolesACL,
   SavedUserConfigurationsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   StagesACL,
   SubTicketsACL,
@@ -297,6 +298,8 @@ export class ACLFactory {
       return new SavedUserConfigurationsACL(ctx, prisma)
     case 'savedUserConfigurationValue':
       return new SavedUserConfigurationValuesACL(ctx, prisma)
+    case 'viewAccess':
+      return new ViewAccessACL(ctx, prisma)
     case 'stage':
       return new StagesACL(ctx, prisma)
     case 'stageApprovers':
@@ -491,6 +494,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'vespaInsertionLogs':
       return new UnscopedACL(ctx, prisma)
+    case 'workflowCredential':
+      return new BaseQueryACL(ctx, prisma)
+    case 'workflowFolder':
+      return new BaseQueryACL(ctx, prisma)
     case 'workflowExecutionLock':
       return new BaseQueryACL(ctx, prisma)
     case 'workflowExecutionState':

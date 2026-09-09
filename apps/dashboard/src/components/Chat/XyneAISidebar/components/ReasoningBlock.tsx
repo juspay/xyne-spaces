@@ -19,7 +19,7 @@ export function ReasoningBlock({ text, streaming }: ReasoningBlockProps): ReactE
         onClick={() => setExpanded(!expanded)}
         className='flex w-full items-center gap-2 py-1 text-left transition-colors hover:text-foreground'
         type='button'
-        data-track-category='xyne-ai'
+        data-track-category='XyneAI'
         data-track-name='toggle-reasoning-block'
       >
         <ChevronRight

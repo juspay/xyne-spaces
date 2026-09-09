@@ -80,6 +80,7 @@ export const DeskConnectionCard = ({
           onReconnect && (
             <button
               type='button'
+              data-ph-capture-attribute-track-id='desk_reconnect_integration'
               onClick={() => void handleReconnect()}
               disabled={isReconnecting}
               className={cn(
@@ -128,7 +129,8 @@ export const DeskConnectionCard = ({
             <Button
               variant='destructive'
               size='sm'
-              onClick={() => void handleDisconnect()}
+              trackId='desk_disconnect_integration'
+              trackAction={handleDisconnect}
               disabled={isDisconnecting}
               data-track-category={trackCategory}
               data-track-name='confirm-disconnect'

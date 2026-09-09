@@ -83,7 +83,7 @@ const ScheduledMessageCard = ({
         'hover:border-primary transition-colors',
         !scheduledMessage.isActive && 'opacity-50',
       )}
-      data-track-category='ScheduledMessages'
+      data-track-category='scheduled-message'
       data-track-name='OpenScheduledMessage'
       data-track-metadata={JSON.stringify({
         messageId: scheduledMessage.id,

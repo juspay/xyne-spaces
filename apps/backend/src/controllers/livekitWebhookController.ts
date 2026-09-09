@@ -23,6 +23,7 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -504,17 +505,13 @@ class LiveKitWebhookController {
         // canvas or a track — either way the same two links are written:
         //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
         const sdlcLink = (roomMetadata as {
-          sdlcLink?: { repoId?: string; ownerType?: string; ownerId?: string };
+          sdlcLink?: { ownerType?: string; ownerId?: string };
         }).sdlcLink;
-        if (sdlcLink?.repoId && sdlcLink.ownerType && sdlcLink.ownerId) {
+        if (sdlcLink?.ownerType && sdlcLink.ownerId) {
           try {
-            const sdlcRepo = await this.db.repo.findFirst({
-              where: { id: sdlcLink.repoId, channelId },
-              select: { id: true, workspaceId: true },
-            });
-            const linkWorkspaceId = channelRecord?.workspaceId ?? sdlcRepo?.workspaceId ?? null;
-            const ownerValid = sdlcRepo
-              ? sdlcLink.ownerType === 'CANVAS'
+            const linkWorkspaceId = channelRecord?.workspaceId ?? null;
+            const ownerValid =
+              sdlcLink.ownerType === 'CANVAS'
                 ? Boolean(
                     await this.db.canvas.findFirst({
                       where: { id: sdlcLink.ownerId, channelId },
@@ -522,20 +519,14 @@ class LiveKitWebhookController {
                     }),
                   )
                 : sdlcLink.ownerType === 'TRACK'
-                  ? Boolean(
-                      await this.db.sdlcTrack.findFirst({
-                        where: { id: sdlcLink.ownerId, repoId: sdlcRepo.id },
-                        select: { id: true },
-                      }),
-                    )
-                  : false
-              : false;
-            if (sdlcRepo && linkWorkspaceId && ownerValid) {
+                  ? await isTrackInChannel(this.db, sdlcLink.ownerId, channelId)
+                  : false;
+            if (linkWorkspaceId && ownerValid) {
               await this.db.sdlcEntityLink.createMany({
                 data: [
                   {
                     workspaceId: linkWorkspaceId,
-                    repoId: sdlcRepo.id,
+                    channelId,
                     sourceType: sdlcLink.ownerType,
                     sourceId: sdlcLink.ownerId,
                     targetType: 'CALL',
@@ -545,7 +536,7 @@ class LiveKitWebhookController {
                   },
                   {
                     workspaceId: linkWorkspaceId,
-                    repoId: sdlcRepo.id,
+                    channelId,
                     sourceType: sdlcLink.ownerType,
                     sourceId: sdlcLink.ownerId,
                     targetType: 'CONVERSATION',
@@ -557,7 +548,7 @@ class LiveKitWebhookController {
                 skipDuplicates: true,
               });
               logger.info(
-                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId} repo=${sdlcRepo.id}`,
+                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
               );
             }
           } catch (sdlcLinkError) {

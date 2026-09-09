@@ -4,7 +4,6 @@ import { useSelector } from '@xstate/react';
 import { RefreshCw, X } from 'lucide-react';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
-import { mixpanelService } from '../../services/Analytics/mixpanelService';
 
 // Kill switch for the Electron auto-update nudge. While false the component is
 // fully inert: no event listener is registered and nothing is rendered.
@@ -181,15 +180,6 @@ function isCallBlockingNow(): boolean {
   );
 }
 
-function trackUpdateEvent(eventName: string, state: PersistedNudgeState, extra = {}): void {
-  mixpanelService.track(eventName, {
-    currentVersion: state.currentVersion,
-    latestVersion: state.latestVersion,
-    checkCount: state.checkCount,
-    ...extra,
-  });
-}
-
 export const ElectronUpdateNudge = (): ReactElement | null => {
   const [nudge, setNudge] = useState<PersistedNudgeState | null>(null);
   const [visible, setVisible] = useState(false);
@@ -252,13 +242,6 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         loadedVersion: __APP_VERSION__,
         status: succeeded ? 'success' : 'failed',
         completedAt: new Date().toISOString(),
-      });
-      mixpanelService.track('Electron Update Completed', {
-        currentVersion: attempt.currentVersion,
-        latestVersion: attempt.latestVersion,
-        loadedVersion: __APP_VERSION__,
-        mode: attempt.mode,
-        success: succeeded,
       });
       removeStorage(UPDATE_ATTEMPT_STORAGE_KEY);
 
@@ -325,7 +308,6 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
       writeStorage(NUDGE_STORAGE_KEY, next);
       setNudge(next);
       setVisible(true);
-      trackUpdateEvent('Electron Update Available', next);
     });
   }, []);
 
@@ -338,10 +320,6 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
 
     if (activationBlocked) {
       if (nudge.countdownEndsAt !== null) {
-        trackUpdateEvent('Electron Update Countdown Paused', nudge, {
-          callBlocking,
-          isTyping,
-        });
         setNudge(current => (current ? { ...current, countdownEndsAt: null } : current));
         setRemainingSeconds(60);
       }
@@ -350,7 +328,6 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
 
     if (nudge.countdownEndsAt === null) {
       const countdownEndsAt = Date.now() + AUTO_UPDATE_DELAY_MS;
-      trackUpdateEvent('Electron Update Countdown Started', nudge);
       setNudge(current => (current ? { ...current, countdownEndsAt } : current));
     }
   }, [activationBlocked, callBlocking, isTyping, nudge]);
@@ -374,7 +351,6 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         mode,
       };
       writeStorage(UPDATE_ATTEMPT_STORAGE_KEY, attempt);
-      trackUpdateEvent('Electron Update Started', nudge, { mode });
       window.electronAPI?.applyAppUpdate();
     },
     [activationBlocked, isTypingNow, nudge],
@@ -395,7 +371,6 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
 
   const dismissUpdate = (): void => {
     if (!nudge || nudge.autoApprovalRequired) return;
-    trackUpdateEvent('Electron Update Dismissed', nudge);
     setVisible(false);
   };
 
@@ -432,7 +407,8 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         type='button'
         onClick={() => applyUpdate('manual')}
         disabled={activationBlocked}
-        className='shrink-0 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+        className='h-auto shrink-0 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+        data-ph-capture-attribute-track-id='electron_apply_update'
         data-track-category='ElectronUpdate'
         data-track-name='UpdateNow'
       >

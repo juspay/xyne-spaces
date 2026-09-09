@@ -167,7 +167,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     className='p-4 hover:bg-muted/50 transition-colors cursor-pointer'
                     onClick={() => setSelectedDocument(doc)}
                     onKeyDown={e => e.key === 'Enter' && setSelectedDocument(doc)}
-                    data-track-category='KnowledgeBase'
+                    data-track-category='knowledge-base'
                     data-track-name='SelectDocument'
                     data-track-metadata={JSON.stringify({
                       documentId: doc.id,
@@ -195,7 +195,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                         disabled={deletingId === doc.id}
                         className='p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50/10 rounded transition-colors disabled:opacity-50'
                         title='Delete document'
-                        data-track-category='KnowledgeBase'
+                        data-track-category='knowledge-base'
                         data-track-name='DeleteDocument'
                         data-track-metadata={JSON.stringify({ documentId: doc.id })}
                       >
@@ -221,7 +221,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
                       className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
-                      data-track-category='KnowledgeBase'
+                      data-track-category='knowledge-base'
                       data-track-name='PreviousPage'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >
@@ -231,7 +231,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
                       className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
-                      data-track-category='KnowledgeBase'
+                      data-track-category='knowledge-base'
                       data-track-name='NextPage'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >

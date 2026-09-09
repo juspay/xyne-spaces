@@ -51,6 +51,7 @@ export function IncomingCallActions({
           onClick={onReject}
           aria-label='Decline call'
           className={`${CIRCLE} ${DECLINE_COLORS}`}
+          data-ph-capture-attribute-track-id='reject_incoming_call'
           data-track-category='CALLS_NOTIFICATIONS'
           data-track-name='REJECT_INCOMING_CALL'
           data-track-metadata={trackMetadata}
@@ -72,6 +73,7 @@ export function IncomingCallActions({
             'px-[26px] text-sm font-semibold transition-colors duration-[120ms] ease-out ' +
             `focus-visible:outline-none ${ACCEPT_COLORS}`
           }
+          data-ph-capture-attribute-track-id='accept_incoming_call'
           data-track-category='CALLS_NOTIFICATIONS'
           data-track-name='ACCEPT_INCOMING_CALL'
           data-track-metadata={trackMetadata}
@@ -86,6 +88,7 @@ export function IncomingCallActions({
             onClick={onAccept}
             aria-label='Accept call'
             className={`${CIRCLE} ${ACCEPT_COLORS}`}
+            data-ph-capture-attribute-track-id='accept_incoming_call'
             data-track-category='CALLS_NOTIFICATIONS'
             data-track-name='ACCEPT_INCOMING_CALL'
             data-track-metadata={trackMetadata}

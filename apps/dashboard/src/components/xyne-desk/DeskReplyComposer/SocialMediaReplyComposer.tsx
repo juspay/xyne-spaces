@@ -114,6 +114,7 @@ export const SocialMediaReplyComposer = ({
             data-track-category={trackingCategory}
             data-track-name='send-reply'
             aria-label='Send reply'
+            data-ph-capture-attribute-track-id='desk_send_social_reply'
           >
             {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
           </button>

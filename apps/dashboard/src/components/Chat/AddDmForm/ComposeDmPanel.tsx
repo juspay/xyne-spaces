@@ -17,11 +17,6 @@ import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useActiveUsers, useActiveUserSearch, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
-import {
-  EVENT_PROPERTIES,
-  EVENTS,
-  mixpanelService,
-} from '../../../services/Analytics/mixpanelService';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
@@ -128,15 +123,6 @@ export const ComposeDmPanel: React.FC = () => {
             participantIds: selectedUsers.map(user => user.id),
           });
           channelId = response.id;
-
-          // Track group creation if more than 1 participant (excluding current user)
-          const isGroupDm = selectedUsers.length > 1;
-          mixpanelService.track(EVENTS.INITIATE_ACTION, {
-            type: isGroupDm
-              ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
-              : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,
-            hasInitialMessage: false,
-          });
 
           // If existing DM was returned (might have been closed), reopen it
           if (response.isExisting) {

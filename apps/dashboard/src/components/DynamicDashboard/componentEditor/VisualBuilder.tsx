@@ -136,6 +136,8 @@ export const VisualBuilder = ({
           <Input
             value={title}
             onChange={e => setTitle(e.target.value)}
+            data-track-category='COMPONENT_EDITOR'
+            data-track-name='Title_Input'
             placeholder='e.g: Revenue by Status'
           />
         </Field>
@@ -299,7 +301,7 @@ export const VisualBuilder = ({
                       ])
                     }
                     className='text-left text-xs px-2 py-1 rounded border border-border hover:bg-accent hover:border-foreground/30 text-foreground/80'
-                    data-track-category='DASHBOARD_EDITOR'
+                    data-track-category='COMPONENT_EDITOR'
                     data-track-name='Add_Join'
                   >
                     <span className='font-medium'>+ Join {edge.target}</span>
@@ -523,6 +525,8 @@ export const VisualBuilder = ({
                       onChange={e =>
                         patchById(setFilters, f.id, x => ({ ...x, value: e.target.value }))
                       }
+                      data-track-category='COMPONENT_EDITOR'
+                      data-track-name='Filter_Value_Input'
                       placeholder={f.op === 'in' || f.op === 'notIn' ? 'a, b, c' : 'value'}
                       className='w-28 text-xs'
                     />
@@ -619,6 +623,8 @@ export const VisualBuilder = ({
                 if (!Number.isFinite(n)) return;
                 setTake(String(Math.min(10000, Math.max(1, Math.floor(n)))));
               }}
+              data-track-category='COMPONENT_EDITOR'
+              data-track-name='Take_Limit_Input'
               placeholder='no limit'
               min={1}
               max={10000}

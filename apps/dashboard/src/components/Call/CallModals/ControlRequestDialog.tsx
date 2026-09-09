@@ -40,6 +40,7 @@ export function ControlRequestDialog({
           <button
             onClick={onApprove}
             className='flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white font-medium transition-all duration-200 shadow-lg hover:shadow-xl'
+            data-ph-capture-attribute-track-id='approve_control_request'
             data-track-category='CALLS'
             data-track-name='APPROVE_CONTROL_REQUEST'
             data-track-metadata={JSON.stringify({ requesterName })}
@@ -50,6 +51,7 @@ export function ControlRequestDialog({
           <button
             onClick={onDeny}
             className='flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-600 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 text-white font-medium transition-all duration-200 shadow-lg hover:shadow-xl'
+            data-ph-capture-attribute-track-id='deny_control_request'
             data-track-event='BUTTON_CLICK'
             data-track-category='CALLS'
             data-track-name='DENY_CONTROL_REQUEST'

@@ -174,6 +174,7 @@ const ProposedCall: React.FC<{
           )}
           data-track-category='CALL_SCHEDULE_ARTIFACT'
           data-track-name='CLICK_APPROVE'
+          data-ph-capture-attribute-track-id='call_schedule_approve'
         >
           {inFlight && <Spinner size={14} className='animate-spin' />}
           Approve

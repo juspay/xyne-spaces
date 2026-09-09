@@ -312,7 +312,7 @@ export const ContextPillRow = ({
                 : 'Navigate to thread'
             }
             {...(threadInfo.senderName && { title: threadInfo.senderName })}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickThreadContextPill'
             data-track-metadata={JSON.stringify({ thread: threadInfo })}
           >
@@ -339,7 +339,7 @@ export const ContextPillRow = ({
             onClick={onRemoveThread}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove thread context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveThreadContext'
             data-track-metadata={JSON.stringify({ thread: threadInfo })}
           >
@@ -360,7 +360,7 @@ export const ContextPillRow = ({
             onClick={onCanvasInfoClick}
             className={CONTEXT_PILL_TRIGGER_CLASS}
             aria-label={`Navigate to canvas: ${canvasInfo.title || 'Untitled Canvas'}`}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickCanvasContextPill'
             data-track-metadata={JSON.stringify({ canvasId: canvasInfo.canvasId })}
           >
@@ -374,7 +374,7 @@ export const ContextPillRow = ({
             onClick={onRemoveCanvasInfo}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove canvas context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveCanvasContext'
             data-track-metadata={JSON.stringify({ canvasId: canvasInfo.canvasId })}
           >
@@ -395,7 +395,7 @@ export const ContextPillRow = ({
             onClick={() => onSelectionClick(selection)}
             className={CONTEXT_PILL_TRIGGER_CLASS}
             aria-label={`Navigate to canvas with selection: ${selection.preview}`}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickSelectionContextPill'
             data-track-metadata={JSON.stringify({ canvasId: selection.canvasId })}
           >
@@ -409,7 +409,7 @@ export const ContextPillRow = ({
             onClick={() => onRemoveSelection(index)}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove selection context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveSelectionContext'
             data-track-metadata={JSON.stringify({ canvasId: selection.canvasId })}
           >
@@ -431,7 +431,7 @@ export const ContextPillRow = ({
             className={CONTEXT_PILL_TRIGGER_CLASS}
             aria-label={`Open ${browserContext.domain}`}
             title={`${browserContext.title}\n${browserContext.url}`}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickBrowserContextPill'
             data-track-metadata={JSON.stringify({
               url: browserContext.url,
@@ -449,7 +449,7 @@ export const ContextPillRow = ({
             onClick={onRemoveBrowserContext}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove browser context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveBrowserContext'
             data-track-metadata={JSON.stringify({ url: browserContext.url })}
           >
@@ -781,7 +781,7 @@ export const ContextPillRow = ({
             onClick={() => onActivitiesChange?.([])}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove all activities'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveAllActivities'
             data-track-metadata={JSON.stringify({ activityCount: activities.length })}
           >

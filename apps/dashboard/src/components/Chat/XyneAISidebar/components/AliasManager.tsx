@@ -137,6 +137,7 @@ export const AliasManager = ({
                             <div className='flex items-center gap-1'>
                               <button
                                 onClick={() => handleConfirmDelete(alias.id)}
+                                data-ph-capture-attribute-track-id='confirm_delete_alias'
                                 data-track-category='XYNE_AI_SIDEBAR'
                                 data-track-name='CONFIRM_DELETE_ALIAS'
                                 className='px-2 py-1 text-xs font-medium text-destructive-foreground bg-destructive rounded hover:bg-destructive/90 transition-colors'

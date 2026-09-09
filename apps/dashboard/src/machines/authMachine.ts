@@ -3,7 +3,7 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
+import { posthogService } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
@@ -187,6 +187,27 @@ const createClearedContext = (): AuthContext => ({
 
 const getWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
   return output?.workspaces || [];
+};
+
+// Domain-conflict fields arrive as URL params on the web callback (processingOAuthCallback) and
+// on the OAUTH_CALLBACK_COMPLETE event from the Electron IPC / React Native bridge. Both paths
+// end in a creatingOrg transition, so both must translate them into the request-to-join context.
+const getEnterpriseJoinContext = (
+  output?: OAuthCallbackOutput,
+): { error: string | null; enterpriseJoinTarget: EnterpriseJoinTarget | null } => {
+  return {
+    error: output?.domainConflictError ?? output?.publicEmailDomainError ?? null,
+    enterpriseJoinTarget:
+      output?.enterpriseJoinOrgName && output.enterpriseJoinWorkspaces
+        ? {
+            orgName: output.enterpriseJoinOrgName,
+            workspaces: JSON.parse(output.enterpriseJoinWorkspaces) as Array<{
+              id: string;
+              name: string;
+            }>,
+          }
+        : null,
+  };
 };
 
 export const authMachine = createMachine(
@@ -727,7 +748,7 @@ export const authMachine = createMachine(
       authenticated: {
         entry: ({ context }) => {
           if (context.user?.id) {
-            mixpanelService.identify(context.user);
+            posthogService.identify(context.user);
           }
         },
         on: {
@@ -859,7 +880,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -945,7 +966,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -1029,7 +1050,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -1307,17 +1328,11 @@ export const authMachine = createMachine(
       }),
       trackLoginSuccess: ({ context }) => {
         if (context.user?.id) {
-          mixpanelService.identify(context.user);
-          mixpanelService.track(EVENTS.AUTHENTICATION, {
-            type: EVENT_PROPERTIES.AUTH_TYPES.LOGIN,
-          });
+          posthogService.identify(context.user);
         }
       },
       trackLogoutSuccess: () => {
-        mixpanelService.track(EVENTS.AUTHENTICATION, {
-          type: EVENT_PROPERTIES.AUTH_TYPES.LOGOUT,
-        });
-        mixpanelService.reset();
+        posthogService.reset();
       },
     },
     actors: {

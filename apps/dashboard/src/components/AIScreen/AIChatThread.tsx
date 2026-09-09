@@ -68,6 +68,7 @@ import {
   resolveCitationIconUrl,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
+
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts } from './ReactArtifact';
 import { TOP_BAR_HEIGHT_CLASS } from '../AppNavigator/topBarHeight';
@@ -522,7 +523,7 @@ function ClawCitationChip({
         className={chipClass}
         aria-label={tooltip}
         onClick={openInPanel}
-        data-track-category='ask-ai'
+        data-track-category='AskAI'
         data-track-name='citation-open-doc-panel'
       >
         {chipInner}
@@ -1102,6 +1103,7 @@ function ChatMessageBubble({
                       Cancel
                     </button>
                     <button
+                      data-ph-capture-attribute-track-id='ai_chat_edit_submit'
                       type='button'
                       onClick={() => {
                         if (editText.trim()) {
@@ -1307,6 +1309,7 @@ function ChatMessageBubble({
                   Only wired on the latest bot message. */}
               {onRegenerate && (
                 <button
+                  data-ph-capture-attribute-track-id='ai_chat_regenerate'
                   type='button'
                   onClick={onRegenerate}
                   title='Regenerate response'

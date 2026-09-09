@@ -29,6 +29,8 @@ import {
   parseForwardedMessageXml,
   parsePreviewMd,
   isDeskChannelType,
+  resolveConversationAnchorType,
+  type ConversationAnchorType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
@@ -50,11 +52,6 @@ import { isMessageEditable } from '../../../utils/chatUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import {
   extractOriginFromHash,
   extractMessageIdFromHash,
@@ -98,6 +95,7 @@ import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUt
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
@@ -131,6 +129,7 @@ interface ChatBubbleProps {
   disableAskAI?: boolean;
   searchItemView?: boolean;
   onUserClick?: (userId: string) => void;
+  spawnedTicketMessageIds?: ReadonlySet<string> | undefined;
   isPrevActivity?: boolean;
   isNextActivity?: boolean;
   linkedConversationId?: string | null;
@@ -161,6 +160,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   disableAskAI = false,
   searchItemView = false,
   onUserClick,
+  spawnedTicketMessageIds,
   isPrevActivity = false,
   isNextActivity = false,
   linkedConversationId,
@@ -193,14 +193,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const sender = useUser(message.senderId);
 
   // Message shortcuts — fetched per channel, used by HoverActionsToolbar
-  const [messageShortcuts, setMessageShortcuts] = useState<AppShortcutWithApp[]>([]);
+  const messageShortcuts = useChannelShortcuts(channelId, 'MESSAGE');
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  useEffect(() => {
-    appsService
-      .getChannelShortcuts(channelId, { type: 'MESSAGE' })
-      .then(setMessageShortcuts)
-      .catch(() => undefined);
-  }, [channelId]);
 
   const messageConversationId = message.conversationId;
 
@@ -453,9 +447,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         channelId,
         conversationId: message['conversationId'],
       });
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,
-      });
       toast.success('Message deleted', {
         description: 'Your message has been deleted successfully',
         duration: 3000,
@@ -530,10 +521,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           );
         })
         .catch(() => undefined);
-
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: 'addBookmark',
-      });
     } catch {
       toast.error('Action failed', {
         description: 'Could not add bookmark',
@@ -553,9 +540,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             markAsDone: false,
           }),
         );
-        mixpanelService.track(EVENTS.INITIATE_ACTION, {
-          type: 'removeBookmark',
-        });
       } catch {
         toast.error('Action failed', {
           description: 'Could not remove bookmark',
@@ -918,8 +902,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ?.parentMessage)
     : undefined;
 
-  const threadPreviewText =
-    isShowInChannel && parentMessage?.content ? createMessagePreview(parentMessage.content) : null;
+  const threadPreviewText = parentMessage?.content
+    ? createMessagePreview(parentMessage.content)
+    : null;
 
   // For showInChannel messages, check if there are newer replies in the original thread
   // by checking if replyCount meets the minimum threshold
@@ -1037,7 +1022,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isMessageDeleted &&
         isTicketThread &&
         canNestSubTicket &&
-        !isFirstInThread && {
+        !isFirstInThread &&
+        !spawnedTicketMessageIds?.has(message.messageId) && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
       ...((!isSystemMessage || isTicketCreationMessage) &&
@@ -1303,13 +1289,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,
             })}
-            {...(isShowInChannel &&
+            {...((isShowInChannel || conversation?.initialMessageId === message.messageId) &&
               parentMessage &&
               threadPreviewText &&
               parentMessage.conversationId && {
                 threadInfo: {
                   preview: threadPreviewText,
                   conversationId: parentMessage.conversationId,
+                  ...((parentMessage as { channelId?: string }).channelId && {
+                    channelId: (parentMessage as { channelId?: string }).channelId,
+                  }),
+                  anchorType: resolveConversationAnchorType(
+                    parentMessage as { anchorType?: ConversationAnchorType },
+                  ),
                 },
               })}
           />
@@ -1499,6 +1491,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             onClose={() => setIsSubTicketModalOpen(false)}
             ticketId={threadTicketId}
             conversationId={conversation.conversationId}
+            sourceMessageId={message.messageId}
           />
         )}
 

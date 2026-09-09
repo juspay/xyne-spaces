@@ -42,6 +42,7 @@ type ThreadListProps = {
   matchedMessageId?: string | null;
   /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
   onUserClick?: ((userId: string) => void) | undefined;
+  spawnedTicketMessageIds?: ReadonlySet<string> | undefined;
 };
 
 /** Space reserved below the last message for the typing / agent-activity bar, which
@@ -69,6 +70,7 @@ const ThreadList = ({
   conversationParticipant,
   matchedMessageId,
   onUserClick,
+  spawnedTicketMessageIds,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
@@ -501,6 +503,7 @@ const ThreadList = ({
                       showAvatar={showAvatar}
                       context='thread'
                       {...(onUserClick && { onUserClick })}
+                      {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                       isFirstInThread={messageIndex === 0}
                       isTicketThread={isTicketThread}
                       isFlowStep={isFlowStep}
@@ -601,6 +604,7 @@ const ThreadList = ({
                     showAvatar={showAvatar}
                     context='thread'
                     {...(onUserClick && { onUserClick })}
+                    {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                     isFirstInThread={index === 0}
                     isTicketThread={isTicketThread}
                     isFlowStep={isFlowStep}

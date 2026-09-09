@@ -160,6 +160,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         className={cn(ghostButton, 'px-2.5')}
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CLICK_DECLINE'
+        data-ph-capture-attribute-track-id='agent_draft_decline'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {pending === 'reject' ? 'Declining…' : 'Decline'}
@@ -192,6 +193,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           className={cn(primaryButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_APPROVE'
+          data-ph-capture-attribute-track-id='agent_draft_approve'
         >
           {(pending === 'approve' || agentRunning) && (
             <Spinner size={14} className='animate-spin' />

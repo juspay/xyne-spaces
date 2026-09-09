@@ -41,7 +41,11 @@ export * from './utils/slashCommandArtifact';
 export {
   parseTicketMd,
   serializeTicketMd,
+  parseSubTicketsMd,
+  serializeSubTicketsMd,
+  SUB_TICKETS_MD_LIMIT,
   TicketCardSummary,
+  SubTicketsMdData,
 } from './utils/activityMetadataParser';
 export * from './types/research';
 export * from './tickets';

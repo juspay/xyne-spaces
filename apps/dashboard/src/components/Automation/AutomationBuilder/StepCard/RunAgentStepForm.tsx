@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Sparkles, X } from 'lucide-react';
+
 import { Combobox } from '../../../ui/Combobox/Combobox';
 import { AutomationRichTextField } from '../SchemaForm/AutomationRichTextField';
 import { SchemaJsonEditor, type SchemaTree } from '../SchemaForm/SchemaJsonEditor';
@@ -142,6 +143,7 @@ export function RunAgentStepForm({
             <span>Couldn&apos;t reach claw — agents unavailable.</span>
             <button
               type='button'
+              data-ph-capture-attribute-track-id='run_agent_step_agents_retry'
               data-track-category='automation-builder'
               data-track-name='run-agent-step-agents-retry'
               onClick={() => {

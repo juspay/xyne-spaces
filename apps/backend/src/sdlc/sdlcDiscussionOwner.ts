@@ -16,7 +16,7 @@ export interface SdlcDiscussionOwnerLookup {
   } | null>;
   getPullRequest: (id: string) => Promise<{ id: string; workspaceId: string } | null>;
   findLinkSource: (input: {
-    repoId: string;
+    channelId: string;
     targetType: Extract<SdlcEntityType, 'CANVAS' | 'TICKET' | 'PULL_REQUEST'>;
     targetId: string;
     relationType: Extract<SdlcRelationType, 'TICKET' | 'PULL_REQUEST'>;
@@ -26,7 +26,6 @@ export interface SdlcDiscussionOwnerLookup {
 export async function resolveSdlcDiscussionOwnerId(
   input: {
     workspaceId: string;
-    repoId: string;
     channelId: string;
     surfaceType: SdlcDiscussionSurfaceType;
     surfaceId: string;
@@ -56,7 +55,7 @@ export async function resolveSdlcDiscussionOwnerId(
       return null;
     }
     const link = await lookup.findLinkSource({
-      repoId: input.repoId,
+      channelId: input.channelId,
       targetType: 'TICKET',
       targetId: ticket.id,
       relationType: 'TICKET',
@@ -70,7 +69,7 @@ export async function resolveSdlcDiscussionOwnerId(
   const pullRequest = await lookup.getPullRequest(input.surfaceId);
   if (!pullRequest || pullRequest.workspaceId !== input.workspaceId) return null;
   const pullRequestLink = await lookup.findLinkSource({
-    repoId: input.repoId,
+    channelId: input.channelId,
     targetType: 'PULL_REQUEST',
     targetId: pullRequest.id,
     relationType: 'PULL_REQUEST',

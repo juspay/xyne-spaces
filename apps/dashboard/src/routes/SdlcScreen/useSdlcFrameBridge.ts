@@ -62,10 +62,10 @@ export function useSdlcFrameBridge(): void {
   useEffect(() => {
     if (!enabled) return;
 
-    const path = `${location.pathname}${location.search}`;
+    const path = `${location.pathname}${location.search}${location.hash}`;
     if (path === lastFromParentRef.current || path === lastReportedRef.current) return;
 
     lastReportedRef.current = path;
     window.parent.postMessage({ type: SDLC_FRAME_MESSAGE.route, path }, window.location.origin);
-  }, [enabled, location.pathname, location.search]);
+  }, [enabled, location.pathname, location.search, location.hash]);
 }

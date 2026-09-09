@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Input from '../../ui/Input';
+
 import { CanvasRow, HighlightedText } from '../CanvasRow';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -274,6 +275,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             onClick={() => void onCreateCanvasInFolder(folderGroup.folder)}
             disabled={isCreatingCanvas}
             title='Create canvas in folder'
+            data-ph-capture-attribute-track-id='create_canvas_in_folder'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_FOLDER'
           >

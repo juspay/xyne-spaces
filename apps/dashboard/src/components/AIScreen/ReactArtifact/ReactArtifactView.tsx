@@ -339,6 +339,7 @@ export const ReactArtifactView = ({
           )}
           {payload.dataRequirements?.some(r => r.source) && (
             <button
+              data-ph-capture-attribute-track-id='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -359,6 +360,7 @@ export const ReactArtifactView = ({
           )}
           {onSave && (
             <button
+              data-ph-capture-attribute-track-id='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}

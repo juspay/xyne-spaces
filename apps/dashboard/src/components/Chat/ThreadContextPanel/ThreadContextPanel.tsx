@@ -94,6 +94,7 @@ const ThreadContextPanel = ({
           className='w-full text-xs'
           disabled={items.length === 0}
           onClick={onConfirm}
+          trackId='confirm_thread_context'
           data-track-category='THREAD_CONTEXT'
           data-track-name='CONFIRM_THREAD_CONTEXT'
         >

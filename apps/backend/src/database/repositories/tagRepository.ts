@@ -237,6 +237,68 @@ export class TagRepository {
 
     return rows.map(r => r.conversationId);
   }
+
+  /**
+   * Distinct (conversationId, tagCategory, tag) triples for every email of a desk
+   * channel created inside [start, end].
+   *
+   * Where `findConversationIdsByEmailTags` answers "which threads match this
+   * filter?", this is the grouping read: the caller gets the tag values themselves
+   * so it can bucket tickets by category.
+   */
+  async findGeneratedTagsByConversation(
+    channelId: string,
+    configKey: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ conversationId: string; tagCategory: string; tag: string }[]> {
+    // Last email per conversation: a thread is re-tagged per email, so reading
+    // them all put one ticket in several sentiment groups at once.
+    const emails = await this.client().email.findMany({
+      where: { channelId, createdAt: { gte: start, lte: end } },
+      orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      distinct: ['conversationId'],
+      select: { id: true, conversationId: true },
+    });
+    if (emails.length === 0) return [];
+
+    // Tags hang off the email (`sourceId`), and `non_zero.tags` has no relation
+    // to `public.emails` to traverse, so the conversation is joined back here.
+    const conversationByEmailId = new Map(emails.map(e => [e.id, e.conversationId]));
+
+    const tags = await this.client().tag.findMany({
+      where: {
+        sourceId: { in: [...conversationByEmailId.keys()] },
+        sourceType: 'desk-email',
+        configKey,
+        isDeleted: false,
+      },
+      select: { sourceId: true, tagCategory: true, tag: true },
+    });
+
+    // Dedupe: the same category and tag can be stored twice against one email.
+    // The key is
+    // NUL-joined because categories and tags are LLM-authored free text: any
+    // printable separator can occur inside them and would fold two distinct
+    // triples into one ("customer intent"/"billing" vs "customer"/"intent billing").
+    const seen = new Set<string>();
+    const rows: { conversationId: string; tagCategory: string; tag: string }[] = [];
+    for (const { sourceId, tagCategory, tag } of tags) {
+      const conversationId = conversationByEmailId.get(sourceId);
+      if (!conversationId) continue;
+      const key = `${conversationId}\u0000${tagCategory}\u0000${tag}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ conversationId, tagCategory, tag });
+    }
+
+    logger.info('[TAG-REPO] findGeneratedTagsByConversation success', {
+      channelId,
+      count: rows.length,
+    });
+
+    return rows;
+  }
 }
 
 export const tagRepository = new TagRepository();

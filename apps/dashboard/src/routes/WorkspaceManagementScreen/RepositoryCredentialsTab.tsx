@@ -150,6 +150,8 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
                 <Button
                   variant='outline'
                   onClick={() => setCredential({ ...credential, status: 'REPLACING' })}
+                  data-track-category='workspace-management'
+                  data-track-name='REPLACE_GITHUB_CREDENTIAL'
                 >
                   <KeyRound className='h-4 w-4' /> Replace
                 </Button>
@@ -157,6 +159,8 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
                   variant='outline'
                   loading={busy === 'disconnect'}
                   onClick={() => void disconnect()}
+                  data-track-category='workspace-management'
+                  data-track-name='DISCONNECT_GITHUB_CREDENTIAL'
                 >
                   <Unplug className='h-4 w-4' /> Disconnect
                 </Button>
@@ -220,6 +224,8 @@ function CredentialForm(props: {
             value={props.resourceOwner}
             onChange={event => props.onOwner(event.target.value)}
             placeholder='github-org-or-user'
+            data-track-category='workspace-management'
+            data-track-name='EDIT_GITHUB_RESOURCE_OWNER'
             required
           />
         </label>
@@ -241,6 +247,8 @@ function CredentialForm(props: {
         type='submit'
         loading={props.busy}
         disabled={!props.token.trim() || !props.resourceOwner.trim()}
+        data-track-category='workspace-management'
+        data-track-name='SAVE_GITHUB_CREDENTIAL'
       >
         Validate and save
       </Button>

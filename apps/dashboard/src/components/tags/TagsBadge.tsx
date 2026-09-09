@@ -1,6 +1,7 @@
 import { ChevronDown, Loader2, Plus, Tag, X } from 'lucide-react';
 import { JSX, useState } from 'react';
 import { cn } from '../../utils/classNames';
+
 import { Popover } from '../ui/Popover/Popover';
 import { useTagEditor, useEntityTags } from '../../hooks/useSourceTags';
 import type { TagGroup } from '../../api/tagsApi';
@@ -139,6 +140,7 @@ export const TagEditorContent = ({
                       key={allowedTag}
                       type='button'
                       disabled={isMutating || wouldExceedMax}
+                      data-ph-capture-attribute-track-id='toggle_tag'
                       data-track-category='Support'
                       data-track-name='ToggleTag'
                       onClick={() => {
@@ -180,6 +182,7 @@ export const TagEditorContent = ({
                           <button
                             type='button'
                             disabled={isMutating}
+                            data-ph-capture-attribute-track-id='remove_tag'
                             data-track-category='Support'
                             data-track-name='RemoveTag'
                             onClick={() => {
@@ -219,6 +222,7 @@ export const TagEditorContent = ({
                           <button
                             key={t}
                             type='button'
+                            data-ph-capture-attribute-track-id='add_tag'
                             data-track-category='Support'
                             data-track-name='AddTag'
                             onClick={() => {

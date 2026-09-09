@@ -11,6 +11,7 @@ import { TagGenerationConfig } from '../TagGenerationConfig';
 import { useClawAgentDetail } from '../../../../hooks/useClawAgentDetail';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { apiInstance } from '../../../../services/clients/apiClient';
+
 import KnowledgeTab from '../../../../routes/ClawAgentsScreen/tabs/KnowledgeTab';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import type { AIFeaturesSubTabId } from '../DeskSettings';
@@ -667,7 +668,8 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
         <span className='inline-flex self-start'>
           <button
             type='button'
-            className='inline-flex items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+            data-ph-capture-attribute-track-id='run_ai_sync'
+            className='inline-flex h-auto items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
             onClick={() => {
               void handleRunSync();
             }}

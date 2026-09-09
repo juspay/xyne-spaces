@@ -23,6 +23,8 @@ export function DayTicketsModal({
         <Dialog.Overlay
           className='fixed inset-0 bg-black/40 backdrop-blur-sm z-50'
           onClick={onClose}
+          data-track-category='Tickets'
+          data-track-name='CLOSE_DAY_TICKETS_MODAL_BACKDROP'
         />
         <Dialog.Content className='fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-background rounded-2xl shadow-2xl z-50 flex flex-col max-h-[80vh] border border-border overflow-hidden'>
           <div className='flex items-center justify-between px-6 py-5 bg-gradient-to-r from-muted to-background border-b border-border'>
@@ -39,6 +41,8 @@ export function DayTicketsModal({
                 type='button'
                 className='p-2 hover:bg-muted rounded-lg transition-colors border border-border'
                 aria-label='Close'
+                data-track-category='Tickets'
+                data-track-name='CLOSE_DAY_TICKETS_MODAL'
               >
                 <X className='w-4 h-4 text-muted-foreground' />
               </button>

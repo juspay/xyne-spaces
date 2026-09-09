@@ -2185,6 +2185,7 @@ export const EmailComposer = ({
                     className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
                     data-track-category='Support'
                     data-track-name='ConfirmTwoStepSend'
+                    data-ph-capture-attribute-track-id='send_email_confirm'
                   >
                     {isSending ? (
                       <Loader2 size={14} className='animate-spin' />
@@ -2233,7 +2234,7 @@ export const EmailComposer = ({
               type='button'
               className='w-full flex items-center gap-2 cursor-pointer text-left py-1'
               onClick={handleExpand}
-              data-track-category='SUPPORT'
+              data-track-category='Support'
               data-track-name='ExpandReplyComposer'
               data-track-metadata={JSON.stringify({
                 toCount: toEmails.length,
@@ -2283,7 +2284,7 @@ export const EmailComposer = ({
                         type='button'
                         className='flex items-center gap-2 pb-1 pt-1 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors'
                         aria-label={`Switch reply mode. Current: ${replyMode === 'replyAll' ? 'Reply all' : 'Reply'}`}
-                        data-track-category='SUPPORT'
+                        data-track-category='Support'
                         data-track-name='ComposerReplyModeDropdown'
                       >
                         <div className='flex items-center gap-1'>
@@ -2340,7 +2341,7 @@ export const EmailComposer = ({
                     onClick={() => setIsExpanded(false)}
                     className='flex-shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
                     title='Collapse'
-                    data-track-category='SUPPORT'
+                    data-track-category='Support'
                     data-track-name='CollapseReplyComposer'
                     data-track-metadata={JSON.stringify({
                       toEmails: toEmails,
@@ -2397,7 +2398,7 @@ export const EmailComposer = ({
                         <button
                           onClick={() => setShowCc(true)}
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                          data-track-category='SUPPORT'
+                          data-track-category='Support'
                           data-track-name='ShowCcField'
                           data-track-metadata={JSON.stringify({
                             ccMails: ccEmails,
@@ -2413,7 +2414,7 @@ export const EmailComposer = ({
                         <button
                           onClick={() => setShowBcc(true)}
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                          data-track-category='SUPPORT'
+                          data-track-category='Support'
                           data-track-name='ShowBccField'
                           data-track-metadata={JSON.stringify({
                             ccCount: ccEmails.length,
@@ -2496,6 +2497,7 @@ export const EmailComposer = ({
                           title='Discard draft'
                           data-track-category='Support'
                           data-track-name='DiscardComposerDraft'
+                          data-ph-capture-attribute-track-id='discard_composer_draft'
                         >
                           <Trash2 size={14} />
                         </button>
@@ -2615,7 +2617,7 @@ export const EmailComposer = ({
               className='flex-1 text-sm py-1 outline-none bg-transparent'
               disabled={isSending}
               aria-label='Subject'
-              data-track-category='SUPPORT'
+              data-track-category='Support'
               data-track-name='EditComposeSubject'
             />
             {/* AI subject suggestion — disabled until the body has content
@@ -2641,6 +2643,7 @@ export const EmailComposer = ({
                   aria-label='Suggest subject with AI'
                   data-track-category='Support'
                   data-track-name='SuggestComposeSubject'
+                  data-ph-capture-attribute-track-id='generate_compose_subject'
                 >
                   {subjectAI.isGenerating ? (
                     <RefreshCw size={14} className='animate-spin' />
@@ -2884,7 +2887,7 @@ export const EmailComposer = ({
                     disabled={isSending || isUploadingAttachments}
                     className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                     aria-label='Attach files'
-                    data-track-category='SUPPORT'
+                    data-track-category='Support'
                     data-track-name='AddEmailAttachment'
                     data-track-metadata={JSON.stringify({
                       conversationId,
@@ -3043,6 +3046,7 @@ export const EmailComposer = ({
                   conversationId,
                   attachmentCount: attachments.length,
                 })}
+                data-ph-capture-attribute-track-id='send_email'
               >
                 {isSending ? (
                   <RefreshCw size={16} className='animate-spin' />

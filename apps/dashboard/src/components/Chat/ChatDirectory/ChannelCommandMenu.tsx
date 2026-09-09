@@ -86,11 +86,6 @@ import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
@@ -1744,22 +1739,6 @@ const ChannelCommandMenu = ({
         textFilterHint ||
         popupFilterHint ||
         (screenSearchActive ? getScreenSearchSuffix() : undefined);
-
-  // Track search performed in command menu (debounced)
-  useEffect(() => {
-    if (!searchText.trim() && activeTab !== TabType.CHANNELS) return;
-
-    const timer = setTimeout((): void => {
-      mixpanelService.track(EVENTS.SEARCH_PERFORMED, {
-        searchType: EVENT_PROPERTIES.SEARCH_TYPES.COMMAND_MENU,
-        searchCategory: activeTab,
-        resultsCount: filteredLocalChannels.length,
-      });
-    }, 500); // 500ms debounce
-
-    return (): void => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchText, activeTab]);
 
   // Reset expanded categories only when search text is cleared completely
   useEffect(() => {

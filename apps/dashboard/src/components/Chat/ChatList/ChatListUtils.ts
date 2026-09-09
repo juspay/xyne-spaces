@@ -48,10 +48,14 @@ export const extractMessageIdFromHash = (hash: string): string | null => {
  * - It's the first message
  * - Different sender than previous message
  * - Previous message was a conversation with replies
+ *
+ * `showThreadTags` is the reader's own preference: a tag chip only breaks grouping for
+ * someone who has the chips turned on.
  */
 export const shouldShowAvatar = (
   currentItem: CombinedMessageItem,
   prevItem: CombinedMessageItem | null,
+  showThreadTags: boolean,
 ): boolean => {
   if (!prevItem) return true;
 
@@ -100,15 +104,19 @@ export const shouldShowAvatar = (
   };
 
   // A tagged thread shows its chip beside the name and timestamp, so it needs its own
-  // header row — grouped under the previous message there is nowhere to put it. Raw check
-  // rather than parsing: '[]' means the tags were cleared, so there is nothing to show.
-  const hasThreadTag = (): boolean => {
+  // header row — grouped under the previous message there is nowhere to put it. Only when
+  // the reader has chips switched on: the classifier tags nearly every thread, so applying
+  // this unconditionally un-clubs the whole channel for people who see no chips at all.
+  // Raw check rather than parsing: '[]' means the tags were cleared, so there is nothing
+  // to show.
+  const hasVisibleThreadTag = (): boolean => {
+    if (!showThreadTags) return false;
     if (currentItem.type !== 'conversation') return false;
     const raw = currentItem.data.threadType;
     return !!raw && raw !== '[]';
   };
 
-  if (hasThreadTag()) return true;
+  if (hasVisibleThreadTag()) return true;
   if (isCurrentItemCallMessage()) return true;
   if (!isSameDayMessege()) return true;
 

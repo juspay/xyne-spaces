@@ -279,6 +279,7 @@ const NotificationKeywordsCard: FC = () => {
               <button
                 type='button'
                 onClick={() => removeKeyword(keyword)}
+                data-ph-capture-attribute-track-id='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
@@ -338,6 +339,8 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
               <button
                 key={level.value}
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                data-ph-capture-attribute-track-id='set_global_desktop_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -364,6 +367,8 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
               <button
                 key={level.value}
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                data-ph-capture-attribute-track-id='set_global_mobile_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -665,6 +670,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           size='sm'
           disabled={isDisconnecting}
           onClick={() => void handleDisconnectCalendar()}
+          trackId='disconnect_calendar'
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
         >
@@ -947,6 +953,7 @@ const PasswordSection: FC = () => {
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
           className='w-full'
+          trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
         >

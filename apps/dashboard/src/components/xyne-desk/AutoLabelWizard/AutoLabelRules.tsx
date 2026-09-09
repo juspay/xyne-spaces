@@ -80,7 +80,14 @@ export function MyAutoLabelRules({
     return (
       <div className='flex min-h-40 flex-col items-center justify-center gap-3 text-center'>
         <p className='text-sm text-muted-foreground'>Could not load your auto-label rules.</p>
-        <Button type='button' variant='outline' size='sm' onClick={onRetry}>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          onClick={onRetry}
+          data-track-category='xyne-desk'
+          data-track-name='auto-label-rules-retry'
+        >
           <RefreshCw className='size-4' />
           Try again
         </Button>

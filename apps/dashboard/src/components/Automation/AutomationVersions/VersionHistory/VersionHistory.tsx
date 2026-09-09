@@ -81,6 +81,7 @@ export function VersionHistory({
             Failed to load version history.
             <button
               type='button'
+              data-ph-capture-attribute-track-id='automation_version_history_retry'
               data-track-category='automation-versions'
               data-track-name='version-history-retry'
               onClick={() => {

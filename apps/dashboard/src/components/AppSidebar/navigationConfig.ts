@@ -29,6 +29,7 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
+  GitBranch,
   type PikaIconProps,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
@@ -94,6 +95,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
+  { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
   { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
   {
@@ -152,6 +154,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
 // Core items that are always in the toolbar. Users cannot remove these — their
 // toggle is locked on in the customize UI.
 export const REQUIRED_TOOLBAR_PATHS: string[] = [
+  '/ai',
   '/chat/dir',
   '/chat/dm',
   '/calls',
@@ -160,8 +163,6 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/sdlc',
   '/support',
   '/chat/activity',
-  '/guide',
-  '/releaseManager',
 ];
 
 // Paths shown in the toolbar by default (before any user customization).

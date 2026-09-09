@@ -45,6 +45,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
+import { workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -136,6 +137,7 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -193,6 +195,7 @@ import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
+import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
@@ -223,6 +226,7 @@ export class App {
           url.startsWith(`${apiPathPrefix}?`);
         if (isPrefixed) {
           req.url = `/api${url.slice(apiPathPrefix.length)}`;
+          req.originalUrl = req.url;
         }
         next();
       });
@@ -350,6 +354,8 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
+    // this.app.use('/api/workflows-v2', webhookLimiter, workflowsPublicRouter);
+
     // Claw MCP route (user + app auth) — must be before /api/query
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
     this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
@@ -420,6 +426,8 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
+    // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -461,6 +469,7 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
+    this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
       '/api/agent-tools-mappings',
@@ -586,6 +595,14 @@ export class App {
       validateS2SKey,
       handleSdlcClawCallback,
     );
+    // Claw's completion callback for a parked RUN_AGENT step. The session — not
+    // the node path — identifies which attempt reported back; the handler
+    // resolves the gate from it.
+    this.app.post(
+      '/api/internal/workflows-v2/claw-callback/:executionId',
+      validateS2SKey,
+      handleWorkflowClawCallback,
+    );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
@@ -691,6 +708,10 @@ export class App {
 
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
+
+    // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
+    // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.
+    this.app.use('/api/office-conversion', authMiddleware.authenticate, officeConversionRoutes);
 
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);
@@ -1006,6 +1027,9 @@ export class App {
     await vespaQueue.initialize();
     // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
     await vespaBackfillQueue.initialize();
+
+    const { initWorkflows } = await import('@/workflowsV2/runtime');
+    await initWorkflows();
 
     // Sync bots for all existing workspaces
     const dbClient = DatabaseClient.getInstance();

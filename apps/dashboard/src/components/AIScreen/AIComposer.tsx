@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { PlusDefault } from '@xyne/icons';
 import { toast } from 'sonner';
+import { posthogService } from '../../services/Analytics/posthogService';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
@@ -35,6 +36,7 @@ import { ModelThinkingSelector, formatModelLabel } from './ModelThinkingSelector
 import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
+
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
@@ -526,6 +528,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      // Keyboard submit is invisible to autocapture; emit it explicitly.
+      posthogService.capture('ai_query_submit', {
+        trigger: 'keyboard',
+        keyCombo: 'enter',
+      });
       submit();
     }
   };
@@ -953,10 +960,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 </button>
               ) : (
                 <button
+                  data-ph-capture-attribute-track-id='ai_composer_send'
                   type='submit'
                   disabled={!canSend}
                   aria-label='Send'
                   title='Send'
+                  data-track-category='XyneAI'
+                  data-track-name='SEND_MESSAGE'
                   className={cn(
                     'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
                   )}

@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import type { SdlcWiki, SdlcWikiActor, SdlcWikiPageSummary } from './types';
@@ -14,25 +15,30 @@ export class SdlcWikiService implements SdlcWiki {
   constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
   async listPages(actor: SdlcWikiActor, repoId: string): Promise<SdlcWikiPageSummary[]> {
-    const repo = await this.prisma.repo.findFirst({
+    // Membership is the read check.
+    const membership = await this.prisma.sdlcEntityLink.findFirst({
       where: {
-        id: repoId,
         workspaceId: actor.workspaceId,
+        targetType: 'REPOSITORY',
+        targetId: repoId,
+        relationType: SDLC_MEMBERSHIP_RELATION,
         channel: { participants: { some: { userId: actor.userId } } },
       },
+      orderBy: { createdAt: 'asc' },
       select: { channelId: true },
     });
-    if (!repo?.channelId) throw new AppError('SDLC repository not found', 404);
+    if (!membership?.channelId) throw new AppError('SDLC repository not found', 404);
 
     const folders = await this.prisma.canvasFolder.findMany({
       where: {
-        channelId: repo.channelId,
+        channelId: membership.channelId,
         OR: [{ name: WIKI_FOLDER_PREFIX }, { name: { startsWith: `${WIKI_FOLDER_PREFIX}/` } }],
       },
       select: {
         name: true,
         canvases: {
-          where: { sdlcArtifact: { is: { artifactType: 'WIKI' } } },
+          // Wiki folders are shared by the hub; each page belongs to one repository.
+          where: { sdlcArtifact: { is: { artifactType: 'WIKI', repoId } } },
           select: {
             id: true,
             title: true,

@@ -37,7 +37,7 @@ export function UpcomingCallActionsMenuItems({
     <>
       <DropdownMenuItem
         onClick={handleCopyLink}
-        data-track-category='calls'
+        data-track-category='CALLS'
         data-track-name='COPY_UPCOMING_CALL_LINK'
         className='flex items-center gap-2 text-sm font-medium rounded-lg'
       >
@@ -50,7 +50,7 @@ export function UpcomingCallActionsMenuItems({
             e.stopPropagation();
             onEdit();
           }}
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='EDIT_UPCOMING_CALL'
           className='flex items-center gap-2 text-sm font-medium rounded-lg'
         >
@@ -64,7 +64,7 @@ export function UpcomingCallActionsMenuItems({
             e.stopPropagation();
             onCancel();
           }}
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='CANCEL_UPCOMING_CALL'
           className='flex items-center gap-2 text-sm font-medium text-destructive focus:text-destructive rounded-lg'
         >

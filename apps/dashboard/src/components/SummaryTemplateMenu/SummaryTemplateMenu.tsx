@@ -78,6 +78,8 @@ export function SummaryTemplateMenu({
             onRequestClose();
             onRegenerate();
           }}
+          data-ph-capture-attribute-track-id='regenerate_selected_summary_template'
+          data-ph-capture-attribute-track-category={trackCategory}
           aria-label={`Regenerate with ${fullLabel}`}
           className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category={trackCategory}
@@ -112,6 +114,8 @@ export function SummaryTemplateMenu({
                   onRequestClose();
                   onSelectTemplate(template.id);
                 }}
+                data-ph-capture-attribute-track-id='select_summary_template'
+                data-ph-capture-attribute-trackCategory={trackCategory}
                 title={template.name}
                 className='flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
                 data-track-category={trackCategory}

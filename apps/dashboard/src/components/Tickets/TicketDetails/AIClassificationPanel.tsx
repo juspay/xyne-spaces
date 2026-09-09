@@ -241,6 +241,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
               <div className='flex gap-2'>
                 <button
                   onClick={() => void handleSave()}
+                  data-ph-capture-attribute-track-id='save_classification_override'
                   disabled={isSaving || !editCategory}
                   className='text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
                   data-track-category='AIClassification'
@@ -292,6 +293,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                       />
                       <button
                         onClick={() => void handleSaveField(key)}
+                        data-ph-capture-attribute-track-id='save_raw_classification_field'
                         disabled={savingField}
                         className='text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground disabled:opacity-50'
                         data-track-category='AIClassification'

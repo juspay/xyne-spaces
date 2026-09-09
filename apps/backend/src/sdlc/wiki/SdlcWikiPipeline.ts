@@ -11,6 +11,7 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcAdmission } from '@/queues/sdlcAdmission';
 import { cancelS2SClawRun } from '@/services/clawAgentService';
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { requireSdlcBaseBranch } from '../sdlcRepositoryContext';
 import { sdlcVcs } from '../vcs';
 import {
@@ -308,30 +309,38 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
         name: true,
         workspaceId: true,
         projectId: true,
-        channelId: true,
         createdBy: true,
         baseBranch: true,
         accessCapabilities: true,
+      },
+    });
+    const membership = await this.prisma.sdlcEntityLink.findFirst({
+      where: {
+        workspaceId: actor.workspaceId,
+        targetType: 'REPOSITORY',
+        targetId: repoId,
+        relationType: SDLC_MEMBERSHIP_RELATION,
+        channel: { participants: { some: { userId: actor.userId } } },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        channelId: true,
         channel: {
           select: {
-            participants: {
-              where: { userId: actor.userId },
-              select: { role: true },
-              take: 1,
-            },
+            participants: { where: { userId: actor.userId }, select: { role: true }, take: 1 },
           },
         },
       },
     });
-    const participant = repo?.channel?.participants[0];
-    if (!repo?.projectId || !repo.channelId || !participant) {
+    const participant = membership?.channel?.participants[0];
+    if (!repo?.projectId || !membership?.channelId || !participant) {
       throw new AppError('SDLC repository not found', 404);
     }
     if (requireAdmin && participant.role !== 'ADMIN') {
       throw new AppError('Repository admin access is required', 403);
     }
     if (requireAdmin) await sdlcVcs.requireCapabilities(actor, repo.id, ['READ_REPOSITORY']);
-    return repo as WikiRepositoryRecord;
+    return { ...repo, channelId: membership.channelId } as WikiRepositoryRecord;
   }
 
   private queuedContext(
@@ -348,6 +357,7 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
       version: 2,
       executionModel: 'HISTORY_WINDOW',
       repoId: repo.id,
+      channelId: repo.channelId,
       agentSlug: null,
       conversationId: null,
       sessionId: null,
@@ -389,7 +399,6 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
       await tx.$queryRaw`SELECT "id" FROM "public"."repos" WHERE "id" = ${repo.id} FOR UPDATE`;
       const activeLinks = await tx.sdlcEntityLink.findMany({
         where: {
-          repoId: repo.id,
           sourceType: 'REPOSITORY',
           sourceId: repo.id,
           targetType: 'WORKFLOW_EXECUTION',
@@ -434,7 +443,7 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
       await tx.sdlcEntityLink.create({
         data: {
           workspaceId: actor.workspaceId,
-          repoId: repo.id,
+          channelId: repo.channelId,
           sourceType: 'REPOSITORY',
           sourceId: repo.id,
           targetType: 'WORKFLOW_EXECUTION',
@@ -450,7 +459,6 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
   private async linkedRun(tx: Prisma.TransactionClient, repoId: string, executionId: string) {
     const link = await tx.sdlcEntityLink.findFirst({
       where: {
-        repoId,
         sourceType: 'REPOSITORY',
         sourceId: repoId,
         targetType: 'WORKFLOW_EXECUTION',
@@ -483,7 +491,6 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
   ): Promise<void> {
     const links = await tx.sdlcEntityLink.findMany({
       where: {
-        repoId,
         sourceType: 'REPOSITORY',
         sourceId: repoId,
         targetType: 'WORKFLOW_EXECUTION',
@@ -506,7 +513,6 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
   private async latestRun(repoId: string) {
     const link = await this.prisma.sdlcEntityLink.findFirst({
       where: {
-        repoId,
         sourceType: 'REPOSITORY',
         sourceId: repoId,
         targetType: 'WORKFLOW_EXECUTION',

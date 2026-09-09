@@ -4,11 +4,8 @@ import {
   BoardType,
   deserializeFlowPlan,
   inferRepositoryNameFromUrl,
-  normalizeChannelName,
-  validateChannelName,
   type FlowPlan,
 } from '@xyne/shared';
-import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
   PencilEdit as Edit2,
@@ -38,7 +35,6 @@ import { toast } from 'sonner';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
-import { channelService } from '../../services/Chat/channelService';
 import { ProjectRepositoriesSection } from './ProjectRepositoriesSection';
 
 // Type for board data passed from BoardEditScreen to BoardStageConfigScreen
@@ -89,7 +85,6 @@ const ProjectDetailScreen = (): ReactElement => {
   const [repositoryUrl, setRepositoryUrl] = useState('');
   const [repositoryName, setRepositoryName] = useState('');
   const [repositoryNameEdited, setRepositoryNameEdited] = useState(false);
-  const [debouncedRepositoryName, setDebouncedRepositoryName] = useState('');
   const [repositoryBranch, setRepositoryBranch] = useState('main');
   const [addingRepository, setAddingRepository] = useState(false);
   const [repositoryRefreshKey, setRepositoryRefreshKey] = useState(0);
@@ -231,21 +226,6 @@ const ProjectDetailScreen = (): ReactElement => {
     fullBoardDetailsStatus.type,
   ]);
 
-  useEffect(() => {
-    const timeoutId = setTimeout(() => setDebouncedRepositoryName(repositoryName), 500);
-    return (): void => clearTimeout(timeoutId);
-  }, [repositoryName]);
-
-  const { data: channelDuplicateCheck } = useQuery({
-    queryKey: ['checkDuplicateChannel', debouncedRepositoryName, 'default'],
-    queryFn: () => channelService.checkDuplicateChannel(debouncedRepositoryName),
-    enabled:
-      Boolean(debouncedRepositoryName) && validateChannelName(debouncedRepositoryName) === null,
-    staleTime: 0,
-    retry: 1,
-    refetchOnWindowFocus: false,
-  });
-
   const loading = project === undefined || boards === undefined;
 
   // Early return if no projectId
@@ -300,15 +280,15 @@ const ProjectDetailScreen = (): ReactElement => {
     }
   };
 
-  const repositoryNameError = repositoryName
-    ? (validateChannelName(repositoryName) ??
-      (channelDuplicateCheck?.isDuplicate ? 'Channel name already exists' : null))
-    : null;
+  // A repository label, not a channel name: repositories no longer create a
+  // channel, and a space names itself when it is created.
+  const repositoryNameError =
+    repositoryName && repositoryName.length > 120 ? 'Keep the name under 120 characters' : null;
 
   const handleRepositoryUrlChange = (value: string): void => {
     setRepositoryUrl(value);
     if (repositoryNameEdited) return;
-    setRepositoryName(normalizeChannelName(inferRepositoryNameFromUrl(value) ?? ''));
+    setRepositoryName(inferRepositoryNameFromUrl(value) ?? '');
   };
 
   const closeAddRepositoryModal = (): void => {
@@ -848,7 +828,7 @@ const ProjectDetailScreen = (): ReactElement => {
             data-track-name='RepositoryUrlChanged'
           />
           <label htmlFor='sdlc-repository-name' className='mt-4 block text-sm font-medium'>
-            Channel name
+            Repository name
           </label>
           <input
             id='sdlc-repository-name'
@@ -856,7 +836,7 @@ const ProjectDetailScreen = (): ReactElement => {
             value={repositoryName}
             onChange={event => {
               setRepositoryNameEdited(true);
-              setRepositoryName(normalizeChannelName(event.target.value));
+              setRepositoryName(event.target.value);
             }}
             className={cn(
               'mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring',
@@ -871,7 +851,7 @@ const ProjectDetailScreen = (): ReactElement => {
               repositoryNameError ? 'text-destructive' : 'text-muted-foreground',
             )}
           >
-            {repositoryNameError ?? "Names this repository's SDLC channel."}
+            {repositoryNameError ?? 'How this repository is labelled in SDLC spaces.'}
           </p>
           <div className='mt-4'>
             <label htmlFor='sdlc-repository-branch' className='block text-sm font-medium'>
@@ -895,7 +875,7 @@ const ProjectDetailScreen = (): ReactElement => {
               loading={addingRepository}
               disabled={!repositoryUrl.trim() || !repositoryName || Boolean(repositoryNameError)}
             >
-              Attach repository
+              Add repository
             </Button>
           </div>
         </form>

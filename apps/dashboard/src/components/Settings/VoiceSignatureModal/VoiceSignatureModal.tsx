@@ -224,6 +224,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                   <p className='text-xs font-medium text-foreground'>Voice signature stored</p>
                 </div>
                 <button
+                  data-ph-capture-attribute-track-id='delete_voice_signature'
                   onClick={() => void handleDelete()}
                   data-track-category='voice-signature'
                   data-track-name='delete-signature'

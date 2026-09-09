@@ -71,6 +71,7 @@ export const DownloadButton = memo<DownloadButtonProps>(
         type='button'
         onClick={e => void handleDownload(e)}
         disabled={isDownloading}
+        data-ph-capture-attribute-track-id='download_attachment'
         className={`p-2 rounded-md text-foreground transition-colors duration-200 disabled:opacity-50 ${VARIANT_STYLES[variant]}`}
         title={buttonLabel}
         aria-label={buttonLabel}

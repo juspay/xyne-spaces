@@ -5,6 +5,7 @@ import { useFlow } from '../FlowContext';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
+
 import type { FlowAction, FlowComponent, UserQuestionItem, UserQuestionOption } from '@xyne/shared';
 
 interface UserQuestionNodeProps {
@@ -370,6 +371,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
             onClick={advance}
             disabled={disabled}
             className='flex h-7 items-center rounded-lg border border-foreground/10 bg-background px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60'
+            data-ph-capture-attribute-track-id='user_question_submit'
           >
             <span className='px-1'>{isLast ? 'Submit' : 'Next'}</span>
           </button>

@@ -7,6 +7,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { Popover } from '../../ui/Popover/Popover';
+
 import { cn } from '../../../utils/classNames';
 
 export type ConversationLabelSlot = 'chips' | 'picker';
@@ -169,6 +170,7 @@ export const ConversationLabels = ({
             key={label.id}
             type='button'
             onClick={() => toggleByName(label.id, label.name, color)}
+            data-ph-capture-attribute-track-id='toggle_conversation_label'
             className='flex items-center justify-between w-full px-2 py-1.5 text-sm rounded text-left hover:bg-muted text-foreground'
             data-track-category='Support'
             data-track-name='ToggleConversationLabel'
@@ -189,6 +191,7 @@ export const ConversationLabels = ({
           <button
             type='button'
             onClick={createAndApply}
+            data-ph-capture-attribute-track-id='create_conversation_label'
             className='flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded font-medium text-foreground hover:bg-muted'
             data-track-category='Support'
             data-track-name='CreateConversationLabel'
@@ -218,6 +221,7 @@ export const ConversationLabels = ({
                 type='button'
                 aria-label={`Remove ${mapping.labelName}`}
                 onClick={() => void removeLabel(mapping.labelId)}
+                data-ph-capture-attribute-track-id='remove_conversation_label'
                 className='hover:bg-muted rounded-full p-0.5'
                 data-track-category='Support'
                 data-track-name='RemoveConversationLabel'
