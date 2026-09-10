@@ -39,6 +39,31 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      # node_modules cache. `cache: pnpm` above only caches the global pnpm
+      # store (downloaded tarballs) — every run still re-links the store into
+      # node_modules, the slow part with node-linker=isolated + 22 workspace
+      # packages. Cache the linked tree too, keyed on the lockfile. With the
+      # isolated linker the virtual store lives in the ROOT node_modules/.pnpm
+      # and each package symlinks into it, so the root tree must be cached or the
+      # symlinks dangle. On a hit `pnpm install` below is a near-instant no-op;
+      # on a lockfile change it falls back to a normal install.
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          # Exact lockfile match only (no restore-keys): never link a fresh
+          # install on top of a stale tree from a different lockfile. A miss
+          # just does a full install from the (cached) store.
+          # Per-job suffix: each job runs a filtered install and thus produces a
+          # DIFFERENT partial tree. Sharing one key made the jobs race for a
+          # single cache slot (first to finish wins, rest skipped), so most jobs
+          # restored a tree missing their packages. Namespacing by job gives each
+          # its own complete cache.
+          key: nm-${{ runner.os }}-backend-${{ hashFiles('pnpm-lock.yaml') }}
+
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-backend...
 
@@ -80,6 +105,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      # See backend job for rationale: cache the linked node_modules tree (root
+      # + per-package for the isolated linker), keyed exactly on the lockfile.
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: nm-${{ runner.os }}-dashboard-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-spaces-dashboard...
@@ -129,6 +165,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      # See backend job for rationale: cache the linked node_modules tree (root
+      # + per-package for the isolated linker), keyed exactly on the lockfile.
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: nm-${{ runner.os }}-agentic-${{ hashFiles('pnpm-lock.yaml') }}
+
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter agentic-framework...
 
@@ -153,6 +200,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      # See backend job for rationale: cache the linked node_modules tree (root
+      # + per-package for the isolated linker), keyed exactly on the lockfile.
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: nm-${{ runner.os }}-claw-${{ hashFiles('pnpm-lock.yaml') }}
+
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-claw...
 
@@ -176,7 +234,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The gitleaks binary is version-pinned, so cache it per OS/arch/version
+      # instead of re-downloading the release tarball on every run.
+      - name: Cache gitleaks binary
+        id: gl
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ runner.arch }}-${{ env.GITLEAKS_VERSION }}
+
       - name: Install gitleaks
+        if: steps.gl.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           # The self-hosted runners differ in OS, so the release asset has to
@@ -195,6 +263,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bin"
           curl -sfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_${os}_${arch}.tar.gz" \
             | tar -xz -C "$RUNNER_TEMP/bin" gitleaks
+
+      # Runs on both hit and miss so PATH is set and the binary is verified
+      # regardless of whether the install step above was skipped.
+      - name: Add gitleaks to PATH
+        run: |
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/bin/gitleaks" version
 
@@ -222,11 +295,26 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The trivy binary is version-pinned, so cache it per OS/arch/version
+      # instead of re-running the install script on every run.
+      - name: Cache Trivy binary
+        id: tv
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin/trivy
+          key: trivy-bin-${{ runner.os }}-${{ runner.arch }}-${{ env.TRIVY_VERSION }}
+
       - name: Install Trivy
+        if: steps.tv.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/bin"
           curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/v${TRIVY_VERSION}/contrib/install.sh" \
             | sh -s -- -b "$RUNNER_TEMP/bin" "v${TRIVY_VERSION}"
+
+      # Runs on both hit and miss so PATH is set and the binary is verified
+      # regardless of whether the install step above was skipped.
+      - name: Add Trivy to PATH
+        run: |
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/bin/trivy" --version
 
@@ -236,13 +324,25 @@ jobs:
       - name: Pin Trivy cache path
         run: echo "TRIVY_CACHE_DIR=$HOME/.cache/trivy" >> "$GITHUB_ENV"
 
-      # Vulnerability DB (~few hundred MB) changes ~every 6h; cache it per day so
-      # reruns don't re-download. A cache miss just downloads fresh — never fatal.
+      # Vulnerability DB (~few hundred MB) refreshes ~every 6h. Bucket the cache
+      # key on the same 6h cadence: every run inside a window is a true cache hit
+      # (no download), and the first run of a new window pulls only the delta on
+      # top of the previous window's DB (via restore-keys). The old
+      # github.run_id key never matched — it re-fetched every run. Expressions
+      # can't compute time, so the bucket (e.g. 2026-08-20-3) is built in a step.
+      - name: Trivy DB cache bucket (6-hourly)
+        id: tdb
+        # 10# forces base-10: bash reads a leading-zero hour like 08/09 as
+        # invalid octal in $(( )) otherwise, failing the step at 08:00/09:00 UTC.
+        run: echo "key=$(date -u +%Y-%m-%d)-$(( 10#$(date -u +%H) / 6 ))" >> "$GITHUB_OUTPUT"
+
       - name: Cache Trivy DB
         uses: actions/cache@v4
         with:
           path: ~/.cache/trivy
-          key: trivy-db-${{ github.run_id }}
+          key: trivy-db-${{ steps.tdb.outputs.key }}
+          # Newest older DB when this window's cache doesn't exist yet, so Trivy
+          # updates just the delta instead of a full download.
           restore-keys: |
             trivy-db-
 
