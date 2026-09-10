@@ -9,7 +9,6 @@ import {
   AutoDraftStatus,
   MailboxState,
   WorkspaceRole,
-  type DeskMetricsDeskListResponse,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -135,7 +134,7 @@ import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
-import { useAuthContextValues } from '../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -212,7 +211,7 @@ import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -575,7 +574,8 @@ const SupportScreen = (): ReactElement => {
   // Gate the Tickets shortcut the same way the main rail gates '/projects'.
   const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
-  const { userID, role } = useAuthContextValues();
+  const { userID } = useAuthContextValues();
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
   const { isMobile } = usePlatform();
   const zero = useZero();
   const queryClient = useQueryClient();
@@ -1248,20 +1248,11 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
-  // Guests can't read email_channel_preferences, so they get metricsEnabled from the desk list.
-  const isGuest = role === WorkspaceRole.GUEST;
-  const { data: guestMetricsDesks } = useQuery({
-    queryKey: ['desk-metrics-desks'],
-    queryFn: async () =>
-      (await apiInstance.get<DeskMetricsDeskListResponse>('/desk-metrics/desks')).data.desks,
-    enabled: isGuest,
-  });
+  // Guests can't read email_channel_preferences (Zero ACL), so gate them on role instead.
   const metricsEnabled =
     !!selectedChannelId &&
     selectedChannelId !== ALL_CHANNELS_ID &&
-    (isGuest
-      ? !!guestMetricsDesks?.find(desk => desk.channelId === selectedChannelId)?.metricsEnabled
-      : !!channelPreference?.metricsEnabled);
+    (isGuest || !!channelPreference?.metricsEnabled);
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
