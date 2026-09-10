@@ -69,6 +69,8 @@ export interface MessageBubbleProps {
   conversation?: ConversationWithTicket;
   context?: 'channel' | 'thread';
   contentOnly?: boolean;
+  /** Render URLs/links as inert plain text (activity sidebar previews). */
+  disableLinks?: boolean;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   threadInfo?: ThreadInfo;
   channelScopeType?: ChannelScopeType | undefined;
