@@ -1,3 +1,10 @@
+## [1.302.0](https://github.com/juspay/xyne-spaces/compare/v1.301.1...v1.302.0) (2026-09-10)
+
+
+### Features
+
+* show basic desk metrics to guest users ([#1745](https://github.com/juspay/xyne-spaces/issues/1745)) ([1afa989](https://github.com/juspay/xyne-spaces/commit/1afa989adf26ab01fd7029970fe2e5e4455dbae3))
+
 ## [1.301.1](https://github.com/juspay/xyne-spaces/compare/v1.301.0...v1.301.1) (2026-09-10)
 
 ## [1.301.0](https://github.com/juspay/xyne-spaces/compare/v1.300.2...v1.301.0) (2026-09-10)
