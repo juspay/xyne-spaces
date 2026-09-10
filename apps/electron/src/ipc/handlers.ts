@@ -5,6 +5,14 @@ import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
+import {
+  openCallWindow,
+  getCallWindow,
+  closeCallWindow,
+  prewarmCallWindow,
+  takePendingCallRoute,
+  setCallWindowRinging,
+} from '../window/call-window';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
@@ -651,9 +659,49 @@ export function setupIpcHandlers(): void {
     setRecordingPillTheme(theme);
   });
 
-  ipcMain.on('call:state-changed', (event, inCall: unknown) => {
+  ipcMain.on('call:open-window', (event, payload: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    const request = payload as { relativePath?: unknown; inactive?: unknown } | null;
+    const relativePath = typeof request?.relativePath === 'string' ? request.relativePath : '';
+    if (!relativePath.startsWith('/newWindow/call/')) {
+      errorLogger.warn('[ipc] Rejected call:open-window with unexpected path');
+      return;
+    }
+    openCallWindow({ relativePath, inactive: request?.inactive === true });
+  });
+
+  ipcMain.on('call:prewarm-window', (event) => {
     if (!isMainWindowSender(event)) return;
-    setCallActive(!!inCall);
+    prewarmCallWindow();
+  });
+
+  ipcMain.handle('call:take-pending-route', (event) => {
+    if (!isAppWindowSender(event)) return null;
+    return takePendingCallRoute();
+  });
+
+  ipcMain.on('call:ringing-changed', (event, ringing: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setCallWindowRinging(!!ringing);
+  });
+
+  ipcMain.on('call:focus-window', (event) => {
+    if (!isAppWindowSender(event)) return;
+    const win = getCallWindow();
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+
+  ipcMain.on('call:close-window', (event) => {
+    if (!isAppWindowSender(event)) return;
+    closeCallWindow();
+  });
+
+  ipcMain.on('call:state-changed', (event, inCall: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setCallActive(!!inCall, event.sender.id);
   });
 
   ipcMain.on('recording:renderer-ready', (event) => {
