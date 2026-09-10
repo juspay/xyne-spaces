@@ -174,6 +174,7 @@ export interface SwitchStepConfig {
 export type AutomationStepConfig = ActionStepConfig | ConditionalStepConfig | SwitchStepConfig;
 
 export const ScheduleOffsetUnitValues = {
+  seconds: 'seconds',
   minutes: 'minutes',
   hours: 'hours',
   days: 'days',
@@ -188,7 +189,7 @@ export interface ScheduleOffset {
 
 export type ScheduleConfig =
   | { type: 'IMMEDIATE' }
-  | { type: 'SCHEDULED'; field: string; offset: ScheduleOffset };
+  | { type: 'SCHEDULED'; field: string; offset: ScheduleOffset; businessHoursOnly?: boolean };
 
 export const MAX_SCHEDULE_OFFSET_MINUTES = 30 * 24 * 60;
 
