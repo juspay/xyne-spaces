@@ -4788,7 +4788,10 @@ model ExecutionItem {
   workspaceId     String // denormalized tenant key (stamped on insert)
   id              String    @id @default(cuid())
   conversationId  String // thread this item lives in (no FK constraint)
-  channelId       String // denormalized for ACL joins (no FK constraint)
+  // Denormalized for ACL joins (no FK constraint). Kept in step with the
+  // conversation: reparenting rewrites it in the same transaction that moves
+  // the thread, so a feed may scope on it directly.
+  channelId       String
   sourceMessageId String // message that created the ask; >1 item per source = split
   title           String
   contextSummary  String?
@@ -4799,14 +4802,18 @@ model ExecutionItem {
   updatedAt       DateTime  @updatedAt
   resolvedAt      DateTime?
 
-  // Only indexes an actual query drives off. workspaceId is never the selective
-  // predicate here — every read pairs it with a GIN array match, a
-  // conversationId, or an id, so the planner drives off that and applies
-  // workspaceId as a filter. Leading with it produced write cost for nothing.
+  // Only indexes an actual query drives off. Most reads pair workspaceId with
+  // a GIN array match, a conversationId, or an id, so the planner drives off
+  // that and applies workspaceId as a filter. The one exception is the Pending
+  // Others feed: its array predicates are a negation and an emptiness test
+  // that GIN cannot serve, so nothing narrows it before the ORDER BY. The last
+  // index below lets that walk updatedAt in order and stop at the limit rather
+  // than sorting everything the channel scope leaves standing.
   @@index([conversationId, status]) // gate: tracked-thread check + resolve-all
   @@index([channelId, status]) // DM scope: open items, debug, bulk actions
   @@index([pendingOn], type: Gin) // feed: Pending Me membership
   @@index([requestedBy], type: Gin) // feed: Waiting On membership
+  @@index([workspaceId, status, updatedAt(sort: Desc)]) // feed: Pending Others ordering
   @@map("execution_items")
   @@schema("non_zero")
 }
@@ -4889,20 +4896,3 @@ model ExecutionRunLog {
   @@schema("non_zero")
 }
 
-// Radar execution engine: viewer-defined team lenses. A team is a personal,
-// named set of users; the team feed shows open items involving those members,
-// filtered by the VIEWER's channel access (DMs / private channels the viewer
-// is not in stay invisible — the lens never widens ACL).
-model RadarTeam {
-  workspaceId String // denormalized tenant key (stamped on insert)
-  id          String   @id @default(cuid())
-  ownerId     String // creator — teams are private to the viewer who made them
-  name        String
-  memberIds   String[] @default([])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([workspaceId, ownerId])
-  @@map("radar_teams")
-  @@schema("non_zero")
-}

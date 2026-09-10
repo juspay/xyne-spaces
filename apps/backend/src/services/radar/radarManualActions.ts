@@ -17,7 +17,7 @@ const MAX_RESOLVE_ALL_ITEMS = 200;
 export class RadarActionError extends Error {
   constructor(
     public code: 'not-found' | 'bad-request' | 'forbidden',
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = 'RadarActionError';
@@ -27,6 +27,8 @@ export class RadarActionError extends Error {
 interface AuthContext {
   userId: string;
   workspaceId: string;
+  /** Required: the ACL needs it to tell a guest from a member. */
+  role: string;
 }
 
 /**
@@ -45,10 +47,7 @@ class RadarManualActionsService {
     // Either side may close it — the assignee finished it, or the requester
     // withdrew it. A bystander may not.
     if (!item.requestedBy.includes(auth.userId) && !item.pendingOn.includes(auth.userId)) {
-      throw new RadarActionError(
-        'forbidden',
-        'Only someone involved in this item can resolve it',
-      );
+      throw new RadarActionError('forbidden', 'Only someone involved in this item can resolve it');
     }
     const { scope } = await this.resolveScope(auth, item.conversationId);
     return this.applyManual(auth, item.conversationId, scope, [
@@ -86,7 +85,7 @@ class RadarManualActionsService {
       auth,
       conversationId,
       scope,
-      items.map(i => ({ op: 'dismiss' as const, itemId: i.id, conversationId: i.conversationId })),
+      items.map((i) => ({ op: 'dismiss' as const, itemId: i.id, conversationId: i.conversationId }))
     );
   }
 
@@ -113,7 +112,7 @@ class RadarManualActionsService {
       auth,
       conversationId,
       scope,
-      items.map(i => ({ op: 'resolve' as const, itemId: i.id, conversationId: i.conversationId })),
+      items.map((i) => ({ op: 'resolve' as const, itemId: i.id, conversationId: i.conversationId }))
     );
   }
 
@@ -172,7 +171,7 @@ class RadarManualActionsService {
       scope: radarScopeFor(
         conversation?.channel?.scopeType ?? null,
         conversation?.channelId ?? '',
-        scopeKey,
+        scopeKey
       ),
     };
   }
@@ -208,7 +207,7 @@ class RadarManualActionsService {
     auth: AuthContext,
     conversationId: string,
     scope: RadarScope,
-    operations: Array<Omit<ApplyOperation, 'sourceMessageId'>>,
+    operations: Array<Omit<ApplyOperation, 'sourceMessageId'>>
   ) {
     // Under thread scope the watermark is slammed to the thread's latest
     // message, so the parser cannot re-litigate from a stale window.
@@ -238,7 +237,7 @@ class RadarManualActionsService {
       conversationId,
       scope,
       // A CTA acts "as of" the latest message — recorded as its source in audit.
-      operations: operations.map(op => ({
+      operations: operations.map((op) => ({
         ...op,
         sourceMessageId: watermark?.messageId ?? '',
       })) as ApplyOperation[],

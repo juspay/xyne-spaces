@@ -219,6 +219,19 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'messageActs must be a comma-separated string'
   }),
 
+  // Entity filter: entity name(s) annotated on chat messages / tickets (`entityNames`).
+  entity: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((name: string) => name.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'entity must be a string or array of entity names'
+    }),
+
   dynamicFieldValues: Joi.alternatives()
     .try(
       Joi.array().items(Joi.string()),

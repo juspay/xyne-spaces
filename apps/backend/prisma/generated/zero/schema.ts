@@ -3021,18 +3021,6 @@ export const executionRunLogTable = table("execution_run_logs")
   })
   .primaryKey("id");
 
-export const radarTeamTable = table("radar_teams")
-  .columns({
-    workspaceId: string(),
-    id: string(),
-    ownerId: string(),
-    name: string(),
-    memberIds: json<string[]>(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
 
 // Define relationships
 
@@ -5228,7 +5216,6 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
-      radarTeamTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5532,4 +5519,3 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
-export type RadarTeam = Row<typeof schema.tables.radar_teams>;
