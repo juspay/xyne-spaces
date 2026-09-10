@@ -50,7 +50,7 @@ import {
   isExternalCalendarEvent,
   type RecentCallFilterV2,
 } from '../CallHistoryScreen/callHistoryItem.utils';
-import { CallLabelFilter } from './CallLabelFilter';
+import { CallLabelFilter } from '../CallHistoryScreen/CallLabelFilter';
 import CallAskAIModal from './components/CallAskAIModal';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
@@ -64,7 +64,7 @@ import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { MentionType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
-import { CallHistorySearchPanel } from './CallHistorySearchPanel';
+import { CallHistorySearchPanel } from '../CallHistoryScreen/CallHistorySearchPanel';
 import { Button } from '../../components/ui/Button/Button';
 import { Switch } from '../../components/ui/Switch';
 import { Popover } from '../../components/ui/Popover/Popover';
@@ -723,6 +723,7 @@ const CallHistoryV2Screen = (): ReactElement => {
         <div className='max-w-[820px] w-full sticky top-0 bg-background z-50 flex flex-col px-6 pt-8 sm:px-8'>
           {/* Row 1: Title + calendar sync */}
           <CallHistorySearchPanel
+            variant='v2'
             callMentionSearchType={callMentionSearchType}
             callMentionSearchQuery={callMentionSearchQuery}
             callSearchSelectedMentions={callSearchSelectedMentions}
