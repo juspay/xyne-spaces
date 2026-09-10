@@ -56,6 +56,27 @@ type PrismaTransaction = Omit<
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
 
+async function upsertTicketDescription(
+  db: PrismaTransaction | typeof prisma,
+  ticketId: string,
+  workspaceId: string,
+  channelId: string,
+  description: string,
+  createdAt: Date,
+): Promise<void> {
+  await db.ticketDescription.upsert({
+    where: { ticketId },
+    update: { description },
+    create: {
+      ticketId,
+      workspaceId,
+      channelId,
+      description,
+      createdAt,
+    },
+  });
+}
+
 const makeFallbackCountsSnapshot = (ticket: {
   id: string;
   workspaceId: string;
@@ -308,6 +329,8 @@ export class TicketRepository {
       ? await runCreate(tx)
       : await prisma.$transaction((innerTx) => runCreate(innerTx));
     const ticket = createResult.finalTicket;
+
+    await upsertTicketDescription(db, ticket.id, ticket.workspaceId, ticket.channelId, data.description, new Date());
 
     // Post-commit notification dispatch - best-effort, must never affect the already-
     // committed response. suppressed if the ticket was created already paused.
@@ -1275,6 +1298,16 @@ export class TicketRepository {
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
+    if (fields.description !== undefined) {
+      await upsertTicketDescription(
+        prisma,
+        updatedTicket.id,
+        updatedTicket.workspaceId,
+        updatedTicket.channelId,
+        fields.description,
+        updatedTicket.updatedAt,
+      );
+    }
 
     if (
       fields.statusV2 !== undefined

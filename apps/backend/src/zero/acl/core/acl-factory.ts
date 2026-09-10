@@ -45,6 +45,7 @@ import { TicketReferenceMappingsACL } from '../tables/ticket-reference-mappings-
 import { TicketTagsACL } from '../tables/ticket-tags-acl';
 import { ProjectTagsACL } from '../tables/project-tags-acl';
 import { TicketTagMappingsACL } from '../tables/ticket-tag-mappings-acl';
+import { TicketDescriptionsACL } from '../tables/ticket-descriptions-acl';
 import { PullRequestsACL } from '../tables/pull-requests-acl';
 import { BookmarksACL } from '../tables/bookmarks-acl';
 import { EmailSignaturesACL } from '../tables/email-signatures-acl';
@@ -288,6 +289,8 @@ export class ACLFactory {
         return new TicketTagMappingsACL(ctx);
       case 'tickets':
         return new TicketACl(ctx);
+      case 'ticket_descriptions':
+        return new TicketDescriptionsACL(ctx);
       case 'tools':
         return new ToolsACL(ctx);
       case 'user_assignment_states':

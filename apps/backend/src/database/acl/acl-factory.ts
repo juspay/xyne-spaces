@@ -86,6 +86,7 @@ import {
   TicketEntityMappingsACL,
   TicketReferenceMappingsACL,
   TicketsACL,
+  TicketDescriptionsACL,
   TicketStageEtaACL,
   TicketSubTicketMappingsACL,
   TicketTagsACL,
@@ -318,6 +319,8 @@ export class ACLFactory {
       return new SurfaceNudgeCountsACL(ctx, prisma)
     case 'ticket':
       return new TicketsACL(ctx, prisma)
+    case 'ticketDescription':
+      return new TicketDescriptionsACL(ctx, prisma)
     case 'ticketActivity':
       return new TicketActivitiesACL(ctx, prisma)
     case 'ticketAssignment':

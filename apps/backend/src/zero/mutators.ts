@@ -107,6 +107,7 @@ import {
   parseTicketEtaManagement,
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -5836,8 +5837,9 @@ export function createMutators(
           // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
         }),
         async ({ tx, args: params }) => {
-          const ticket = await tx.run(zql.tickets.where('id', params.id).one());
+          const ticket = await tx.run(zql.tickets.where('id', params.id).related('ticketDescription').one());
           if (!ticket) throw new Error('Ticket not found');
+          const currentDescription = resolveTicketDescription(ticket);
           const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
           if (
             currentBoard?.boardType === BoardType.FLOW &&
@@ -6233,8 +6235,10 @@ export function createMutators(
             updateData.statusUpdatedAt = params.updatedAt;
           }
 
+          const ticketRecord = ticket as Record<string, unknown>;
           for (const field of fields) {
-            if (params[field] !== undefined && params[field] !== ticket[field]) {
+            const previousValue = field === 'description' ? currentDescription : ticketRecord[field];
+            if (params[field] !== undefined && params[field] !== previousValue) {
               updateData[field] = params[field];
               if (field === 'kanbanPosition') continue;
               let activityType = field.toUpperCase();
@@ -6250,8 +6254,8 @@ export function createMutators(
               activities.push({
                 activityType,
                 value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: ticket[field], newValue: params[field] }
-                  : { oldValue: ticket[field], newValue: params[field] },
+                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                  : { oldValue: previousValue, newValue: params[field] },
               });
             }
           }
@@ -6548,6 +6552,26 @@ export function createMutators(
           }
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
+
+          if (params.description !== undefined && params.description !== currentDescription) {
+            const existingDescription = await tx.run(
+              zql.ticket_descriptions.where('ticketId', params.id).one()
+            );
+            if (existingDescription) {
+              await tx.mutate.ticket_descriptions.update({
+                ticketId: params.id,
+                description: params.description,
+              });
+            } else {
+              await tx.mutate.ticket_descriptions.insert({
+                ticketId: params.id,
+                workspaceId: ticket.workspaceId,
+                channelId: ticket.channelId,
+                description: params.description,
+                createdAt: params.updatedAt,
+              });
+            }
+          }
 
           if (
             params.statusV2 === TicketStatusV2.COMPLETED

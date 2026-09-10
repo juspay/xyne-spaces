@@ -72,6 +72,7 @@ import {
   SavedUserConfigurationsACL,
   TicketAssignmentsACL,
   TicketStageEtaACL,
+  TicketDescriptionsACL,
   TicketStageRequestsACL,
   UserProfilesACL,
   UserPreferencesACL,
@@ -267,6 +268,8 @@ export class QueryACLFactory {
         return new TicketAssignmentsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_eta':
         return new TicketStageEtaACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_descriptions':
+        return new TicketDescriptionsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_requests':
         return new TicketStageRequestsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_workload_mappings':
