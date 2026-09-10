@@ -63,6 +63,22 @@ function widgetErrorContent(error: unknown, fallback: string): string {
   return isSessionLockedError(error) ? SESSION_LOCKED_MESSAGE : fallback;
 }
 
+async function getCrossUserInspectorAccess(
+  req: Request,
+  userId: string,
+  agentSlug: string,
+): Promise<{ allowed: boolean; orgId?: string }> {
+  if (req.query["allRuns"] !== "1") return { allowed: false };
+
+  const orgId = getOrgId(req);
+  if (!orgId) return { allowed: false };
+
+  if (await isClawAdmin(userId)) return { allowed: true, orgId };
+
+  const access = await getAgentEditAccess(userId, agentSlug, orgId);
+  return { allowed: Boolean(access?.canEdit), orgId: access?.agent.orgId ?? orgId };
+}
+
 /**
  * Coerce a pi-coding-agent tool result into plain text. The persisted shape is
  * often a JSON-encoded string wrapping the MCP envelope
@@ -2284,18 +2300,12 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // across every user in a thread (see buildSandboxStoreKey), so one
     // conversation contains messages from multiple users. Each user must see
     // ONLY their own messages and the assistant replies to them (assistant
-    // rows are tagged with the triggering user's id). Admins see everything.
-    // Filtering — rather than an owner-only 403 — is the access boundary:
-    // guessing a conversation id returns only your own slice (empty if none).
-    // Cross-user visibility is OPT-IN. A twin thread shares one conversationId
-    // across every mentioned user, so an admin's OWN chat window would otherwise
-    // render a confusing mix of other people's turns. The default (even for
-    // admins) is own-turns-only; cross-user is returned ONLY when the admin
-    // explicitly opened this conversation from the agent "All Runs" inspector,
-    // which passes ?allRuns=1. Admins keep full cross-user access there — this
-    // just stops it leaking into the normal chat view.
-    const isAdmin = await isClawAdmin(userId);
-    const crossUser = isAdmin && req.query["allRuns"] === "1";
+    // rows are tagged with the triggering user's id). Filtering — rather than
+    // an owner-only 403 — is the access boundary: guessing a conversation id
+    // returns only your own slice (empty if none). Cross-user visibility is
+    // OPT-IN via ?allRuns=1 and limited to claw-admins or agent editors/
+    // contributors so the agent Conversations inspector can show all runs.
+    const crossUser = (await getCrossUserInspectorAccess(req, userId, req.params.slug)).allowed;
     const visibleForUser = crossUser ? allMessages : allMessages.filter((m) => m.userId === userId);
     // Hide the in-progress "running" assistant placeholder from the transcript:
     // the in-flight turn is rendered by the /live stream (snapshot `partial` +
@@ -2503,11 +2513,10 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
   }
   const { slug, convId } = req.params;
   // Cross-user visibility is OPT-IN (mirrors /messages): the default live view
-  // — even for admins — streams ONLY the requester's own runs, so a shared twin
-  // thread doesn't leak other users' in-flight turns into the normal chat. The
-  // agent "All Runs" inspector passes ?allRuns=1 for genuine cross-user viewing.
-  const isAdmin = await isClawAdmin(userId);
-  const crossUser = isAdmin && req.query["allRuns"] === "1";
+  // streams ONLY the requester's own runs. The agent Conversations inspector
+  // passes ?allRuns=1 for cross-user viewing, gated to claw-admins or agent
+  // editors/contributors.
+  const crossUser = (await getCrossUserInspectorAccess(req, userId, slug)).allowed;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -3008,6 +3017,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
       return;
     }
     const requestedUserId = req.query["userId"] as string | undefined;
+    const crossUserAccess = await getCrossUserInspectorAccess(req, requesterId, req.params.slug);
     let userId = requesterId;
     if (requestedUserId && requestedUserId !== requesterId) {
       if (!(await isClawAdmin(requesterId))) {
@@ -3017,8 +3027,12 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
       userId = requestedUserId;
     }
 
-    // Get all messages for this user+agent, grouped by conversation
-    const allMessages = await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
+    // Get messages for this agent, grouped by conversation. The normal chat
+    // history is user-scoped; ?allRuns=1 lets claw-admins and agent editors/
+    // contributors inspect every user's conversations for the agent.
+    const allMessages = crossUserAccess.allowed && crossUserAccess.orgId && (!requestedUserId || requestedUserId === requesterId)
+      ? await chatMessageRepository.findByAgent(req.params.slug, crossUserAccess.orgId)
+      : await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
 
     // Group by conversationId, skipping artifact-app threads. Those are real,
     // durable conversations, but their prompts are written by app code on the

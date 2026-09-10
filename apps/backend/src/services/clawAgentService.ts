@@ -993,10 +993,13 @@ export async function listClawAgentModels(
 
 export async function listClawConversations(
   req: { headers?: { cookie?: string }; userId: string },
-  agentSlug?: string
+  agentSlug?: string,
+  opts: { allRuns?: boolean } = {}
 ): Promise<{ success: boolean; data: ClawConversationSummary[] }> {
   const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/conversations?userId=${encodeURIComponent(req.userId)}`;
+  const params = new URLSearchParams({ userId: req.userId });
+  if (opts.allRuns) params.set('allRuns', '1');
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/conversations?${params.toString()}`;
   const response = await fetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
@@ -1016,10 +1019,14 @@ export async function listClawConversations(
 export async function getClawConversationMessages(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,
-  agentSlug?: string
+  agentSlug?: string,
+  opts: { allRuns?: boolean } = {}
 ): Promise<ClawMessagesResponse> {
   const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages`;
+  const params = new URLSearchParams();
+  if (opts.allRuns) params.set('allRuns', '1');
+  const query = params.toString();
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages${query ? `?${query}` : ''}`;
   const response = await fetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
@@ -1084,9 +1091,12 @@ export async function streamClawConversationLive(
   res: Response,
   convId: string,
   agentSlug = 'ask-ai',
-  opts: { signal?: AbortSignal } = {}
+  opts: { signal?: AbortSignal; allRuns?: boolean } = {}
 ): Promise<void> {
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live`;
+  const params = new URLSearchParams();
+  if (opts.allRuns) params.set('allRuns', '1');
+  const query = params.toString();
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live${query ? `?${query}` : ''}`;
   const upstream = await fetch(url, {
     headers: {
       Accept: 'text/event-stream',

@@ -85,9 +85,12 @@ interface ClawMessagesResponse {
  */
 export async function fetchV2Conversations(
   agentSlug?: string | null,
+  options: { allRuns?: boolean } = {},
 ): Promise<ConversationHistoryType[]> {
   const effectiveAgentSlug = agentSlug ?? 'ask-ai';
-  const url = `/xyne-ai/v2/conversations?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
+  const params = new URLSearchParams({ agentSlug: effectiveAgentSlug });
+  if (options.allRuns) params.set('allRuns', '1');
+  const url = `/xyne-ai/v2/conversations?${params.toString()}`;
   const response = await apiInstance.get<ClawConversationListResponse>(url);
 
   if (!response.data.success || !response.data.data) {
@@ -115,11 +118,13 @@ export async function fetchV2ConversationMessages(
   conversationId: string,
   agentSlug?: string | null,
   urlOverride?: string,
+  options: { allRuns?: boolean } = {},
 ): Promise<Message[]> {
   const effectiveAgentSlug = agentSlug ?? 'ask-ai';
+  const params = new URLSearchParams({ agentSlug: effectiveAgentSlug });
+  if (options.allRuns) params.set('allRuns', '1');
   const url =
-    urlOverride ??
-    `/xyne-ai/v2/conversations/${conversationId}/messages?agentSlug=${encodeURIComponent(effectiveAgentSlug)}`;
+    urlOverride ?? `/xyne-ai/v2/conversations/${conversationId}/messages?${params.toString()}`;
   const response = await apiInstance.get<ClawMessagesResponse>(url);
 
   if (!response.data.success || !response.data.data) {
