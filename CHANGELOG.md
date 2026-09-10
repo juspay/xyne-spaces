@@ -1,3 +1,12 @@
+## [1.295.0-release-20260909.6](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.5...v1.295.0-release-20260909.6) (2026-09-10)
+
+
+### Bug Fixes
+
+* add supportTicketsFilteredV4 (IN filters) and repoint V3 callers ([#1753](https://github.com/juspay/xyne-spaces/issues/1753)) ([7e71be2](https://github.com/juspay/xyne-spaces/commit/7e71be2ae3a3d4a532d7084c0e03beda9aad401e))
+* cut kanban query scan cost ~10x (indexes, pinned join, range cursor, sliding window) ([#1755](https://github.com/juspay/xyne-spaces/issues/1755)) ([168c25c](https://github.com/juspay/xyne-spaces/commit/168c25cf4bf4c6c683916938e277723f76007ea1))
+* stamp initial_message_md at write time so conversations cannot render empty [release-20260909] ([#1751](https://github.com/juspay/xyne-spaces/issues/1751)) ([b3c321c](https://github.com/juspay/xyne-spaces/commit/b3c321ca142df949cb188f8810f0f98abe8d5802))
+
 ## [1.295.0-release-20260909.5](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.4...v1.295.0-release-20260909.5) (2026-09-10)
 
 
