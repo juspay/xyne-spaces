@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.5](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.4...v1.295.0-release-20260909.5) (2026-09-10)
+
+
+### Features
+
+* show basic desk metrics to guest users (release-20260909) ([#1748](https://github.com/juspay/xyne-spaces/issues/1748)) ([65e3a2e](https://github.com/juspay/xyne-spaces/commit/65e3a2ed3654f03069989f6fd307bdf2408404f6))
+
 ## [1.295.0-release-20260909.4](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.3...v1.295.0-release-20260909.4) (2026-09-10)
 
 
