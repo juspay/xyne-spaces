@@ -1375,10 +1375,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
-  // Gates the Create Sub-Ticket button only, mirroring subTicket.create's row-existence
-  // guard. linkExisting has no depth limit, so the picker below is deliberately not gated.
-  const canCreateNestedSubTicket =
-    (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
   // Query parent tickets through the mappings
   const parentTicketIds = useMemo(
@@ -3267,17 +3263,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     boardData?.boardType === BoardType.FLOW ? null : (
       <button
         onClick={() => setIsSubTicketModalOpen(true)}
-        disabled={!canCreateNestedSubTicket}
         data-testid='create-sub-ticket-button'
         data-track-event='BUTTON_CLICK'
         data-track-category='Tickets'
         data-track-name='CREATE_SUB_TICKET'
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-        title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
-        className={cn(
-          'flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors',
-          canCreateNestedSubTicket ? 'hover:text-foreground' : 'cursor-not-allowed opacity-50',
-        )}
+        className='flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors hover:text-foreground'
       >
         <Plus size={16} />
         Create Sub-Ticket

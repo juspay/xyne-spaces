@@ -687,25 +687,6 @@ export class TicketController {
         }
       }
 
-      // Unlimited nesting is reserved for FLOW run graphs. Normal boards keep
-      // the existing one-level sub-ticket contract.
-      if (parentTicketId) {
-        const parent = await prisma.ticket.findUnique({
-          where: { id: parentTicketId },
-          select: { board: { select: { boardType: true } } },
-        });
-        if (parent?.board.boardType !== BoardType.FLOW) {
-          const parentAsSubTicket = await prisma.subTicket.findFirst({
-            where: { mappedTicketId: parentTicketId },
-            select: { id: true },
-          });
-          if (parentAsSubTicket) {
-            res.status(400).json({ error: 'Cannot create a sub-ticket under a sub-ticket.' });
-            return;
-          }
-        }
-      }
-
       // Determine the actual channel to check its type
       let actualChannelId = channelId;
       if (!actualChannelId && sourceConversationId) {

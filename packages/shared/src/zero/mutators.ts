@@ -4418,18 +4418,6 @@ export const mutators = defineMutators({
         ctx,
         args: { subTicketId, timestamp, mappingId, title, description, ticketId, conversationId },
       }) => {
-        const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
-        const parentBoard = parentTicket
-          ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
-          : null;
-        if (parentBoard?.boardType !== BoardType.FLOW) {
-          const parentAsSubTicket = await tx.run(
-            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
-          );
-          if (parentAsSubTicket) {
-            throw new Error('Cannot create a sub-ticket under a sub-ticket');
-          }
-        }
         // Create the subticket
         await tx.mutate.sub_tickets.insert({
           id: subTicketId,
