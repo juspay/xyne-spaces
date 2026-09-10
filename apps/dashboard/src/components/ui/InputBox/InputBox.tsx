@@ -36,6 +36,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../dropdown-menu';
 
@@ -91,7 +93,10 @@ import { VoiceInput } from './VoiceInput';
 import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
-import { ScheduleMessageDialog } from '../ScheduleMessageDialog/ScheduleMessageDialog';
+import {
+  getSchedulePresets,
+  ScheduleMessageDialog,
+} from '../ScheduleMessageDialog/ScheduleMessageDialog';
 import { Checkbox } from '../Checkbox/Checkbox';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
@@ -255,6 +260,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       onCreateCanvas,
       onTranscriptSelect,
       onScheduleSend,
+      showSchedulePresets = false,
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
@@ -380,6 +386,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
+    const schedulePresets = React.useMemo(
+      () => (isSendMenuOpen && showSchedulePresets ? getSchedulePresets() : []),
+      [isSendMenuOpen, showSchedulePresets],
+    );
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
     const [showFormatToolbar, setShowFormatToolbar] = useState(defaultFormattingToolbarOpen);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
@@ -1266,6 +1276,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const trackedChannel = useChannel(channelId ?? '');
+
+    const submitScheduled = useCallback(
+      (scheduledFor: number): void => {
+        if (!onScheduleSend) return;
+        const html = editor?.getHTML() ?? '';
+        const files = allAttachments.map(a => a.file).filter((f): f is File => f instanceof File);
+        void onScheduleSend(scheduledFor, html, files);
+        editor?.commands.clearContent(true);
+      },
+      [onScheduleSend, editor, allAttachments],
+    );
 
     const handleSend = useCallback(async () => {
       if (!editor || isSending) return;
@@ -2211,27 +2232,56 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
                           ></div>
                           <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type='button'
-                                disabled={disabled || isSending}
-                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                                data-testid='send-options-menu'
-                              >
-                                <ChevronBigDown className='h-3 w-3' />
-                              </button>
-                            </DropdownMenuTrigger>
+                            <Tooltip
+                              content='Schedule for later'
+                              side='top'
+                              delayDuration={1000}
+                              skipDelayDuration={1000}
+                              {...(!showSchedulePresets && { open: false })}
+                            >
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type='button'
+                                  disabled={disabled || isSending}
+                                  className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                                  data-testid='send-options-menu'
+                                >
+                                  <ChevronBigDown className='h-3 w-3' />
+                                </button>
+                              </DropdownMenuTrigger>
+                            </Tooltip>
                             <DropdownMenuContent side='top' align='end'>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  void handleSend();
-                                  setIsSendMenuOpen(false);
-                                }}
-                                data-track-category='CHAT_INPUT'
-                                data-track-name='SEND_FROM_MENU'
-                              >
-                                <ArrowUp className='h-4 w-4' /> Send now
-                              </DropdownMenuItem>
+                              {showSchedulePresets ? (
+                                <>
+                                  <DropdownMenuLabel>Schedule message</DropdownMenuLabel>
+                                  {schedulePresets.map(option => (
+                                    <DropdownMenuItem
+                                      key={option.key}
+                                      disabled={!hasSendableContent}
+                                      onClick={() => {
+                                        setIsSendMenuOpen(false);
+                                        submitScheduled(option.at.getTime());
+                                      }}
+                                      data-track-category='CHAT_INPUT'
+                                      data-track-name={`SCHEDULE_PRESET_${option.trackId}`}
+                                    >
+                                      {option.label}
+                                    </DropdownMenuItem>
+                                  ))}
+                                  <DropdownMenuSeparator />
+                                </>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    void handleSend();
+                                    setIsSendMenuOpen(false);
+                                  }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='SEND_FROM_MENU'
+                                >
+                                  <ArrowUp className='h-4 w-4' /> Send now
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onClick={() => {
                                   setIsSendMenuOpen(false);
@@ -2240,7 +2290,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                 data-track-category='CHAT_INPUT'
                                 data-track-name='OPEN_SCHEDULE_DIALOG'
                               >
-                                <Clock className='h-4 w-4' /> Schedule message
+                                <Clock className='h-4 w-4' />{' '}
+                                {showSchedulePresets ? 'Custom time' : 'Schedule message'}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -2312,14 +2363,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <ScheduleMessageDialog
             open={isScheduleDialogOpen}
             onOpenChange={setIsScheduleDialogOpen}
-            onConfirm={scheduledFor => {
-              const html = editor?.getHTML() ?? '';
-              const files = allAttachments
-                .map(a => a.file)
-                .filter((f): f is File => f instanceof File);
-              void onScheduleSend(scheduledFor, html, files);
-              editor?.commands.clearContent(true);
-            }}
+            onConfirm={submitScheduled}
           />
         )}
 
