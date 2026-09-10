@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -508,6 +509,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   headerContent,
   onUserClick,
 }) => {
+  const renderConversationBadge = useContext(ConversationBadgeContext);
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
@@ -1174,6 +1176,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               {metadata?.['clawRunOrigin'] ? (
                 <RunOriginChip origin={metadata['clawRunOrigin']} />
               ) : null}
+              {/* Host-supplied mark for where this conversation belongs. Null in
+                  every surface that does not provide one. */}
+              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
               {headerContent}
             </div>
           )}

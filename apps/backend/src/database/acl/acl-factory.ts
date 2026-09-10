@@ -296,6 +296,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'sdlcTrack':
       return new BaseQueryACL(ctx, prisma)
+    case 'sdlcFolder':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':
