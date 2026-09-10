@@ -491,13 +491,22 @@ export const useKanbanTicketsPage = (
     typeof options.groupBy === 'object'
       ? `${options.groupBy.type}:${options.groupBy.fieldId}`
       : String(options.groupBy ?? 'none');
-  // Include filter values in search key so all columns re-search when filters change
+  // Include ALL filter values in search key so all columns re-search when filters change
+  // Previously this only included priority, assignee, tags, createdBy - missing boards, stages, etc.
   const filterKey = skipColumnFiltersForSearch
     ? JSON.stringify({
         priority: vespaPriority ?? '',
         assignee: vespaAssignee ?? '',
         tags: vespaTags ?? '',
         createdBy: vespaCreatedBy ?? '',
+        boards: options.filters?.boards ?? [],
+        stages: options.filters?.stages ?? [],
+        ticketTypes: options.filters?.ticketTypes ?? [],
+        sourceChannels: options.filters?.sourceChannels ?? [],
+        userGroups: options.filters?.userGroups ?? [],
+        dynamicFields: options.filters?.dynamicFields ?? {},
+        boardId: effectiveVespaBoardId ?? '',
+        projectId: options.projectId ?? '',
       })
     : '';
   const vespaSearchKey = skipColumnFiltersForSearch

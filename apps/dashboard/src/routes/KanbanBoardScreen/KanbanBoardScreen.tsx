@@ -3494,8 +3494,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     if (!isKanbanLayout) return;
     if (hasSearchTerm) return;
+
+    // Don't reset lastKnownKanbanGroupsRef to null when query key changes.
+    // Keep the old groups visible until new ones load to prevent the view
+    // from disappearing when filters are applied in group-by mode.
+    // Only update the query key ref to track that we're waiting for new data.
     if (lastKnownKanbanGroupsQueryKeyRef.current !== kanbanColumnQueryKey) {
-      lastKnownKanbanGroupsRef.current = null;
       lastKnownKanbanGroupsQueryKeyRef.current = kanbanColumnQueryKey;
     }
 
@@ -3509,14 +3513,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   useEffect(() => {
     if (!isKanbanLayout) return;
-
-    // On the pass where the query key changes, `localTickets` here still holds the previous
-    // query's rows: the reset above only queues setLocalTickets(null), which lands next render.
-    // Stamping the new key onto those rows would make the queryKey check below always pass, so
-    // drop the remembered rows instead and let a later pass re-record the new query's results.
     if (lastKnownKanbanTicketsQueryKeyRef.current !== kanbanColumnQueryKey) {
       lastKnownKanbanTicketsQueryKeyRef.current = kanbanColumnQueryKey;
-      lastKnownKanbanTicketsRef.current = null;
       return;
     }
 
@@ -3539,16 +3537,30 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const kanbanTicketsForGrouping = useMemo(() => {
     if (localTickets && localTickets.length > 0) return localTickets;
     const lastKnownKanbanTickets = lastKnownKanbanTicketsRef.current;
-    if (
-      hasSearchTerm &&
-      lastKnownKanbanTickets !== null &&
-      lastKnownKanbanTickets.queryKey === kanbanColumnQueryKey &&
-      lastKnownKanbanTickets.tickets.length > 0
-    ) {
-      return lastKnownKanbanTickets.tickets;
+    // Use last known tickets as fallback when localTickets is empty/null.
+    // This prevents the view from disappearing when filters are applied in group-by mode.
+    // IMPORTANT: Apply current filters to fallback tickets so stale data doesn't show.
+    if (lastKnownKanbanTickets !== null && lastKnownKanbanTickets.tickets.length > 0) {
+      // Apply current filters to the fallback tickets
+      const filteredFallback = applyTicketFilters(
+        lastKnownKanbanTickets.tickets,
+        deferredFilters,
+        tagsByTicketId,
+        formValuesByTicketId,
+        formFieldsById,
+        user?.id,
+      );
+      return filteredFallback;
     }
     return localTickets ?? [];
-  }, [hasSearchTerm, kanbanColumnQueryKey, localTickets]);
+  }, [
+    localTickets,
+    deferredFilters,
+    tagsByTicketId,
+    formValuesByTicketId,
+    formFieldsById,
+    user?.id,
+  ]);
 
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
