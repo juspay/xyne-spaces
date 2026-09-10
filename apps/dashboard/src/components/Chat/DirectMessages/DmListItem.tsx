@@ -20,7 +20,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
-import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
@@ -83,8 +83,15 @@ export const DmListItem = ({
       }
     }
 
-    const rawContent =
-      lastMessage.content || (lastMessage.hasAttachment ? 'Sent an attachment' : 'Message');
+    // Attachment-only messages arrive as empty rich-text markup (e.g. '<p></p>'),
+    // which is truthy but renders blank. Fall back to a label whenever the message
+    // has no visible text, so an attachment preview is not shown as an empty line.
+    const hasVisibleText = htmlToPlainText(lastMessage.content).length > 0;
+    const rawContent = hasVisibleText
+      ? lastMessage.content
+      : lastMessage.hasAttachment
+        ? 'Sent an attachment'
+        : lastMessage.content || 'Message';
 
     return sanitizeHtmlString(rawContent);
   }, [lastMessage]);

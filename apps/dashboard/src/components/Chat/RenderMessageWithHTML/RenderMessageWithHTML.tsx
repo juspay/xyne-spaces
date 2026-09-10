@@ -57,6 +57,8 @@ interface RenderMessageWithHTMLProps {
   showEdited?: boolean;
   isSystemMessage?: boolean;
   breakLongLinks?: boolean;
+  /** Render URLs/links as inert plain text (activity sidebar: a click opens the activity, not the link). */
+  disableLinks?: boolean;
   /** Needed to render embedded FlowScreenManager widgets */
   messageId?: string;
   conversationId?: string;
@@ -865,6 +867,7 @@ const parseNode = (
   conversationId?: string,
   preserveThreadRoute = false,
   slashCommandArtifactContext?: RenderMessageWithHTMLProps['slashCommandArtifactContext'],
+  disableLinks = false,
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -888,7 +891,16 @@ const parseNode = (
         addTokenizedNodes(parts, textBeforeUrl, skipEmojiWrapping, `emoji-url-${offset}`);
       }
 
-      if (parseInternalXyneLink(url)) {
+      if (disableLinks) {
+        parts.push(
+          <span
+            key={`${keyPrefix}-url-${offset}`}
+            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
+          >
+            {url}
+          </span>,
+        );
+      } else if (parseInternalXyneLink(url)) {
         const external = isExternalUrl(url);
         const linkProps = getAnchorTargetProps(url);
 
@@ -1118,6 +1130,7 @@ const parseNode = (
       conversationId,
       preserveThreadRoute,
       slashCommandArtifactContext,
+      disableLinks,
     );
     if (parsed !== null) children.push(parsed);
   });
@@ -1252,6 +1265,14 @@ const parseNode = (
     }
   }
 
+  if (tag === 'a' && disableLinks) {
+    return (
+      <span key={`${keyPrefix}-nolink-${idx}`} className='text-primary hover:underline'>
+        {children}
+      </span>
+    );
+  }
+
   if (tag === 'a') {
     let href = el.getAttribute('href');
     if (href && isValidURL(href)) {
@@ -1356,6 +1377,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   showEdited = false,
   isSystemMessage = false,
   breakLongLinks = false,
+  disableLinks = false,
   messageId,
   conversationId,
   preserveThreadRoute = false,
@@ -1405,6 +1427,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           conversationId,
           preserveThreadRoute,
           slashCommandArtifactContext,
+          disableLinks,
         );
         if (parsed !== null) nodes.push(parsed);
       });
@@ -1418,6 +1441,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     keyPrefix,
     navigate,
     breakLongLinks,
+    disableLinks,
     messageId,
     conversationId,
     preserveThreadRoute,

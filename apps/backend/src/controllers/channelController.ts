@@ -141,19 +141,17 @@ export class ChannelController {
       // Names are user-supplied, so everything interpolated into the markup is escaped.
       const esc = (value: string): string =>
         value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      const userPill = (userId: string, userName: string): string =>
-        `<span data-mention data-mention-type="user" data-user-id="${esc(userId)}" data-username="${esc(userName)}">${esc(userName)}</span>`;
       const channelPill = (id: string, label: string): string =>
         `<span data-channel-mention data-channel-id="${esc(id)}" data-channel-name="${esc(label)}" data-is-private="true">${esc(label)}</span>`;
 
-      const pills = newParticipants.map(p => userPill(p.userId, p.userName));
+      const names = newParticipants.map(p => esc(p.userName));
       let formattedUsers = '';
-      if (pills.length === 1) {
-        formattedUsers = pills[0];
-      } else if (pills.length > 1) {
-        formattedUsers = `${pills.slice(0, -1).join(', ')} and ${pills[pills.length - 1]}`;
+      if (names.length === 1) {
+        formattedUsers = names[0];
+      } else if (names.length > 1) {
+        formattedUsers = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
       }
-      const actor = userPill(authData.id, authData.name);
+      const actor = esc(authData.name);
 
       const addedOrRemovedText = operationType === 'participants_added' ? 'added' : 'removed';
       let systemContent: string;
@@ -169,7 +167,7 @@ export class ChannelController {
       } else if (operationType === 'conversation_moved_target') {
         systemContent = `${actor} moved messages from a previous conversation into this one`;
       } else {
-        systemContent = `${formattedUsers} ${pills.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
+        systemContent = `${formattedUsers} ${names.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
       }
 
       // Create metadata

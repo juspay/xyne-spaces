@@ -57,6 +57,9 @@ const ElectronEvent = {
     // Security guard rail events
     OPEN_EXTERNAL_BLOCKED: 'open_external_blocked',
     DEEP_LINK_INVITATION_REJECTED: 'deep_link_invitation_rejected',
+    DEEP_LINK_PARAM_REJECTED: 'deep_link_param_rejected',
+    AGENT_AUTH_PEER_MISMATCH: 'agent_auth_peer_mismatch',
+    AGENT_AUTH_COOLDOWN_BLOCKED: 'agent_auth_cooldown_blocked',
     } as const;
 
 export type ElectronEventType = (typeof ElectronEvent)[keyof typeof ElectronEvent];
