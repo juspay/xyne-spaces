@@ -123,6 +123,8 @@ export function SdlcFinderColumn(props: {
   const groupBy = useUserPreference('sdlcFinderGroupBy');
   /** The row the pointer is currently over mid-drag, so only it shows a target. */
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  /** The pointer is over this column but not over a row, so the drop lands here. */
+  const [columnDragOver, setColumnDragOver] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   /** The folder being renamed in place, and the text so far. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -250,10 +252,20 @@ export function SdlcFinderColumn(props: {
   return (
     <div
       onDragOver={event => {
-        if (props.draggingItem) event.preventDefault();
+        if (!props.draggingItem) return;
+        event.preventDefault();
+        setColumnDragOver(true);
+      }}
+      onDragLeave={event => {
+        // dragleave also fires crossing into a child, so only a pointer that has
+        // actually left the column clears the highlight.
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setColumnDragOver(false);
+        }
       }}
       onDrop={event => {
         event.preventDefault();
+        setColumnDragOver(false);
         const dragged = props.draggingItem;
         if (!dragged) return;
         props.onMoveItem(dragged, { type: props.parent.type, id: props.parent.id });
@@ -262,9 +274,12 @@ export function SdlcFinderColumn(props: {
       ref={columnRef}
       style={props.isLast ? { minWidth: FINDER_MIN_COLUMN_WIDTH } : { width: columnWidth }}
       className={cn(
-        'relative flex shrink-0 flex-col border-r border-border last:border-r-0',
+        'relative flex shrink-0 flex-col border-r border-border transition-colors last:border-r-0',
         // The open level takes the slack so the columns fill the width.
         props.isLast && 'flex-1',
+        // Where the drop would land, when it is the level itself rather than a
+        // folder in it. A row under the pointer owns the target instead.
+        props.draggingItem && columnDragOver && !dragOverId && 'bg-primary/[0.06]',
       )}
     >
       {/* A real step, not a theme surface: --card and --background are the same
@@ -363,7 +378,9 @@ export function SdlcFinderColumn(props: {
           />
         </div>
       )}
-      <div className='scrollbar-none min-h-0 flex-1 overflow-y-auto p-1.5'>
+      {/* Deep bottom padding, not a spacer row: the last item should never sit
+          against the edge, and the slack scrolls away with the list. */}
+      <div className='scrollbar-none min-h-0 flex-1 overflow-y-auto p-1.5 pb-[150px]'>
         {groups.map(group => (
           <div key={group.label ?? 'all'} className='mb-1 last:mb-0'>
             {group.label && (
