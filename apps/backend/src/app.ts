@@ -932,8 +932,13 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
-    logger.info('Initializing commit analysis queue...');
-    await commitAnalysisQueue.initialize();
+    // Commit analysis queue worker (enabled only on generic worker pods)
+    if (config.enableCommitAnalysisWorker) {
+      logger.info('Initializing commit analysis queue worker...');
+      await commitAnalysisQueue.initialize();
+    } else {
+      logger.info('Commit analysis queue worker disabled (ENABLE_COMMIT_ANALYSIS_WORKER=false)');
+    }
 
     logger.info('Initializing SDLC queue (producer)...');
     await sdlcQueue.initialize();

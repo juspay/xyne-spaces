@@ -1263,6 +1263,7 @@ model PullRequests {
 /// Individual commits within a PR, with bot attribution parsed from Co-authored-by trailers
 model Commit {
   id              String   @id @default(cuid())
+  workspaceId     String   // Denormalized tenant key (from parent pull_requests)
 
   // Commit identifiers
   commitSha       String
