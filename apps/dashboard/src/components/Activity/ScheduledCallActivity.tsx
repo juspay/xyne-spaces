@@ -6,6 +6,7 @@ import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { usePlatform } from '../../hooks/usePlatform';
 import { xyneCalendarActor } from '../../machines/xyneCalendarMachine';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { CalendarTimer, NotificationBellOn, CalendarCheck, CalendarCancel } from '@xyne/icons';
 
 export const ScheduledCallActivity = ({
@@ -34,6 +35,7 @@ export const ScheduledCallActivity = ({
       ? (): void => {
           const call = activity.call!;
           const day = new Date(call.startsAt ?? call.startedAt ?? Date.now());
+          xyneAIActor.send({ type: 'CLOSE' });
           xyneCalendarActor.send({ type: 'OPEN', date: format(day, 'yyyy-MM-dd') });
           xyneCalendarActor.send({
             type: 'SELECT_CALL',

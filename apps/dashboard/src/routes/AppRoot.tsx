@@ -213,7 +213,7 @@ import {
   XYNE_CALENDAR_SIDEBAR_MIN_SIZE,
   XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
 } from '../components/Chat/XyneCalendarSidebar';
-import { xyneCalendarActor } from '../machines/xyneCalendarMachine';
+import { xyneCalendarActor, setXyneCalendarPanelRef } from '../machines/xyneCalendarMachine';
 import {
   AppSidebarHost,
   type SidebarPanelDescriptor,
@@ -363,6 +363,9 @@ const AppRoot = (): ReactElement => {
   // Create panel refs for XyneAI
   const xyneAIRightPanelRef = useRef<PanelImperativeHandle>(null);
 
+  // Panel ref for the Calendar sidebar (Week/Month force-max its own slot width)
+  const xyneCalendarPanelRef = useRef<PanelImperativeHandle>(null);
+
   const browserPanelLeftRef = useRef<PanelImperativeHandle>(null);
   const browserPanelRightRef = useRef<PanelImperativeHandle>(null);
 
@@ -468,6 +471,7 @@ const AppRoot = (): ReactElement => {
       left: browserPanelLeftRef,
       right: browserPanelRightRef,
     });
+    setXyneCalendarPanelRef(xyneCalendarPanelRef);
   }, []);
 
   useEffect(() => {
@@ -541,6 +545,13 @@ const AppRoot = (): ReactElement => {
     }
     previousSdlcChannelIdRef.current = sdlcChannelId;
   }, [sdlcChannelId]);
+
+  // Close the Ask AI drawer if the calendar opens, since they share the same right-side panel slot.
+  useEffect(() => {
+    if (isCalendarOpen) {
+      xyneAIActor.send({ type: 'CLOSE' });
+    }
+  }, [isCalendarOpen]);
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
@@ -651,6 +662,7 @@ const AppRoot = (): ReactElement => {
         min: XYNE_CALENDAR_SIDEBAR_MIN_SIZE,
         max: XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
       },
+      panelRef: xyneCalendarPanelRef,
       content: <XyneCalendarSidebar />,
     },
     {

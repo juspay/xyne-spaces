@@ -1,8 +1,20 @@
+import type { RefObject } from 'react';
 import { setup, createActor, assign } from 'xstate';
 import { logger, Event as LogEvent } from '../utils/logger';
 import type { Call } from '../routes/CallHistoryScreen/callHistoryItem.utils';
+import type { PanelImperativeHandle } from '../components/ui/Resizable/Resizable';
+
+export let globalXyneCalendarPanelRef: RefObject<PanelImperativeHandle | null> = {
+  current: null,
+};
+
+export const setXyneCalendarPanelRef = (ref: RefObject<PanelImperativeHandle | null>): void => {
+  globalXyneCalendarPanelRef = ref;
+};
 
 export type XyneCalendarState = 'closed' | 'open';
+
+export type CalendarViewMode = 'day' | 'week' | 'month';
 
 export interface XyneCalendarContext {
   xyneCalendarState: XyneCalendarState;
@@ -11,13 +23,15 @@ export interface XyneCalendarContext {
   selectedCallId: string | null;
   /** Caller-provided call snapshot, used when the id isn't in either query pool (e.g. gone ACTIVE/CANCELLED). */
   selectedCallFallback: Call | null;
+  viewMode: CalendarViewMode;
 }
 
 export type XyneCalendarEvent =
   | { type: 'OPEN'; date?: string }
   | { type: 'CLOSE' }
   | { type: 'SELECT_DATE'; date: string }
-  | { type: 'SELECT_CALL'; callId: string | null; callFallback?: Call };
+  | { type: 'SELECT_CALL'; callId: string | null; callFallback?: Call }
+  | { type: 'SET_VIEW_MODE'; mode: CalendarViewMode };
 
 const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
@@ -32,6 +46,7 @@ const STALE_DATE_MS = 60 * 60 * 1000; // 1 hour
 interface PersistedCalendarState {
   xyneCalendarState: XyneCalendarState;
   selectedDate: string;
+  viewMode: CalendarViewMode;
   savedAt: number;
 }
 
@@ -50,6 +65,7 @@ const initDB = (): Promise<IDBDatabase> => {
 const savePersistedState = async (
   state: XyneCalendarState,
   selectedDate: string,
+  viewMode: CalendarViewMode,
 ): Promise<void> => {
   try {
     const db = await initDB();
@@ -57,6 +73,7 @@ const savePersistedState = async (
     const persisted: PersistedCalendarState = {
       xyneCalendarState: state,
       selectedDate,
+      viewMode,
       savedAt: Date.now(),
     };
     store.put(persisted, CONTEXT_KEY);
@@ -72,6 +89,7 @@ const savePersistedState = async (
 const loadPersistedState = async (): Promise<{
   state: XyneCalendarState;
   selectedDate: string | null;
+  viewMode: CalendarViewMode | null;
 }> => {
   try {
     const db = await initDB();
@@ -81,13 +99,14 @@ const loadPersistedState = async (): Promise<{
       request.onsuccess = () => {
         const result = request.result as PersistedCalendarState | undefined;
         if (!result) {
-          resolve({ state: 'closed', selectedDate: null });
+          resolve({ state: 'closed', selectedDate: null, viewMode: null });
           return;
         }
         const isStale = Date.now() - result.savedAt > STALE_DATE_MS;
         resolve({
           state: result.xyneCalendarState ?? 'closed',
           selectedDate: isStale ? null : (result.selectedDate ?? null),
+          viewMode: result.viewMode ?? null,
         });
       };
       request.onerror = () =>
@@ -101,7 +120,7 @@ const loadPersistedState = async (): Promise<{
       message: String('Failed to load XyneCalendar state from IndexedDB:'),
       error: error,
     });
-    return { state: 'closed', selectedDate: null };
+    return { state: 'closed', selectedDate: null, viewMode: null };
   }
 };
 
@@ -112,9 +131,9 @@ export const xyneCalendarMachine = setup({
   },
   actions: {
     // Only the reload-restore path passes `date`; a real click always resets to today.
-    resetView: assign(({ event }) => {
+    resetView: assign(({ event, context }) => {
       const date = (event.type === 'OPEN' && event.date) || todayIso();
-      void savePersistedState('open', date);
+      void savePersistedState('open', date, context.viewMode);
       return {
         xyneCalendarState: 'open' as XyneCalendarState,
         selectedDate: date,
@@ -123,17 +142,22 @@ export const xyneCalendarMachine = setup({
       };
     }),
     setClosed: assign(({ context }) => {
-      void savePersistedState('closed', context.selectedDate);
+      void savePersistedState('closed', context.selectedDate, context.viewMode);
       return { xyneCalendarState: 'closed' as XyneCalendarState };
     }),
     setSelectedDate: assign(({ event, context }) => {
       if (event.type !== 'SELECT_DATE') return {};
-      void savePersistedState(context.xyneCalendarState, event.date);
+      void savePersistedState(context.xyneCalendarState, event.date, context.viewMode);
       return { selectedDate: event.date };
     }),
     setSelectedCall: assign(({ event }) => {
       if (event.type !== 'SELECT_CALL') return {};
       return { selectedCallId: event.callId, selectedCallFallback: event.callFallback ?? null };
+    }),
+    setViewMode: assign(({ event, context }) => {
+      if (event.type !== 'SET_VIEW_MODE') return {};
+      void savePersistedState(context.xyneCalendarState, context.selectedDate, event.mode);
+      return { viewMode: event.mode };
     }),
   },
 }).createMachine({
@@ -142,6 +166,7 @@ export const xyneCalendarMachine = setup({
     selectedDate: todayIso(),
     selectedCallId: null,
     selectedCallFallback: null,
+    viewMode: 'day',
   }),
   id: 'xyneCalendarMachine',
   initial: 'closed',
@@ -149,6 +174,7 @@ export const xyneCalendarMachine = setup({
     closed: {
       on: {
         OPEN: { target: 'open', actions: 'resetView' },
+        SET_VIEW_MODE: { actions: 'setViewMode' },
       },
     },
     open: {
@@ -157,6 +183,7 @@ export const xyneCalendarMachine = setup({
         CLOSE: { target: 'closed', actions: 'setClosed' },
         SELECT_DATE: { actions: 'setSelectedDate' },
         SELECT_CALL: { actions: 'setSelectedCall' },
+        SET_VIEW_MODE: { actions: 'setViewMode' },
       },
     },
   },
@@ -166,7 +193,10 @@ export const xyneCalendarActor = createActor(xyneCalendarMachine).start();
 
 // Async restore, mirrors xyneAIMachine — starts closed, flips open once IndexedDB resolves.
 void (async (): Promise<void> => {
-  const { state, selectedDate } = await loadPersistedState();
+  const { state, selectedDate, viewMode } = await loadPersistedState();
+  if (viewMode) {
+    xyneCalendarActor.send({ type: 'SET_VIEW_MODE', mode: viewMode });
+  }
   if (state === 'open') {
     xyneCalendarActor.send({ type: 'OPEN', ...(selectedDate ? { date: selectedDate } : {}) });
   }
