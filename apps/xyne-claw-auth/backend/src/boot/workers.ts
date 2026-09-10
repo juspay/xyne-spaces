@@ -26,6 +26,8 @@ import { initEvalJudgeWorker, closeEvalJudgeWorker } from "../queue/eval-judge-w
 import { initFailureCuratorWorker, closeFailureCuratorWorker } from "../services/failure-curator-worker.js";
 import { closeBackfillQueue } from "../queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "../bootstrap-tools.js";
+import { beginLocalHarnessDrain } from "../routes/local-harness.js";
+import { initLocalHarnessExpirySweep } from "../services/localHarnessExpiry.js";
 import { initMemoryCron } from "../services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js";
 import { initDigitalTwinDaily } from "../services/digitalTwinDaily.js";
@@ -44,6 +46,9 @@ type WorkerEntry = {
 };
 
 const WORKERS: WorkerEntry[] = [
+  // Stop parking new local-harness long-polls first so in-flight bridge
+  // connections return idle and the pod can exit without dropping a run.
+  { name: "local-harness-bridge", closeSync: beginLocalHarnessDrain },
   { name: "bitbucket-stats", closeSync: stopBitbucketStatsBackgroundRefresh },
   { name: "scheduled-jobs-worker", init: initScheduledJobsWorker, close: closeWorker },
   { name: "scheduled-jobs-queue", close: closeQueue },
@@ -77,9 +82,11 @@ const WORKERS: WorkerEntry[] = [
   { name: "awakening-window-worker", init: initAwakeningWindowWorker, close: closeAwakeningWindowWorker },
   { name: "awakening-reflex-worker", init: initAwakeningReflexWorker, close: closeAwakeningReflexWorker },
   { name: "awakening-queues", close: closeAwakeningQueues },
+  { name: "local-harness-expiry", init: initLocalHarnessExpirySweep },
 ];
 
 const SHUTDOWN_SEQUENCE: string[] = [
+  "local-harness-bridge",
   "bitbucket-stats",
   "scheduled-jobs-worker",
   "run-recovery-worker",
