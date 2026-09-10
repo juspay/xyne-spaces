@@ -205,43 +205,51 @@ export const ShareViewDialog = ({
           />
         </div>
 
-        <div className='max-h-52 overflow-y-auto space-y-0.5'>
-          {userOptions.length === 0 ? (
-            <div className='p-6 text-center text-sm text-muted-foreground'>No users found</div>
-          ) : (
-            userOptions.map(u => {
-              const isSelected = selectedUserIds.has(u.id);
-              return (
-                <button
-                  key={u.id}
-                  type='button'
-                  onClick={() => toggleUser(u.id)}
-                  className={cn(
-                    'w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none text-left',
-                    isSelected
-                      ? 'bg-accent text-accent-foreground'
-                      : 'hover:bg-muted text-foreground',
-                  )}
-                  data-track-category='Projects'
-                  data-track-name='ToggleShareViewUser'
-                  data-track-metadata={JSON.stringify({ userId: u.id, selected: !isSelected })}
-                >
-                  <Avatar userId={u.id} size='md' rounded />
-                  <div className='flex-1 min-w-0'>
-                    <div className='text-sm font-medium truncate'>{u.name}</div>
-                    {u.email && (
-                      <div className='text-xs text-muted-foreground truncate'>{u.email}</div>
+        {searchQuery.trim() && (
+          <div className='max-h-52 overflow-y-auto space-y-0.5'>
+            {userOptions.length === 0 ? (
+              <div className='p-6 text-center text-sm text-muted-foreground'>No users found</div>
+            ) : (
+              userOptions.map(u => {
+                const isSelected = selectedUserIds.has(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type='button'
+                    onClick={() => toggleUser(u.id)}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none text-left',
+                      isSelected
+                        ? 'bg-accent text-accent-foreground'
+                        : 'hover:bg-muted text-foreground',
                     )}
-                  </div>
-                  {isSelected && <Check className='w-4 h-4 text-primary shrink-0' />}
-                </button>
-              );
-            })
-          )}
-        </div>
+                    data-track-category='Projects'
+                    data-track-name='ToggleShareViewUser'
+                    data-track-metadata={JSON.stringify({ userId: u.id, selected: !isSelected })}
+                  >
+                    <Avatar userId={u.id} size='md' rounded />
+                    <div className='flex-1 min-w-0'>
+                      <div className='text-sm font-medium truncate'>{u.name}</div>
+                      {u.email && (
+                        <div className='text-xs text-muted-foreground truncate'>{u.email}</div>
+                      )}
+                    </div>
+                    {isSelected && <Check className='w-4 h-4 text-primary shrink-0' />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
 
         <div className='flex flex-col gap-2 border-t border-border pt-3'>
-          <div className='text-xs font-medium text-muted-foreground'>Who has access</div>
+          <div className='flex items-center justify-between'>
+            <div className='text-xs font-medium text-muted-foreground'>Who has access</div>
+            <Button variant='ghost' size='sm' onClick={() => void handleCopyLink()}>
+              <Link2 className='w-4 h-4 mr-1.5' />
+              Copy link
+            </Button>
+          </div>
           <div className='max-h-44 overflow-y-auto space-y-0.5'>
             {/* Owner (view creator) — always shown, never removable. */}
             {ownerId && (
@@ -282,44 +290,40 @@ export const ShareViewDialog = ({
                     <div className='text-xs text-muted-foreground truncate'>{sharedUser.email}</div>
                   )}
                 </div>
-                <button
-                  type='button'
-                  onClick={() => void handleRevoke(grantId)}
-                  disabled={revokingId === grantId}
-                  className='p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 disabled:opacity-50'
-                  aria-label='Remove access'
-                  title='Remove access'
-                  data-track-category='Projects'
-                  data-track-name='RevokeShareViewUser'
-                  data-track-metadata={JSON.stringify({ viewId, userId })}
-                >
-                  <X className='w-4 h-4' />
-                </button>
+                {user?.id === ownerId && (
+                  <button
+                    type='button'
+                    onClick={() => void handleRevoke(grantId)}
+                    disabled={revokingId === grantId}
+                    className='p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 disabled:opacity-50'
+                    aria-label='Remove access'
+                    title='Remove access'
+                    data-track-category='Projects'
+                    data-track-name='RevokeShareViewUser'
+                    data-track-metadata={JSON.stringify({ viewId, userId })}
+                  >
+                    <X className='w-4 h-4' />
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </div>
 
-        <div className='flex items-center justify-between gap-2'>
-          <Button variant='ghost' size='sm' onClick={() => void handleCopyLink()}>
-            <Link2 className='w-4 h-4 mr-1.5' />
-            Copy link
+        <div className='flex items-center justify-end gap-2'>
+          <Button variant='ghost' size='sm' onClick={onClose}>
+            Cancel
           </Button>
-          <div className='flex gap-2'>
-            <Button variant='ghost' size='sm' onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              size='sm'
-              onClick={() => void handleShare()}
-              disabled={selectedUserIds.size === 0 || isSharing}
-            >
-              <Share2 className='w-4 h-4 mr-1.5' />
-              {isSharing
-                ? 'Sharing…'
-                : `Share${selectedUserIds.size > 0 ? ` (${selectedUserIds.size})` : ''}`}
-            </Button>
-          </div>
+          <Button
+            size='sm'
+            onClick={() => void handleShare()}
+            disabled={selectedUserIds.size === 0 || isSharing}
+          >
+            <Share2 className='w-4 h-4 mr-1.5' />
+            {isSharing
+              ? 'Sharing…'
+              : `Share${selectedUserIds.size > 0 ? ` (${selectedUserIds.size})` : ''}`}
+          </Button>
         </div>
       </div>
     </Dialog>
