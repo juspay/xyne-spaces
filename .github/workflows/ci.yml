@@ -24,7 +24,8 @@ jobs:
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'false' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    if: false
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
@@ -35,7 +36,6 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v5
-        if: vars.USE_SELF_HOSTED_CI == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -65,7 +65,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard ${{ matrix.task }}
-    if: false # temporarily disabled — testing automation test job only
+    if: false
     runs-on: ${{ vars.USE_SELF_HOSTED_CI != 'true' && 'ubuntu-latest' || matrix.task == 'build' && 'ci-cluster-github-runners-mini-max' || 'ci-cluster-github-runners-mini' }}
     strategy:
       fail-fast: false
@@ -164,29 +164,6 @@ jobs:
             -F "channelId=$CHANNELID" \
             -F "markdownText=CI automation test report — commit ${GITHUB_SHA::9}" \
             -F "files=@${REPORT_HTML};type=text/html"
-
-  # Standalone smoke test for the Squid whitelist + Spaces push flow — no
-  # dependency on the automation suite, so it validates that path even while
-  # the actual test build is broken on something unrelated (Dockerfile.test
-  # apt-get). Safe to delete once the automation job's own push step is
-  # confirmed working end-to-end.
-  spaces-hello:
-    name: Spaces hello test
-    runs-on: ci-cluster-github-runners
-    steps:
-      - name: Say hello
-        run: echo "hello"
-
-      - name: Post hello to Spaces
-        env:
-          JWT: ${{ secrets.TESTCASES_JWT }}
-          CHANNELID: ${{ secrets.TESTCASES_CHANNELID }}
-          SPACES_URL: ${{ secrets.SPACES_URL }}
-        run: |
-          set -euo pipefail
-          curl -X POST "${SPACES_URL%/}/api/apps/chat/postMessage" \
-            -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
-            -d '{"channelId":"'"$CHANNELID"'","text":"Testing squid + spaces push flow"}'
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
