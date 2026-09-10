@@ -169,7 +169,7 @@ export function ViewBoardPicker({
       data-track-name='OpenBoardPicker'
       className={cn('rounded-[10px] border-border hover:bg-muted', className)}
     >
-      <Layers className='w-3 h-3 text-muted-foreground' />
+      <Layers className='w-3 h-3' />
       <span className='font-medium'>
         {count === 0 ? 'Select boards' : `${count} board${count > 1 ? 's' : ''}`}
       </span>
