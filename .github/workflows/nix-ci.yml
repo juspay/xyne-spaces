@@ -96,4 +96,5 @@ jobs:
         with:
           name: nix-smoke-logs
           path: .logs/
+          include-hidden-files: true
           retention-days: 7

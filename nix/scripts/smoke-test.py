@@ -22,6 +22,19 @@ env["NODE_ENV"] = "development"
 logs = Path(".logs/nix-smoke")
 logs.mkdir(parents=True, exist_ok=True)
 children = []
+service_socket = str((logs / "process-compose.sock").resolve())
+
+
+def check_services():
+    if existing or not Path(service_socket).exists():
+        return
+    result = subprocess.run(
+        ["process-compose", "-U", "-u", service_socket, "process", "list", "-o", "json"],
+        capture_output=True, text=True, timeout=10, env=env, check=True)
+    for service in json.loads(result.stdout):
+        if service["exit_code"] != 0 or service["restarts"] > 0:
+            raise RuntimeError(f"Service failed or restarted: {service['name']} "
+                               f"(exit={service['exit_code']}, restarts={service['restarts']})")
 
 
 def launch(command, name, cwd=None):
@@ -36,6 +49,7 @@ def launch(command, name, cwd=None):
 def wait_for(url, timeout, check=lambda response: True):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        check_services()
         for child in children:
             if child.poll() is not None:
                 raise RuntimeError(f"Process exited early: {child.args} ({child.returncode})")
@@ -58,7 +72,8 @@ try:
             if sock.connect_ex(("127.0.0.1", port)) == 0:
                 raise RuntimeError(f"Port {port} is occupied; stop its service before testing")
     if not existing:
-        launch(["process-compose", "-f", config_path, "-t=false", "--no-server"], "services")
+        launch(["process-compose", "-f", config_path, "-t=false", "-U", "-u", service_socket],
+               "services")
     # LiveKit must actually connect to Redis; NumPy/LiveKit native imports must load.
     wait_for("http://127.0.0.1:7880", 180)
     wait_for("http://127.0.0.1:8001/health", 900)
@@ -73,6 +88,13 @@ try:
     wait_for("http://127.0.0.1:8001/health", 10)
     wait_for("http://127.0.0.1:3001/api/health", 10)
     print("Nix runtime smoke test passed", flush=True)
+except BaseException:
+    # Keep actionable errors in the job output even if artifact upload fails.
+    for log_path in logs.glob("*.log"):
+        print(f"\n--- Last 100 lines of {log_path} ---", file=sys.stderr)
+        print("\n".join(log_path.read_text(errors="replace").splitlines()[-100:]),
+              file=sys.stderr, flush=True)
+    raise
 finally:
     for child in reversed(children):
         try:
