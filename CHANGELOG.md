@@ -1,3 +1,15 @@
+## [1.274.0-release-20260904.8](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.7...v1.274.0-release-20260904.8) (2026-09-10)
+
+
+### Features
+
+* show basic desk metrics to guest users (release-20260904) ([#1746](https://github.com/juspay/xyne-spaces/issues/1746)) ([8fcf5c1](https://github.com/juspay/xyne-spaces/commit/8fcf5c1ed9b643d7ae6c6637fc731637a51f3985))
+
+
+### Bug Fixes
+
+* word split fix in subject contains and body contains … ([#1644](https://github.com/juspay/xyne-spaces/issues/1644)) ([#1734](https://github.com/juspay/xyne-spaces/issues/1734)) ([3d9bfc3](https://github.com/juspay/xyne-spaces/commit/3d9bfc36713aee1fd4ecba2804fb382b916f8003))
+
 ## [1.274.0-release-20260904.7](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.6...v1.274.0-release-20260904.7) (2026-09-10)
 
 
