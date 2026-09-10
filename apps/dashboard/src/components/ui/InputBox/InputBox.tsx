@@ -100,6 +100,9 @@ const getFileExtension = (name: string): string => {
   return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
 };
 import { preloadEmojiData } from '../../../utils/emojiLookup';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+import { useChannel } from '../../../hooks/useChannels';
 
 const lowlight = createLowlight(all);
 
@@ -1262,6 +1265,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
     );
 
+    const trackedChannel = useChannel(channelId ?? '');
+
     const handleSend = useCallback(async () => {
       if (!editor || isSending) return;
       if (sendDisabled) {
@@ -1344,6 +1349,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
         await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
 
+        // Tracked here, not on the Send button: Enter, the button, the mobile
+        // editor and shortcuts all land in this function, and only a send that
+        // succeeded should count.
+        globalClickTracker.trackManualEvent(
+          'CHAT_INPUT',
+          'SEND_MESSAGE',
+          undefined,
+          {
+            ...channelTrackingMetadata(trackedChannel),
+            ...(conversationId !== null && { conversationId }),
+            isThreadReply: conversationId !== null,
+            hasAttachments: filesToSend.length > 0,
+          },
+          'active',
+        );
+
         editor.commands.setContent('');
         setContent('');
         setAttachedCanvas(null);
@@ -1366,6 +1387,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       commandItems,
       onCommandSelect,
       disableDraftUpload,
+      trackedChannel,
     ]);
 
     // Canvas attachment handlers
@@ -2115,14 +2137,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-kind='active'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                message: editor?.getText().trim() || '',
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -2201,13 +2215,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-kind='active'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -2274,13 +2281,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             }`}
                             aria-label='Send message'
                             data-testid='send-message-button'
-                            data-track-category='CHAT_INPUT'
-                            data-track-name='SEND_MESSAGE'
-                            data-track-kind='active'
-                            data-track-metadata={JSON.stringify({
-                              ...(conversationId !== null ? { conversationId } : { channelId }),
-                              hasAttachments: allAttachments.length > 0,
-                            })}
                           >
                             {isSending ? (
                               <Loader2 className='h-4 w-4 animate-spin' />

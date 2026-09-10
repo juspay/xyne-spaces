@@ -60,7 +60,7 @@ const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElemen
         data-track-category='CHAT_INFO'
         data-track-name='JOIN_CHANNEL_BUTTON_CLICK'
         data-track-kind='active'
-        data-track-metadata={JSON.stringify({ channelId })}
+        data-track-metadata={JSON.stringify({ channelId, channelName: channelTitle })}
       />
     </div>
   );

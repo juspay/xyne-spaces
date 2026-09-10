@@ -64,6 +64,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
 interface InfoProps {
@@ -429,7 +430,7 @@ const Info = ({
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
             data-track-kind='active'
-            data-track-metadata={JSON.stringify({ channelId: channel.id })}
+            data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
             data-ph-capture-attribute-track-id='leave_channel'
           >
             <LucideLogOut size={16} className='text-destructive' />
@@ -1006,6 +1007,10 @@ const ChannelMembers = ({
               data-track-category='CHAT_INFO'
               data-track-name='CONFIRM_REMOVE_PARTICIPANT'
               data-track-kind='active'
+              data-track-metadata={JSON.stringify({
+                ...channelTrackingMetadata(channel),
+                targetUserId: userToRemove?.id,
+              })}
               className='px-6'
               trackId='remove_channel_participant'
             >

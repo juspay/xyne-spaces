@@ -51,6 +51,7 @@ import {
   markPulseItemAsSent as rewritePulseItemAsSent,
   updatePulseMerchant as rewritePulseMerchant,
 } from '../utils/markPulseItemAsSent';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { ConversationV3Repository } from '../database/repositories/conversationV3Repository';
 import { RecentConversationsRepository } from '../database/repositories/recentConversationsRepository';
 import { serializeConversationV3Row } from '../serializers/conversationV3Serializer';
@@ -690,7 +691,16 @@ export class ConversationController {
         })
         .catch((err) => logger.error('Side-effect handler error: createConversation', err));
 
-      // MESSAGE_SENT is recorded by MessagesSideEffectHandler.onInsert above (with channelId).
+      userActivityTrackingService
+        .trackMessageSent(userId, {
+          messageId: message.messageId,
+        })
+        .catch((error) => {
+          logger.error('[UserActivityTracking] Failed to track message sent activity:', {
+            messageId: message.messageId,
+            error: error,
+          });
+        });
 
       res.status(201).json({
         conversationId: conversation.conversationId,

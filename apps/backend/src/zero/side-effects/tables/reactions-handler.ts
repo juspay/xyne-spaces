@@ -4,16 +4,12 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { activityService } from '@/services/activity/activityService';
 import { radarReactionResolver } from '@/services/radar/radarReactionResolver';
-import {
-  reportableChannelName,
-  userActivityTrackingService,
-} from '@/services/userActivityTrackingService';
 
 export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
   private async getReactionContext(reactionId: string) {
     const reaction = await db.reaction.findUnique({
       where: { reactionId },
-      select: { reactionId: true, messageId: true, userId: true, emojiName: true },
+      select: { reactionId: true, messageId: true, userId: true },
     });
 
     if (!reaction) {
@@ -31,11 +27,7 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const conversation = await db.conversation.findUnique({
       where: { conversationId: message.conversationId },
-      select: {
-        channelId: true,
-        initialMessageId: true,
-        channel: { select: { name: true, scopeType: true } },
-      },
+      select: { channelId: true, initialMessageId: true },
     });
 
     if (!conversation?.channelId) {
@@ -44,32 +36,12 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const messageAuthorId = message.senderId;
     const reactingUserId = reaction.userId;
-    const isThreadActivity = conversation.initialMessageId !== reaction.messageId;
-
-    // Usage analytics counts every reaction; the activity feed below drops
-    // self-reactions. Emitted before the filter so both get what they need
-    // off one set of lookups. Keyed on the reactor from the row, not the
-    // mutation context, so attribution cannot drift from `isSelf`.
-    userActivityTrackingService
-      .trackReactionAdded(reactingUserId, {
-        messageId: reaction.messageId,
-        channelId: conversation.channelId,
-        channelName: reportableChannelName(conversation.channel?.name, conversation.channel?.scopeType),
-        ...(conversation.channel?.scopeType && { scopeType: conversation.channel.scopeType }),
-        emojiName: reaction.emojiName,
-        isThreadReply: isThreadActivity,
-        isSelf: messageAuthorId === reactingUserId,
-      })
-      .catch(error => {
-        logger.error('[UserActivityTracking] Failed to track reaction added activity:', {
-          reactionId,
-          error,
-        });
-      });
 
     if (messageAuthorId === reactingUserId) {
       return null;
     }
+
+    const isThreadActivity = conversation.initialMessageId !== reaction.messageId;
 
     return {
       reactionId,
@@ -131,39 +103,11 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const message = await db.message.findUnique({
       where: { messageId: previousValue.messageId },
-      select: { senderId: true, conversationId: true },
+      select: { senderId: true },
     });
 
     if (!message) {
       return;
-    }
-
-    // Counterpart of REACTION_ADDED so reaction counts can go down as well as up.
-    const conversation = await db.conversation.findUnique({
-      where: { conversationId: message.conversationId },
-      select: {
-        channelId: true,
-        initialMessageId: true,
-        channel: { select: { name: true, scopeType: true } },
-      },
-    });
-    if (conversation?.channelId) {
-      userActivityTrackingService
-        .trackReactionRemoved(previousValue.userId, {
-          messageId: previousValue.messageId,
-          channelId: conversation.channelId,
-          channelName: reportableChannelName(conversation.channel?.name, conversation.channel?.scopeType),
-          ...(conversation.channel?.scopeType && { scopeType: conversation.channel.scopeType }),
-          emojiName: previousValue.emojiName,
-          isThreadReply: conversation.initialMessageId !== previousValue.messageId,
-          isSelf: message.senderId === previousValue.userId,
-        })
-        .catch(error => {
-          logger.error('[UserActivityTracking] Failed to track reaction removed activity:', {
-            messageId: previousValue.messageId,
-            error,
-          });
-        });
     }
 
     const latestNonSelfReaction = await db.reaction.findFirst({

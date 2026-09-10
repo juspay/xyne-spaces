@@ -1359,7 +1359,6 @@ export class ChannelController {
       void userActivityTrackingService.trackChannelCreated(userId, {
         channelId: channel.id,
         name: channel.name,
-        channelName: channel.name,
         scopeType: channel.scopeType,
       });
 
@@ -2601,13 +2600,6 @@ export class ChannelController {
             entityType: 'channel_participants',
             operation: 'insert'
           }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-          // Group DMs carry no reportable name (see reportableChannelName).
-          void userActivityTrackingService.trackChannelJoined(participant.userId, {
-            channelId: result.channelId,
-            scopeType: ChannelScopeType.GROUP_DM,
-            addedBy: currentUserId,
-            isSelf: false,
-          });
         }
       }
 

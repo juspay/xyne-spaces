@@ -1,24 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { activityTrackingService } from './activityTrackingService';
-import { ChannelScopeType, Platform, TriggerType } from '@xyne/shared';
+import { Platform, TriggerType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-
-const NON_DISPLAY_NAME_SCOPES = new Set<string>([ChannelScopeType.DM, ChannelScopeType.GROUP_DM]);
-
-/**
- * `Channel.name` is a human name only for non-DM scopes; DMs store a sorted
- * user-id pair (channelRepository.getDMChannel) and self-DMs the user id.
- * Those are neither readable in reports nor something to persist into the
- * event store, so they are dropped here and `channelId` + `scopeType` carry
- * the dimension.
- */
-export function reportableChannelName(
-  name: string | null | undefined,
-  scopeType: string | null | undefined,
-): string | undefined {
-  if (!name) return undefined;
-  return NON_DISPLAY_NAME_SCOPES.has(scopeType ?? '') ? undefined : name;
-}
 
 class UserActivityTrackingService {
 
@@ -68,8 +51,6 @@ class UserActivityTrackingService {
         url: 'backend',
         trigger_type: TriggerType.DB_MUTATION,
         context_metadata: params.metadata,
-        // No interaction_kind: a server-side emitter sees a row change, not a
-        // gesture, and the client click that caused it is tracked separately.
         platform: Platform.WEB,
         timestamp: Date.now(),
       };
@@ -108,61 +89,10 @@ class UserActivityTrackingService {
 
   // ==================== Specific Message Operations ====================
 
-  async trackMessageSent(
-    userId: string,
-    metadata?: {
-      messageId?: string;
-      conversationId?: string;
-      channelId?: string;
-      channelName?: string;
-      scopeType?: string;
-      isThreadReply?: boolean;
-      hasAttachment?: boolean;
-    },
-  ): Promise<void> {
+  async trackMessageSent(userId: string, metadata?: { messageId?: string; conversationId?: string; channelId?: string; hasAttachment?: boolean }): Promise<void> {
     await this.track({
       userId,
       eventName: 'MESSAGE_SENT',
-      eventCategory: 'CHAT',
-      metadata,
-    });
-  }
-
-  async trackReactionAdded(
-    userId: string,
-    metadata?: {
-      messageId?: string;
-      channelId?: string;
-      channelName?: string;
-      scopeType?: string;
-      emojiName?: string;
-      isThreadReply?: boolean;
-      isSelf?: boolean;
-    },
-  ): Promise<void> {
-    await this.track({
-      userId,
-      eventName: 'REACTION_ADDED',
-      eventCategory: 'CHAT',
-      metadata,
-    });
-  }
-
-  async trackReactionRemoved(
-    userId: string,
-    metadata?: {
-      messageId?: string;
-      channelId?: string;
-      channelName?: string;
-      scopeType?: string;
-      emojiName?: string;
-      isThreadReply?: boolean;
-      isSelf?: boolean;
-    },
-  ): Promise<void> {
-    await this.track({
-      userId,
-      eventName: 'REACTION_REMOVED',
       eventCategory: 'CHAT',
       metadata,
     });
@@ -222,46 +152,10 @@ class UserActivityTrackingService {
 
   // ==================== Specific Channel Operations ====================
 
-  async trackChannelCreated(
-    userId: string,
-    metadata?: { channelId?: string; name?: string; channelName?: string; scopeType?: string; projectId?: string },
-  ): Promise<void> {
+  async trackChannelCreated(userId: string, metadata?: { channelId?: string; name?: string; scopeType?: string; projectId?: string }): Promise<void> {
     await this.track({
       userId,
       eventName: 'CHANNEL_CREATED',
-      eventCategory: 'CHANNEL',
-      metadata,
-    });
-  }
-
-  /**
-   * `memberId` became a member of a channel. Keyed on the member (the subject,
-   * like every other event on this table); `addedBy` is the actor when someone
-   * else added them, and `isSelf` is true when they joined on their own.
-   */
-  async trackChannelJoined(
-    memberId: string,
-    metadata?: { channelId?: string; channelName?: string; scopeType?: string; addedBy?: string; isSelf?: boolean },
-  ): Promise<void> {
-    await this.track({
-      userId: memberId,
-      eventName: 'CHANNEL_JOINED',
-      eventCategory: 'CHANNEL',
-      metadata,
-    });
-  }
-
-  /**
-   * `memberId` stopped being a member. `removedBy` is the actor when someone
-   * else removed them; `isSelf` is true when they left on their own.
-   */
-  async trackChannelLeft(
-    memberId: string,
-    metadata?: { channelId?: string; channelName?: string; scopeType?: string; removedBy?: string; isSelf?: boolean },
-  ): Promise<void> {
-    await this.track({
-      userId: memberId,
-      eventName: 'CHANNEL_LEFT',
       eventCategory: 'CHANNEL',
       metadata,
     });

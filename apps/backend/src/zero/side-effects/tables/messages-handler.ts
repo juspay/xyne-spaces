@@ -18,7 +18,7 @@ import {
   getOnlineChannelParticipants,
   extractSpecialMentions,
 } from '@/utils/mentionUtils';
-import { reportableChannelName, userActivityTrackingService } from '@/services/userActivityTrackingService';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
 import { activityTrackingService } from '@/services/activityTrackingService';
@@ -297,7 +297,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
         // a second lookup.
-        channel: { select: { scopeType: true, name: true } },
+        channel: { select: { scopeType: true } },
       },
     });
 
@@ -312,18 +312,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
     }
 
-    const reportableName = reportableChannelName(
-      conversation?.channel?.name,
-      conversation?.channel?.scopeType,
-    );
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {
       messageId,
       ...(conversation?.channelId && { channelId: conversation.channelId }),
-      ...(reportableName && { channelName: reportableName }),
-      ...(conversation?.channel?.scopeType && { scopeType: conversation.channel.scopeType }),
-      // Every channel message owns a conversation whose initialMessageId is the
-      // message itself; anything else in that conversation is a thread reply.
-      isThreadReply: conversation !== null && conversation.initialMessageId !== messageId,
       hasAttachment: message.hasAttachment,
     }).catch(error => {
       logger.error('[UserActivityTracking] Failed to track message sent activity:', {
