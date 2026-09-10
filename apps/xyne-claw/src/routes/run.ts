@@ -1775,6 +1775,8 @@ export async function processTask(
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    // Root of this run's spilled tool-result / attachment files, so sandbox-copy-in can forward a whole MCP result file into a sandbox (contextPath).
+    meta["contextRoot"] = join(mcpOutputDir, ".context");
     if (taskCommand) meta["taskCommand"] = taskCommand.command;
     if (recordingFiles.length > 0) {
       // Server-authored metadata consumed only by analyze-skill-recording. The
@@ -2337,6 +2339,7 @@ export async function processTask(
       if (userName) calleeMeta["userName"] = userName;
       if (userEmail) calleeMeta["userEmail"] = userEmail;
       calleeMeta["agentSlug"] = spec.slug;
+      calleeMeta["contextRoot"] = join(mcpOutputDir, ".context");
       if (channelId) calleeMeta["channelId"] = channelId;
       if (conversationId) calleeMeta["conversationId"] = conversationId;
       if (eventType) calleeMeta["eventType"] = eventType;
