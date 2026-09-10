@@ -9,7 +9,7 @@ import {
   parseRepliesMd,
   serializeRepliesMd,
   addReplyToData,
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeParentMessageMd,
 } from '@xyne/shared';
 import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
@@ -166,27 +166,11 @@ export class MessageMetadataService {
 
     if (!message) return;
 
-    const summary: InitialMessageSummary = {
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      content: message.content,
+    const md = buildInitialMessageMd({
+      ...message,
       msgType: message.msgType as InitialMessageSummary['msgType'],
-      hasAttachment: message.hasAttachment,
-      edited: message.edited,
-      isDeleted: message.isDeleted,
-      showInChannel: message.showInChannel,
-      visibleTo: message.visibleTo,
       createdAt: message.createdAt.getTime(),
-      metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-      nudgeCount: message.nudgeCount,
-      isSent: message.isSent,
-      reactions_md: message.reactions_md,
-      link_preview_md: message.link_preview_md,
-      childConversationId: message.childConversationId,
-    };
-
-    const md = serializeInitialMessageMd(summary);
+    });
     if (conversation.initial_message_md === md) return;
 
     await this.prisma.conversation.update({
