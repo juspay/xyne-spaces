@@ -186,8 +186,6 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'executionRunLog':
       return new BaseQueryACL(ctx, prisma)
-    case 'radarTeam':
-      return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':

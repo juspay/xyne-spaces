@@ -731,12 +731,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const toggleGroupExpansion = useCallback(
     (groupKey: string) => {
       setExpandedGroups(prev => {
-        const next = new Set(prev);
-        if (next.has(groupKey)) {
-          next.delete(groupKey);
-        } else {
-          next.add(groupKey);
-        }
+        const next = new Set<string>(prev.has(groupKey) ? [] : [groupKey]);
         try {
           const raw = sessionStorage.getItem(expandedGroupsStorageKey);
           const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
@@ -760,7 +755,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     try {
       const raw = sessionStorage.getItem(expandedGroupsStorageKey);
       const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
-      setExpandedGroups(new Set(map[groupByKey] ?? []));
+      setExpandedGroups(new Set((map[groupByKey] ?? []).slice(0, 1)));
     } catch (err) {
       logger.error(Event.FRONTEND_ERROR, {
         type: 'migrated_console_error',
@@ -3696,6 +3691,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const isTableEmpty = processedGroups.every(group => group.allTickets.length === 0);
   const tableGroups = isTableEmpty ? [] : processedGroups;
 
+  const hasScrolledToExpandedGroup = useRef(false);
+  useEffect(() => {
+    if (hasScrolledToExpandedGroup.current) return;
+    const [expandedGroupKey] = [...expandedGroups];
+    if (!expandedGroupKey || processedGroups.length === 0) return;
+    const el = document.querySelector(`[data-group-key="${CSS.escape(expandedGroupKey)}"]`);
+    if (!el) return;
+    hasScrolledToExpandedGroup.current = true;
+    el.scrollIntoView({ block: 'start' });
+  }, [expandedGroups, processedGroups]);
+
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
@@ -3828,131 +3834,136 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
         {/* Create Ticket / Save View Button - Right Side */}
         <div className='flex flex-wrap lg:flex-col md:items-end gap-3 ml-auto md:ml-0'>
-          {isWorkspaceView && (
-            <div className='flex items-center gap-2'>
-              {isViewDirty && (
-                <>
-                  <span className='text-[13px] text-muted-foreground whitespace-nowrap'>
-                    Unsaved changes
-                  </span>
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    onClick={handleResetWorkspaceView}
-                    className='rounded-[10px]'
-                    aria-label='Discard unsaved changes'
-                    data-track-category='Projects'
-                    data-track-name='ResetView'
-                  >
-                    Reset
-                  </Button>
-                </>
-              )}
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleShareWorkspaceView}
-                disabled={!workspaceViewReady}
-                className='rounded-[10px] border-border hover:bg-muted'
-                aria-label='Share view'
-                data-track-category='Projects'
-                data-track-name='ShareView'
-              >
-                <Share2 className='w-3 h-3 text-muted-foreground' />
-                <span>Share</span>
-              </Button>
-              {canSaveInPlace ? (
-                <Button
-                  size='sm'
-                  onClick={handleSaveExistingView}
-                  disabled={!workspaceViewReady || isSavingWorkspaceView || !isViewDirty}
-                  className='rounded-[10px]'
-                  data-track-category='Projects'
-                  data-track-name='SaveView'
-                >
-                  <Bookmark className='w-3 h-3' />
-                  <span>Save</span>
-                </Button>
-              ) : (
-                <Popover
-                  open={isSavePopoverOpen}
-                  onOpenChange={handleSavePopoverOpenChange}
-                  align='end'
-                  className='w-64 p-3'
-                  trigger={
+          <div className='flex flex-wrap items-center justify-end gap-2'>
+            {isWorkspaceView && (
+              <div className='flex items-center gap-2'>
+                {isViewDirty && (
+                  <>
+                    <span className='text-[13px] text-muted-foreground whitespace-nowrap'>
+                      Unsaved changes
+                    </span>
                     <Button
+                      variant='ghost'
                       size='sm'
-                      disabled={!workspaceViewReady || isSavingWorkspaceView}
+                      onClick={handleResetWorkspaceView}
                       className='rounded-[10px]'
+                      aria-label='Discard unsaved changes'
                       data-track-category='Projects'
-                      data-track-name='SaveView'
+                      data-track-name='ResetView'
                     >
-                      <Bookmark className='w-3 h-3' />
-                      <span>{viewId ? 'Save' : 'Save view'}</span>
+                      Reset
                     </Button>
-                  }
+                  </>
+                )}
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleShareWorkspaceView}
+                  disabled={!workspaceViewReady}
+                  className='rounded-[10px] border-border hover:bg-muted'
+                  aria-label='Share view'
+                  data-track-category='Projects'
+                  data-track-name='ShareView'
                 >
-                  <div className='flex flex-col gap-2'>
-                    <span className='text-[13px] font-medium text-foreground'>Name this view</span>
-                    <input
-                      autoFocus
-                      value={workspaceViewNameDraft}
-                      onChange={e => setWorkspaceViewNameDraft(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
-                      }}
-                      placeholder='e.g. My open PRs'
-                      data-track-category='Projects'
-                      data-track-name='SaveViewNameInput'
-                      className={cn(
-                        'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
-                        'text-foreground outline-none placeholder:text-muted-foreground',
-                        'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                      )}
-                    />
-                    <div className='flex justify-end gap-2 pt-1'>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        onClick={() => setIsSavePopoverOpen(false)}
-                        data-track-category='Tickets'
-                        data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
-                      >
-                        Cancel
-                      </Button>
+                  <Share2 className='w-3 h-3 text-muted-foreground' />
+                  <span>Share</span>
+                </Button>
+                {canSaveInPlace ? (
+                  <Button
+                    size='sm'
+                    onClick={handleSaveExistingView}
+                    disabled={!workspaceViewReady || isSavingWorkspaceView || !isViewDirty}
+                    className='rounded-[10px]'
+                    data-track-category='Projects'
+                    data-track-name='SaveView'
+                  >
+                    <Bookmark className='w-3 h-3' />
+                    <span>Save</span>
+                  </Button>
+                ) : (
+                  <Popover
+                    open={isSavePopoverOpen}
+                    onOpenChange={handleSavePopoverOpenChange}
+                    align='end'
+                    className='w-64 p-3'
+                    trigger={
                       <Button
                         size='sm'
-                        onClick={handleConfirmSaveWorkspaceView}
-                        data-track-category='Tickets'
-                        data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
-                        disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
+                        disabled={!workspaceViewReady || isSavingWorkspaceView}
+                        className='rounded-[10px]'
+                        data-track-category='Projects'
+                        data-track-name='SaveView'
                       >
-                        Save
+                        <Bookmark className='w-3 h-3' />
+                        <span>{viewId ? 'Save' : 'Save view'}</span>
                       </Button>
+                    }
+                  >
+                    <div className='flex flex-col gap-2'>
+                      <span className='text-[13px] font-medium text-foreground'>
+                        Name this view
+                      </span>
+                      <input
+                        autoFocus
+                        value={workspaceViewNameDraft}
+                        onChange={e => setWorkspaceViewNameDraft(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
+                        }}
+                        placeholder='e.g. My open PRs'
+                        data-track-category='Projects'
+                        data-track-name='SaveViewNameInput'
+                        className={cn(
+                          'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
+                          'text-foreground outline-none placeholder:text-muted-foreground',
+                          'focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                        )}
+                      />
+                      <div className='flex justify-end gap-2 pt-1'>
+                        <Button
+                          variant='ghost'
+                          size='sm'
+                          onClick={() => setIsSavePopoverOpen(false)}
+                          data-track-category='Tickets'
+                          data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size='sm'
+                          onClick={handleConfirmSaveWorkspaceView}
+                          data-track-category='Tickets'
+                          data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
+                          disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
+                        >
+                          Save
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </Popover>
+                  </Popover>
+                )}
+              </div>
+            )}
+            {canCreateTicket &&
+              ((channel && !channel.isArchived) || isMyTicketsView || isWorkspaceView) && (
+                <button
+                  data-testid='kanban-create-ticket-button'
+                  data-track-event='BUTTON_CLICK'
+                  data-track-category='Tickets'
+                  data-track-name='CREATE_TICKET_KANBAN'
+                  data-track-metadata={JSON.stringify({ boardId, channelId })}
+                  onClick={() => {
+                    setCreateTicketSeed(null);
+                    setIsCreateModalOpen(true);
+                  }}
+                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
+                >
+                  <Plus className='w-4 h-4' />
+                  <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
+                  <span className='sm:hidden'>Create</span>
+                </button>
               )}
-            </div>
-          )}
-          {canCreateTicket && ((channel && !channel.isArchived) || isMyTicketsView) && (
-            <button
-              data-testid='kanban-create-ticket-button'
-              data-track-event='BUTTON_CLICK'
-              data-track-category='Tickets'
-              data-track-name='CREATE_TICKET_KANBAN'
-              data-track-metadata={JSON.stringify({ boardId, channelId })}
-              onClick={() => {
-                setCreateTicketSeed(null);
-                setIsCreateModalOpen(true);
-              }}
-              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
-            >
-              <Plus className='w-4 h-4' />
-              <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
-              <span className='sm:hidden'>Create</span>
-            </button>
-          )}
+          </div>
           {/* Layout View Toggle (flow boards only have the flow view) */}
           <div className='flex items-center gap-2'>
             {!isFlowBoard && (
@@ -5163,6 +5174,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             return (
               <div
                 key={group.key}
+                data-group-key={group.key}
                 className='flex flex-col rounded-lg border border-border overflow-hidden'
               >
                 {showGroupHeader && (
@@ -5261,7 +5273,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : null;
 
                 return (
-                  <div key={group.key} className={isExpanded || !showGroupHeader ? 'h-full' : ''}>
+                  <div
+                    key={group.key}
+                    data-group-key={group.key}
+                    className={isExpanded || !showGroupHeader ? 'h-full' : ''}
+                  >
                     {showGroupHeader && (
                       <button
                         onClick={() => toggleGroupExpansion(group.key)}
@@ -5394,8 +5410,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         />
       )}
 
-      {/* Create Ticket Modal — my-tickets view (no channel context, user picks channel + board) */}
-      {isMyTicketsView && !channel && isCreateModalOpen && (
+      {/* Create Ticket Modal — my-tickets and saved views (no channel context, user picks channel + board) */}
+      {(isMyTicketsView || isWorkspaceView) && !channel && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
           onClose={() => {

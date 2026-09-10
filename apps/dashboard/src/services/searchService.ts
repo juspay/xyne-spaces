@@ -216,6 +216,10 @@ export class SearchService {
       params['tags'] = filters.tags;
     }
 
+    if (filters.entity) {
+      params['entity'] = filters.entity;
+    }
+
     if (filters.before) {
       params['before'] = filters.before;
     }

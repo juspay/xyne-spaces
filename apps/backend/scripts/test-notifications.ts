@@ -112,7 +112,7 @@ async function testNotificationSystem() {
       limit: 10
     });
     console.log(`Found ${notifications.notifications.length} notifications for user`);
-    console.log('Latest notification:', notifications.notifications[0]?.title);
+    console.log('Latest notification:', notifications.notifications[0]?.id, notifications.notifications[0]?.type);
 
     const unreadCount = await notificationService.getUnreadCount(testUser.id);
     console.log(`Unread count: ${unreadCount}\n`);
