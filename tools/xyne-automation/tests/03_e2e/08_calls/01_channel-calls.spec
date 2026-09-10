@@ -1,9 +1,8 @@
 # Channel Calls E2E Flow
 > Initiate and join calls from a channel conversation.
-> "User joins ongoing call" is quarantined: starting a call works, but the join
-> affordance never surfaces to a second member (active-call presence isn't propagating).
-> Needs a call-presence fix, not a selector change. Tracked in XYNE-62732 (re-enable
-> "User joins ongoing call" in 01_channel-calls, 02_dm-calls, 03_group-calls once fixed).
+> The join button only renders once LiveKit's participant_joined webhook has created
+> the call row and channel message on the backend — in the Docker test stack the
+> backend container answers to host.docker.internal for this (docker-compose.test.yml).
 
 ## User starts call from channel
 * Using browser
@@ -18,9 +17,6 @@
 * verifying "[data-testid='participant-count']" is visible
 
 ## User joins ongoing call from channel
-tags: quarantine
-// Quarantined: active-call presence never reaches the second member, so the join
-// affordance never renders. Tracked in XYNE-62732.
 * Using browser
 * Logging in user "admin-1" on temp browser "caller-browser-1"
 * Ensuring user "user-1" is logged in
