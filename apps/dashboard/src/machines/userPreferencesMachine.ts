@@ -71,10 +71,16 @@ export interface UserPreferencesContext {
   preferences: UserPreferences;
   /** False until IndexedDB has answered, so nothing is written over a stored value. */
   hydrated: boolean;
+  /**
+   * Whose preferences these are. The actor is a module singleton, so signing out
+   * and in as someone else in the same tab would otherwise leave the previous
+   * reader's choices in place — and then persist them into the new reader's store.
+   */
+  ownerId: string | null;
 }
 
 export type UserPreferencesEvent =
-  | { type: 'HYDRATED'; preferences: Partial<UserPreferences> }
+  | { type: 'HYDRATED'; userId: string | null; preferences: Partial<UserPreferences> }
   | { type: 'SET'; key: keyof UserPreferences; value: UserPreferences[keyof UserPreferences] }
   | { type: 'RESET' };
 
@@ -117,17 +123,26 @@ export const userPreferencesMachine = setup({
   context: {
     preferences: DEFAULT_USER_PREFERENCES,
     hydrated: false,
+    ownerId: null,
   },
   on: {
     // Stored values win over defaults but never over a choice already made in
     // this session — hydration can land after the reader has clicked something.
     HYDRATED: {
-      actions: assign(({ context, event }) => ({
-        preferences: context.hydrated
-          ? context.preferences
-          : { ...DEFAULT_USER_PREFERENCES, ...event.preferences },
-        hydrated: true,
-      })),
+      actions: assign(({ context, event }) => {
+        // A different reader replaces everything: the in-session latch protects
+        // one person's choices from a late load, not one person's choices from
+        // another person.
+        const sameReader = context.ownerId === null || context.ownerId === event.userId;
+        return {
+          preferences:
+            sameReader && context.hydrated
+              ? context.preferences
+              : { ...DEFAULT_USER_PREFERENCES, ...event.preferences },
+          hydrated: true,
+          ownerId: event.userId,
+        };
+      }),
     },
     SET: {
       actions: [
@@ -155,16 +170,18 @@ export const userPreferencesActor = createActor(userPreferencesMachine).start();
  * Read stored preferences into the actor. Safe to call more than once — the
  * machine keeps whatever the reader has already chosen this session.
  */
-export async function hydrateUserPreferences(): Promise<void> {
+export async function hydrateUserPreferences(userId: string | null): Promise<void> {
   try {
     if (!indexedDBService.isInitialized()) return;
     const stored = await indexedDBService.loadContextProperty(STORAGE_KEY);
-    if (stored && typeof stored === 'object') {
-      userPreferencesActor.send({
-        type: 'HYDRATED',
-        preferences: stored as Partial<UserPreferences>,
-      });
-    }
+    // Sent even when nothing is stored: a reader with no saved preferences still
+    // has to displace the previous reader's, which an early return would keep.
+    userPreferencesActor.send({
+      type: 'HYDRATED',
+      userId,
+      preferences:
+        stored && typeof stored === 'object' ? (stored as Partial<UserPreferences>) : {},
+    });
   } catch {
     // Defaults are a working app.
   }

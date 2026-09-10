@@ -1536,13 +1536,17 @@ export class SdlcHubService implements SdlcHub {
       // Propagate the source artifact's track onto the ticket so the ticket shows
       // under the same track (same TRACK_ITEM entity link we use for PRDs/Tech Docs).
       if (input.targetType === 'TICKET' && input.sourceType === 'CANVAS') {
+        // The flat edge, not containment: once an artifact is filed into a
+        // folder its containment edge is FOLDER -> CANVAS, and a TRACK source
+        // finds nothing — the ticket would be created and silently left off the
+        // track's list. Same lookup, same reason, as entityLinkService.
         const trackLink = await this.prisma.sdlcEntityLink.findFirst({
           where: {
             channelId: repo.channelId,
             sourceType: 'TRACK',
             targetType: 'CANVAS',
             targetId: input.sourceId,
-            relationType: 'TRACK_ITEM',
+            relationType: SDLC_TRACK_FLAT_RELATION,
           },
           select: { sourceId: true },
         });

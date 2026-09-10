@@ -1506,10 +1506,7 @@ export default function SdlcScreen(): ReactElement {
     // Creation always files an artifact at the track's root, so one started from
     // inside a folder is moved there straight after.
     if (fileIntoFolder && channel) {
-      await moveItemAction(
-        { type: 'CANVAS', id: newCanvasId },
-        { type: 'FOLDER', id: fileIntoFolder },
-      );
+      await fileNewArtifactIntoFolder(newCanvasId, fileIntoFolder);
     }
     setRelatedSourceId(null);
     // Same search as opening an artifact from the list, so a new artifact lands
@@ -1788,6 +1785,29 @@ export default function SdlcScreen(): ReactElement {
     // The stored path carries names for the column headers, so a rename has to
     // reach it too or the breadcrumb keeps the old one until a reload.
     setFinderPath(finderPath.map(step => (step.id === folderId ? { ...step, name } : step)));
+  };
+
+  /**
+   * Filing a just-created artifact. It was created over HTTP, so its containment
+   * edge reaches the Zero client by replication — usually a moment after this
+   * runs, and moveSdlcItem refuses a move it cannot find an edge for. Waiting for
+   * the row beats reporting a failure the reader can do nothing about; only that
+   * one refusal is retried, since every other is a real answer.
+   */
+  const fileNewArtifactIntoFolder = async (canvasId: string, folderId: string): Promise<void> => {
+    const attempts = 10;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        await moveItemAction({ type: 'CANVAS', id: canvasId }, { type: 'FOLDER', id: folderId });
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        if (attempt === attempts || !message.includes('Item is not filed anywhere')) {
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+    }
   };
 
   const moveItemAction = async (

@@ -119,7 +119,14 @@ export function SdlcFinderColumn(props: {
   onDragItem: (item: { type: SdlcFinderNodeType; id: string } | null) => void;
 }): ReactElement {
   const columnWidths = useUserPreference('sdlcFinderColumnWidths');
-  const columnWidth = columnWidths[props.parent.id] ?? FINDER_DEFAULT_COLUMN_WIDTH;
+  /**
+   * The width mid-drag. Persisting on every pointermove re-rendered every open
+   * column each frame, because the preference is shared; holding it here keeps
+   * the drag to this column and writes once, on release.
+   */
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const columnWidth =
+    dragWidth ?? columnWidths[props.parent.id] ?? FINDER_DEFAULT_COLUMN_WIDTH;
   const groupBy = useUserPreference('sdlcFinderGroupBy');
   /** The row the pointer is currently over mid-drag, so only it shows a target. */
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -161,9 +168,11 @@ export function SdlcFinderColumn(props: {
         FINDER_MAX_COLUMN_WIDTH,
         Math.max(FINDER_MIN_COLUMN_WIDTH, startWidth + (moveEvent.clientX - startX)),
       );
-      setUserPreference('sdlcFinderColumnWidths', { ...columnWidths, [props.parent.id]: latest });
+      setDragWidth(latest);
     };
     const finish = (): void => {
+      setUserPreference('sdlcFinderColumnWidths', { ...columnWidths, [props.parent.id]: latest });
+      setDragWidth(null);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', finish);
       window.removeEventListener('pointercancel', finish);

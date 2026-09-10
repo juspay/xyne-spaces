@@ -274,7 +274,14 @@ export function sdlcSectionLayout(
   let used = 0;
   open.forEach((section, index) => {
     const exact = settled.get(section.id) ?? MIN_OPEN_SECTION_HEIGHT;
-    const height = index === open.length - 1 ? available - used : Math.round(exact);
+    // The last section absorbs the rounding, but `available - used` goes negative
+    // when every section has been starved to the minimum and there was never
+    // enough room — a short viewport with four sections open. A negative resize
+    // is worse than overflowing, so the floor wins.
+    const height =
+      index === open.length - 1
+        ? Math.max(MIN_OPEN_SECTION_HEIGHT, available - used)
+        : Math.round(exact);
     heights[section.id] = height;
     used += height;
   });
