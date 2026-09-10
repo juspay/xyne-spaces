@@ -1,5 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Bot, ChevronDown } from 'lucide-react';
+import { ExpandableMessage } from '../ExpandableMessage/ExpandableMessage';
+
+const TRANSCRIPT_PREVIEW_MAX_HEIGHT = 480;
 
 export interface SharedTranscriptCardProps {
   content: string;
@@ -20,11 +23,13 @@ export const SharedTranscriptCard: React.FC<SharedTranscriptCardProps> = ({
   defaultCollapsed = false,
   renderBody,
 }) => {
+  const [isOpen, setIsOpen] = useState(!defaultCollapsed);
   return (
     <details
-      open={!defaultCollapsed}
+      open={isOpen}
+      onToggle={event => setIsOpen(event.currentTarget.open)}
       data-testid='shared-agent-transcript'
-      className='group my-1 overflow-hidden rounded-lg border border-border bg-muted/40'
+      className='group my-1 overflow-hidden rounded-lg border border-border bg-muted'
     >
       <summary className='flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-sm font-medium text-foreground'>
         <span className='flex items-center gap-2'>
@@ -41,15 +46,22 @@ export const SharedTranscriptCard: React.FC<SharedTranscriptCardProps> = ({
           className='transition-transform group-open:rotate-180 text-muted-foreground'
         />
       </summary>
-      <div className='border-t border-border px-3 py-2 text-sm'>
-        {renderBody ? (
-          renderBody(content)
-        ) : (
-          <pre className='whitespace-pre-wrap break-words font-sans text-sm text-foreground'>
-            {content}
-          </pre>
-        )}
-      </div>
+      {isOpen ? (
+        <div className='border-t border-border px-3 py-2 text-sm'>
+          <ExpandableMessage
+            maxHeight={TRANSCRIPT_PREVIEW_MAX_HEIGHT}
+            fadeColor='hsl(var(--muted))'
+          >
+            {renderBody ? (
+              renderBody(content)
+            ) : (
+              <pre className='whitespace-pre-wrap break-words font-sans text-sm text-foreground'>
+                {content}
+              </pre>
+            )}
+          </ExpandableMessage>
+        </div>
+      ) : null}
     </details>
   );
 };
