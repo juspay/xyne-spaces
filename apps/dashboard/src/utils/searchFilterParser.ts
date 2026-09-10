@@ -22,8 +22,10 @@ export function parseSearchFilters(text: string) {
   let assignee: string | undefined;
   let type: string | undefined;
 
-  // `priority:` is intentionally NOT parsed: it's a chip-only filter (via
-  // selectedMentions), so raw `priority:` text is left intact for full-text search.
+  // `priority:` and `entity:` are intentionally NOT parsed: they're chip-only filters
+  // (via selectedMentions), so raw text is left intact for full-text search. Parsing an
+  // uncommitted `entity:Big Bask` would filter on a half-typed value on every keystroke —
+  // the value only becomes a filter once EntityChipPlugin commits it to a chip.
 
   // Parse board:value
   const boardMatch = searchText.match(/\bboard:\s*(\S+)/i);

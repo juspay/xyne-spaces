@@ -57,6 +57,9 @@ export interface SlackFilters {
   // messages that justified a tag. Different questions; both exact attribute filters.
   threadType?: string[];
   messageActs?: string[];
+  // Entity filter: docs annotated with these entity names (chat_message/ticket `entityNames`).
+  // AND-ed, not OR-ed — multiple entities narrow to docs mentioning every one of them.
+  entityNames?: string[];
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -88,6 +91,9 @@ export interface TicketFilters {
   createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
   stage?: string[]; // Filter by ticket stage - comma-separated
   assignedTo?: string[]; // Filter by assigned user ID - comma-separated
+  // Entity filter: docs annotated with these entity names (chat_message/ticket `entityNames`).
+  // AND-ed, not OR-ed — multiple entities narrow to docs mentioning every one of them.
+  entityNames?: string[];
 }
 
 export interface FileFilters {
@@ -466,6 +472,7 @@ export class YqlBuilder {
       createdByUserId: boolean;
       isPrivate: boolean;
       messageType: boolean;
+      entityNames: boolean;
     }
   > = {
     [messageSchema]: {
@@ -475,6 +482,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: true,
       messageType: true,
+      entityNames: true,
     },
     [channelSchema]: {
       ownerId: true,
@@ -483,6 +491,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: true,
       messageType: false,
+      entityNames: false,
     },
     [attachmentSchema]: {
       ownerId: false,
@@ -491,6 +500,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: false,
       messageType: false,
+      entityNames: false,
     },
     [ticketSchema]: {
       ownerId: false,
@@ -499,6 +509,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: false,
       messageType: false,
+      entityNames: true,
     },
     [fileSchema]: {
       ownerId: true,
@@ -507,6 +518,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: true,
       messageType: false,
+      entityNames: false,
     },
     [mailSchema]: {
       ownerId: false,
@@ -515,6 +527,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: false,
       messageType: false,
+      entityNames: false,
     },
     [callSchema]: {
       ownerId: false,
@@ -523,6 +536,7 @@ export class YqlBuilder {
       createdByUserId: true,
       isPrivate: false,
       messageType: false,
+      entityNames: false,
     },
   };
 
@@ -827,6 +841,20 @@ export class YqlBuilder {
       conditions.push(`(${acts})`);
     }
 
+    // Entity filter — AND-ed so multiple entities narrow to messages mentioning every one
+    // of them. entityNames exists only on chat_message, so skip it when the query is pruned
+    // to chat_channel/chat_attachment only (else Vespa rejects the field reference).
+    if (
+      filters.entityNames &&
+      filters.entityNames.length > 0 &&
+      this.schemasHaveField(selectedSchemas, (f) => f.entityNames)
+    ) {
+      const entities = filters.entityNames
+        .map((entityName) => `entityNames contains ${params.bind('entityNames', entityName.trim())}`)
+        .join(' and ');
+      conditions.push(`(${entities})`);
+    }
+
     if (filters.createdBefore) {
       const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
       if (timestamp) conditions.push(`createdAtTimestamp < ${timestamp}`);
@@ -952,6 +980,14 @@ export class YqlBuilder {
         .map((tag) => `tags contains ${params.bind('tags', tag.trim())}`)
         .join(' or ');
       conditions.push(`(${tagConditions})`);
+    }
+
+    // Entity filter — AND-ed so multiple entities narrow to tickets mentioning every one of them.
+    if (filters.entityNames && filters.entityNames.length > 0) {
+      const entities = filters.entityNames
+        .map((entityName) => `entityNames contains ${params.bind('entityNames', entityName.trim())}`)
+        .join(' and ');
+      conditions.push(`(${entities})`);
     }
 
     // Dynamic field filter (fieldId::value tokens)
