@@ -13,9 +13,10 @@ export interface CreateChannelInput {
   description?: string;
   visibility?: ChannelVisibility;
   createdBy: string;
-  /** Optional — channels may be created without a project (decoupling). When set, all of
-   *  the project's boards are mirrored into channel_board_mappings; when null, no mappings. */
-  projectId?: string | null;
+  /** Optional at the app boundary — a projectless (decoupled) channel is stored with '' .
+   *  When a real projectId is set, the project's boards are mirrored into
+   *  channel_board_mappings; when '' (or omitted), no mappings are created. */
+  projectId?: string;
   workspaceId: string;
   type?: ChannelType;
   /** Desk channels: board to mark isDefault in channel_board_mappings. Falls back to the
@@ -70,7 +71,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         description: data.description,
         visibility: data.visibility || 'PUBLIC',
         createdBy: data.createdBy,
-        projectId: data.projectId ?? null,
+        // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
+        projectId: data.projectId ?? '',
         workspaceId: data.workspaceId,
         ...(data.type && { type: data.type }),
       }

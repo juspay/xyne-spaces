@@ -1385,7 +1385,7 @@ export class ChannelController {
         scopeType: channel.scopeType as ChannelScopeType,
         description: channel.description,
         visibility: channel.visibility as ChannelVisibility,
-        projectId: projectId ?? null,
+        projectId: projectId ?? '',
         createdAt: channel.createdAt,
       };
 

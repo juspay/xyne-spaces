@@ -1010,6 +1010,7 @@ export class SdlcWikiPageStore {
               },
             },
             select: { id: true },
+
           });
           await tx.canvasVersion.create({
             data: {
