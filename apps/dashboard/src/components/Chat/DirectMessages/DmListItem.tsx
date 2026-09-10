@@ -29,7 +29,17 @@ interface DmListItemProps {
   channel: Channel;
   unreadCount?: number;
   isSelected?: boolean;
-  latestConversation?: { initial_message_md?: string | null; workspaceId: string } | undefined;
+  latestConversation?:
+    | {
+        initial_message_md?: string | null;
+        workspaceId: string;
+        // Live initial-message row (from the DM query's `initialMessage` relation).
+        // Authoritative attachment signal for conversations whose denormalized
+        // initial_message_md snapshot predates the hasAttachment field and would
+        // otherwise serialize it as false.
+        initialMessage?: { hasAttachment: boolean } | null | undefined;
+      }
+    | undefined;
 }
 
 const getSenderLabel = (isCurrentUser: boolean, isDM: boolean, senderName?: string): string => {
@@ -87,14 +97,20 @@ export const DmListItem = ({
     // which is truthy but renders blank. Fall back to a label whenever the message
     // has no visible text, so an attachment preview is not shown as an empty line.
     const hasVisibleText = htmlToPlainText(lastMessage.content).length > 0;
+    // Prefer the snapshot flag, but fall back to the live initial-message row.
+    // Conversations created before initial_message_md carried hasAttachment
+    // serialize it as false, so relying on the snapshot alone drops the label
+    // for every historical attachment DM.
+    const hasAttachment =
+      lastMessage.hasAttachment || !!latestConversation?.initialMessage?.hasAttachment;
     const rawContent = hasVisibleText
       ? lastMessage.content
-      : lastMessage.hasAttachment
+      : hasAttachment
         ? 'Sent an attachment'
         : lastMessage.content || 'Message';
 
     return sanitizeHtmlString(rawContent);
-  }, [lastMessage]);
+  }, [lastMessage, latestConversation?.initialMessage?.hasAttachment]);
 
   // FlowJSON messages carry the whole interactive flow in their content. Feeding
   // that to RenderMessageWithHTML mounts the full flow card (title, textarea,
