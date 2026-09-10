@@ -24,7 +24,7 @@ import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
-import { isClawAdmin, requireClawAdmin, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { isClawAdmin, requireClawAdmin, getOrgId, getRequesterId, getAgentEditAccess } from "../middleware/agent-acl.js";
 import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
 import { classifySessionSubsystemForBank, distillSessionFile, parseSessionFile } from "../services/sessionCurator.js";
 import { enqueueAgentBackfill, getAgentBackfillQueue } from "../queue/agent-backfill-queue.js";
@@ -2037,6 +2037,56 @@ interface RecallHitInput {
   rank?: number | null;
   recalledAt: string;
 }
+
+/**
+ * GET /memory/banks/:slug/admin-access?userId=<id>
+ *
+ * S2S authorization probe for xyne-claw's inspect-memory / mutate-memory agent
+ * tools. claw resolves this ONCE per session to decide whether the human who
+ * triggered the run may browse/mutate the agent's shared memory bank. Returns
+ * the SAME decision as requireAgentOwnerContributorOrAdmin: agent owner OR an
+ * EDITOR/CONTRIBUTOR share OR CLAW_ADMIN.
+ *
+ * The authorization subject is the run's triggering user (the `userId` query
+ * param), NOT the request's requester — the S2S caller is claw, not the human.
+ * Authenticated via requireAuth on the router mount (claw passes x-s2s-key).
+ * Never 404s: an unknown/other-org agent resolves to allowed=false so claw
+ * treats absence as deny (fail closed).
+ */
+memoryRouter.get("/banks/:slug/admin-access", async (req, res) => {
+  try {
+    const slug = req.params["slug"] as string | undefined;
+    const userId = typeof req.query["userId"] === "string" ? req.query["userId"].trim() : "";
+    if (!slug || !userId) {
+      res.status(400).json({ success: false, error: "slug and userId are required" });
+      return;
+    }
+    // S2S callback from claw carries no org context; derive the org from the
+    // triggering user (User rows are org-scoped) so the agent lookup resolves
+    // the right org's agent — same pattern as /recall-hits.
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    const orgId = getOrgId(req) ?? user?.orgId ?? null;
+    const [access, admin] = await Promise.all([
+      getAgentEditAccess(userId, slug, orgId),
+      isClawAdmin(userId),
+    ]);
+    if (!access) {
+      res.json({
+        success: true,
+        data: { allowed: admin, isOwner: false, isContributor: false, isClawAdmin: admin, reason: "agent_not_found" },
+      });
+      return;
+    }
+    const allowed = admin || access.canEdit;
+    res.json({
+      success: true,
+      data: { allowed, isOwner: access.isOwner, isContributor: access.isContributor, isClawAdmin: admin },
+    });
+  } catch (err) {
+    logger.error("[memory] GET /banks/:slug/admin-access failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
 
 memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
   try {
