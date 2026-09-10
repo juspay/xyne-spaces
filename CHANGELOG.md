@@ -1,3 +1,10 @@
+## [1.307.0](https://github.com/juspay/xyne-spaces/compare/v1.306.0...v1.307.0) (2026-09-10)
+
+
+### Features
+
+* share an agent DM conversation to a channel ([#1054](https://github.com/juspay/xyne-spaces/issues/1054)) ([5967973](https://github.com/juspay/xyne-spaces/commit/5967973d65ba04e1b9f7aa9b0a78eab9a5f5b39a))
+
 ## [1.306.0](https://github.com/juspay/xyne-spaces/compare/v1.305.1...v1.306.0) (2026-09-10)
 
 
