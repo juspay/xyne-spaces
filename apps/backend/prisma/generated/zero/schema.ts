@@ -538,6 +538,8 @@ export const userPreferenceTable = table("user_preferences")
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
     showThreadTags: boolean(),
+    mobileRoutingMode: string(),
+    desktopInactivityThresholdMinutes: number(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),

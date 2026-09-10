@@ -224,6 +224,40 @@ class WebSocketService {
     return 'web';
   }
 
+  /**
+   * Device-aware mobile routing: is the user currently active on a desktop
+   * client (web/electron)? True when they hold at least one live desktop
+   * socket AND their last desktop activity is within the inactivity threshold.
+   * Fail-open: errors resolve to false (deliver the mobile notification).
+   */
+  async isUserActiveOnDesktop(
+    userId: string,
+    inactivityThresholdMinutes = 5,
+  ): Promise<boolean> {
+    try {
+      const connections = await redisService.getUserConnections(userId);
+      if (connections.length === 0) return false;
+
+      const thresholdMs = inactivityThresholdMinutes * 60 * 1000;
+      for (const socketId of connections) {
+        const platform = await redisService.getSocketPlatform(userId, socketId);
+        if (platform === 'web' || platform === 'electron') {
+          const desktopActiveAt = await redisService.getDesktopActiveAt(userId);
+          if (desktopActiveAt !== null && Date.now() - desktopActiveAt < thresholdMs) {
+            return true;
+          }
+        }
+      }
+      return false;
+    } catch (error) {
+      logger.error('isUserActiveOnDesktop failed, failing open (not active)', {
+        userId,
+        error,
+      });
+      return false;
+    }
+  }
+
   private async handleConnection(socket: AuthenticatedSocket): Promise<void> {
     const { userId, userEmail, userName } = socket;
 
@@ -240,6 +274,12 @@ class WebSocketService {
 
     // Add user connection to Redis with platform info
     await redisService.addUserConnection(userId, socket.id, platform);
+
+    // Device-aware mobile routing: mark desktop presence so mobile pushes can
+    // be suppressed while the user is at their desk (web/electron clients).
+    if (platform === 'web' || platform === 'electron') {
+      await redisService.setDesktopActiveAt(userId);
+    }
 
     socket.join(`user:${userId}`);
 

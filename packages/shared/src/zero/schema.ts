@@ -58,6 +58,7 @@ import {
   IngestionStatus,
   InvitationResponse,
   LinkVisibility,
+  MobileRoutingMode,
   LookupType,
   MailboxState,
   MessageArtifactStatus,
@@ -635,6 +636,9 @@ export const userPreferenceTable = table('user_preferences')
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
     showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
+    // Device-aware mobile routing
+    mobileRoutingMode: enumeration<MobileRoutingMode>().optional(), // When to route notifications to mobile
+    desktopInactivityThresholdMinutes: number().optional(), // Desktop-inactivity threshold before mobile routing resumes (minutes)
     createdAt: number(),
     updatedAt: number(),
   })

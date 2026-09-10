@@ -22,6 +22,7 @@ import { serializeInitialMessageMd,
   isDeskChannelType,
   type InitialMessageSummary,
   ChannelScopeType,
+  MobileRoutingMode,
   NotificationDeliveryMethod,
   NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
@@ -191,6 +192,79 @@ interface UserPreferences {
 }
 
 class NotificationService {
+  // Device-aware mobile routing: per-user preference cache (short TTL so SQL
+  // edits and cross-device changes converge quickly).
+  private mobileRoutingPrefCache = new Map<
+    string,
+    { mode: MobileRoutingMode; thresholdMinutes: number; fetchedAt: number }
+  >();
+  private static readonly MOBILE_ROUTING_PREF_CACHE_TTL_MS = 30_000;
+
+  private async getMobileRoutingPreference(userId: string): Promise<{
+    mode: MobileRoutingMode;
+    thresholdMinutes: number;
+  }> {
+    const cached = this.mobileRoutingPrefCache.get(userId);
+    if (
+      cached &&
+      Date.now() - cached.fetchedAt <
+        NotificationService.MOBILE_ROUTING_PREF_CACHE_TTL_MS
+    ) {
+      return { mode: cached.mode, thresholdMinutes: cached.thresholdMinutes };
+    }
+    try {
+      const pref = await runAsSystem(() =>
+        prisma.userPreference.findUnique({
+          where: { userId },
+          select: {
+            mobileRoutingMode: true,
+            desktopInactivityThresholdMinutes: true,
+          },
+        }),
+      );
+      const entry = {
+        mode: (pref?.mobileRoutingMode as MobileRoutingMode) ?? MobileRoutingMode.WHEN_DESKTOP_INACTIVE,
+        thresholdMinutes: pref?.desktopInactivityThresholdMinutes ?? 5,
+        fetchedAt: Date.now(),
+      };
+      this.mobileRoutingPrefCache.set(userId, entry);
+      return { mode: entry.mode, thresholdMinutes: entry.thresholdMinutes };
+    } catch (error) {
+      logger.error(
+        '[NOTIFICATION-SERVICE] Failed to load mobile routing preference, failing open',
+        { userId, error },
+      );
+      return {
+        mode: MobileRoutingMode.WHEN_DESKTOP_INACTIVE,
+        thresholdMinutes: 5,
+      };
+    }
+  }
+
+  /**
+   * Device-aware mobile routing (Slack-style): suppress the mobile push when
+   * the recipient is active on desktop AND their preference is
+   * WHEN_DESKTOP_INACTIVE. ALWAYS never suppresses. Fail-open on errors.
+   */
+  private async shouldSuppressMobilePush(userId: string): Promise<boolean> {
+    try {
+      const pref = await this.getMobileRoutingPreference(userId);
+      if (pref.mode !== MobileRoutingMode.WHEN_DESKTOP_INACTIVE) {
+        return false;
+      }
+      return await websocketService.isUserActiveOnDesktop(
+        userId,
+        pref.thresholdMinutes,
+      );
+    } catch (error) {
+      logger.error(
+        '[NOTIFICATION-SERVICE] shouldSuppressMobilePush failed, failing open',
+        { userId, error },
+      );
+      return false;
+    }
+  }
+
   /**
    * Helper to create a granular notification entry for a specific session (Mobile or Web)
    */
@@ -915,13 +989,22 @@ class NotificationService {
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
 
-            // Resolve the tenant ONCE — see createFCMNotification.
-            const sessionData: NotificationData = {
-              ...data,
-              workspaceId: data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })),
-            };
+            // Device-aware mobile routing: skip mobile push (queueing only —
+            // the notification/inbox records stay intact) while the user is
+            // active on desktop and their preference is WHEN_DESKTOP_INACTIVE.
+            const suppressMobilePush = await this.shouldSuppressMobilePush(userId);
+            if (suppressMobilePush) {
+              logger.info(
+                `[NOTIFICATION-SERVICE] Suppressed mobile push for user ${userId} (active on desktop, ${sessions.length} sessions skipped)`,
+              );
+            }
+            for (const session of suppressMobilePush ? [] : sessions) {
+              // Resolve the tenant ONCE — see createFCMNotification.
+              const sessionData: NotificationData = {
+                ...data,
+                workspaceId: data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })),
+              };
 
-            for (const session of sessions) {
               const deliveryMethod = session.platform === 'ios'
                 ? NotificationDeliveryMethod.IOS
                 : NotificationDeliveryMethod.ANDROID;

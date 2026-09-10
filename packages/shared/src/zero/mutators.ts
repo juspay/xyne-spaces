@@ -13,6 +13,7 @@ import {
   ChannelAddUserPolicy,
   ChannelSortOrder,
   ChannelFilterMode,
+  MobileRoutingMode,
   ConversationParticipation,
   TicketStatusV2,
   MailboxState,
@@ -9696,6 +9697,51 @@ export const mutators = defineMutators({
             allowThreadBroadcastMentions: false,
             globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
             globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            showThreadTags: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    setMobileRoutingPreference: defineMutator(
+      z.object({
+        id: z.string(),
+        mobileRoutingMode: z.nativeEnum(MobileRoutingMode).optional(),
+        desktopInactivityThresholdMinutes: z.number().int().min(1).max(120).optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { id, mobileRoutingMode, desktopInactivityThresholdMinutes, timestamp },
+      }) => {
+        const fields = {
+          ...(mobileRoutingMode !== undefined && { mobileRoutingMode }),
+          ...(desktopInactivityThresholdMinutes !== undefined && { desktopInactivityThresholdMinutes }),
+        };
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            ...fields,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            mobileRoutingMode: mobileRoutingMode ?? MobileRoutingMode.WHEN_DESKTOP_INACTIVE,
+            desktopInactivityThresholdMinutes: desktopInactivityThresholdMinutes ?? 5,
             threadReplyNotificationsEnabled: true,
             channelWideMentionsEnabled: true,
             notificationKeywords: '[]',
