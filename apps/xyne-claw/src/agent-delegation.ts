@@ -15,15 +15,18 @@
  * Callable AGENTS are the opposite: each is a FULL agent loop with its own
  * system prompt, toolset, MCP servers and provider — a genuinely heavy,
  * expensive nested run. So the governance is inverted:
- *   - CONCURRENCY = 1: at most one agent delegation runs at a time per parent
- *     run. If the model fires two in one turn, they SERIALIZE (a mutex), they
- *     do NOT run in parallel.
+ *   - CONCURRENCY (default 1): at most one agent delegation runs at a time per
+ *     parent run — if the model fires two in one turn they SERIALIZE behind a
+ *     mutex. Orchestrator-tier runs override this to unlimited: fanning a
+ *     multi-part request out to N specialists costs the slowest one, not the
+ *     sum. The per-run BUDGET and DEPTH CAP stay the real limits.
  *   - DEPTH CAP (default 1): a callee cannot itself delegate to another agent.
  *     No A → B → C. (Subagents already forbid nesting; this is the A2A analog.)
  *   - COUNT BUDGET: a hard cap on total delegations per parent run.
  *   - CYCLE GUARD: an agent already on the delegation stack cannot be called
  *     again (no A → A, and at higher caps no A → B → A).
- *   - Flipped tool tag: "delegate to at most ONE at a time, do NOT batch".
+ *   - Tool tag: batch INDEPENDENT calls in one turn (they run in parallel when
+ *     concurrency allows); go sequential only when one task needs another's output.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * WHERE THIS PLUGS IN (production wiring)
@@ -145,7 +148,7 @@ export type NestedAgentRunner = (args: {
 export type DelegationEventKind =
   | "requested"     // parent asked to delegate
   | "blocked"       // refused by a guard (depth / budget / cycle)
-  | "queued"        // waiting on the concurrency-1 mutex
+  | "queued"        // waiting on the concurrency mutex (concurrency: 1 only)
   | "started"       // callee loop began
   | "completed"     // callee loop returned
   | "failed";       // callee loop threw
@@ -169,6 +172,10 @@ export interface DelegationGovernorOptions {
   maxDepth?: number;
   /** Hard cap on total delegations across the whole parent run. */
   maxDelegationsPerRun?: number;
+  /** How many delegations may run at once. Defaults to A2A_DEFAULTS.CONCURRENCY
+   *  (1 = serialize). Orchestrator-tier runs pass Infinity so independent
+   *  parallel tool_use blocks actually run in parallel. */
+  concurrency?: number;
   /** Depth of THIS governor (0 at the top-level run). */
   depth?: number;
   /** Slugs already on the delegation stack (for the cycle guard). */
@@ -240,14 +247,20 @@ export class AgentDelegationGovernor {
   private readonly onEvent: DelegationEventSink | undefined;
   private readonly sharedCounter: { count: number };
 
-  /** Tail of the mutex chain. Every exclusive section awaits the previous one,
-   *  so concurrency is pinned to 1 regardless of how many tool calls the model
-   *  fires in a single turn. */
+  /** Tail of the mutex chain, used only when `concurrency` is 1. Each exclusive
+   *  section awaits the previous one, so delegations serialize no matter how
+   *  many tool calls the model fires in one turn. When concurrency is
+   *  unlimited this stays untouched and `runExclusive` runs `fn` immediately. */
   private queueTail: Promise<void> = Promise.resolve();
+  /** How many delegations may run at once. 1 = the historical mutex;
+   *  Infinity = the model's parallel tool_use blocks actually run in parallel
+   *  (what orchestrator-tier runs want — see A2A_DEFAULTS.CONCURRENCY). */
+  readonly concurrency: number;
 
   constructor(opts: DelegationGovernorOptions = {}) {
     this.maxDepth = opts.maxDepth ?? A2A_DEFAULTS.MAX_DEPTH;
     this.maxDelegationsPerRun = opts.maxDelegationsPerRun ?? A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN;
+    this.concurrency = opts.concurrency ?? A2A_DEFAULTS.CONCURRENCY;
     this.depth = opts.depth ?? 0;
     this.ownerSlug = opts.ownerSlug ?? "root";
     this.visited = new Set(opts.visited ?? []);
@@ -305,10 +318,13 @@ export class AgentDelegationGovernor {
     this.sharedCounter.count += 1;
   }
 
-  /** Serialize `fn` behind the concurrency-1 mutex. If another delegation is
-   *  in flight, this awaits it first (queued), then runs. Guarantees exactly
-   *  one heavy agent loop executes at a time within the run. */
+  /** Run `fn` under the configured concurrency. With `concurrency: 1` this is
+   *  the historical mutex — if another delegation is in flight, await it first
+   *  (signalling `queued`), then run. With unlimited concurrency there is
+   *  nothing to wait for, so parallel tool_use blocks genuinely run in
+   *  parallel; the per-run budget and depth cap remain the only limits. */
   async runExclusive<T>(onQueued: () => void, fn: () => Promise<T>): Promise<T> {
+    if (this.concurrency !== 1) return fn();
     const prior = this.queueTail;
     let release!: () => void;
     this.queueTail = new Promise<void>((r) => (release = r));
@@ -331,6 +347,7 @@ export class AgentDelegationGovernor {
     return new AgentDelegationGovernor({
       maxDepth: this.maxDepth,
       maxDelegationsPerRun: this.maxDelegationsPerRun,
+      concurrency: this.concurrency,
       depth: this.depth + 1,
       ownerSlug: calleeSlug,
       visited: [...this.visited, calleeSlug],
@@ -481,7 +498,11 @@ export function buildOrchestratorCallableAgentTool(
   return [{
     name: "call-agent",
     label: "Call Agent",
-    description: "Delegate a self-contained task to another agent — ONE at a time, never batch.",
+    description:
+      "Delegate a self-contained task to another agent. When a request has several INDEPENDENT parts, " +
+      "emit one call-agent block PER PART IN THE SAME TURN — they run concurrently, so the wait is the " +
+      "slowest agent instead of the sum. Only call sequentially when one task genuinely needs a previous " +
+      "task's output.",
     progressLabels: ["Delegating to agent…"],
     parameters: {
       type: "object",

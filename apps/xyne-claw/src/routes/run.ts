@@ -2494,6 +2494,11 @@ export async function processTask(
     const delegationGovernor = new AgentDelegationGovernor({
       ownerSlug: agentSlug ?? "root",
       maxDelegationsPerRun,
+      // Orchestrator-tier runs fan a multi-part request out to one specialist
+      // per part; serializing them would make the wait the SUM of the callees
+      // instead of the slowest, which is the whole point of routing. Standard
+      // callers keep the concurrency-1 mutex. Budget + depth cap still bound it.
+      ...(delegationMode === "orchestrator" ? { concurrency: Number.POSITIVE_INFINITY } : {}),
       onEvent: (ev) => {
         log(`A2A ${ev.kind}: ${ev.caller} -> ${ev.callee}${ev.reason ? ` (${ev.reason})` : ""}`);
         if (ev.kind === "requested" || ev.kind === "queued" || ev.kind === "started") {
