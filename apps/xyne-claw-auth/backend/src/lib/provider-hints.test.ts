@@ -40,6 +40,17 @@ test("providers we do not offer are named back, never silently dropped", () => {
   expect(unsupportedProvidersFromText("connect claude")).toEqual([]);
 });
 
+test("a question about an agent's config is not a request to connect", () => {
+  // Both posted a card in prod (2026-09-10) and read as noise: the user was
+  // asking about an agent, not about their own accounts.
+  expect(wantsProviderRoster("which AI provider this agent will use check")).toBe(false);
+  expect(wantsProviderRoster("can u check which AI provider the above PR agent will use")).toBe(false);
+  expect(providersUserAskedFor("create a PR agent for me with anthropic as Ai provider")).toEqual([]);
+  expect(wantsProviderRoster("then why in the model->provider it shows spaces platform model")).toBe(
+    false,
+  );
+});
+
 test("an unsupported name does not turn into a roster", () => {
   expect(wantsProviderRoster("i want to connect the gemini model")).toBe(false);
 });

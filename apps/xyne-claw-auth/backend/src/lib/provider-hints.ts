@@ -118,6 +118,16 @@ export function unsupportedProvidersFromText(text: string): string[] {
 
 const PROVIDER_NOUN = /\b(ai provider|ai providers|provider|providers|model|models|llm|llms)\b/i;
 
+/**
+ * The message is about an AGENT's configuration, not the user's own accounts.
+ *
+ * "which provider will this agent use" and "create a PR agent with anthropic"
+ * both name a provider, but neither is a request to connect one — the card was
+ * posted on both and read as noise. An agent's provider lives in its own Keys
+ * dialog, so a user-level connect card is the wrong answer here regardless.
+ */
+const AGENT_CONTEXT = /\bagents?\b|\bsubagents?\b|@[a-z0-9-]+/i;
+
 const ROSTER_INTENT =
   /\b(show|see|view|open|display|list|find|browse|bring up|pull up|what|which|how many|any)\b/i;
 
@@ -130,6 +140,7 @@ const CONNECT_INTENT =
  */
 export function wantsProviderRoster(text: string): boolean {
   if (!text.trim()) return false;
+  if (AGENT_CONTEXT.test(text)) return false;
   if (!PROVIDER_NOUN.test(text)) return false;
   // "I want to connect a provider" without naming one is also a roster ask —
   // they cannot name what they have not been shown yet.
@@ -144,6 +155,7 @@ export function wantsProviderRoster(text: string): boolean {
  */
 export function providersUserAskedFor(text: string): SupportedProvider[] {
   if (!text.trim()) return [];
+  if (AGENT_CONTEXT.test(text)) return [];
   if (!CONNECT_INTENT.test(text) && !PROVIDER_NOUN.test(text)) return [];
   return providerTypesFromText(text);
 }
