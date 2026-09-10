@@ -167,6 +167,10 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
+import {
+  reportableChannelName,
+  userActivityTrackingService,
+} from '@/services/userActivityTrackingService';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -1207,6 +1211,13 @@ export function createMutators(
 
           await addChannelParticipant(tx, channelId, authData.sub, ChannelRole.MEMBER, channelParticipantId, channelUserStatusId, timestamp);
 
+          void userActivityTrackingService.trackChannelJoined(authData.sub, {
+            channelId,
+            channelName: reportableChannelName(channel.name, channel.scopeType),
+            scopeType: channel.scopeType,
+            isSelf: true,
+          });
+
           // send system message for joined participants
           const newParticipants = [{ userId: authData.sub, userName: authData.displayName || authData.name }];
           const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", orgId: "", role: "", memberId: "", orgRole: "" }
@@ -1381,6 +1392,17 @@ export function createMutators(
             addedUsers.push(user);
           }
 
+          // One channel lookup above, one event per person who joined.
+          for (const addedUser of addedUsers) {
+            void userActivityTrackingService.trackChannelJoined(addedUser.id, {
+              channelId,
+              channelName: reportableChannelName(channel.name, channel.scopeType),
+              scopeType: channel.scopeType,
+              addedBy: authData.sub,
+              isSelf: false,
+            });
+          }
+
           // send system message for added participants
           const newParticipants = addedUsers.map((currUser) => ({
             userId: currUser.id,
@@ -1443,6 +1465,14 @@ export function createMutators(
 
           await removeChannelParticipant(tx, channelId, targetUserId, updatedAt);
 
+          void userActivityTrackingService.trackChannelLeft(targetUserId, {
+            channelId,
+            channelName: reportableChannelName(channel.name, channel.scopeType),
+            scopeType: channel.scopeType,
+            removedBy: authData.sub,
+            isSelf: false,
+          });
+
           // Send system message for removed participant
           if (targetUser) {
             await sendAddAndRemoveParticipantsSystemMessage(tx, {
@@ -1476,6 +1506,13 @@ export function createMutators(
           }
 
           await removeChannelParticipant(tx, channelId, authData.sub, updatedAt);
+
+          void userActivityTrackingService.trackChannelLeft(authData.sub, {
+            channelId,
+            channelName: reportableChannelName(channel.name, channel.scopeType),
+            scopeType: channel.scopeType,
+            isSelf: true,
+          });
         },
       ),
       updateAddUserPolicy: defineMutator(
@@ -10832,7 +10869,6 @@ export function createMutators(
                 eventName: 'NUDGE_DISMISSED',
                 url: '',
                 triggerType: 'SYSTEM',
-                interactionKind: 'passive', // declining a nudge, not contributing
                 platform: Platform.WEB,
                 timestamp: new Date(timestamp),
                 contextMetadata: {

@@ -829,6 +829,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           ? {
               'data-track-category': 'MESSAGE',
               'data-track-name': 'OPEN_MESSAGE_BUBBLE',
+              'data-track-kind': 'passive',
               // Static label: the auto-label would capture message content.
               'data-track-label': 'message_bubble',
             }

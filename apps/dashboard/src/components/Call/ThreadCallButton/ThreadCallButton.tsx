@@ -34,6 +34,7 @@ export const ThreadCallButton = ({
   testId = 'thread-initiate-call-button',
   trackCategory,
   trackName,
+  trackKind,
   trackMetadata,
 }: ThreadCallButtonProps) => {
   return (
@@ -47,6 +48,7 @@ export const ThreadCallButton = ({
             data-testid={testId}
             {...(trackCategory && { 'data-track-category': trackCategory })}
             {...(trackName && { 'data-track-name': trackName })}
+            {...(trackKind && { 'data-track-kind': trackKind })}
             {...(trackMetadata && {
               'data-track-metadata': JSON.stringify(trackMetadata),
             })}

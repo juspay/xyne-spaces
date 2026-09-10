@@ -18,7 +18,7 @@ import {
   getOnlineChannelParticipants,
   extractSpecialMentions,
 } from '@/utils/mentionUtils';
-import { userActivityTrackingService } from '@/services/userActivityTrackingService';
+import { reportableChannelName, userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
 import { activityTrackingService } from '@/services/activityTrackingService';
@@ -312,15 +312,18 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
     }
 
+    const reportableName = reportableChannelName(
+      conversation?.channel?.name,
+      conversation?.channel?.scopeType,
+    );
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {
       messageId,
       ...(conversation?.channelId && { channelId: conversation.channelId }),
-      ...(conversation?.channel?.name && { channelName: conversation.channel.name }),
+      ...(reportableName && { channelName: reportableName }),
       ...(conversation?.channel?.scopeType && { scopeType: conversation.channel.scopeType }),
       // Every channel message owns a conversation whose initialMessageId is the
       // message itself; anything else in that conversation is a thread reply.
-      isThreadReply:
-        conversation?.initialMessageId != null && conversation.initialMessageId !== messageId,
+      isThreadReply: conversation !== null && conversation.initialMessageId !== messageId,
       hasAttachment: message.hasAttachment,
     }).catch(error => {
       logger.error('[UserActivityTracking] Failed to track message sent activity:', {

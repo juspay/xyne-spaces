@@ -254,7 +254,6 @@ export const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement =
             pagination={pagination}
             setPage={nextPage => setPage(nextPage + 1)}
             trackName='mettle-team-member'
-            trackKind='passive'
           />
         </div>
       )}
@@ -348,7 +347,6 @@ export const BulletBrief = ({ request }: { request: SectionRequest }): ReactElem
         pagination={pagination}
         setPage={nextPage => setPage(nextPage + 1)}
         trackName='leadership-bullet'
-        trackKind='passive'
         className='px-5 sm:px-6'
       />
     </div>

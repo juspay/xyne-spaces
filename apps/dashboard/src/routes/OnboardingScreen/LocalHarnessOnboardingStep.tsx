@@ -162,6 +162,7 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) 
                       ...radioProps(isSelected),
                       'data-track-category': 'Onboarding',
                       'data-track-name': `Select local harness: ${install.provider}`,
+                      'data-track-kind': 'passive',
                     })}
                 className={cn(
                   'flex items-center gap-3 py-3 text-left transition-opacity',

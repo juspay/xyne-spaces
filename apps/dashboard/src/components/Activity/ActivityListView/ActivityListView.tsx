@@ -604,9 +604,9 @@ const ActivityListView = (): ReactElement => {
     const handler = (e: Event) => {
       const target = e.target as HTMLElement;
       if (
-        target.closest('[data-track-name="MARK_AS_READ" data-track-kind="active"]') ||
-        target.closest('[data-track-name="MARK_AS_UNREAD" data-track-kind="active"]') ||
-        target.closest('[data-track-name="VIEW_CHANNEL" data-track-kind="passive"]')
+        target.closest('[data-track-name="MARK_AS_READ"]') ||
+        target.closest('[data-track-name="MARK_AS_UNREAD"]') ||
+        target.closest('[data-track-name="VIEW_CHANNEL"]')
       ) {
         return;
       }

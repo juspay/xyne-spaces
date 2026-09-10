@@ -3,7 +3,6 @@ import {
   isoDate,
   type UseDigitalTwinRangeResult,
 } from '@/components/ClawAgents/digitalTwin/useDigitalTwinRange';
-import type { InteractionKind } from '@xyne/shared';
 
 const INPUT_CLASS =
   'w-auto shrink-0 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none';
@@ -15,7 +14,6 @@ export const DateRangeInputs = ({
 }: {
   range: UseDigitalTwinRangeResult;
   trackName: string;
-  trackKind?: InteractionKind;
   showDayCount?: boolean;
 }): ReactElement => (
   <div className='flex flex-wrap items-center gap-2'>
@@ -26,6 +24,7 @@ export const DateRangeInputs = ({
       onChange={e => range.setCustomFrom(e.target.value)}
       data-track-category='Claw Agents'
       data-track-name={`${trackName} from date`}
+      data-track-kind='passive'
       className={INPUT_CLASS}
     />
     <span className='shrink-0 text-xs text-muted-foreground'>→</span>
@@ -37,6 +36,7 @@ export const DateRangeInputs = ({
       onChange={e => range.setCustomTo(e.target.value)}
       data-track-category='Claw Agents'
       data-track-name={`${trackName} to date`}
+      data-track-kind='passive'
       className={INPUT_CLASS}
     />
     {showDayCount && range.customDays > 0 && (

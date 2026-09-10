@@ -1,12 +1,20 @@
 import type { Platform } from '../zero/types.js';
 
 /**
- * Whether a tracked interaction persisted a write (`active`: send, create,
- * edit, delete, join, star, change a setting, ...) or only read / navigated
- * (`passive`: open, view, search, filter, switch tab, expand, cancel, ...).
- * Declared where the event is emitted: `data-track-kind` on the tracked
- * element, or explicitly by backend emitters. `null` means the emitter did
- * not declare one.
+ * The intent behind a tracked client gesture, declared by the element that
+ * emits it (`data-track-kind`), never inferred server-side.
+ *
+ *  - `active`: the gesture's purpose is to change persisted state — send,
+ *    create, edit, delete, join, leave, react, star, mute, mark read, change
+ *    a setting, approve, dismiss-and-forget is NOT included. Preference writes
+ *    count. "Did the user contribute or decide something" is the test, not
+ *    "did a row change".
+ *  - `passive`: read, navigate, or UI-only — open, view, search, filter, sort,
+ *    switch tab, expand/collapse, preview, cancel, dismiss.
+ *  - `null`: the emitter declared nothing. Backend-originated rows
+ *    (DB_MUTATION / SYSTEM) are always `null`: a server-side write cannot see
+ *    the gesture, and the client click that caused it is tracked separately,
+ *    so stamping them would double-count one action.
  */
 export type InteractionKind = 'active' | 'passive';
 export const INTERACTION_KINDS: readonly InteractionKind[] = ['active', 'passive'];

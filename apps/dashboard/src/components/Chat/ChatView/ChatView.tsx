@@ -98,6 +98,8 @@ const ChatView = (): ReactElement => {
     if (!channel || !channelId) return;
     if (viewedChannelIdRef.current === channelId) return;
     viewedChannelIdRef.current = channelId;
+    const isDmScope =
+      channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
 
     globalClickTracker.trackManualEvent(
       'CHANNEL',
@@ -105,10 +107,12 @@ const ChatView = (): ReactElement => {
       channelDisplayName,
       {
         channelId,
-        channelName: channel.name ?? channelDisplayName,
+        // DM "names" are user-id pairs and a DM display name is the other
+        // person; neither belongs in the event store. channelId carries it.
+        ...(!isDmScope && { channelName: channel.name }),
         ...(channel.scopeType && { scopeType: channel.scopeType }),
         ...(channel.type && { channelType: channel.type }),
-        ...(conversationId && { openedInThread: true }),
+        openedInThread: !!conversationId,
       },
       'passive',
     );

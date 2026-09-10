@@ -102,12 +102,7 @@ export const DigitalTwinRangeSelector = ({
 
             {r.selection === 'custom' && (
               <div className='border-t border-primary/20 px-3.5 pb-3 pt-2.5'>
-                <DateRangeInputs
-                  range={r}
-                  trackName='Digital Twin backfill'
-                  trackKind='active'
-                  showDayCount
-                />
+                <DateRangeInputs range={r} trackName='Digital Twin backfill' showDayCount />
                 <div className='mt-2 flex flex-wrap gap-1.5'>
                   {QUICK_DAYS.map(n => (
                     <button

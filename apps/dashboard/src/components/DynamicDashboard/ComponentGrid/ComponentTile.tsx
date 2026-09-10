@@ -190,6 +190,7 @@ const ComponentTile = ({
             'aria-pressed': !!isSelected,
             'data-track-category': 'DYNAMIC_DASHBOARD',
             'data-track-name': 'Dashboard_Tile_Select',
+            'data-track-kind': 'passive',
             onClick: (e: MouseEvent<HTMLDivElement>): void => {
               // Menus and dialogs render in portals under document.body; React
               // still bubbles their clicks here, so ignore any target that isn't

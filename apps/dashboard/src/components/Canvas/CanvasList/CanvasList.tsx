@@ -354,6 +354,9 @@ const renderCanvasCardMenuItem = (item: CanvasCardMenuItem): React.ReactNode => 
   if (item.trackName) {
     trackAttributes['data-track-category'] = 'CANVAS';
     trackAttributes['data-track-name'] = item.trackName;
+    if (item.trackKind) {
+      trackAttributes['data-track-kind'] = item.trackKind;
+    }
     if (item.trackMetadata) {
       trackAttributes['data-track-metadata'] = JSON.stringify(item.trackMetadata);
     }

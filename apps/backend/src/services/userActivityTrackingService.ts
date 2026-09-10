@@ -1,7 +1,24 @@
 import { v4 as uuidv4 } from 'uuid';
 import { activityTrackingService } from './activityTrackingService';
-import { Platform, TriggerType } from '@xyne/shared';
+import { ChannelScopeType, Platform, TriggerType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+
+const NON_DISPLAY_NAME_SCOPES = new Set<string>([ChannelScopeType.DM, ChannelScopeType.GROUP_DM]);
+
+/**
+ * `Channel.name` is a human name only for non-DM scopes; DMs store a sorted
+ * user-id pair (channelRepository.getDMChannel) and self-DMs the user id.
+ * Those are neither readable in reports nor something to persist into the
+ * event store, so they are dropped here and `channelId` + `scopeType` carry
+ * the dimension.
+ */
+export function reportableChannelName(
+  name: string | null | undefined,
+  scopeType: string | null | undefined,
+): string | undefined {
+  if (!name) return undefined;
+  return NON_DISPLAY_NAME_SCOPES.has(scopeType ?? '') ? undefined : name;
+}
 
 class UserActivityTrackingService {
 
@@ -51,8 +68,8 @@ class UserActivityTrackingService {
         url: 'backend',
         trigger_type: TriggerType.DB_MUTATION,
         context_metadata: params.metadata,
-        // Every event on this path records a persisted server-side write.
-        interaction_kind: 'active' as const,
+        // No interaction_kind: a server-side emitter sees a row change, not a
+        // gesture, and the client click that caused it is tracked separately.
         platform: Platform.WEB,
         timestamp: Date.now(),
       };
@@ -131,6 +148,26 @@ class UserActivityTrackingService {
     });
   }
 
+  async trackReactionRemoved(
+    userId: string,
+    metadata?: {
+      messageId?: string;
+      channelId?: string;
+      channelName?: string;
+      scopeType?: string;
+      emojiName?: string;
+      isThreadReply?: boolean;
+      isSelf?: boolean;
+    },
+  ): Promise<void> {
+    await this.track({
+      userId,
+      eventName: 'REACTION_REMOVED',
+      eventCategory: 'CHAT',
+      metadata,
+    });
+  }
+
   // ==================== Specific Ticket Operations ====================
 
   async trackTicketCreated(userId: string, metadata?: { ticketId?: string; title?: string; boardId?: string; channelId?: string }): Promise<void> {
@@ -198,16 +235,16 @@ class UserActivityTrackingService {
   }
 
   /**
-   * A user became a member of a channel. `userId` is the actor (who performed
-   * the add); `memberId` is the user who joined. `isSelf` is true when a user
-   * joined on their own rather than being added by someone else.
+   * `memberId` became a member of a channel. Keyed on the member (the subject,
+   * like every other event on this table); `addedBy` is the actor when someone
+   * else added them, and `isSelf` is true when they joined on their own.
    */
   async trackChannelJoined(
-    userId: string,
-    metadata?: { channelId?: string; channelName?: string; scopeType?: string; memberId?: string; isSelf?: boolean },
+    memberId: string,
+    metadata?: { channelId?: string; channelName?: string; scopeType?: string; addedBy?: string; isSelf?: boolean },
   ): Promise<void> {
     await this.track({
-      userId,
+      userId: memberId,
       eventName: 'CHANNEL_JOINED',
       eventCategory: 'CHANNEL',
       metadata,
@@ -215,15 +252,15 @@ class UserActivityTrackingService {
   }
 
   /**
-   * A user stopped being a member of a channel. Same actor/member split as
-   * trackChannelJoined: `isSelf` false means the member was removed by someone.
+   * `memberId` stopped being a member. `removedBy` is the actor when someone
+   * else removed them; `isSelf` is true when they left on their own.
    */
   async trackChannelLeft(
-    userId: string,
-    metadata?: { channelId?: string; channelName?: string; scopeType?: string; memberId?: string; isSelf?: boolean },
+    memberId: string,
+    metadata?: { channelId?: string; channelName?: string; scopeType?: string; removedBy?: string; isSelf?: boolean },
   ): Promise<void> {
     await this.track({
-      userId,
+      userId: memberId,
       eventName: 'CHANNEL_LEFT',
       eventCategory: 'CHANNEL',
       metadata,

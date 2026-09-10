@@ -256,7 +256,7 @@ export class NudgeEvaluationEngine {
       url: event.url,
       triggerType: event.triggerType,
       contextMetadata: (event.contextMetadata ?? null) as UserActivityEvent['contextMetadata'],
-      interactionKind: event.interactionKind ?? null,
+      interactionKind: null,
       platform: event.platform as Platform,
       timestamp: event.timestamp,
     };
@@ -394,7 +394,6 @@ export class NudgeEvaluationEngine {
           url: true,
           triggerType: true,
           contextMetadata: true,
-          interactionKind: true,
           platform: true,
           timestamp: true,
         },
@@ -407,7 +406,6 @@ export class NudgeEvaluationEngine {
         url: e.url,
         triggerType: e.triggerType,
         contextMetadata: e.contextMetadata as Record<string, unknown> | undefined,
-        interactionKind: e.interactionKind,
         platform: e.platform,
         timestamp: e.timestamp,
       }));

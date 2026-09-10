@@ -102,7 +102,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
 
           {r.selection === 'custom' && (
             <div className='mt-4 flex flex-col gap-2.5'>
-              <DateRangeInputs range={r} trackName='Digital Twin enable' trackKind='active' />
+              <DateRangeInputs range={r} trackName='Digital Twin enable' />
               <div className='flex flex-wrap gap-1.5'>
                 {QUICK_DAYS.map(n => (
                   <button

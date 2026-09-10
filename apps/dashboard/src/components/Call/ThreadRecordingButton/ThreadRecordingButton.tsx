@@ -25,6 +25,7 @@ export const ThreadRecordingButton = ({
   testId = 'thread-start-recording-button',
   trackCategory,
   trackName,
+  trackKind,
   trackMetadata,
 }: ThreadRecordingButtonProps) => {
   return (
@@ -38,6 +39,7 @@ export const ThreadRecordingButton = ({
         data-testid={testId}
         {...(trackCategory && { 'data-track-category': trackCategory })}
         {...(trackName && { 'data-track-name': trackName })}
+        {...(trackKind && { 'data-track-kind': trackKind })}
         {...(trackMetadata && {
           'data-track-metadata': JSON.stringify(trackMetadata),
         })}

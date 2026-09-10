@@ -406,7 +406,7 @@ export function AISidebar({
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName }) => {
+            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName, trackKind }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
@@ -414,7 +414,11 @@ export function AISidebar({
                   to={prefixWs(to)}
                   aria-current={isActive ? 'page' : undefined}
                   {...(trackName
-                    ? { 'data-track-category': 'XyneAI', 'data-track-name': trackName }
+                    ? {
+                        'data-track-category': 'XyneAI',
+                        'data-track-name': trackName,
+                        ...(trackKind ? { 'data-track-kind': trackKind } : {}),
+                      }
                     : {})}
                   className={cn(
                     NAV_ITEM_CLASS,

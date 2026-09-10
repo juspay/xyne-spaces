@@ -495,6 +495,7 @@ const RadarPanel = (): ReactElement => {
           : {
               'data-track-category': 'RADAR',
               'data-track-name': 'OPEN_THREAD_FROM_CARD',
+              'data-track-kind': 'passive',
               ...openOnClick(() =>
                 openThread(
                   card,

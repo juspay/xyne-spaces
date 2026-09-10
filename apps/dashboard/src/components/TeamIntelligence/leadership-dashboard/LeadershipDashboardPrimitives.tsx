@@ -13,7 +13,6 @@ import {
   sectionToneClassName,
   toneClassName,
 } from './leadershipDashboardUtils';
-import type { InteractionKind } from '@xyne/shared';
 
 export const EmptyState = ({ title, text }: { title: string; text: string }): ReactElement => (
   <div className='rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-5'>
@@ -71,7 +70,6 @@ export const PaginationControls = ({
   >;
   setPage: (page: number) => void;
   trackName: string;
-  trackKind?: InteractionKind;
   className?: string;
 }): ReactElement | null => {
   if (pagination.pageCount <= 1) return null;
