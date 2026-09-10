@@ -783,12 +783,21 @@ export class ConversationService {
       await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
-    await this.conversationRepository.incrementReplyCount(
+    // Single conversations write: replyCount, lastActivityAt and replies_md were
+    // three separate commits against this row, each replayed through every
+    // subscribed Zero pipeline. replies_md is read immediately before the write
+    // so the lost-update window stays as narrow as the previous append's was.
+    const replyAppliedAt = new Date();
+    await this.conversationRepository.applyThreadReply({
       conversationId,
-      createdAt === undefined ? undefined : message.createdAt,
+      repliesMd: messageMetadataService.buildRepliesMdAfterReply(
+        await this.conversationRepository.findRepliesMd(conversationId),
+        userId,
+      ),
+      lastActivityAt: lastActivityAt ?? replyAppliedAt,
+      replyCreatedAt: createdAt === undefined ? replyAppliedAt : message.createdAt,
       markParticipantsRead,
-    );
-    await messageMetadataService.addReply(conversationId, userId);
+    });
 
     // Update reply count for previous message's child conversation if it exists
     // This matches the mutator logic - get the most recent previous message and check if it has showInChannel
@@ -801,13 +810,6 @@ export class ConversationService {
     if (mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
       await this.conversationRepository.update(mostRecentPrevMsg.childConversationId, {
         replyCount: 1,
-      });
-    }
-
-    // Update last activity for the conversation
-    if (lastActivityAt) {
-      await this.conversationRepository.update(conversationId, {
-        lastActivityAt: lastActivityAt,
       });
     }
 
