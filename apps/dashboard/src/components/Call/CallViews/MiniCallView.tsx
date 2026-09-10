@@ -573,9 +573,10 @@ export function MiniCallView({
                     </div>
                   )}
                 </div>
-
-                {/* Controls */}
-                <div className='pb-4' onPointerDown={(e): void => e.stopPropagation()}>
+                <div
+                  className='relative z-40 pb-4'
+                  onPointerDown={(e): void => e.stopPropagation()}
+                >
                   <CallControls
                     isMicEnabled={isMicEnabled}
                     isCameraEnabled={isCameraEnabled}
