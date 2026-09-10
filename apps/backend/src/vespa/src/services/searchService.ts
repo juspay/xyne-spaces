@@ -450,11 +450,7 @@ export class SearchService {
           "input.query(query_length)": queryWordCount,
           timeout: '30s',
           ...(shouldEmbed ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
-          // "all", not "weakAnd". The query is split into trigrams and weakAnd accepts a doc
-          // matching ANY of them, so "BID0" (bid + id0) matched every message containing "bid".
-          // Measured on prod for "BID0": text_fuzzy 9,786 -> 28 hits, chunks_fuzzy 11,026 -> 379.
-          // Trade-off: stricter typo tolerance, since every gram must now be present.
-          ...(useFuzzy ? { "gram.match": "all" } : {}),
+          ...(useFuzzy ? { "gram.match": "weakAnd" } : {}),
           "input.query(freshness_weight)": freshnessWeight,
           "input.query(filtering_weight)": filteringWeight,
           "input.query(time_from)": timeRangeStart,

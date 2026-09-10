@@ -224,7 +224,7 @@ export class YqlBuilder {
     mailFilters: MailFilters = {},
     callFilters: CallFilters = {},
     useFuzzy: boolean = false,
-    _useSemanticAnyway: boolean = true, // unused: semantic clauses removed; kept for positional-arg compatibility
+    useSemanticAnyway: boolean = true,
     workspaceId?: string,
     sort?: string,
     useExactMatch: boolean = false,
@@ -241,6 +241,14 @@ export class YqlBuilder {
 
     //Build search condition
     const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
+    const queryLength = query?.length ?? 0;
+
+    // Whether the vector half of retrieval runs. `useSemanticAnyway` is the caller's
+    // config-driven decision (searchService reads the
+    // `vespa_search_semantic_disabled_rank_profiles` Superposition flag and turns it off for
+    // rank profiles that read no vector feature). Short queries skip it regardless — under 4
+    // characters the embedding is noise.
+    const useSemantic = useSemanticAnyway && queryLength > 3;
 
     if (query && query !== '*') {
       if (useExactMatch) {
@@ -250,15 +258,22 @@ export class YqlBuilder {
         // phrase when a stopword sits mid-query. No nearestNeighbor / fuzzy — those broaden a match.
         whereConditions.push(userInputClause(undefined, 'grammar:"phrase"'));
       } else if (useFuzzy) {
-        // Lexical only. The nearestNeighbor clauses that used to be OR'd in here were removed:
-        // they are threshold-free top-k retrieval (they always return their targetHits, however
-        // far away), while no rank profile on this path reads vector_score -- so they only ever
-        // padded the match set with unscored strays. Measured on prod for `DHDFMDB1TYUB6V`:
-        // 25 hits -> 8, all 8 genuine (was 8/25); querytime 92.8ms -> 3.1ms.
+        // Same user-query fields for both fuzzy branches; grammar:"tokenize" applied per clause.
         const lexicalFieldClauses = LEXICAL_FUZZY_FIELDS.map((field) => userInputClause(field)).join('\n      or ');
-        whereConditions.push(`(
+        if (useSemantic) {
+          // Hybrid: fuzzy lexical + semantic
+          whereConditions.push(`(
+      ${lexicalFieldClauses}
+      or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
+      or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
+      or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
+    )`);
+        } else {
+          // Lexical only: semantic disabled for this rank profile, or the query is too short.
+          whereConditions.push(`(
       ${lexicalFieldClauses}
     )`);
+        }
       } else if (isTranscriptOnly) {
         // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
         whereConditions.push(`(
@@ -270,9 +285,19 @@ export class YqlBuilder {
       or ({targetHits:${safeLimit}} nearestNeighbor(qna_embeddings, e))
     )`);
       } else {
-        // Lexical only. See the useFuzzy branch above for why the nearestNeighbor clauses were
-        // removed. Nothing here reads vector_score, so they added latency and noise only.
-        whereConditions.push(lexicalClause(query, params));
+        // `lexicalClause` on both sides: the digit-token fix it carries is about how the lexical
+        // half is parsed, so it must not depend on whether the vector half runs.
+        if (useSemantic) {
+          // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
+          whereConditions.push(`(
+          ${lexicalClause(query, params)}
+        or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
+        or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
+        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
+        )`);
+        } else {
+          whereConditions.push(lexicalClause(query, params));
+        }
       }
 
       // `personalized` only: caller as rank-only terms so each profile's involvement tier can
