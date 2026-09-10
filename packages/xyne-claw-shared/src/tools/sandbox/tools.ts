@@ -7,7 +7,7 @@ import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
 import {
   cleanupSdlcGitCredentialMaterial,
@@ -1235,9 +1235,20 @@ export const sandboxCopyIn: ToolDefinition = {
     if (roWrite) return roWrite;
 
     try {
-      const buf = await readFile(sourceAbs);
-      await session.files.write(destPath, buf);
-      return JSON.stringify({ sourcePath: relPath, destPath, bytes: buf.length, copied: true });
+      // Stream the file in bounded chunks instead of one base64 JSON POST.
+      // A whole-file write() base64-inflates the payload ~1.33x into a single
+      // /write body, which the sandbox workspace server rejects with
+      // "request entity too large" for large spilled MCP results (observed at
+      // ~486 KB raw -> ~650 KB body). writeStream reuses the same /write
+      // endpoint per chunk and appends server-side, so no single request is
+      // large and no workspace-image change is needed. 256 KiB keeps a clear
+      // margin under the observed cap.
+      const { bytesWritten } = await session.files.writeStream(
+        destPath,
+        createReadStream(sourceAbs),
+        { chunkBytes: 256 * 1024 },
+      );
+      return JSON.stringify({ sourcePath: relPath, destPath, bytes: bytesWritten, copied: true });
     } catch (err) {
       if (isStaleSessionError(err)) {
         evictSession(session);
