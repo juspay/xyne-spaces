@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { MultipleCrossCancelDefault, PencilEditLine, PlusDefault } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
@@ -8,6 +8,7 @@ import { Pill } from '../../../../shared/primitives/Pill';
 import { V2Dialog } from '../../../../shared/primitives/V2Dialog';
 import type { AgentProviderCredentialStatus } from './agentCredentialsService';
 import { CredentialFormFields } from './CredentialFormFields';
+import type { CredentialScope } from './credentialScope';
 import {
   CREDENTIAL_PROVIDERS,
   CREDENTIAL_PROVIDER_LABELS,
@@ -32,8 +33,11 @@ const SECTION_LABEL = 'text-sm font-medium leading-[1.2] tracking-[-0.1px] text-
 interface AgentKeysDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  slug: string;
+  /** Whose credentials this manages — an agent's, or the signed-in user's. */
+  scope: CredentialScope;
   canManage: boolean;
+  /** Preselected when opened from a card that already named a provider. */
+  initialProvider?: string;
 }
 
 const label = (provider: string): string => CREDENTIAL_PROVIDER_LABELS[provider] ?? provider;
@@ -47,21 +51,43 @@ function summarise(entry: AgentProviderCredentialStatus): string {
 export function AgentKeysDialog({
   open,
   onOpenChange,
-  slug,
+  scope,
   canManage,
+  initialProvider,
 }: AgentKeysDialogProps): ReactElement {
   const queryClient = useQueryClient();
-  const { data: credentials, isLoading } = useAgentCredentials(slug, open);
-  const { save, remove, saving, removing } = useAgentCredentialMutations(slug);
+  const isUserScope = scope.kind === 'user';
+  const { data: credentials, isLoading } = useAgentCredentials(scope, open);
+  const { save, remove, saving, removing } = useAgentCredentialMutations(scope);
 
   const [form, setForm] = useState<CredentialForm | null>(null);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
+
+  // Opened from a card that already named a provider: land straight on its
+  // form instead of the list, so the user does not pick it twice.
+  useEffect(() => {
+    if (!open || !initialProvider) return;
+    setForm({
+      ...EMPTY_CREDENTIAL_FORM,
+      provider: initialProvider as CredentialForm['provider'],
+      authType: supportsOauth(initialProvider) ? 'oauth_token' : 'api_key',
+    });
+    setEditingProvider(null);
+  }, [open, initialProvider]);
 
   const configured = (credentials ?? []).filter(entry => entry.configured);
   const configuredKeys = new Set(configured.map(entry => entry.provider));
   const available = CREDENTIAL_PROVIDERS.filter(provider => !configuredKeys.has(provider));
 
+  // Opened for one named provider, so there is no list behind the form —
+  // cancelling or finishing closes rather than revealing one.
+  const singleProvider = Boolean(initialProvider);
+
   const reset = (): void => {
+    if (singleProvider) {
+      onOpenChange(false);
+      return;
+    }
     setForm(null);
     setEditingProvider(null);
   };
@@ -96,9 +122,21 @@ export function AgentKeysDialog({
         onOpenChange(next);
         if (!next) reset();
       }}
-      title='Agent keys'
-      description='Provider keys this agent runs with.'
-      testId='agent-keys-dialog'
+      title={
+        form === null
+          ? 'Agent keys'
+          : editing
+            ? `Edit ${label(form.provider)}`
+            : `Connect ${label(form.provider)}`
+      }
+      description={
+        form !== null
+          ? `Use a ${label(form.provider)} account for this agent.`
+          : isUserScope
+            ? 'Your own provider keys, used when you talk to an agent.'
+            : 'Provider keys this agent runs with.'
+      }
+      testId={isUserScope ? 'provider-keys-dialog' : 'agent-keys-dialog'}
       footer={
         form === null ? (
           <Button
@@ -136,73 +174,79 @@ export function AgentKeysDialog({
         )
       }
     >
-      <p className='text-sm font-normal leading-5 text-muted-foreground'>
-        Without a key here, everyone falls through to their own provider, or to Spaces.
-      </p>
+      {form === null && (
+        <p className='text-sm font-normal leading-5 text-muted-foreground'>
+          Without a key here, everyone falls through to their own provider, or to Spaces.
+        </p>
+      )}
 
-      <section className='flex w-full flex-col gap-3'>
-        <span className={SECTION_LABEL}>Configured</span>
+      {form === null && (
+        <section className='flex w-full flex-col gap-3'>
+          <span className={SECTION_LABEL}>Configured</span>
 
-        {isLoading ? (
-          <div className='flex flex-col gap-2'>
-            <Skeleton className='h-11 w-full rounded-[10px]' />
-            <Skeleton className='h-11 w-full rounded-[10px]' />
-          </div>
-        ) : configured.length === 0 ? (
-          <p className='text-sm font-normal leading-5 text-muted-foreground'>No agent keys yet.</p>
-        ) : (
-          <div className='flex w-full flex-col gap-2'>
-            {configured.map(entry => (
-              <div
-                key={entry.provider}
-                className='flex min-h-11 w-full items-center gap-2 rounded-[10px] border-[0.8px] border-border bg-muted px-3 py-2'
-              >
-                <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                  <span className='truncate text-sm font-medium leading-5 text-foreground'>
-                    {label(entry.provider)}
-                  </span>
-                  <span className='truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
-                    {summarise(entry)}
-                  </span>
+          {isLoading ? (
+            <div className='flex flex-col gap-2'>
+              <Skeleton className='h-11 w-full rounded-[10px]' />
+              <Skeleton className='h-11 w-full rounded-[10px]' />
+            </div>
+          ) : configured.length === 0 ? (
+            <p className='text-sm font-normal leading-5 text-muted-foreground'>
+              {isUserScope ? 'No provider keys yet.' : 'No agent keys yet.'}
+            </p>
+          ) : (
+            <div className='flex w-full flex-col gap-2'>
+              {configured.map(entry => (
+                <div
+                  key={entry.provider}
+                  className='flex min-h-11 w-full items-center gap-2 rounded-[10px] border-[0.8px] border-border bg-muted px-3 py-2'
+                >
+                  <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                    <span className='truncate text-sm font-medium leading-5 text-foreground'>
+                      {label(entry.provider)}
+                    </span>
+                    <span className='truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
+                      {summarise(entry)}
+                    </span>
+                  </div>
+                  <Pill tone='success'>Configured</Pill>
+                  {canManage && (
+                    <>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setEditingProvider(entry.provider);
+                          setForm(formFromCredential(entry));
+                        }}
+                        aria-label={`Edit ${label(entry.provider)} credential`}
+                        data-track-category='Claw Agents'
+                        data-track-name='Agent detail v2: edit agent key'
+                        className={ICON_BUTTON}
+                      >
+                        <PencilEditLine className='size-4' aria-hidden />
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => void remove(entry.provider)}
+                        disabled={removing}
+                        aria-label={`Remove ${label(entry.provider)} credential`}
+                        data-track-category='Claw Agents'
+                        data-track-name='Agent detail v2: remove agent key'
+                        className={ICON_BUTTON}
+                      >
+                        {removing ? (
+                          <Loader2 className='size-4 animate-spin' aria-hidden />
+                        ) : (
+                          <MultipleCrossCancelDefault className='size-4' aria-hidden />
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
-                <Pill tone='success'>Configured</Pill>
-                {canManage && (
-                  <>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setEditingProvider(entry.provider);
-                        setForm(formFromCredential(entry));
-                      }}
-                      aria-label={`Edit ${label(entry.provider)} credential`}
-                      data-track-category='Claw Agents'
-                      data-track-name='Agent detail v2: edit agent key'
-                      className={ICON_BUTTON}
-                    >
-                      <PencilEditLine className='size-4' aria-hidden />
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => void remove(entry.provider)}
-                      disabled={removing}
-                      aria-label={`Remove ${label(entry.provider)} credential`}
-                      data-track-category='Claw Agents'
-                      data-track-name='Agent detail v2: remove agent key'
-                      className={ICON_BUTTON}
-                    >
-                      {removing ? (
-                        <Loader2 className='size-4 animate-spin' aria-hidden />
-                      ) : (
-                        <MultipleCrossCancelDefault className='size-4' aria-hidden />
-                      )}
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {canManage && form === null && available.length > 0 && (
         <section className='flex w-full flex-col gap-3'>
@@ -232,16 +276,17 @@ export function AgentKeysDialog({
 
       {form !== null && (
         <section className='flex w-full flex-col gap-3'>
-          <span className={SECTION_LABEL}>
-            {editing ? `Edit ${label(form.provider)}` : `New ${label(form.provider)} key`}
-          </span>
           <CredentialFormFields
             form={form}
             onChange={setForm}
             editing={editing}
-            slug={slug}
+            scope={scope}
             onOauthConnected={() => {
-              void queryClient.invalidateQueries({ queryKey: agentCredentialsKey(slug) });
+              void queryClient.invalidateQueries({ queryKey: agentCredentialsKey(scope) });
+              if (singleProvider) {
+                onOpenChange(false);
+                return;
+              }
               // The exchange already stored the bundle. Stay open in edit mode so
               // a model/base URL can follow — the backend allows that update
               // without an apiKey precisely because OAuth saved the credential.
