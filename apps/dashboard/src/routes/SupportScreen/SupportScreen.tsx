@@ -6228,11 +6228,7 @@ export const SupportTicketDetail = ({
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
                     placeholder={channelIntegrationInfo.sourceType === 'instagram' ? 'Reply to this DM…' : 'Reply to this review…'}
-                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
-                      ? { maxLength: 350 }
-                      : channelIntegrationInfo.sourceType === 'instagram'
-                      ? { maxLength: 1000 }
-                      : {})}
+                    maxLength={channelIntegrationInfo.sourceType === 'instagram' ? 1000 : 350}
                     trackingCategory='social-media-composer'
                   />
                 ) : null

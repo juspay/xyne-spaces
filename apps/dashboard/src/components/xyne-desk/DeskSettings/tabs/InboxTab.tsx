@@ -55,7 +55,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     isSlack,
     isApp,
     isSocial,
-    isSocialMedia,
     isDeskChannel,
     ownerId,
     setOwner,
