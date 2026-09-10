@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.3](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.2...v1.295.0-release-20260909.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* derive github credential owner from the token [backport to release-20260909] ([#1688](https://github.com/juspay/xyne-spaces/issues/1688)) ([552709a](https://github.com/juspay/xyne-spaces/commit/552709ada0d6d0dce1ab468f59b6be4f3b970006))
+
 ## [1.295.0-release-20260909.2](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.1...v1.295.0-release-20260909.2) (2026-09-10)
 
 
