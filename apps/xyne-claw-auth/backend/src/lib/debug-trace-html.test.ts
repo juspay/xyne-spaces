@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEBUG_TRACE_MAX_BYTES, renderDebugTraceHtml, type DebugTraceRun } from "./debug-trace-html.js";
+import {
+  DEBUG_TRACE_MAX_BYTES,
+  renderDebugTraceHtml,
+  renderDebugTraceBundleHtml,
+  type DebugTraceBundleEntry,
+  type DebugTraceRun,
+} from "./debug-trace-html.js";
 
 const START = "2026-09-01T12:00:00.000Z";
 
@@ -143,5 +149,77 @@ describe("renderDebugTraceHtml", () => {
   it("handles an empty run without throwing", () => {
     const html = renderDebugTraceHtml({});
     expect(html).toContain("No tool calls recorded.");
+  });
+});
+
+describe("renderDebugTraceBundleHtml", () => {
+  function entry(sessionId: string, minutesAgo: number, status: string): DebugTraceBundleEntry {
+    return {
+      run: { ...fixture(), sessionId },
+      sessionId,
+      status,
+      checkpointMs: Date.parse(START) - minutesAgo * 60_000,
+    };
+  }
+
+  it("renders one expandable section per session, newest expanded", () => {
+    const html = renderDebugTraceBundleHtml([
+      entry("sess-newest", 0, "completed"),
+      entry("sess-older", 10, "failed"),
+    ]);
+    const sections = html.match(/<details class="sess"/g) ?? [];
+    expect(sections).toHaveLength(2);
+    // Only the first section is open; the rest collapse.
+    expect(html.match(/<details class="sess" open>/g) ?? []).toHaveLength(1);
+    expect(html.indexOf('<details class="sess" open>')).toBeLessThan(html.indexOf('<details class="sess">'));
+  });
+
+  it("labels each section with session id and status", () => {
+    const html = renderDebugTraceBundleHtml([entry("sess-abc12345", 0, "completed"), entry("sess-def67890", 5, "failed")]);
+    expect(html).toContain("sess-abc");
+    expect(html).toContain("completed");
+    expect(html).toContain("failed");
+    expect(html).toContain("#1");
+    expect(html).toContain("#2");
+  });
+
+  it("still scrubs secrets and omits tool results/final answers in every section", () => {
+    const html = renderDebugTraceBundleHtml([entry("s1", 0, "completed"), entry("s2", 1, "completed")]);
+    expect(html).not.toContain("TOOLRESULTBODY");
+    expect(html).not.toContain("FINALANSWERBODY");
+    expect(html).not.toContain("SUPERSECRETPROMPTBODY");
+    expect(html).not.toContain("abc123secret");
+  });
+
+  it("degrades later sections to a summary line once the page size cap is reached", () => {
+    // Each session is heavy enough that a handful blow past the page cap.
+    const heavy = (sessionId: string, minutesAgo: number): DebugTraceBundleEntry => ({
+      run: {
+        startedAt: START,
+        agentSlug: "doctor",
+        events: Array.from({ length: 8_000 }, (_, i) => ({
+          seq: i + 1,
+          at: at(i),
+          kind: "tool_execution_start",
+          toolCallId: `${sessionId}-call-${i}`,
+          data: { toolName: `tool-${i}`, args: { q: "x".repeat(30) } },
+        })),
+      },
+      sessionId,
+      status: "completed",
+      checkpointMs: Date.parse(START) - minutesAgo * 60_000,
+    });
+    const many = Array.from({ length: 6 }, (_, i) => heavy(`sess-${i}`, i));
+    const html = renderDebugTraceBundleHtml(many);
+    expect(html).toContain("page size cap reached");
+    // Every session is still LISTED even when its timeline is not rendered.
+    expect((html.match(/<details class="sess"/g) ?? []).length).toBe(6);
+  });
+
+  it("emits a valid standalone document for a single entry", () => {
+    const html = renderDebugTraceBundleHtml([entry("only", 0, "running")]);
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html.trimEnd().endsWith("</html>")).toBe(true);
+    expect(html).toContain("1 session in this thread");
   });
 });

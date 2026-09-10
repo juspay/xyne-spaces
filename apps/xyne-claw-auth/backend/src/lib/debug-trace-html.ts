@@ -150,7 +150,15 @@ function row(cells: { offset: string; badge: string; kindClass: string; title: s
   );
 }
 
-export function renderDebugTraceHtml(run: DebugTraceRun): string {
+interface TraceParts {
+  agentSlug: string;
+  /** "N tool calls · N LLM turns · N compactions · N events" */
+  headline: string;
+  /** Everything between the <h1> and the footer: Run table, tool stats, timeline. */
+  inner: string;
+}
+
+function buildTraceParts(run: DebugTraceRun): TraceParts {
   const all = events(run);
   const startedAt = str(run.startedAt);
   const startMs = startedAt ? Date.parse(startedAt) : NaN;
@@ -440,9 +448,30 @@ export function renderDebugTraceHtml(run: DebugTraceRun): string {
     ? `<p class="notice">Timeline truncated — the trace exceeded the ${Math.round(DEBUG_TRACE_MAX_BYTES / 1_000_000)} MB rendering cap. ${rows.length} of ${all.length} events shown.</p>`
     : "";
 
+  return {
+    agentSlug: clean(run.agentSlug, 60) || "run",
+    headline: `${toolCalls} tool calls · ${llmTurns} LLM turns · ${compactions} compactions · ${all.length} events`,
+    inner: [
+      `<h2>Run</h2>`,
+      `<div class="scroll"><table class="meta-table"><tbody>${headerRows}</tbody></table></div>`,
+      `<h2>Tool calls by name</h2>`,
+      `<div class="scroll"><table><thead><tr><th>Tool</th><th>Calls</th><th>Avg</th><th>Max</th><th>Errors</th></tr></thead>`,
+      `<tbody>${statRows || `<tr><td colspan="5">No tool calls recorded.</td></tr>`}</tbody></table></div>`,
+      `<h2>Timeline</h2>`,
+      truncNotice,
+      rows.join("\n"),
+    ].join("\n"),
+  };
+}
+
+const TRACE_FOOT =
+  `<p class="foot">Tool arguments are reduced to a short summary and tool results are never included. ` +
+  `Secrets are scrubbed. The final answer body is not part of this trace.</p>`;
+
+function shell(title: string, body: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Execution trace — ${clean(run.agentSlug, 60) || "run"}</title>
+<title>${title}</title>
 <style>
 :root { color-scheme: light dark; --bg:#fff; --fg:#16181d; --muted:#666e7a; --line:#e3e6ea; --accent:#2f6fd0; --warn:#b8620a; --err:#c0362c; --chip:#f2f4f7; }
 @media (prefers-color-scheme: dark) { :root { --bg:#14161a; --fg:#e6e8ec; --muted:#9aa3ae; --line:#2a2e35; --accent:#79aaf5; --warn:#e0a25a; --err:#ef7a70; --chip:#1e2229; } }
@@ -478,18 +507,85 @@ details summary { cursor:pointer; color:var(--accent); font-size:12.5px; }
 .err-count { color:var(--err); font-weight:600; }
 .notice { color:var(--warn); font-size:13px; }
 .foot { color:var(--muted); font-size:12px; margin-top:28px; }
+.sess { border:1px solid var(--line); border-radius:6px; margin:10px 0; padding:0 12px; }
+.sess[open] { padding-bottom:12px; }
+.sess > summary { font-size:14px; font-weight:600; color:var(--fg); padding:10px 0; list-style:none; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+.sess > summary::-webkit-details-marker { display:none; }
+.sess > summary::before { content:"▸"; color:var(--muted); font-weight:400; }
+.sess[open] > summary::before { content:"▾"; }
+.sess > summary .sub { font-weight:400; font-size:12.5px; color:var(--muted); }
 </style></head>
 <body>
-<h1>Execution trace — ${clean(run.agentSlug, 60) || "run"}</h1>
-<p class="meta">${toolCalls} tool calls · ${llmTurns} LLM turns · ${compactions} compactions · ${all.length} events</p>
-<h2>Run</h2>
-<div class="scroll"><table class="meta-table"><tbody>${headerRows}</tbody></table></div>
-<h2>Tool calls by name</h2>
-<div class="scroll"><table><thead><tr><th>Tool</th><th>Calls</th><th>Avg</th><th>Max</th><th>Errors</th></tr></thead>
-<tbody>${statRows || `<tr><td colspan="5">No tool calls recorded.</td></tr>`}</tbody></table></div>
-<h2>Timeline</h2>
-${truncNotice}
-${rows.join("\n")}
-<p class="foot">Tool arguments are reduced to a short summary and tool results are never included. Secrets are scrubbed. The final answer body is not part of this trace.</p>
+${body}
 </body></html>`;
+}
+
+export function renderDebugTraceHtml(run: DebugTraceRun): string {
+  const parts = buildTraceParts(run);
+  return shell(
+    `Execution trace — ${parts.agentSlug}`,
+    [
+      `<h1>Execution trace — ${parts.agentSlug}</h1>`,
+      `<p class="meta">${parts.headline}</p>`,
+      parts.inner,
+      TRACE_FOOT,
+    ].join("\n"),
+  );
+}
+
+/** One snapshot in a multi-session bundle, newest first. */
+export interface DebugTraceBundleEntry {
+  run: DebugTraceRun;
+  sessionId: string;
+  status?: string | undefined;
+  /** Checkpoint time (ms since epoch) parsed from the snapshot filename. */
+  checkpointMs?: number | undefined;
+}
+
+/**
+ * Render several sessions of one thread into a single page, newest first, each
+ * collapsed behind a <details> so an issue can be traced across runs. The
+ * newest is expanded; older ones open on click.
+ *
+ * Sections are added until the page reaches DEBUG_TRACE_MAX_BYTES so one huge
+ * run cannot push the whole bundle past what Spaces will render/attach; the
+ * remainder degrade to a summary line instead of being silently dropped.
+ */
+export function renderDebugTraceBundleHtml(entries: DebugTraceBundleEntry[]): string {
+  const agentSlug = clean(entries[0]?.run?.agentSlug, 60) || "run";
+  const sections: string[] = [];
+  let budget = DEBUG_TRACE_MAX_BYTES;
+
+  entries.forEach((entry, index) => {
+    const shortId = entry.sessionId.slice(0, 8);
+    const when = entry.checkpointMs && entry.checkpointMs > 0
+      ? new Date(entry.checkpointMs).toISOString().replace("T", " ").slice(0, 19) + " UTC"
+      : clean(entry.run?.startedAt, 40) || "—";
+    const label =
+      `<span>#${index + 1}</span>` +
+      `<code>${clean(shortId, 20)}</code>` +
+      `<span class="sub">${clean(entry.status, 20) || "—"} · ${when}</span>`;
+
+    if (budget <= 0) {
+      sections.push(`<details class="sess"><summary>${label}<span class="sub">not rendered — page size cap reached</span></summary></details>`);
+      return;
+    }
+    const parts = buildTraceParts(entry.run);
+    const html =
+      `<details class="sess"${index === 0 ? " open" : ""}>` +
+      `<summary>${label}<span class="sub">${parts.headline}</span></summary>` +
+      `${parts.inner}</details>`;
+    budget -= html.length;
+    sections.push(html);
+  });
+
+  return shell(
+    `Execution traces — ${agentSlug}`,
+    [
+      `<h1>Execution traces — ${agentSlug}</h1>`,
+      `<p class="meta">${entries.length} session${entries.length === 1 ? "" : "s"} in this thread, newest first. Click a session to expand it.</p>`,
+      sections.join("\n"),
+      TRACE_FOOT,
+    ].join("\n"),
+  );
 }
