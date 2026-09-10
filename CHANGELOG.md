@@ -1,3 +1,10 @@
+## [1.308.0](https://github.com/juspay/xyne-spaces/compare/v1.307.0...v1.308.0) (2026-09-10)
+
+
+### Features
+
+* folders and folder conversations in the SDLC hub ([#1756](https://github.com/juspay/xyne-spaces/issues/1756)) ([b25cac9](https://github.com/juspay/xyne-spaces/commit/b25cac99143683be7c20dfe639b1ecab1f1092fa))
+
 ## [1.307.0](https://github.com/juspay/xyne-spaces/compare/v1.306.0...v1.307.0) (2026-09-10)
 
 
