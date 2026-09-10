@@ -906,12 +906,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Don't query until:
   // 1. Machine is initialized (filters loaded from URL/storage)
-  // 2. For workspace views: seeding is complete AND a board is picked
-  const workspaceViewReady =
-    isMachineInitialized &&
-    (!isWorkspaceView || (hasSeededWorkspaceView && (filters.boards?.length ?? 0) > 0));
-  const isWorkspaceViewWithoutBoards =
-    isWorkspaceView && hasSeededWorkspaceView && (filters.boards?.length ?? 0) === 0;
+  // 2. For workspace views: seeding is complete (a view with no boards picked
+  //    queries every accessible board, matching "All boards" in a project view)
+  const workspaceViewReady = isMachineInitialized && (!isWorkspaceView || hasSeededWorkspaceView);
   const showSubStatus = state.context.showSubStatus;
 
   const setShowOverdueOnly = useCallback(
@@ -1800,9 +1797,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
           // A workspace view has no channel or project to key on; `workspaceViewReady`
-          // is the equivalent guard (at least one board picked), the same one the
-          // kanban pagination path uses. Without this clause the table, calendar and
-          // flow layouts render no rows at all in a saved view.
+          // is the equivalent guard (view seeded), the same one the kanban pagination
+          // path uses. Without this clause the table, calendar and flow layouts render
+          // no rows at all in a saved view.
           (isWorkspaceView && workspaceViewReady) ||
           viewMode === 'my-tickets'),
     },
@@ -5554,11 +5551,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'>
           {isTableEmpty && (
             <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
-              {isTicketsSyncing
-                ? 'Loading tickets…'
-                : isWorkspaceViewWithoutBoards
-                  ? 'Select boards to build your view.'
-                  : 'No tickets match the current filters.'}
+              {isTicketsSyncing ? 'Loading tickets…' : 'No tickets match the current filters.'}
             </div>
           )}
           {tableGroups.map(group => {
@@ -5640,27 +5633,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             sensors={sensors}
           >
             <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
-              {allColumnsHidden && (
-                <div className='flex h-full flex-col items-center justify-center gap-3.5 text-center'>
-                  <div className='flex size-[52px] items-center justify-center rounded-2xl bg-muted text-muted-foreground'>
-                    <EyeOff className='size-6' />
-                  </div>
-                  <p className='text-base font-semibold text-foreground'>Every column is hidden</p>
-                  <p className='max-w-[340px] text-[13.5px] leading-[1.6] text-muted-foreground'>
-                    Hidden columns keep their tickets out of the board and out of every count.
-                    Unhide one from the panel on the right.
-                  </p>
-                  <button
-                    type='button'
-                    onClick={showAllColumns}
-                    className='flex h-[34px] items-center rounded-[9px] bg-primary px-[15px] text-[13.5px] font-medium text-primary-foreground transition-colors hover:bg-blue-700'
-                    data-track-category='Tickets'
-                    data-track-name='ShowAllKanbanColumns'
-                  >
-                    Show all columns
-                  </button>
-                </div>
-              )}
               {kanbanGroups.map(group => {
                 const isExpanded = expandedGroups.has(group.key);
                 const showGroupHeader = groupBy !== 'none';
