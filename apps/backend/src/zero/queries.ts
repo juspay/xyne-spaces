@@ -30,7 +30,10 @@ import {
   AttachmentEntityType,
   ChannelType,
   SDLC_MEMBERSHIP_RELATION,
-  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_CONTAINMENT_RELATION,
+  SDLC_HUB_GRAPH_EXCLUDED_RELATIONS,
+  SDLC_TREE_TARGET_TYPES,
+  SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   EmailType,
   ActivityClassification, LinkVisibility,
@@ -4514,7 +4517,47 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       )
       .one(),
   ),
+  /**
+   * One level of a track's folder tree: the things directly inside `parentId`.
+   *
+   * Containment is an edge, so this is the same query at every depth — only the
+   * parent changes, from the TRACK at the root to a FOLDER below it. Covered by
+   * the (sourceType, sourceId, relationType) index.
+   *
+   * The entities themselves are fetched separately by id: sourceId and targetId
+   * are polymorphic, so no relation covers them. The targetType filter keeps the
+   * tree to things it can render — TRACK -> TICKET edges share this relationType
+   * and are not part of the folder tree.
+   */
+  getSdlcFolderChildren: defineQuery(
+    z.object({
+      channelId: z.string(),
+      parentType: z.enum(['TRACK', 'FOLDER']),
+      parentId: z.string(),
+    }),
+    ({ args: { channelId, parentType, parentId } }) =>
+      zql.sdlc_entity_links
+        .where('channelId', channelId)
+        .where('relationType', SDLC_CONTAINMENT_RELATION)
+        .where('sourceType', parentType)
+        .where('sourceId', parentId)
+        .where(helpers => helpers.cmp('targetType', 'IN', [...SDLC_TREE_TARGET_TYPES]))
+        .orderBy('createdAt', 'asc'),
+  ),
   /** A hub's tracks. Tracks carry no scope column; the CHANNEL -> TRACK edge places them. */
+  /**
+   * Every folder in a hub, in one subscription. Folders carry no scope column,
+   * so the flat TRACK -> FOLDER edge places them — the same shape getSdlcTracks
+   * uses. One query for the hub beats one per open finder column, and it is what
+   * lets a conversation say which folder it belongs to without a second fetch.
+   */
+  getSdlcFoldersByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.sdlc_folders.whereExists('sdlcEntityLinks', link =>
+        link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
+      ),
+  ),
   getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_tracks
       .whereExists('sdlcEntityLinks', link =>
@@ -4539,7 +4582,15 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getSdlcLinks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_entity_links
       .where('channelId', channelId)
-      .where(helpers => helpers.cmp('relationType', 'NOT IN', [...SDLC_STRUCTURAL_RELATIONS]))
+      .where(helpers =>
+        helpers.cmp('relationType', 'NOT IN', [...SDLC_HUB_GRAPH_EXCLUDED_RELATIONS]),
+      )
+      .where(helpers =>
+        helpers.or(
+          helpers.cmp('relationType', '!=', SDLC_TRACK_FLAT_RELATION),
+          helpers.cmp('targetType', '!=', 'FOLDER'),
+        ),
+      )
       .orderBy('createdAt', 'asc'),
   ),
   sdlcTicketsByIds: defineQuery(
@@ -4655,17 +4706,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .related('call')
         .related('ticket');
     },
-  ),
-  sdlcRelatedConversations: defineQuery(
-    z.object({ conversationIds: z.array(z.string()) }),
-    ({ args: { conversationIds } }) =>
-      zql.conversations.where(helpers =>
-        helpers.cmp(
-          'conversationId',
-          'IN',
-          conversationIds.length > 0 ? conversationIds : ['__no_sdlc_related_conversation__'],
-        ),
-      ),
   ),
   getAllForms: defineQuery(() => {
     return zql.forms
