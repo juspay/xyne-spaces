@@ -35,7 +35,7 @@ import {
 import { getDigitalTwinAgent, type ResolvedAgent } from "../lib/digital-twin-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
-import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension } from "xyne-claw-shared";
+import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
@@ -122,7 +122,7 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
 
 import {
-  buildSdlcAgentToolProfile,
+  sdlcAgentToolProfile,
   buildWriteApprovalFlow,
   buildTicketProposalFlow,
   buildTwinApprovalFlow,
@@ -154,7 +154,7 @@ import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoste
 import { availabilityForServerIds } from "../lib/connector-availability.js";
 
 const clog = createLogger("webhook");
-const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
   xyneSpacesTools.map((tool) => tool.name),
 );
 
@@ -2897,7 +2897,7 @@ export async function handleAutomationWebhook(
   // per-agent DB flag is needed.
   const sdlcProfile =
     payload.executionProfile === "sdlc" &&
-    agentSlug === "sdlc-agent" &&
+    agentSlug === SDLC_AGENT_SLUG &&
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};

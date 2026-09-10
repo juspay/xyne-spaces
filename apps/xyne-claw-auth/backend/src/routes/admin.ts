@@ -826,6 +826,17 @@ router.post("/error-pipeline/seed", requireClawAdmin, asyncHandler(async (req: R
   ok(res, { upserted: ERROR_BUCKET_SEED.length, total });
 }));
 
+router.post("/sdlc-agent/sync", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req)!;
+  const apply = req.query["apply"] === "true";
+  const orgId = typeof req.query["orgId"] === "string" ? req.query["orgId"] : undefined;
+  const { syncSdlcAgent } = await import("../lib/sdlc-agent-sync.js");
+  const rows = await syncSdlcAgent(prisma, { apply, requesterId, ...(orgId ? { orgId } : {}) });
+  const changed = rows.reduce((total, row) => total + row.changes.length, 0);
+  log.info(`[admin] sdlc-agent sync by ${requesterId} apply=${apply} orgId=${orgId ?? "(all)"} rows=${rows.length} changes=${changed}`);
+  ok(res, { applied: apply, rows: rows.length, changes: changed, results: rows });
+}));
+
 router.get("/error-pipeline/buckets", asyncHandler(async (_req: Request, res: Response) => {
   ok(res, { buckets: await epBucketStats() });
 }));

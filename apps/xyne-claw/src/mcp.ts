@@ -74,7 +74,8 @@ interface AuthResponse<T> {
   readonly error?: string;
 }
 
-export type TrustedMcpToolBindings = Record<string, Record<string, unknown>>;
+export type { TrustedMcpToolBindings } from "xyne-claw-shared";
+import type { TrustedMcpToolBindings } from "xyne-claw-shared";
 
 export function schemaWithTrustedMcpBindings(
   inputSchema: Record<string, unknown>,

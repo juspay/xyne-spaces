@@ -28,13 +28,11 @@ import {
 } from "../lib/callable-agent-resolver.js";
 
 import {
-  buildSdlcAgentToolProfile,
   ClawSseParser,
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
 } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { mintSessionToken, verifySessionToken } from "../lib/session-tokens.js";
 import { consumeAlreadyOpenStream, streamDispatcher } from "../lib/consume-claw-stream.js";
 import {
@@ -80,9 +78,6 @@ import {
 } from "../lib/start-run.js";
 import type { SessionContext } from "./webhook.js";
 const log = createLogger("run");
-const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
-  xyneSpacesTools.map((tool) => tool.name),
-);
 
 const router = Router();
 
