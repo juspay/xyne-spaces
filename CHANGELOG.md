@@ -1,3 +1,10 @@
+## [1.310.0](https://github.com/juspay/xyne-spaces/compare/v1.309.0...v1.310.0) (2026-09-10)
+
+
+### Features
+
+* filter activity by a specific user or agent ([#1757](https://github.com/juspay/xyne-spaces/issues/1757)) ([64a8c5e](https://github.com/juspay/xyne-spaces/commit/64a8c5edfd677f44ff9f142559645b22fc4cd02d))
+
 ## [1.309.0](https://github.com/juspay/xyne-spaces/compare/v1.308.0...v1.309.0) (2026-09-10)
 
 
