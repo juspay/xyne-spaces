@@ -1,10 +1,12 @@
 import { activeGoalRepository } from "../../repositories/index.js";
 import type { WebhookCommandCtx } from "./context.js";
 
-// ── /stop (and /goal clear) ── halt EVERYTHING active in this thread: cancel
-// the in-flight run, drop queued messages, and clear any active goal. Queued
-// messages must go too — the cancel's failure result drains the queue
-// immediately, so keeping them would restart work the instant it stopped.
+// ── /stop (and /goal clear) ── halt THE ADDRESSED AGENT in this thread:
+// cancel its in-flight runs, drop its queued messages, and clear any active
+// goal. Other agents' runs in the same thread keep going — /stop is scoped to
+// the app that received the command. Queued messages must go too — the
+// cancel's failure result drains the queue immediately, so keeping them would
+// restart work the instant it stopped.
 // Any thread participant may stop (same permissive model as /goal clear).
 export async function handleStop(ctx: WebhookCommandCtx): Promise<void> {
   const { agent, payload } = ctx;
@@ -12,7 +14,7 @@ export async function handleStop(ctx: WebhookCommandCtx): Promise<void> {
   let goalWasActive = false;
   if (convId) {
     const g = await activeGoalRepository.findActiveByConversation(convId).catch(() => null);
-    if (g) {
+    if (g && g.agentSlug === agent.slug) {
       goalWasActive = true;
       await activeGoalRepository.terminate(convId, "cancelled", "user_stopped").catch(() => {});
     }
@@ -29,7 +31,7 @@ export async function handleStop(ctx: WebhookCommandCtx): Promise<void> {
   const reply =
     stopResult.hadRunningRows || goalWasActive || stopResult.queued > 0
       ? `🛑 ${parts.join(" - ")}.`
-      : "Nothing is currently running in this thread.";
+      : `Nothing is currently running for ${agent.slug} in this thread.`;
 
   await ctx.reply(reply, "Failed to post /stop reply");
 }

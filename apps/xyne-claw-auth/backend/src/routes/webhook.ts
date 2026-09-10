@@ -2309,22 +2309,10 @@ interface StopReconcileSummary {
   hadRunningRows: boolean;
 }
 
-// Reconcile the whole conversation for Spaces /stop. Enumerates every running
-// AgentRun row, POSTs the runtime's per-session cancel, and treats
-// status="not_running" as the existing stale-row janitor signal.
-async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: string): Promise<StopReconcileSummary> {
-  const runningRuns = await agentRunRepository.listRunningByConversation(conversationId);
-  const agentSlugs = new Set<string>([fallbackAgentSlug, ...runningRuns.map((run) => run.agentSlug)]);
-  // DROP queued messages BEFORE cancelling. The cancelled run's failure result
-  // drains the queue in the same breath as the cancel, so a queued message
-  // would instantly re-start the work the user just stopped — /queue clear can
-  // never win that race (2026-07-16: customer-support resumed its stopped plan
-  // one second after 🛑 from a queued "\help"). /stop means halt everything in
-  // the thread; the user can resend a message to continue.
-  let queued = 0;
-  for (const agentSlug of agentSlugs) {
-    queued += await clearQueue(conversationId, agentSlug);
-  }
+async function reconcileStoppedRuns(conversationId: string, targetAgentSlug: string): Promise<StopReconcileSummary> {
+  const runningRuns = (await agentRunRepository.listRunningByConversation(conversationId))
+    .filter((run) => run.agentSlug === targetAgentSlug);
+  const queued = await clearQueue(conversationId, targetAgentSlug);
 
   const summary: StopReconcileSummary = {
     stopped: 0,
