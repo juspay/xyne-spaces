@@ -21,6 +21,7 @@ import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, ChevronUp, UserUser02 } from '@xyne/icons';
 import { ActivityActorPicker } from '../ActivityActorPicker';
+import { ActivityEmptyIcon } from '../../icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUsersById } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -1339,7 +1340,7 @@ const ActivityListView = (): ReactElement => {
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
                 <div className='flex flex-col items-center justify-center p-8 text-center'>
-                  <NotificationBellOn className='text-muted-foreground mb-4' size={64} />
+                  <ActivityEmptyIcon className='mb-6' />
                   <h3
                     className='text-xl font-medium text-foreground mb-2'
                     data-testid='select-activity-heading'
