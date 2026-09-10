@@ -1,3 +1,16 @@
+## [1.305.0](https://github.com/juspay/xyne-spaces/compare/v1.304.2...v1.305.0) (2026-09-10)
+
+
+### Features
+
+* enable delta subscription for project tags query ([#1586](https://github.com/juspay/xyne-spaces/issues/1586)) ([ebc4b93](https://github.com/juspay/xyne-spaces/commit/ebc4b937feac829e2a5f279aa8a8f82a78cb16fe))
+* quick schedule presets in the DM send menu ([#1738](https://github.com/juspay/xyne-spaces/issues/1738)) ([24e0907](https://github.com/juspay/xyne-spaces/commit/24e0907602ff6018b065860e958c2d30f3e60d37)), closes [#FF4F4](https://github.com/juspay/xyne-spaces/issues/FF4F4)
+
+
+### Bug Fixes
+
+* mentions no longer render or notify inside code blocks ([#1659](https://github.com/juspay/xyne-spaces/issues/1659)) ([3777531](https://github.com/juspay/xyne-spaces/commit/37775319edd434a3bb0520aa8a2bb3226675cf74))
+
 ## [1.304.2](https://github.com/juspay/xyne-spaces/compare/v1.304.1...v1.304.2) (2026-09-10)
 
 
