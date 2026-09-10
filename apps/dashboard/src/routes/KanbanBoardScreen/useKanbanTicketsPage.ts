@@ -92,6 +92,7 @@ type UseKanbanTicketsPageResult = {
 };
 
 const DEFAULT_PAGE_SIZE = 20;
+
 const MINUTE_MS = 60 * 1000;
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
@@ -380,6 +381,14 @@ export const useKanbanTicketsPage = (
 ): UseKanbanTicketsPageResult => {
   const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
   const [fetchCursorState, setFetchCursorState] = useState<FetchCursorState | null>(null);
+  // The page cursor is an INCLUSIVE createdAt bound (see kanbanTicketsPageV3), so the
+  // boundary tie group is re-fetched and de-duplicated below. If a whole page is
+  // nothing but already-seen rows the tie group is bigger than the page, and paging
+  // would stall — widen the page until it clears.
+  const [tieSlack, setTieSlack] = useState(0);
+  // Mirrors ticketsState so the page merge can be computed in the effect body rather
+  // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
+  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
   const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
@@ -642,7 +651,14 @@ export const useKanbanTicketsPage = (
   const queryKey = JSON.stringify(queryKeyArgs);
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
-  const pageArgs = buildKanbanTicketsPageArgs(pageOptions, fetchCursor);
+  ticketsStateRef.current = ticketsState;
+
+  const pageArgs = buildKanbanTicketsPageArgs(
+    tieSlack > 0
+      ? { ...pageOptions, pageSize: (options.pageSize ?? DEFAULT_PAGE_SIZE) + tieSlack }
+      : pageOptions,
+    fetchCursor,
+  );
   const pageQuery = queries.kanbanTicketsPageV3(
     pageArgs as Parameters<typeof queries.kanbanTicketsPageV3>[0],
   );
@@ -702,8 +718,11 @@ export const useKanbanTicketsPage = (
     setFetchCursorState(null);
     setNextCursor(null);
     setHasMore(true);
+    setTieSlack(0);
     isLoadingMoreRef.current = false;
   }, [queryKey, shouldUseDirectVespaRows]);
+
+  const currentLimit = (options.pageSize ?? DEFAULT_PAGE_SIZE) + tieSlack;
 
   useEffect(() => {
     if (effectivePageDetailsType !== 'complete') return;
@@ -740,16 +759,25 @@ export const useKanbanTicketsPage = (
       return;
     }
 
-    setTicketsState(prev => {
-      if (shouldUseDirectVespaRows || fetchCursor === null) {
-        return { queryKey, tickets: pageRows };
-      }
-
-      const previousTickets = prev.queryKey === queryKey ? prev.tickets : [];
+    if (shouldUseDirectVespaRows || fetchCursor === null) {
+      setTicketsState({ queryKey, tickets: pageRows });
+      if (tieSlack !== 0) setTieSlack(0);
+    } else {
+      const prevState = ticketsStateRef.current;
+      const previousTickets = prevState.queryKey === queryKey ? prevState.tickets : [];
       const combined = [...previousTickets, ...pageRows];
+      // The cursor bound is inclusive, so the boundary tie group arrives again — drop
+      // the rows we already hold.
       const unique = Array.from(new Map(combined.map(ticket => [ticket.id, ticket])).values());
-      return { queryKey, tickets: unique };
-    });
+      setTicketsState({ queryKey, tickets: unique });
+      // A full page that adds nothing new means the boundary tie group is larger than
+      // the page. Widen and re-fetch rather than looping on the same rows.
+      if (unique.length === previousTickets.length && rawPageRows.length >= currentLimit) {
+        setTieSlack(slack => (slack === 0 ? currentLimit : slack * 2));
+      } else if (tieSlack !== 0) {
+        setTieSlack(0);
+      }
+    }
 
     if (shouldUseDirectVespaRows) {
       setNextCursor(null);
@@ -757,7 +785,9 @@ export const useKanbanTicketsPage = (
       return;
     }
 
-    setHasMore(rawPageRows.length >= (options.pageSize ?? DEFAULT_PAGE_SIZE));
+    // A short page means either the window is too narrow or we have genuinely reached
+    // the end. Widen first; only the unbounded step is allowed to conclude.
+    setHasMore(rawPageRows.length >= currentLimit);
 
     const lastItemOfPage = rawPageRows.at(-1);
     if (lastItemOfPage) {
@@ -771,6 +801,8 @@ export const useKanbanTicketsPage = (
   }, [
     fetchCursor,
     queryKey,
+    currentLimit,
+    tieSlack,
     options.pageSize,
     options.excludeFlowSteps,
     effectivePage,
