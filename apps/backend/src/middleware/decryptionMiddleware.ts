@@ -65,7 +65,7 @@ export async function decryptRequestBodyMiddleware(
       path: req.path,
     });
 
-    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId, userId);
+    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId);
 
     logger.info('[decryptionMiddleware] request body decrypted successfully', {
       method,
@@ -102,7 +102,7 @@ export function encryptResponseBodyMiddleware(
       return originalJson(body);
     }
 
-    void getEncryptionProvider().encryptResponse(body, sessionId, userId)
+    void getEncryptionProvider().encryptResponse(body, sessionId)
       .then((encryptedBody) => originalJson(encryptedBody))
       .catch((error) => {
         logger.error('[decryptionMiddleware] failed to encrypt response body', {
