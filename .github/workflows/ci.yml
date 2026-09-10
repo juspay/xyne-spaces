@@ -143,6 +143,51 @@ jobs:
       - name: Run automation tests
         run: pnpm run test
 
+      - name: Push report to Spaces
+        if: always()
+        env:
+          JWT: ${{ secrets.TESTCASES_JWT }}
+          CHANNELID: ${{ secrets.TESTCASES_CHANNELID }}
+          SPACES_URL: ${{ secrets.SPACES_URL }}
+        run: |
+          set -euo pipefail
+          REPORT_HTML=$(find tools/xyne-automation/reports -type f -path '*/html-report/index.html' -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
+
+          if [ -z "$REPORT_HTML" ]; then
+            echo "::error::No html-report/index.html found under tools/xyne-automation/reports"
+            exit 1
+          fi
+
+          curl -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
+            -H "Authorization: Bearer $JWT" \
+            -F "channelId=$CHANNELID" \
+            -F "markdownText=CI automation test report — commit ${GITHUB_SHA::9}" \
+            -F "files=@${REPORT_HTML};type=text/html"
+
+  # Standalone smoke test for the Squid whitelist + Spaces push flow — no
+  # dependency on the automation suite, so it validates that path even while
+  # the actual test build is broken on something unrelated (Dockerfile.test
+  # apt-get). Safe to delete once the automation job's own push step is
+  # confirmed working end-to-end.
+  spaces-hello:
+    name: Spaces hello test
+    runs-on: ci-cluster-github-runners
+    steps:
+      - name: Say hello
+        run: echo "hello"
+
+      - name: Post hello to Spaces
+        env:
+          JWT: ${{ secrets.TESTCASES_JWT }}
+          CHANNELID: ${{ secrets.TESTCASES_CHANNELID }}
+          SPACES_URL: ${{ secrets.SPACES_URL }}
+        run: |
+          set -euo pipefail
+          curl -X POST "${SPACES_URL%/}/api/apps/chat/postMessage" \
+            -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
+            -d '{"channelId":"'"$CHANNELID"'","text":"Testing squid + spaces push flow"}'
+
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
