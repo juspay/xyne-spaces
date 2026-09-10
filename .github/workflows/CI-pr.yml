@@ -24,5 +24,6 @@ concurrency:
 jobs:
   ci:
     uses: juspay/xyne-spaces/.github/workflows/ci.yml@fix/testcases-run
+    secrets: inherit
     permissions:
       contents: read
