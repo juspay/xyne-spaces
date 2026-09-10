@@ -68,6 +68,7 @@ export class PrCommitAnalysisService {
       const { botCommitCount, humanCommitCount } = await this.processCommits(
         commits,
         input.prInternalId,
+        input.workspaceId,
       );
 
       result.botCommits = botCommitCount;
@@ -105,6 +106,7 @@ export class PrCommitAnalysisService {
   private async processCommits(
     commits: CommitInfo[],
     pullRequestId: string,
+    workspaceId: string,
   ): Promise<{ botCommitCount: number; humanCommitCount: number }> {
     let botCommitCount = 0;
     let humanCommitCount = 0;
@@ -127,6 +129,7 @@ export class PrCommitAnalysisService {
           },
         },
         create: {
+          workspaceId,
           pullRequestId,
           commitSha: commit.sha,
           agentSlug: botSlug, // Single bot slug or null
