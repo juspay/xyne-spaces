@@ -1,6 +1,13 @@
 # Main project configuration for xyne-spaces
 # This file contains all the development environment and service configurations
-{ pkgs, lib, flakeInputs, ... }:
+{ config, pkgs, lib, flakeInputs, ... }:
+let
+  prismaEngines = import ./nix/prisma-engines.nix { inherit pkgs; };
+  prismaEnvironment = lib.optionalAttrs pkgs.stdenv.isLinux {
+    PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
+    PRISMA_SCHEMA_ENGINE_BINARY = "${prismaEngines}/bin/schema-engine";
+  };
+in
 {
   imports = [
     ./nix/modules/devshell.nix
@@ -14,7 +21,10 @@
       nodejs
       pnpm
       just
+      openssl
     ];
+
+    environment = prismaEnvironment;
 
     banner = ''
       # Xyne Spaces Dev Environment
@@ -24,12 +34,14 @@
       ## Getting Started
 
       ```bash
+      # Install, build, generate clients, and create local env files
+      just prepare
       # Start services (automatically cleans up ports first)
       nix run .#xyne-space-services  # Or, `just services`
       # Run backend
-      cd apps/backend && pnpm install && pnpm run dev
+      just backend
       # Run dashboard
-      cd apps/dashboard && pnpm install && pnpm run dev
+      just dashboard
       ```
 
       ## Cleanup Commands
@@ -108,54 +120,26 @@
         echo "Project root: $PROJECT_ROOT"
         echo "Backend dir: $BACKEND_DIR"
         
-        # Only run setup if backend has dependencies
-        if [ ! -d "$BACKEND_DIR/node_modules" ]; then
-          echo "Backend dependencies not installed. Skipping database setup."
-          echo "Run: cd apps/backend && pnpm install"
-          exit 0
+        if [ ! -d "$BACKEND_DIR/node_modules" ] || [ ! -f "$BACKEND_DIR/.env.local" ]; then
+          echo "Run 'nix develop' and 'just prepare' before starting services."
+          exit 1
         fi
-        echo "✓ Backend node_modules found"
-        
+
+        export PATH="${lib.makeBinPath [ pkgs.nodejs pkgs.pnpm pkgs.openssl ]}:$PATH"
         cd "$BACKEND_DIR"
-        echo "Changed to backend directory"
-        
-        # Check if users table exists
-        echo "Checking if users table exists..."
-        USER_COUNT=$(${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM users;" 2>&1 || echo "ERROR")
-        USER_COUNT=$(echo "$USER_COUNT" | xargs)
-        echo "User count: $USER_COUNT"
-        
-        if [[ "$USER_COUNT" == *"ERROR"* ]] || [[ "$USER_COUNT" == *"does not exist"* ]] || [ -z "$USER_COUNT" ]; then
-          echo "Setting up database from scratch..."
-          
-          # Drop and recreate database
-          ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -c "DROP DATABASE IF EXISTS xyne_dev_db;" 2>/dev/null || true
-          ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db;" 2>/dev/null || true
-          
-          # Push schema
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --force-reset --accept-data-loss --skip-generate
-          
-          # Seed ACL system
-          echo "Seeding ACL system..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
-          echo "✓ ACL system seeded"
-          
-          # Auto-create admin user from DEFAULT_ADMIN_EMAIL
-          echo ""
-          echo "Creating default admin user..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-admin-user.ts
-          echo ""
-          echo "✓ Database setup complete"
-        else
-          echo "Syncing database schema..."
-          ${pkgs.nodejs}/bin/pnpm exec dotenv -e .env.local -- pnpm exec prisma db push
-          echo "✓ Database schema is up to date"
+
+        # Also handle data directories created before the common DB was added.
+        if ! ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -tAc \
+          "SELECT 1 FROM pg_database WHERE datname = 'xyne_common'" | grep -q 1; then
+          ${pkgs.postgresql}/bin/createdb -h 127.0.0.1 -p 5433 -U xyne xyne_common
         fi
-        
+
+        # Never reset existing data as part of ordinary startup.
+        pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --skip-generate
+        pnpm exec dotenv -e .env.local -- pnpm exec prisma db push --schema prisma-common/schema.prisma --skip-generate
+        pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
+        pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-app-permissions.ts
         echo "✓ Database ready"
-        
-        # Keep the process running
-        tail -f /dev/null
       '');
       
       depends_on = {
@@ -167,7 +151,7 @@
     };
 
     # Disable TUI for headless operation
-    settings.environment.PC_DISABLE_TUI = "true";
+    settings.environment = prismaEnvironment // { PC_DISABLE_TUI = "true"; };
 
     # PostgreSQL service
     services.postgres."xyne-db" = {
@@ -179,6 +163,7 @@
 
       initialDatabases = [
         { name = "xyne_dev_db"; }
+        { name = "xyne_common"; }
       ];
 
       initialScript.after = ''
@@ -207,7 +192,11 @@
       rtcPortRangeEnd = 60000;
       apiKey = "devkey";
       apiSecret = "devsecret";
-      configFile = ./docker/livekit.yaml;
+      # Native services reach Redis and the backend over loopback.
+      configFile = pkgs.writeText "livekit-native.yaml" (builtins.replaceStrings
+        [ "redis:6379" "host.docker.internal:3001" ]
+        [ "127.0.0.1:6379" "127.0.0.1:3001" ]
+        (builtins.readFile ./docker/livekit.yaml));
       devMode = true;
       logLevel = "debug";
     };
@@ -234,8 +223,16 @@
       };
     };
 
+    settings.processes."xyne-livekit".depends_on."xyne-redis".condition = "process_healthy";
+    # Read credentials at runtime; local secrets must never enter the Nix store.
+    settings.processes."xyne-livekit".command = lib.mkForce (
+      let livekit = config.process-compose."xyne-space-services".services.livekit."xyne-livekit";
+      in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
+    );
+
     # Add dependency: zero-cache depends on postgres
     settings.processes."xyne-zero".depends_on."xyne-db".condition = "process_healthy";
+    settings.processes."xyne-zero".depends_on."db-setup".condition = "process_completed_successfully";
 
     # Fake GCS Server (native Nix package)
     settings.processes.fake-gcs = {
@@ -333,11 +330,14 @@
       command = toString (pkgs.writeShellScript "transcription-agent" ''
         cd apps/backend/python-agent
         mkdir -p transcriptions
+
+        # PyPI native wheels need runtime libraries on Nix Linux hosts.
+        ${lib.optionalString pkgs.stdenv.isLinux ''
+          export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        ''}
         
         # Set environment variables
         export LIVEKIT_URL="ws://127.0.0.1:7880"
-        export LIVEKIT_API_KEY="devkey"
-        export LIVEKIT_API_SECRET="devsecret"
         export BACKEND_URL="http://127.0.0.1:3001"
         export REDIS_URL="redis://127.0.0.1:6379"
         export REDIS_HOST="127.0.0.1"
@@ -357,7 +357,7 @@
         fi
         
         # Run the agent using the venv with 'start' command
-        .venv/bin/python main.py start
+        .venv/bin/python -c 'from dotenv import load_dotenv; import runpy; load_dotenv("../.env.local", override=True); runpy.run_path("main.py", run_name="__main__")' start
       '');
       
       depends_on = {
@@ -385,6 +385,18 @@
 
     # Container infrastructure kept for future use (currently empty)
     containers = { };
+  };
+
+  # Export the exact runtime configuration for the isolated CI smoke check.
+  packages.nix-services-config = pkgs.writeText "xyne-services.json"
+    (builtins.toJSON config.process-compose."xyne-space-services".settings);
+
+  packages.nix-smoke-test = pkgs.writeShellApplication {
+    name = "nix-smoke-test";
+    runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs pkgs.pnpm pkgs.openssl ];
+    text = ''
+      python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} "$@"
+    '';
   };
 
   # Custom apps/commands

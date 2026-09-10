@@ -1,16 +1,19 @@
 name: Nix CI
 
 # Guards the Nix-based local dev setup (the flake devShell + the process-compose
-# services bundle) against regressions. Two classes are covered:
+# services bundle) against regressions. Three classes are covered:
 #   1. flake eval / build breakage (removed attrs, broken derivations, input drift)
 #   2. source-path drift in the process-compose bootstrap (project.nix) — the class
 #      that silently broke db-setup when the repo was restructured to apps/backend/.
+#   3. runtime startup: Prisma engines/clients, native Python libraries, LiveKit
+#      Redis connectivity, database bootstrap, and the backend health endpoint.
 #
 # Installer + cache choice follows juspay/skills `nix-ci` (Option 1, GitHub
 # Actions): use nix-quick-install-action (NOT the DeterminateSystems installer),
 # because only its store layout is snapshotted by cache-nix-action.
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -18,6 +21,7 @@ on:
       - master
       - staging
       - "release**"
+      - "fix/nix-**"
 
 permissions:
   contents: read
@@ -32,8 +36,9 @@ concurrency:
 
 jobs:
   nix:
-    name: Nix flake check + build + path guard
+    name: Nix build + runtime smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -71,3 +76,24 @@ jobs:
       #    dead path and silently skipping schema push + ACL seed + admin creation.
       - name: Bootstrap path-drift guard
         run: bash nix/scripts/check-referenced-paths.sh
+
+      - name: Prepare workspace through the Nix development shell
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: nix develop --command just prepare
+
+      - name: Check local secret generation preserves custom credentials
+        run: nix develop --command node --test scripts/generate-local-secrets.test.mjs
+
+      # Uses the exact generated process commands, without the launcher's port
+      # cleanup. A fresh runner cannot accidentally pass using an existing service.
+      - name: Start native services and verify backend health
+        run: nix run .#nix-smoke-test
+
+      - name: Upload smoke test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nix-smoke-logs
+          path: .logs/
+          retention-days: 7

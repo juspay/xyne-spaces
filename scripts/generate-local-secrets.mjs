@@ -62,6 +62,17 @@ setValue(backendPath, "JWT_SECRET", randomHex(48));
 setValue(backendPath, "ZERO_AUTH_SECRET", randomHex(48));
 setValue(backendPath, "ENCRYPTION_KEY", randomHex(32));
 
+// Nix reads these credentials at runtime. Legacy Docker configs still use the
+// fixed sample pair, so opt in only when the service consumes generated keys.
+if (process.argv.includes("--livekit")) {
+  for (const [key, sample, bytes] of [
+    ["LIVEKIT_API_KEY", "devkey", 16],
+    ["LIVEKIT_API_SECRET", "devsecret", 32],
+  ]) {
+    setValue(backendPath, key, randomHex(bytes), readValue(backendPath, key) !== sample);
+  }
+}
+
 for (const [envPath, contents] of files) {
   writeFileSync(envPath, contents);
 }

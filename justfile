@@ -6,24 +6,38 @@ default:
     @just --list
 
 # Start all services using Nix
+[group('nix')]
 services:
     nix run .#xyne-space-services
 
 # Cleanup ports and database volumes (like docker-compose down -v)
+[group('nix')]
 cleanup:
     nix run .#cleanup
 
 # Clean only ports (lightweight cleanup)
+[group('nix')]
 cleanup-ports:
     ./nix/scripts/cleanup-ports.sh
 
 # Start backend development server
-backend:
-    cd apps/backend && pnpm install && pnpm run dev
+[group('development')]
+backend: prepare
+    cd apps/backend && pnpm run dev
+
+# Install dependencies, build workspace libraries, and generate both Prisma clients
+[group('development')]
+prepare:
+    pnpm run env:setup
+    pnpm install
+    pnpm run build:shared
+    pnpm run secrets --livekit
+    just prisma-generate
 
 # Start dashboard development server
-dashboard:
-    cd apps/dashboard && pnpm install && pnpm run dev
+[group('development')]
+dashboard: prepare
+    cd apps/dashboard && pnpm run dev
 
 # Run database migrations
 migrate:
@@ -46,6 +60,7 @@ assign-admin EMAIL='':
     cd apps/backend && pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-admin-user.ts {{EMAIL}}
 
 # Full fresh start (cleanup + services + backend + dashboard)
+[group('nix')]
 fresh-start: cleanup
     @echo "Starting services..."
     nix run .#xyne-space-services &
@@ -55,20 +70,11 @@ fresh-start: cleanup
     @echo "  Terminal 3: just dashboard"
 
 # Reset all data (remove ./data directory)
+[group('nix')]
 reset:
     rm -rf ./data
 
-# Check flake
-check:
-    nix flake check
-
-# Update flake inputs
-update:
-    nix flake update
-
-# Show flake outputs
-show:
-    nix flake show --allow-import-from-derivation
 #one-click-setup
+[group('nix')]
 setup:
     chmod +x setup.sh && ./setup.sh
