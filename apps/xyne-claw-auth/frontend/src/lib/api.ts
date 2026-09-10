@@ -2738,10 +2738,11 @@ export async function listSubagentMcpConnections(
   name: string,
   requesterId: string,
 ): Promise<SubagentMcpConnectionMeta[]> {
-  return request<SubagentMcpConnectionMeta[]>(
+  const data = await request<{ success: boolean; data: SubagentMcpConnectionMeta[] }>(
     `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections`,
     { headers: { "x-user-id": requesterId } },
   );
+  return data.data;
 }
 
 export async function upsertSubagentMcpConnection(
@@ -2751,7 +2752,7 @@ export async function upsertSubagentMcpConnection(
   credentials: Record<string, string>,
   opts?: { slug?: string; displayName?: string; nonOverridable?: boolean },
 ): Promise<SubagentMcpConnectionMeta> {
-  return request<SubagentMcpConnectionMeta>(
+  const data = await request<{ success: boolean; data: SubagentMcpConnectionMeta }>(
     `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections`,
     {
       method: "POST",
@@ -2765,6 +2766,7 @@ export async function upsertSubagentMcpConnection(
       }),
     },
   );
+  return data.data;
 }
 
 export async function deleteSubagentMcpConnection(

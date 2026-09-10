@@ -73,7 +73,7 @@ export function SubagentMcpTabV3({ subagentName, userId, canEdit, isBuiltIn }: P
 
   const connectionsByType = useMemo(() => {
     const m = new Map<string, SubagentMcpConnectionMeta[]>();
-    for (const c of connections) {
+    for (const c of Array.isArray(connections) ? connections : []) {
       const arr = m.get(c.mcpServerType) ?? [];
       arr.push(c);
       m.set(c.mcpServerType, arr);

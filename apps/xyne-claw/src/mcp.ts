@@ -3,6 +3,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Attachment } from "./agent.js";
 import { SERVER } from "./config.js";
 import { promoteIfOversized } from "./tool-output.js";
+import { currentSubagentMcpId } from "./subagent-mcp-context.js";
 import { writeAttachmentToContext } from "./attachment-write.js";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve as resolvePath, isAbsolute, sep } from "node:path";
@@ -391,7 +392,7 @@ export async function loadMcpToolsForUser(
                 params: callParams,
                 permission,
                 agentSlug,
-                ...(subagentId ? { subagentId } : {}),
+                ...((subagentId ?? currentSubagentMcpId()) ? { subagentId: subagentId ?? currentSubagentMcpId() } : {}),
               }),
             },
             server.serverType,

@@ -21,6 +21,7 @@ import {
 import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
+import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
 import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
@@ -549,7 +550,7 @@ function resolveProviderForSubagent(
   return undefined;
 }
 
-function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skillTriggers?: SkillTrigger[], skills?: Array<{ slug?: string; name: string; description?: string; content: string }>, providerResolution?: SubagentProviderResolution, progressCtx?: SubagentProgressCtx): ToolDefinition {
+function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skillTriggers?: SkillTrigger[], skills?: Array<{ slug?: string; name: string; description?: string; content: string }>, providerResolution?: SubagentProviderResolution, progressCtx?: SubagentProgressCtx, subagentDbId?: string): ToolDefinition {
   const resolvedProvider = resolveProviderForSubagent(def, providerResolution);
   // Tag the description so the parent LLM can tell subagent wrappers apart
   // from direct MCP tools. The "[Subagent]" marker is what the parent's
@@ -686,7 +687,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
       // The body below — extracted as a closure so the cache wrapper can call
       // it once and share the resulting promise. No behaviour change inside.
-      async function doExecute(): Promise<SubagentExecResult> {
+      function doExecute(): Promise<SubagentExecResult> {
+        return runWithSubagentMcpId(subagentDbId, doExecuteInner);
+      }
+      async function doExecuteInner(): Promise<SubagentExecResult> {
 
       // Sticky-label state hoisted out of the try block so the catch handler
       // can clear the timer on early failures without leaking the interval.
@@ -1703,6 +1707,7 @@ export function buildSubagentTools(
           spec.skills,
           providerResolution,
           progressCtx,
+          spec.id,
         ),
       );
     }
