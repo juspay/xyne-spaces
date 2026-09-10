@@ -172,6 +172,7 @@ model Ticket {
   workflows          Workflow[]
   stageEtaEntries    TicketStageEta[]
   assignments        TicketAssignment[]
+  ticketDescription TicketDescription?
 
   @@index([status])
   @@index([assignedTo, status])
@@ -202,6 +203,21 @@ model Ticket {
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
   @@map("tickets")
+  @@schema("public")
+}
+
+model TicketDescription {
+  ticketId    String @id
+  workspaceId String
+  channelId   String
+  description String
+  createdAt   DateTime
+
+  // Relations
+  ticket      Ticket  @relation(fields: [ticketId], references: [id])
+  channel     Channel @relation(fields: [channelId], references: [id])
+
+  @@map("ticket_descriptions")
   @@schema("public")
 }
 
@@ -1838,6 +1854,7 @@ model Channel {
   // SDLC channel membership: the CHANNEL -> REPOSITORY edges in sdlcEntityLinks.
   sdlcEntityLinks    SdlcEntityLink[] @relation("SdlcChannelLink")
   collectionPermissions CollectionPermission[]
+  ticketDescriptions    TicketDescription[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility

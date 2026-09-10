@@ -201,6 +201,16 @@ export const ticketTable = table('tickets')
   })
   .primaryKey('id');
 
+export const ticketDescriptionTable = table('ticket_descriptions')
+  .columns({
+    ticketId: string(),
+    workspaceId: string(),
+    channelId: string(),
+    description: string(),
+    createdAt: number(),
+  })
+  .primaryKey('ticketId');
+
 export const subTicketTable = table('sub_tickets')
   .columns({
     id: string(),
@@ -2510,6 +2520,24 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketTagMappingTable,
   }),
+  ticketDescription: one({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketDescriptionTable,
+  }),
+}));
+
+export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const subTicketTableRelationships = relationships(subTicketTable, ({ one, many }) => ({
@@ -4800,6 +4828,7 @@ export const schema = createSchema({
     toolTable,
     agentToolsMappingTable,
     ticketTable,
+    ticketDescriptionTable,
     subTicketTable,
     ticketSubTicketMappingTable,
     ticketAssignmentTable,
@@ -4939,6 +4968,7 @@ export const schema = createSchema({
     toolTableRelationships,
     agentToolsMappingTableRelationships,
     ticketTableRelationships,
+    ticketDescriptionTableRelationships,
     subTicketTableRelationships,
     ticketSubTicketMappingTableRelationships,
     ticketAssignmentTableRelationships,

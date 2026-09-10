@@ -12,6 +12,7 @@ import {
   TicketTag,
   TicketStatusV2,
   addSlaHours,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent, isStageOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
@@ -829,7 +830,10 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     'whitespace-pre-wrap overflow-hidden text-muted-foreground text-clip line-clamp-1 sm:line-clamp-2 break-all text-[13px]',
                   )}
                 >
-                  <RenderMessageWithHTML message={ticket.description || ''} breakLongLinks={true} />
+                  <RenderMessageWithHTML
+                    message={resolveTicketDescription(ticket) || ''}
+                    breakLongLinks={true}
+                  />
                 </p>
               </div>
             )}
