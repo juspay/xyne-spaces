@@ -1,3 +1,10 @@
+## [1.301.0](https://github.com/juspay/xyne-spaces/compare/v1.300.2...v1.301.0) (2026-09-10)
+
+
+### Features
+
+* add canvas labels backend support ([#539](https://github.com/juspay/xyne-spaces/issues/539)) ([dda36b5](https://github.com/juspay/xyne-spaces/commit/dda36b5442f8dddee7b0f7888f6fc1109fe4389b))
+
 ## [1.300.2](https://github.com/juspay/xyne-spaces/compare/v1.300.1...v1.300.2) (2026-09-10)
 
 
