@@ -45,7 +45,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("credentials-loader");
 
 export interface EffectiveCredentials {
-  source: "agent" | "user" | "global";
+  source: "subagent" | "agent" | "user" | "global";
   connectionId: string;
   credentials: Record<string, unknown>;
   /** True iff the user owns this connection (admin/health code uses this to
@@ -142,6 +142,7 @@ export async function loadEffectiveCredentials(
   agentSlug?: string,
   instanceSlug?: string,
   agentOrgId?: string,
+  subagentId?: string,
 ): Promise<EffectiveCredentials | null> {
   // google / microsoft: per-user OAuth connectors (never agent-pinned or
   // global), executed as claw-auth-hosted stdio MCP servers. Resolve a fresh
@@ -241,6 +242,66 @@ export async function loadEffectiveCredentials(
     }
     log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no spacesAppToken on agent; cannot resolve`);
     return null;
+  }
+
+
+  if (subagentId) {
+    const subagentOrgScope = agentOrgId
+      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+      ?? undefined;
+    let subConn = null;
+    if (subagentOrgScope) {
+      if (instanceSlug) {
+        subConn = await prisma.subagentMcpConnection.findFirst({
+          where: {
+            subagentDefinitionId: subagentId,
+            subagent: { orgId: subagentOrgScope },
+            mcpServer: { type: serverType },
+            slug: instanceSlug,
+          },
+        });
+      } else {
+        subConn = await prisma.subagentMcpConnection.findFirst({
+          where: {
+            subagentDefinitionId: subagentId,
+            subagent: { orgId: subagentOrgScope },
+            mcpServer: { type: serverType },
+            slug: "default",
+          },
+        });
+        if (!subConn) {
+          subConn = await prisma.subagentMcpConnection.findFirst({
+            where: {
+              subagentDefinitionId: subagentId,
+              subagent: { orgId: subagentOrgScope },
+              mcpServer: { type: serverType },
+            },
+            orderBy: { createdAt: "asc" },
+          });
+        }
+      }
+    }
+    if (subConn) {
+      try {
+        const decrypted = decrypt(subConn.encryptedCreds, subConn.iv, subConn.authTag, CONFIG.encryptionKey);
+        log.info(
+          `[creds-loader] ${serverType} userId=${userId} subagent=${subagentId} instance=${subConn.slug} nonOverridable=${subConn.nonOverridable} → subagent hit (connId=${subConn.id})`,
+        );
+        return {
+          source: "subagent",
+          connectionId: subConn.id,
+          credentials: JSON.parse(decrypted) as Record<string, unknown>,
+          isUserOwned: false,
+        };
+      } catch (err) {
+        // A pinned-but-undecryptable credential is a config error. When the pin
+        // is non-overridable we must NOT fall through to a weaker identity —
+        // that would silently defeat the "cannot be overridden" contract — so
+        // we fail the resolution. A soft pin falls through to the cascade.
+        log.error(`[creds-loader] ${serverType} subagent=${subagentId} → decrypt failed: ${errMsg(err)}`);
+        if (subConn.nonOverridable) return null;
+      }
+    }
   }
 
   // 1. Agent-pinned creds win when present. Only checked if the caller

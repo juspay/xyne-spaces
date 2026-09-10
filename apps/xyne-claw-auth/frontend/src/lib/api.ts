@@ -2721,6 +2721,64 @@ export async function deleteAgentMcpConnection(
   );
 }
 
+export interface SubagentMcpConnectionMeta {
+  id: string;
+  mcpServerId: string;
+  mcpServerType: string;
+  mcpServerName: string;
+  slug: string;
+  displayName: string;
+  nonOverridable: boolean;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listSubagentMcpConnections(
+  name: string,
+  requesterId: string,
+): Promise<SubagentMcpConnectionMeta[]> {
+  return request<SubagentMcpConnectionMeta[]>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections`,
+    { headers: { "x-user-id": requesterId } },
+  );
+}
+
+export async function upsertSubagentMcpConnection(
+  name: string,
+  requesterId: string,
+  mcpServerType: string,
+  credentials: Record<string, string>,
+  opts?: { slug?: string; displayName?: string; nonOverridable?: boolean },
+): Promise<SubagentMcpConnectionMeta> {
+  return request<SubagentMcpConnectionMeta>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections`,
+    {
+      method: "POST",
+      headers: { "x-user-id": requesterId, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mcpServerType,
+        credentials,
+        ...(opts?.slug ? { slug: opts.slug } : {}),
+        ...(opts?.displayName ? { displayName: opts.displayName } : {}),
+        ...(opts?.nonOverridable !== undefined ? { nonOverridable: opts.nonOverridable } : {}),
+      }),
+    },
+  );
+}
+
+export async function deleteSubagentMcpConnection(
+  name: string,
+  requesterId: string,
+  mcpServerType: string,
+  instanceSlug = "default",
+): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections/${encodeURIComponent(mcpServerType)}/${encodeURIComponent(instanceSlug)}`,
+    { method: "DELETE", headers: { "x-user-id": requesterId } },
+  );
+}
+
 /**
  * Fork a subagent for one of this agent's MCP instances. Copies the source
  * subagent's definition (prompt, tools, skills) into a new SubagentDefinition

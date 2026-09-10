@@ -22,6 +22,7 @@ const log = createLogger("subagent-resolver");
 // ── Wire-format types ─────────────────────────────────────────────────────
 
 export interface CustomSubagentSpec {
+  id?: string;
   name: string;
   description: string;
   progressLabels: string[];
@@ -296,6 +297,7 @@ export function toCustomSubagentSpec(row: DbRowWithSkills): CustomSubagentSpec {
     }
   }
   return {
+    id: row.id,
     name: row.name,
     description: row.description,
     progressLabels: row.progressLabels as string[],

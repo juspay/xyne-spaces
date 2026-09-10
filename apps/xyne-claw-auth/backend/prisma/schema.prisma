@@ -1505,6 +1505,8 @@ enum AgentAuditEvent {
   SUBAGENT_CREATED
   SUBAGENT_UPDATED
   MCP_SERVER_CREATED
+  SUBAGENT_MCP_UPDATED
+  SUBAGENT_MCP_DELETED
 }
 
 model AgentAuditLog {
@@ -1691,6 +1693,7 @@ model McpServer {
   agentConnections     AgentMcpConnection[]
   globalCredentials    GlobalMcpCredentials[]
   editRequests         McpConnectorEditRequest[]
+  subagentConnections  SubagentMcpConnection[]
 
   @@unique([type])
   @@index([enabled])
@@ -1922,6 +1925,7 @@ model SubagentDefinition {
   org              Organization    @relation(fields: [orgId], references: [id], onDelete: Restrict)
   skills           SubagentSkill[]
   shares           SubagentShare[]
+  mcpConnections   SubagentMcpConnection[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -1955,6 +1959,25 @@ model SubagentSkill {
 
   @@unique([subagentDefinitionId, skillId])
   @@map("subagent_skills")
+}
+
+model SubagentMcpConnection {
+  id                   String             @id @default(cuid())
+  subagentDefinitionId String
+  subagent             SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
+  mcpServerId          String
+  mcpServer            McpServer          @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  nonOverridable       Boolean            @default(true)
+  encryptedCreds       String
+  iv                   String
+  authTag              String
+  createdByUserId      String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([subagentDefinitionId, mcpServerId, slug])
+  @@index([subagentDefinitionId])
+  @@map("subagent_mcp_connections")
 }
 
 model PendingMemoryReview {

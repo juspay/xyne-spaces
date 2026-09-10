@@ -1470,6 +1470,7 @@ function isCustomWriteTool(tool: ToolDefinition): boolean {
  * never travel this path.
  */
 export interface CustomSubagentSpec {
+  id?: string;
   name: string;
   description: string;
   progressLabels: string[];

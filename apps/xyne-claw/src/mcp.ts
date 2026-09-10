@@ -280,6 +280,7 @@ export async function loadMcpToolsForUser(
   // from omitting or replacing trusted run bindings.
   trustedToolBindings?: TrustedMcpToolBindings,
   onConnectorBlocked?: (serverType: string, status: number) => void,
+  subagentId?: string,
 ): Promise<{
   groups: McpToolGroup[];
   cleanup: () => Promise<void>;
@@ -375,6 +376,7 @@ export async function loadMcpToolsForUser(
                 params: callParams,
                 permission,
                 agentSlug,
+                ...(subagentId ? { subagentId } : {}),
               }),
             },
             server.serverType,

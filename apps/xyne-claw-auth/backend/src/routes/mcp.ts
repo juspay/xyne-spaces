@@ -806,6 +806,11 @@ async function loadEffectiveCredentialsWithSpacesFallback(
   agentSlug?: string,
   agentOrgId?: string,
   sessionId?: string,
+  // SubagentDefinition.id forwarded from the /mcp/call body when the tool
+  // call originates from a subagent's nested run. Threaded into the resolver
+  // so a SubagentMcpConnection can pin (and, when non-overridable, force) the
+  // credential identity above the agent/user/global cascade.
+  subagentId?: string,
 ): Promise<EffectiveCredentials | null> {
   // A Slack-surface run must use the bot installed in the workspace that
   // dispatched it. Do this before user/agent/global credential resolution so
@@ -815,7 +820,7 @@ async function loadEffectiveCredentialsWithSpacesFallback(
     if (surface) return surface;
   }
 
-  const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId);
+  const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId, subagentId);
   if (effective) return effective;
 
   if (serverType === "xyne-spaces") {
@@ -1347,12 +1352,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
       ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
-    const { serverType, tool, params, permission, backendId } = req.body as {
+    const { serverType, tool, params, permission, backendId, subagentId } = req.body as {
       serverType?: string;
       tool?: string;
       params?: Record<string, unknown>;
       permission?: string;
       backendId?: string;
+      // Set by xyne-claw when the invoking tool belongs to a subagent's
+      // palette. Selects a SubagentMcpConnection identity in the resolver.
+      subagentId?: string;
     };
 
     if (!serverType || typeof serverType !== "string") {
@@ -1657,6 +1665,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       agentSlug,
       sessionAgentOrgId,
       req.params.sessionId,
+      subagentId,
     );
     if (!effective) {
       res
@@ -2099,6 +2108,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         params?: Record<string, unknown>;
         userId?: string;
         signature?: string;
+        subagentId?: string;
       };
       // Initial-signing shape (2026-07-15): claw's custom-tool write wrapper
       // (custom-tools.ts signWriteAction) sends the bare action — it CANNOT
@@ -2112,11 +2122,15 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       serverType?: string;
       tool?: string;
       params?: Record<string, unknown>;
+      subagentId?: string;
     };
 
     let serverType: string | undefined;
     let tool: string | undefined;
     let actionParams: Record<string, unknown>;
+    // Preserve the subagent-pinned credential identity across the write-approval
+    // replay: use whichever shape carried it (undefined = normal cascade).
+    const subagentId = body.subagentId ?? body.pendingAction?.subagentId;
 
     if (body.pendingAction && typeof body.pendingAction === "object") {
       // Re-sign shape: verify the existing signature before re-issuing.
@@ -2250,6 +2264,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         agentSlug,
         sessionAgentOrgId,
         req.params.sessionId,
+        subagentId,
       );
       const credentials = effective?.credentials;
       if (!credentials) {
