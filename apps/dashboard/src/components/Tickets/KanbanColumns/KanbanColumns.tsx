@@ -748,9 +748,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     allKnownTickets={knownTicketsForOptimisticMerge}
                     {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                     availableTags={availableTags}
-                      onLoadMoreTags={onLoadMoreTags}
-                      hasMoreTags={hasMoreTags}
-                      onSearchTags={onSearchTags}
+                    onLoadMoreTags={onLoadMoreTags}
+                    hasMoreTags={hasMoreTags}
+                    onSearchTags={onSearchTags}
                     visibleColumns={visibleColumns}
                     {...(activeTicketId !== undefined && { activeTicketId })}
                     {...(showEmailReads !== undefined && { showEmailReads })}
@@ -768,9 +768,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       stageTickets={stageTickets}
                       {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                       availableTags={availableTags}
-                        onLoadMoreTags={onLoadMoreTags}
-                        hasMoreTags={hasMoreTags}
-                        onSearchTags={onSearchTags}
+                      onLoadMoreTags={onLoadMoreTags}
+                      hasMoreTags={hasMoreTags}
+                      onSearchTags={onSearchTags}
                       visibleColumns={visibleColumns}
                       {...(activeTicketId !== undefined && { activeTicketId })}
                       {...(showEmailReads !== undefined && { showEmailReads })}
