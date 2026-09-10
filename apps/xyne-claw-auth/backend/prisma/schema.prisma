@@ -1967,6 +1967,8 @@ model SubagentMcpConnection {
   subagent             SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
   mcpServerId          String
   mcpServer            McpServer          @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  slug                 String             @default("default")
+  displayName          String?
   nonOverridable       Boolean            @default(true)
   encryptedCreds       String
   iv                   String
