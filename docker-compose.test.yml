@@ -21,6 +21,14 @@ services:
       context: .
       dockerfile: apps/backend/Dockerfile.test
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend
+    # docker/livekit.yaml posts webhooks to host.docker.internal:3001 (the dev stack's
+    # host-run backend). Here the backend is this container, so answer to that name —
+    # without it participant_joined never lands, no call row/message is created, and a
+    # second member never sees the join button.
+    networks:
+      default:
+        aliases:
+          - host.docker.internal
     ports:
       - "${BACKEND_BIND_PORT:-0}:3001"
     env_file:
