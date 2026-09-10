@@ -16,6 +16,8 @@
 
 ## User joins ongoing group call
 tags: quarantine
+// Quarantined: active-call presence never reaches the second member, so the join
+// affordance never renders. Tracked in XYNE-62732.
 * Using browser
 * Logging in user "user-1" on temp browser "caller-browser-1"
 * Logging in user "user-3" on temp browser "user3-browser-1"

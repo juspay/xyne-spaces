@@ -14,7 +14,7 @@ const router = Router();
  * Configure in LiveKit server config (livekit.yaml):
  * 
  * webhook:
- *   api_key: devkey  # Your LIVEKIT_API_KEY
+ *   api_key: localdevkey  # Your LIVEKIT_API_KEY
  *   urls:
  *     - https://your-backend.com/api/livekit/webhook
  * 

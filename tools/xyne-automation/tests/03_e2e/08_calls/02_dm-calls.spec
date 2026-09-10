@@ -12,6 +12,8 @@
 
 ## User joins ongoing call from DM
 tags: quarantine
+// Quarantined: active-call presence never reaches the second member, so the join
+// affordance never renders. Tracked in XYNE-62732.
 * Using browser
 * Logging in user "user-1" on temp browser "caller-browser-1"
 * Ensuring user "user-2" is logged in
