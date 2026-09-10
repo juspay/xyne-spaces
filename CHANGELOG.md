@@ -1,3 +1,10 @@
+## [1.304.1](https://github.com/juspay/xyne-spaces/compare/v1.304.0...v1.304.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* RUN_AGENT  inside control-flow branches ([#1657](https://github.com/juspay/xyne-spaces/issues/1657)) ([48f947a](https://github.com/juspay/xyne-spaces/commit/48f947a23be5c2f0cb11fb9a25d95660bdf601cf))
+
 ## [1.304.0](https://github.com/juspay/xyne-spaces/compare/v1.303.0...v1.304.0) (2026-09-10)
 
 
