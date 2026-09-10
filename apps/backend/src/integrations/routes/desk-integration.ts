@@ -90,7 +90,7 @@ async function findActiveSourceForChannel(
       channelId,
       isActive: true,
       sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
-      NOT: { name: { startsWith: 'google-dl-sync' } },
+      NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
     },
     select: { id: true, sourceType: true, displayName: true, credentials: true },
     orderBy: { createdAt: 'desc' },
@@ -246,7 +246,7 @@ router.post(
         where: {
           channelId,
           sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
-          NOT: { name: { startsWith: 'google-dl-sync' } },
+          NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
         },
         select: { id: true, sourceType: true, displayName: true },
         orderBy: { createdAt: 'desc' },

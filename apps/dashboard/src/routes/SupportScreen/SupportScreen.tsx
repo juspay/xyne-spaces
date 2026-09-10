@@ -1992,6 +1992,9 @@ const SupportScreen = (): ReactElement => {
       handleChannelBoardIdResolved(channelPreference.boardId);
     }
   }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
+  useEffect(() => {
+    setFetchTarget(undefined);
+  }, [refetchChannelId]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -3216,7 +3219,10 @@ const SupportScreen = (): ReactElement => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
                               <DropdownMenuItem
-                                onClick={() => setShowRefetchDialog(true)}
+                                onClick={() => {
+                                  setFetchTarget(undefined);
+                                  setShowRefetchDialog(true);
+                                }}
                                 data-track-category='Support'
                                 data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
                               >
