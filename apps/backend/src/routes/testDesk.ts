@@ -348,6 +348,20 @@ router.post('/desk/channel-source', async (req, res, next) => {
       return res.status(404).json({ error: 'Desk channel not found in current workspace' });
     }
 
+    // Match the authorization used by every other channel-scoped route: the
+    // caller must be a workspace desk manager (owner/admin) or a member of the
+    // channel. Without this, any workspace user could attach a mock source to a
+    // channel they are not part of.
+    const requestingUser = await getCurrentWorkspaceUser(userId, workspaceId);
+    const canManageWorkspaceSource = canManageWorkspaceDesk(requestingUser?.role);
+    const membership = await db.channelParticipant.findUnique({
+      where: { channelId_userId: { channelId, userId } },
+      select: { id: true },
+    });
+    if (!canManageWorkspaceSource && !membership) {
+      return res.status(403).json({ error: 'Not a member of this channel' });
+    }
+
     const firstBoard = await db.board.findFirst({
       where: { projectId: channel.projectId },
       orderBy: { createdAt: 'asc' },
@@ -382,9 +396,14 @@ router.post('/desk/channel-source', async (req, res, next) => {
     if (rejectNonMockSourceOverwrite(existingSource, res)) return;
 
     const externalSource = await db.$transaction(async (tx) => {
-      await tx.emailChannelPreference.updateMany({
+      // Upsert (not updateMany): a channel without an existing preference row
+      // used to leave updateMany a silent 0-row no-op, producing a mock source
+      // pointed at a channel with no ticket board. Upsert guarantees the
+      // preference exists and targets the resolved board.
+      await tx.emailChannelPreference.upsert({
         where: { channelId },
-        data: { boardId: firstBoard.id },
+        create: { channelId, workspaceId, boardId: firstBoard.id },
+        update: { boardId: firstBoard.id },
       });
 
       return tx.externalSource.upsert({
