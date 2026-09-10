@@ -1,8 +1,22 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, SavedConfigVisibility, Schema } from '@xyne/shared';
+import { ChannelRole, SavedConfigContextType, SavedConfigVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema, type QueryContext } from '../core/types';
 import { zql } from '../../queries';
+
+async function isChannelAdmin(
+  tx: Transaction<Schema>,
+  userId: string,
+  channelId: string,
+): Promise<boolean> {
+  const p = await tx.run(
+    zql.channel_participants
+      .where('userId', userId)
+      .where('channelId', channelId)
+      .where('role', ChannelRole.ADMIN),
+  );
+  return p.length > 0;
+}
 
 /**
  * Checks if a user can create or promote a saved view to PUBLIC visibility.
@@ -62,7 +76,9 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
     }
 
     if (args.visibility === SavedConfigVisibility.PUBLIC) {
-      const allowed = await canMakePublicView(tx, this.ctx.userID, args.contextId);
+      const allowed = args.contextType === SavedConfigContextType.DESK_TICKET
+        ? await isChannelAdmin(tx, this.ctx.userID, args.contextId)
+        : await canMakePublicView(tx, this.ctx.userID, args.contextId);
       if (!allowed) {
         throw new MutationACLError(
           'Saved view insert failed: you do not have permission to create a public view',
@@ -97,7 +113,9 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
       args.visibility === SavedConfigVisibility.PUBLIC &&
       config.visibility !== SavedConfigVisibility.PUBLIC
     ) {
-      const allowed = await canMakePublicView(tx, this.ctx.userID, config.contextId);
+      const allowed = config.contextType === SavedConfigContextType.DESK_TICKET
+        ? await isChannelAdmin(tx, this.ctx.userID, config.contextId)
+        : await canMakePublicView(tx, this.ctx.userID, config.contextId);
       if (!allowed) {
         throw new MutationACLError(
           'Saved view update failed: you do not have permission to make this view public',

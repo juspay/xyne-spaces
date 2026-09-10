@@ -14942,14 +14942,20 @@ export function createMutators(
           tx,
           args: { id, name, contextType, contextId, visibility, timestamp, values },
         }) => {
-          // Check for duplicate name (case-insensitive) per user per contextId
+          // Check for duplicate name (case-insensitive) per user per contextType+contextId
           const allUserConfigs = await tx.run(
             zql.saved_user_configurations
               .where('userId', authData.sub)
+              .where('contextType', contextType)
               .where('contextId', contextId)
           );
+          const isDeskContext = contextType === SavedConfigContextType.DESK_TICKET;
           if (allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-            throw new Error('A saved view with this name already exists for this board');
+            throw new Error(
+              isDeskContext
+                ? 'A saved view with this name already exists for this channel'
+                : 'A saved view with this name already exists for this board',
+            );
           }
 
           await tx.mutate.saved_user_configurations.insert({
@@ -15010,10 +15016,16 @@ export function createMutators(
             const allUserConfigs = await tx.run(
               zql.saved_user_configurations
                 .where('userId', authData.sub)
+                .where('contextType', config.contextType)
                 .where('contextId', config.contextId)
             );
             if (allUserConfigs.some(c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase())) {
-              throw new Error('A saved view with this name already exists for this board');
+              const isDesk = config.contextType === SavedConfigContextType.DESK_TICKET;
+              throw new Error(
+                isDesk
+                  ? 'A saved view with this name already exists for this channel'
+                  : 'A saved view with this name already exists for this board',
+              );
             }
           }
 

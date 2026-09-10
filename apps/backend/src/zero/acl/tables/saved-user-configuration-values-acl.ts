@@ -24,19 +24,23 @@ interface TicketFilterFieldDescriptor {
  * Column type (string vs number) is derived from col.type at runtime — not hardcoded.
  */
 const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
-  boards:           { col: ticketCols.boardId,         enumValues: null },
-  assignee:         { col: ticketCols.assignedTo,      enumValues: null },
-  createdBy:        { col: ticketCols.createdBy,       enumValues: null },
-  userGroups:       { col: ticketCols.userGroupId,     enumValues: null },
-  tags:             { col: tagCols.name,               enumValues: null },
-  stages:           { col: ticketCols.stageName,       enumValues: null },
-  ticketTypes:      { col: ticketCols.ticketType,      enumValues: null },
-  sourceChannels:   { col: ticketCols.channelId,       enumValues: null },
-  dueDateStart:     { col: ticketCols.eta,             enumValues: null },
-  dueDateEnd:       { col: ticketCols.eta,             enumValues: null },
-  createdDateStart: { col: ticketCols.createdAt,       enumValues: null },
-  createdDateEnd:   { col: ticketCols.createdAt,       enumValues: null },
-  priority:         { col: ticketCols.priority,        enumValues: new Set(Object.values(TicketPriority)) },
+  boards:              { col: ticketCols.boardId,      enumValues: null },
+  assignee:            { col: ticketCols.assignedTo,   enumValues: null },
+  createdBy:           { col: ticketCols.createdBy,    enumValues: null },
+  userGroups:          { col: ticketCols.userGroupId,  enumValues: null },
+  tags:                { col: tagCols.name,            enumValues: null },
+  stages:              { col: ticketCols.stageName,    enumValues: null },
+  ticketTypes:         { col: ticketCols.ticketType,   enumValues: null },
+  sourceChannels:      { col: ticketCols.channelId,    enumValues: null },
+  dueDateStart:        { col: ticketCols.eta,          enumValues: null },
+  dueDateEnd:          { col: ticketCols.eta,          enumValues: null },
+  createdDateStart:    { col: ticketCols.createdAt,    enumValues: null },
+  createdDateEnd:      { col: ticketCols.createdAt,    enumValues: null },
+  priority:            { col: ticketCols.priority,     enumValues: new Set(Object.values(TicketPriority)) },
+  // Desk-specific real-column fields
+  aiCategory:          { col: ticketCols.aiCategory,   enumValues: null },
+  lastEmailAtStart:    { col: ticketCols.lastEmailAt,  enumValues: null },
+  lastEmailAtEnd:      { col: ticketCols.lastEmailAt,  enumValues: null },
 };
 
 function validateTicketValue(fieldName: string, fieldValue: string): void {
@@ -50,6 +54,18 @@ function validateTicketValue(fieldName: string, fieldValue: string): void {
 
   // Virtual UI-state field (the groupBy column name), not a real column.
   if (fieldName === '__groupBy') return;
+
+  // Desk-only virtual fields — not real DB columns so not in TICKET_FILTER_SCHEMA.
+  if (fieldName === 'generatedTags') return; // free-form "category:tag" string
+  if (fieldName === 'conversationLabelId') return; // UUID string, existence validated at query time
+  if (fieldName === 'assigned') return; // boolean-as-string, existence validated at query time
+  if (fieldName === 'hasSubTickets') return; // boolean-as-string
+  if (fieldName === 'hasAiDraft') {
+    if (fieldValue !== 'true' && fieldValue !== 'false') {
+      throw new MutationACLError(`hasAiDraft must be "true" or "false"`, 'saved_user_configuration_values');
+    }
+    return;
+  }
 
   if (fieldName === 'roleAssignments') {
     const [roleId, userIdsCsv] = fieldValue.split('|');
@@ -101,8 +117,9 @@ function validateTicketValue(fieldName: string, fieldValue: string): void {
  *   - "<fieldId>.start"   — lower bound for DATE range filters
  *   - "<fieldId>.end"     — upper bound for DATE range filters
  *
- * The fieldId is looked up in form_fields to confirm it exists and to validate
- * the fieldValue against the actual field type.
+ * The fieldId may be either a form_fields.id (legacy rows) or a global_fields.id
+ * (new-style rows where resolveDisplayFormFields uses globalFieldId as the key).
+ * Both paths are checked so both work identically.
  */
 async function validateFormEntityValue(
   fieldName: string,
@@ -123,23 +140,40 @@ async function validateFormEntityValue(
     isDateBound = true;
   }
 
+  // Try form_fields.id first (legacy), then global_fields.id (new-style).
+  // resolveDisplayFormFields uses row.globalFieldId as the field key for new rows,
+  // so the stored fieldId in dynamicFields is a global_fields.id, not a form_fields.id.
   const formField = await tx.run(zql.form_fields.where('id', fieldId).one());
-  if (!formField) {
-    throw new MutationACLError(
-      `Unknown dynamic field id "${fieldId}"`,
-      table,
-    );
+  let resolvedFieldType: string | null | undefined;
+  let resolvedFieldOptions: string | null | undefined;
+  let resolvedFieldEnum: string | null | undefined;
+  if (formField) {
+    resolvedFieldType = formField.fieldType;
+    resolvedFieldOptions = formField.fieldOptions;
+    // form_fields.fieldEnum is json() in the schema, cast to string for parseFieldOptionValues
+    resolvedFieldEnum = formField.fieldEnum as string | null | undefined;
+  } else {
+    const globalField = await tx.run(zql.global_fields.where('id', fieldId).one());
+    if (!globalField) {
+      throw new MutationACLError(
+        `Unknown dynamic field id "${fieldId}"`,
+        table,
+      );
+    }
+    resolvedFieldType = globalField.fieldType;
+    resolvedFieldOptions = globalField.fieldOptions;
+    resolvedFieldEnum = globalField.fieldEnum;
   }
 
   // Non-date fields must NOT use the .start / .end suffix
-  if (isDateBound && formField.fieldType !== FormFieldType.DATE) {
+  if (isDateBound && resolvedFieldType !== FormFieldType.DATE) {
     throw new MutationACLError(
       `Non-DATE field "${fieldId}" must not use ".start" or ".end" suffix`,
       table,
     );
   }
 
-  switch (formField.fieldType) {
+  switch (resolvedFieldType) {
     case FormFieldType.DATE:
       if (!isDateBound) {
         throw new MutationACLError(
@@ -175,7 +209,7 @@ async function validateFormEntityValue(
 
     case FormFieldType.SINGLE_SELECT:
     case FormFieldType.MULTI_SELECT: {
-      const options = parseFieldOptionValues(formField.fieldOptions ?? formField.fieldEnum);
+      const options = parseFieldOptionValues(resolvedFieldOptions ?? resolvedFieldEnum);
       if (options.length > 0 && !options.includes(fieldValue)) {
         throw new MutationACLError(
           `Invalid value "${fieldValue}" for field "${fieldId}"`,
@@ -197,6 +231,7 @@ async function validateFormEntityValue(
     }
 
     case FormFieldType.STRING:
+    default:
       // Any non-empty string is valid — already checked above
       break;
   }

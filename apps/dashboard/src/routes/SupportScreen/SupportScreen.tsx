@@ -8,6 +8,7 @@ import {
   NotificationLevel,
   AutoDraftStatus,
   MailboxState,
+  SavedConfigVisibility,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -198,6 +199,8 @@ import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
+import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
+import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -875,6 +878,35 @@ const SupportScreen = (): ReactElement => {
   const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+
+  // Desk ticket saved views
+  const ticketViewsChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : '';
+  const [activeTicketViewId, setActiveTicketViewId] = useState<string | null>(null);
+  const {
+    savedViews: deskSavedViews,
+    saveView: saveDeskView,
+    updateView: updateDeskView,
+    deleteView: deleteDeskView,
+    applySavedView: applyDeskSavedView,
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}), {
+    enabled: !!ticketViewsChannelId,
+  });
+  const isTicketViewsChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === ticketViewsChannelId,
+  );
+
+  const handleSaveDeskView = async (
+    name: string,
+    visibility: SavedConfigVisibility,
+  ): Promise<string | undefined> => {
+    return saveDeskView(name, filters, visibility);
+  };
+
+  const handleUpdateDeskView = async (viewId: string): Promise<void> => {
+    await updateDeskView(viewId, filters);
+  };
 
   const {
     rowRef: filterRowRef,
@@ -3454,6 +3486,22 @@ const SupportScreen = (): ReactElement => {
                         </Popover.Root>
                       )}
                       <div ref={actionsRestRef} className='flex items-center gap-2'>
+                        {/* Desk saved views — only shown when a specific channel is selected */}
+                        {ticketViewsChannelId && (
+                          <DeskSavedViewsControls
+                            savedViews={deskSavedViews}
+                            activeViewId={activeTicketViewId}
+                            onActiveViewChange={setActiveTicketViewId}
+                            currentUserId={userID}
+                            isChannelAdmin={isTicketViewsChannelAdmin}
+                            onApply={view => applyDeskSavedView(view)}
+                            onSave={handleSaveDeskView}
+                            onUpdate={handleUpdateDeskView}
+                            onDelete={deleteDeskView}
+                            hasActiveFilters={hasAnyFilterActive}
+                            trackCategory='Support'
+                          />
+                        )}
                         {/* View Toggle */}
                         <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                           <button
