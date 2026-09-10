@@ -1,9 +1,12 @@
 import { Hash, Info, RefreshCw } from 'lucide-react';
+import { Hashtag as HashV2 } from '@xyne/icons';
 import * as Popover from '@radix-ui/react-popover';
 import { useRef, type Dispatch, type ReactElement, type SetStateAction } from 'react';
 import Avatar from '../../components/ui/Avatar/Avatar';
+import { Button } from '../../components/ui/Button/Button';
 import { Switch } from '../../components/ui/Switch';
 import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { cn } from '../../utils/classNames';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { MentionType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -16,11 +19,14 @@ import type { CalendarProvider } from '../../services/clients/calendarApi';
 import type { CalendarReauthCountdown, CalendarSyncMessage } from '../../utils/calendarSync';
 
 interface CallHistorySearchPanelProps {
-  calendarProvider: CalendarProvider | null;
-  isSyncing: boolean;
-  syncMessage: CalendarSyncMessage | null;
-  reauthCountdown: CalendarReauthCountdown | null;
-  onCalendarSync: () => void;
+  /** 'v2' swaps header, icon set and drops the calendar-sync/channel-toggle row for the Ask AI button. */
+  variant?: 'v1' | 'v2';
+  calendarProvider?: CalendarProvider | null;
+  isSyncing?: boolean;
+  syncMessage?: CalendarSyncMessage | null;
+  reauthCountdown?: CalendarReauthCountdown | null;
+  onCalendarSync?: () => void;
+  onOpenAskAI?: () => void;
   callMentionSearchType: MentionType | null;
   callMentionSearchQuery: string;
   callSearchSelectedMentions: Array<{
@@ -46,18 +52,20 @@ interface CallHistorySearchPanelProps {
   ) => void;
   handleCallUserSearch: (query: string | null) => void;
   handleCallChannelSearch: (query: string | null) => void;
-  showChannelCalls: boolean;
-  setShowChannelCalls: (checked: boolean) => void;
+  showChannelCalls?: boolean;
+  setShowChannelCalls?: (checked: boolean) => void;
   isMobile: boolean;
   currentUserId?: string;
 }
 
 export function CallHistorySearchPanel({
+  variant = 'v1',
   calendarProvider,
   isSyncing,
   syncMessage,
   reauthCountdown,
   onCalendarSync,
+  onOpenAskAI,
   callMentionSearchType,
   callMentionSearchQuery,
   callSearchSelectedMentions,
@@ -82,58 +90,88 @@ export function CallHistorySearchPanel({
     ((item: { id: string; name: string; email?: string }) => void) | null
   >(null);
 
+  const isV2 = variant === 'v2';
+  const HashIcon = isV2 ? HashV2 : Hash;
+
   return (
     <>
-      <div className='flex items-center justify-between'>
-        <h1 className='text-lg font-semibold text-foreground'>Calls</h1>
-        <div className='flex items-center gap-2'>
-          {calendarProvider && (
-            <button
-              onClick={onCalendarSync}
-              disabled={isSyncing}
+      <div
+        className={
+          isV2 ? 'mb-6 flex items-center justify-between' : 'flex items-center justify-between'
+        }
+      >
+        {isV2 ? (
+          <>
+            <h1 className='m-0 text-3xl font-semibold leading-none tracking-tight text-foreground'>
+              Calls V2
+            </h1>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={onOpenAskAI}
+              className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
               data-track-category='CALLS'
-              data-track-name='calendar-sync'
-              title={`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 h-8 rounded-lg text-sm font-medium border transition-colors disabled:opacity-60',
-                syncMessage?.reauth
-                  ? 'border-destructive text-destructive hover:bg-destructive/10'
-                  : 'border-border text-foreground hover:bg-muted',
-              )}
+              data-track-name='open_ask_ai'
             >
-              {isSyncing ? (
-                <RefreshCw className='size-3.5 animate-spin' />
-              ) : calendarProvider === 'GOOGLE' ? (
-                <GoogleCalendarIcon size={14} />
-              ) : (
-                <MicrosoftIcon size={14} />
+              <XyneAIStar size={15} />
+              Ask AI
+            </Button>
+          </>
+        ) : (
+          <>
+            <h1 className='text-lg font-semibold text-foreground'>Calls</h1>
+            <div className='flex items-center gap-2'>
+              {calendarProvider && (
+                <button
+                  onClick={onCalendarSync}
+                  disabled={isSyncing}
+                  data-track-category='CALLS'
+                  data-track-name='calendar-sync'
+                  title={`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 h-8 rounded-lg text-sm font-medium border transition-colors disabled:opacity-60',
+                    syncMessage?.reauth
+                      ? 'border-destructive text-destructive hover:bg-destructive/10'
+                      : 'border-border text-foreground hover:bg-muted',
+                  )}
+                >
+                  {isSyncing ? (
+                    <RefreshCw className='size-3.5 animate-spin' />
+                  ) : calendarProvider === 'GOOGLE' ? (
+                    <GoogleCalendarIcon size={14} />
+                  ) : (
+                    <MicrosoftIcon size={14} />
+                  )}
+                  <span>
+                    {reauthCountdown ? (
+                      <>
+                        <span className='md:hidden'>{`Redirecting in ${reauthCountdown.count}s…`}</span>
+                        <span className='hidden md:inline'>{`Need calendar access, redirecting for authorization in ${reauthCountdown.count}s…`}</span>
+                      </>
+                    ) : syncMessage ? (
+                      syncMessage.text
+                    ) : isSyncing ? (
+                      'Syncing…'
+                    ) : (
+                      <>
+                        <span className='md:hidden'>Sync</span>
+                        <span className='hidden md:inline'>{`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}</span>
+                      </>
+                    )}
+                  </span>
+                </button>
               )}
-              <span>
-                {reauthCountdown ? (
-                  <>
-                    <span className='md:hidden'>{`Redirecting in ${reauthCountdown.count}s…`}</span>
-                    <span className='hidden md:inline'>{`Need calendar access, redirecting for authorization in ${reauthCountdown.count}s…`}</span>
-                  </>
-                ) : syncMessage ? (
-                  syncMessage.text
-                ) : isSyncing ? (
-                  'Syncing…'
-                ) : (
-                  <>
-                    <span className='md:hidden'>Sync</span>
-                    <span className='hidden md:inline'>{`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}</span>
-                  </>
-                )}
-              </span>
-            </button>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
 
-      <div className='flex items-center justify-between gap-4'>
+      <div className={isV2 ? 'mb-3.5' : 'flex items-center justify-between gap-4'}>
         <Popover.Root open={callMentionSearchType !== null} modal={false}>
           <Popover.Anchor asChild>
-            <div className='relative flex-1 max-w-full md:max-w-[350px]'>
+            <div
+              className={isV2 ? 'relative w-full' : 'relative flex-1 max-w-full md:max-w-[350px]'}
+            >
               <LexicalSearchInput
                 {...(!callMentionSearchQuery ? { value: '' } : {})}
                 initialQuery={callSearchInitialQuery}
@@ -165,7 +203,10 @@ export function CallHistorySearchPanel({
                 open={true}
                 disableAutoFocus={isMobile}
                 {...(currentUserId ? { currentUserID: currentUserId } : {})}
-                className='min-h-10 w-full overflow-hidden rounded-xl border border-input bg-background pr-2 focus-within:ring-1 focus-within:ring-ring flex items-center [&>div]:w-full'
+                className={cn(
+                  'min-h-10 w-full overflow-hidden rounded-xl border bg-background focus-within:ring-1 focus-within:ring-ring flex items-center [&>div]:w-full',
+                  isV2 ? 'border-border pr-3' : 'border-input pr-2',
+                )}
               />
             </div>
           </Popover.Anchor>
@@ -249,7 +290,7 @@ export function CallHistorySearchPanel({
                             });
                           }}
                         >
-                          <Hash className='size-4 shrink-0 text-muted-foreground' />
+                          <HashIcon className='size-4 shrink-0 text-muted-foreground' />
                           <span className='truncate font-medium'>{channel.name || channel.id}</span>
                         </button>
                       </li>
@@ -262,24 +303,26 @@ export function CallHistorySearchPanel({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <div className='flex items-center gap-3 shrink-0'>
-          <label
-            htmlFor='channel-calls-toggle'
-            className='hidden md:block text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
-          >
-            Include all channel calls
-          </label>
-          <Switch
-            id='channel-calls-toggle'
-            checked={showChannelCalls}
-            onCheckedChange={setShowChannelCalls}
-          />
-          <Tooltip content='Include all channel calls' side='bottom'>
-            <button className='md:hidden text-muted-foreground flex items-center'>
-              <Info className='size-4' />
-            </button>
-          </Tooltip>
-        </div>
+        {!isV2 && (
+          <div className='flex items-center gap-3 shrink-0'>
+            <label
+              htmlFor='channel-calls-toggle'
+              className='hidden md:block text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+            >
+              Include all channel calls
+            </label>
+            <Switch
+              id='channel-calls-toggle'
+              checked={showChannelCalls ?? false}
+              onCheckedChange={setShowChannelCalls ?? (() => {})}
+            />
+            <Tooltip content='Include all channel calls' side='bottom'>
+              <button className='md:hidden text-muted-foreground flex items-center'>
+                <Info className='size-4' />
+              </button>
+            </Tooltip>
+          </div>
+        )}
       </div>
     </>
   );
