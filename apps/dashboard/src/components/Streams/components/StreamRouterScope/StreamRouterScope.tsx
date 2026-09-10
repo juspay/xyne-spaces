@@ -3,7 +3,6 @@ import {
   createPath,
   NavigationType,
   parsePath,
-  useLocation,
   UNSAFE_LocationContext,
   UNSAFE_NavigationContext,
   UNSAFE_RouteContext,
@@ -158,21 +157,3 @@ const StreamRouterScope = ({
 StreamRouterScope.displayName = 'StreamRouterScope';
 
 export default StreamRouterScope;
-
-/**
- * Prints the URL as seen from inside the current scope. Diagnostic only — it is
- * the whole isolation question made visible: three distinct paths means three
- * private address bars, three identical ones means they are sharing.
- */
-export const ScopePathReadout = (): ReactElement => {
-  const { pathname, search, hash } = useLocation();
-  const shown = `${pathname}${search}${hash}`;
-  return (
-    <div
-      className='shrink-0 truncate border-b border-border bg-muted/40 px-3 py-1 font-mono text-[10px] text-muted-foreground'
-      title={shown}
-    >
-      {shown}
-    </div>
-  );
-};

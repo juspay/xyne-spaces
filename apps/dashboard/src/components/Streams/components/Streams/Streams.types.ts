@@ -236,7 +236,6 @@ export const SURFACE_MIN_WIDTHS: Record<SurfaceKind, number> = {
 
 export const MIN_WIDTH = 280;
 export const MAX_WIDTH = 1600;
-export const COLUMN_GAP = 10;
 /**
  * Inset around the whole strip, in px.
  *
@@ -316,20 +315,6 @@ export const STRIP_LEAD = 6;
  * still alive one scroll away — the sliver is what says so.
  */
 export const FOCUS_PEEK = 56;
-
-/**
- * How long the whole focus-mode change takes.
- *
- * One number for three things that must move as one: the focused column's width,
- * the strip's scroll position, and the rail sliding in. When they had separate
- * timings the mode change read as three unrelated events — the layout snapped
- * instantly with no tween at all, and then the strip drifted for another second
- * on native smooth-scroll behind it.
- *
- * 260ms is a layout change of most of the viewport. Shorter reads as a cut;
- * much longer and you are waiting for a mode you already chose.
- */
-export const FOCUS_MS = 260;
 
 /**
  * The stream's easing, everywhere. Already the curve every column transition uses;

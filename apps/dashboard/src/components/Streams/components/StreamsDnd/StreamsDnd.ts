@@ -16,6 +16,12 @@
  * never learn about each other, which is the only way this stays addable — the
  * columns are a channel panel, a kanban board and an agent chat, three
  * components with nothing in common but the chrome around them.
+ *
+ * NOTE: no drag *source* ships yet. `setDragItem` is the write half and nothing
+ * calls it — the one caller is `FeedColumn`, which is not in this PR — so the
+ * drop targets in `StreamColumn` are inert: `hasDragItem` sees a MIME type
+ * nothing sets and every handler bails on its first line. Kept whole rather than
+ * half-removed, because the read half is what a future source plugs into.
  */
 
 /**

@@ -33,13 +33,6 @@ export interface StreamsDevSettings {
   /** When a channel column stops counting as unread. */
   markRead: MarkReadPolicy;
   /**
-   * The floating stream dock: every column, always, wherever you put it.
-   *
-   * Off by default. It is a fourth answer to "where is everything", alongside
-   * the jump pills, the tab row and the focus rail, and the point of having all
-   * four at once is to use them against each other — not to ship all four.
-   */
-  /**
    * Mark the tab row the way the rest of the workspace marks a channel.
    *
    * The sidebar makes one distinction and Streams should not invent a second:
@@ -110,7 +103,7 @@ export interface StreamsDevSettings {
    * the pinned run — the right edge only ever meets the page.
    */
   leftFade: number;
-  /** How long entering or leaving focus mode takes, in ms. Settled: 430. */
+  /** How long entering or leaving focus mode takes, in ms. Settled: 280. */
   focusMs: number;
   /**
    * Draw the 1px edge on each column.
@@ -143,28 +136,7 @@ export type MarkReadPolicy = 'never' | 'on-leave' | 'on-focus';
  */
 export type StreamGround = 'theme' | 'paper' | 'bleed';
 
-/**
- * `activity` — a notification: only columns with something new.
- * `always` — a navigator: everything currently off screen.
- *
- * The second use turned up by accident. Once every off-screen column is named
- * and one click away, the panel stops being a thing that interrupts you and
- * becomes the fastest way around a wide stream.
- */
-export type NavPlacement = 'top' | 'side' | 'off';
-
 export type FocusFade = 'off' | 'scrolling' | 'always';
-
-export type PillScope = 'activity' | 'always';
-
-/**
- * `off` — no tab row. `list` — every tab, in the header's flex slot, current one
- * weighted. `window` — an aperture centred on the screen over the run of columns
- * you can see, widening to the whole stream on hover and marking nothing.
- */
-
-/** Which edge the index's marks sit on and grow from. */
-export type TickAnchor = 'center' | 'top';
 
 /**
  * Which end of a column header the focus button sits at.
@@ -178,16 +150,6 @@ export type TickAnchor = 'center' | 'top';
  * about the shape of the whole row at a glance.
  */
 export type FocusSide = 'left' | 'right';
-
-/**
- * Option labels are kept to a word or two on purpose.
- *
- * The panel puts a control's name and its current value on one line in about
- * 305px, so an option label reading "Bleed — the sidenav ground, through" has
- * nowhere to go: it collides with the name to its left and then truncates. What
- * each option *means* belongs in the doc comment on its type, which is where a
- * sentence can actually be read — not in a string competing for 140px.
- */
 
 export const DEV_DEFAULTS: StreamsDevSettings = {
   // Settled, both off. Recentring moved the whole stream sideways every time you

@@ -182,7 +182,7 @@ export interface StreamColumnProps {
   /**
    * How long a width change should take, in ms. Zero at rest — a resize drag
    * rewrites the width every frame and must stay glued to the cursor — and
-   * `FOCUS_MS` only while the stream is changing focus mode.
+   * `dev.focusMs` only while the stream is changing focus mode.
    */
   widthMs: number;
   /**

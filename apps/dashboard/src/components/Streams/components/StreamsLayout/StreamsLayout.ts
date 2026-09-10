@@ -42,7 +42,21 @@ const readWidth = (value: unknown): number => {
  * Here, a malformed field falls back to its default and the rest survives.
  */
 
-const STORAGE_KEY = 'xyne.streams.layout.v1';
+const STORAGE_KEY_BASE = 'xyne.streams.layout.v1';
+
+/**
+ * One layout per workspace, not one per browser.
+ *
+ * A column stores the id of the channel, ticket or file it shows, and those ids
+ * are workspace-local. A single shared key therefore loads workspace A's columns
+ * inside workspace B, where every one of them fails to resolve and renders as an
+ * empty shell — with no way back except clearing storage by hand.
+ *
+ * Falls back to the bare key when the route carries no workspace, which is the
+ * one case where there is no workspace to scope to.
+ */
+const storageKey = (workspaceId?: string): string =>
+  workspaceId ? `${STORAGE_KEY_BASE}.${workspaceId}` : STORAGE_KEY_BASE;
 
 /**
  * Where a layout that could not be read is parked before anything overwrites it.
@@ -58,7 +72,7 @@ const STORAGE_KEY = 'xyne.streams.layout.v1';
  * string is in hand *and* known to be untrusted. Restoring is deliberately manual
  * — this is a black box for the rare bad day, not a migration path.
  */
-const BACKUP_KEY = `${STORAGE_KEY}.bak`;
+const backupKey = (workspaceId?: string): string => `${storageKey(workspaceId)}.bak`;
 
 /**
  * Keep the unreadable value, once, before anything can write over it.
@@ -67,9 +81,10 @@ const BACKUP_KEY = `${STORAGE_KEY}.bak`;
  * and been replaced by an empty default, a second failure would otherwise back up
  * the *empty* one and bury the copy that still has the columns in it.
  */
-const backupUnreadable = (stored: string): void => {
+const backupUnreadable = (stored: string, workspaceId?: string): void => {
+  const key = backupKey(workspaceId);
   try {
-    if (localStorage.getItem(BACKUP_KEY) === null) localStorage.setItem(BACKUP_KEY, stored);
+    if (localStorage.getItem(key) === null) localStorage.setItem(key, stored);
   } catch {
     // Quota or private mode. The backup is insurance, never a blocker.
   }
@@ -457,16 +472,16 @@ const columnsIn = (rawStreams: readonly unknown[]): number =>
     return total + (Array.isArray(columns) ? columns.length : 0);
   }, 0);
 
-export const loadLayout = (): StreamsLayout => {
+export const loadLayout = (workspaceId?: string): StreamsLayout => {
   // Declared outside the `try` so the `catch` can still reach the raw string it
   // failed to make sense of — that string is the only copy of the user's layout.
   let stored: string | null = null;
   try {
-    stored = localStorage.getItem(STORAGE_KEY);
+    stored = localStorage.getItem(storageKey(workspaceId));
     if (!stored) return defaultLayout();
     const raw = asRaw(JSON.parse(stored));
     if (!raw) {
-      backupUnreadable(stored);
+      backupUnreadable(stored, workspaceId);
       return defaultLayout();
     }
     const rawStreams = readList(raw);
@@ -489,7 +504,7 @@ export const loadLayout = (): StreamsLayout => {
     // Nothing survived validation. Distinct from "nothing was stored": something
     // was, and this build cannot read it, so keep it rather than replace it.
     if (streams.length === 0) {
-      if (rawStreams.length > 0) backupUnreadable(stored);
+      if (rawStreams.length > 0) backupUnreadable(stored, workspaceId);
       return defaultLayout();
     }
     // What validation threw away, if anything.
@@ -516,7 +531,7 @@ export const loadLayout = (): StreamsLayout => {
     // Partial loss is logged above but deliberately NOT backed up: the backup
     // slot is written once and never overwritten, so letting a routine one-column
     // drop claim it would leave nothing for the catastrophe to fall back on.
-    if (claimed > 0 && kept === 0) backupUnreadable(stored);
+    if (claimed > 0 && kept === 0) backupUnreadable(stored, workspaceId);
     // Through `settle` rather than returned directly, so a stored layout whose
     // active stream was archived — or which somehow has no live stream at all —
     // opens on something rather than on nothing.
@@ -528,17 +543,17 @@ export const loadLayout = (): StreamsLayout => {
     // the code that threw may read perfectly well.
     // eslint-disable-next-line no-console -- the stored layout was unreadable; say so loudly
     console.error(
-      `[streams] could not read the stored layout — keeping the original at "${BACKUP_KEY}"`,
+      `[streams] could not read the stored layout — keeping the original at "${backupKey(workspaceId)}"`,
       error,
     );
-    if (stored) backupUnreadable(stored);
+    if (stored) backupUnreadable(stored, workspaceId);
     return defaultLayout();
   }
 };
 
-export const saveLayout = (layout: StreamsLayout): void => {
+export const saveLayout = (layout: StreamsLayout, workspaceId?: string): void => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    localStorage.setItem(storageKey(workspaceId), JSON.stringify(layout));
   } catch {
     // Quota or private mode — the layout is a convenience, never a blocker.
   }
@@ -561,16 +576,6 @@ const nextStreamName = (streams: readonly Stream[]): string => {
   return `Stream ${n}`;
 };
 
-/** "Incidents copy", then "Incidents copy 2" — the app's own convention. */
-const copyName = (streams: readonly Stream[], name: string): string => {
-  const taken = new Set(streams.map(stream => stream.name));
-  const base = `${name} copy`;
-  if (!taken.has(base)) return base;
-  let n = 2;
-  while (taken.has(`${base} ${n}`)) n += 1;
-  return `${base} ${n}`;
-};
-
 /** Open a stream. Ignored if it does not exist or is archived — restore it first. */
 export const switchStream = (layout: StreamsLayout, id: string): StreamsLayout => {
   const stream = layout.streams.find(candidate => candidate.id === id);
@@ -582,39 +587,6 @@ export const switchStream = (layout: StreamsLayout, id: string): StreamsLayout =
 export const createStream = (layout: StreamsLayout, name?: string): StreamsLayout => {
   const stream = emptyStream(name?.trim() || nextStreamName(layout.streams));
   return { version: 1, streams: [...layout.streams, stream], activeStreamId: stream.id };
-};
-
-/**
- * Copy a stream, place the copy beside its original, and open it.
- *
- * Beside rather than appended: a copy belongs next to what it was copied from,
- * which is also the only place anyone looks for it. Opened because duplicating
- * is how you make a variant — you are about to edit the copy, not admire it.
- */
-export const duplicateStream = (layout: StreamsLayout, id: string): StreamsLayout => {
-  const at = layout.streams.findIndex(stream => stream.id === id);
-  const source = layout.streams[at];
-  if (!source) return layout;
-  const copy: Stream = {
-    id: uid(),
-    name: copyName(layout.streams, source.name),
-    // Fresh column ids, and this is the whole reason duplication needs a helper
-    // rather than a spread. A column id is layout-local — it keys the seed a
-    // drag left in a composer, the set of columns mid-collapse, the focus ring
-    // — so two streams sharing one id would have the copy inherit whatever was
-    // happening to the original, and closing a column in one would take the
-    // other with it.
-    //
-    // `addedAt` is deliberately *not* reset: it records when you started
-    // watching this thing, and duplicating the stream you were watching it in
-    // does not change that answer.
-    columns: source.columns.map(column => ({ ...column, id: uid() })),
-    focus: source.focus,
-    createdAt: Date.now(),
-  };
-  const streams = layout.streams.slice();
-  streams.splice(at + 1, 0, copy);
-  return { version: 1, streams, activeStreamId: copy.id };
 };
 
 /** Rename a stream. An empty name keeps the old one — same rule as `readStream`. */

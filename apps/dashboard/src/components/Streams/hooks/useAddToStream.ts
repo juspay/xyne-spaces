@@ -77,24 +77,27 @@ export const useAddToStream = (): AddToStream => {
     void navigate(workspaceId ? `/${workspaceId}/streams` : '/streams');
   }, [navigate, workspaceId]);
 
-  const has = useCallback((source: ColumnSource): boolean => {
-    // An `agent` column allows duplicates by design — several Ask AI columns in
-    // one stream is a normal arrangement — so it is never "already there".
-    if (allowsDuplicates(source)) return false;
-    const key = sourceKey(source);
-    return liveStreams(loadLayout()).some(stream =>
-      stream.columns.some(column => sourceKey(column.source) === key),
-    );
-  }, []);
+  const has = useCallback(
+    (source: ColumnSource): boolean => {
+      // An `agent` column allows duplicates by design — several Ask AI columns in
+      // one stream is a normal arrangement — so it is never "already there".
+      if (allowsDuplicates(source)) return false;
+      const key = sourceKey(source);
+      return liveStreams(loadLayout(workspaceId)).some(stream =>
+        stream.columns.some(column => sourceKey(column.source) === key),
+      );
+    },
+    [workspaceId],
+  );
 
   const list = useCallback((): StreamTarget[] => {
-    const layout = loadLayout();
+    const layout = loadLayout(workspaceId);
     return liveStreams(layout).map(stream => ({
       id: stream.id,
       name: stream.name,
       active: stream.id === layout.activeStreamId,
     }));
-  }, []);
+  }, [workspaceId]);
 
   /**
    * The shared tail of both entry points: append, focus, save, say so.
@@ -125,21 +128,24 @@ export const useAddToStream = (): AddToStream => {
         columns: [...stream.columns, column],
         focus: stream.columns.length,
       };
-      saveLayout({
-        version: 1,
-        streams: streams.map(s => (s.id === next.id ? next : s)),
-        activeStreamId: activeId,
-      });
+      saveLayout(
+        {
+          version: 1,
+          streams: streams.map(s => (s.id === next.id ? next : s)),
+          activeStreamId: activeId,
+        },
+        workspaceId,
+      );
       toast.success(`Added to ${next.name}`, {
         action: { label: 'View', onClick: openStreams },
       });
     },
-    [openStreams],
+    [openStreams, workspaceId],
   );
 
   const add = useCallback(
     (source: ColumnSource, streamId: string): void => {
-      const layout = loadLayout();
+      const layout = loadLayout(workspaceId);
       const stream = layout.streams.find(s => s.id === streamId);
       // The stream was archived or deleted while the menu sat open. Saying so
       // beats writing the column into a stream nobody will look at again.
@@ -149,7 +155,7 @@ export const useAddToStream = (): AddToStream => {
       }
       commit(source, stream, layout.streams, layout.activeStreamId);
     },
-    [commit],
+    [commit, workspaceId],
   );
 
   const addToNew = useCallback(
@@ -157,12 +163,12 @@ export const useAddToStream = (): AddToStream => {
       // `createStream` names it and makes it active; the new one is the last in
       // the returned list. Made active on purpose — you asked for a new stream,
       // so that is the one you mean to be in when you go and look.
-      const layout = createStream(loadLayout());
+      const layout = createStream(loadLayout(workspaceId));
       const created = layout.streams[layout.streams.length - 1];
       if (!created) return;
       commit(source, created, layout.streams, created.id);
     },
-    [commit],
+    [commit, workspaceId],
   );
 
   return { list, has, add, addToNew };

@@ -251,7 +251,7 @@ const StreamsScreen = (): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const navigate = useNavigate();
 
-  const [layout, setLayout] = useState<StreamsLayout>(() => loadLayout());
+  const [layout, setLayout] = useState<StreamsLayout>(() => loadLayout(workspaceId));
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Persisted, because it is a posture rather than a gesture: you switch into
   // focus mode to do a piece of work, and having a reload throw you back into
@@ -343,8 +343,8 @@ const StreamsScreen = (): ReactElement => {
 
   useEffect(() => {
     if (layout === loadedLayout.current) return;
-    saveLayout(layout);
-  }, [layout]);
+    saveLayout(layout, workspaceId);
+  }, [layout, workspaceId]);
 
   useEffect(() => {
     saveFocusMode(focusMode);
@@ -1221,7 +1221,7 @@ const StreamsScreen = (): ReactElement => {
   /**
    * The mode change's clock — the only thing that lets a width animate.
    *
-   * Zero at rest, so a resize drag stays glued to the cursor; `FOCUS_MS` only
+   * Zero at rest, so a resize drag stays glued to the cursor; `dev.focusMs` only
    * while a focus transition is in flight. Armed in the *same* commit as the mode
    * flip, because `width` is permanently in the transition list and only its
    * duration moves — which is the case a browser will interpolate.
