@@ -500,48 +500,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const selectedChannelProjectId =
     canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
   const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
-  const [channelBoardMappings, mappingDetails] = useCachedQuery(
-    queries.boardsByChannel({ channelId: effectiveChannelId }),
-    { enabled: !!effectiveChannelId },
-  );
-  // main's board resolution (channel-board-mapping with a project-boards fallback)
-  // must define `boards` before the release additions below read it.
+  // Boards for ticket creation come from the selected channel's PROJECT (all of the
+  // project's boards). A projectless channel resolves to no project → no boards, and
+  // the UI shows the "no boards are configured" empty state.
   const [projectBoards] = useCachedQuery(
     queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
     { enabled: !!selectedChannelProjectId },
   );
-  const boards = useMemo(() => {
-    // Release repos are project-scoped (its release boards), not channel-mapped.
-    if (ticketKind === 'release') return projectBoards ?? [];
-    const mappingSynced = mappingDetails.type === 'complete';
-    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
-    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
-    const projectBoardsList = projectBoards ?? [];
-    if (filtered.length > 0) {
-      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-        source: 'CreateTicketModal',
-        resolution: 'channel-board-mapping',
-        channelId: effectiveChannelId,
-        mappedCount: filtered.length,
-        projectBoardsCount: projectBoardsList.length,
-      });
-      return filtered;
-    }
-    // Only fall back to project boards once the mapping query has fully synced —
-    // an empty result before that is just the zero cache warming up, not a truly
-    // unmapped channel.
-    if (!mappingSynced) {
-      return projectBoardsList;
-    }
-    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-      source: 'CreateTicketModal',
-      resolution: 'project-boards-fallback',
-      channelId: effectiveChannelId,
-      mappedCount: 0,
-      projectBoardsCount: projectBoardsList.length,
-    });
-    return projectBoardsList;
-  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId, ticketKind]);
+  const boards = useMemo(() => projectBoards ?? [], [projectBoards]);
 
   // Read by the open-reset effect without adding `boards` to its deps.
   const boardsRef = useRef(boards);
