@@ -1,8 +1,47 @@
 import tseslint from "typescript-eslint";
 
 const slackFiles = ["src/surfaces/slack/**/*.ts"];
+const standardHttpFiles = ["src/routes/**/*.ts", "src/middleware/**/*.ts"];
+const protocolResponseFiles = ["src/routes/cli-auth.ts", "src/routes/flow-action.ts"];
 
 export default [
+  {
+    files: standardHttpFiles,
+    ignores: protocolResponseFiles,
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+      },
+    },
+    plugins: {
+      "@typescript-eslint": tseslint.plugin,
+    },
+    rules: {
+      // Standard API routes must use sendApiError()/HttpError instead of
+      // hand-assembling response bodies. Warning-only during the legacy route
+      // migration; protocol adapters are explicitly excluded below.
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector:
+            "CallExpression[callee.property.name='json'] > ObjectExpression:has(Property[key.name='success'][value.value=false])",
+          message: "Use sendApiError() or throw HttpError instead of a handwritten { success: false } envelope",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='json'] > ObjectExpression:has(Property[key.name='type'][value.value='error'])",
+          message: "Standard API routes must use sendApiError(); typed error actions belong only in protocol adapters",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='json'] > ObjectExpression:has(Property[key.name='error']):not(:has(Property[key.name='success'])):not(:has(Property[key.name='type']))",
+          message: "Use sendApiError() instead of a bare { error } response",
+        },
+      ],
+    },
+  },
   {
     files: slackFiles,
     languageOptions: {

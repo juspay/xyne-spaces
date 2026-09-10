@@ -37,7 +37,7 @@ import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
-import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { API_ERROR_CODES, asyncHandler, ok, sendApiError, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agents");
@@ -236,7 +236,7 @@ router.post("/generate-prompt", async (req: Request, res: Response) => {
     res.status(clawRes.status).json(data);
   } catch (err) {
     log.error("[agents] generate-prompt proxy error:", err);
-    res.status(500).json({ success: false, error: "Failed to generate prompt" });
+    sendApiError(res, 500, API_ERROR_CODES.UPSTREAM_ERROR, "Failed to generate prompt");
   }
 });
 
@@ -260,7 +260,7 @@ router.post("/generate-output-format", async (req: Request, res: Response) => {
     res.status(clawRes.status).json(data);
   } catch (err) {
     log.error("[agents] generate-output-format proxy error:", err);
-    res.status(500).json({ success: false, error: "Failed to generate output format" });
+    sendApiError(res, 500, API_ERROR_CODES.UPSTREAM_ERROR, "Failed to generate output format");
   }
 });
 
@@ -279,7 +279,7 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
     };
     const intent = (systemPrompt && systemPrompt.trim()) || (description && description.trim());
     if (!intent) {
-      res.status(400).json({ success: false, error: "systemPrompt or description is required" });
+      sendApiError(res, 400, API_ERROR_CODES.VALIDATION_FAILED, "systemPrompt or description is required");
       return;
     }
 
@@ -290,7 +290,7 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
         : undefined);
     if (!orgId) {
       log.error(`[agents/suggest-tools] orgId is required; refusing global tools catalog userId=${requesterId ?? "none"}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
+      sendApiError(res, 400, API_ERROR_CODES.VALIDATION_FAILED, "orgId is required");
       return;
     }
 
@@ -325,7 +325,7 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
     res.status(clawRes.status).json(data);
   } catch (err) {
     log.error("[agents] suggest-tools proxy error:", err);
-    res.status(500).json({ success: false, error: "Failed to suggest tools" });
+    sendApiError(res, 500, API_ERROR_CODES.UPSTREAM_ERROR, "Failed to suggest tools");
   }
 });
 
