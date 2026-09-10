@@ -1,3 +1,81 @@
+## [1.298.0](https://github.com/juspay/xyne-spaces/compare/v1.297.2...v1.298.0) (2026-09-09)
+
+
+### Features
+
+* Add remove option for decision items ([#1699](https://github.com/juspay/xyne-spaces/issues/1699)) ([2b38c76](https://github.com/juspay/xyne-spaces/commit/2b38c76f3226e1341cab310b95a55d900f0b29b9))
+
+
+### Bug Fixes
+
+* include mentions in canvas search ([#1695](https://github.com/juspay/xyne-spaces/issues/1695)) ([6a93eaa](https://github.com/juspay/xyne-spaces/commit/6a93eaaca924aef5e7390420743cc16820466943))
+* render DM add/remove system message names as plain text ([#1705](https://github.com/juspay/xyne-spaces/issues/1705)) ([ac31028](https://github.com/juspay/xyne-spaces/commit/ac31028a84954fb2bd250c5975731f2fb278aa41)), closes [#690](https://github.com/juspay/xyne-spaces/issues/690)
+* show board stages whenever a single board is in scope ([#1707](https://github.com/juspay/xyne-spaces/issues/1707)) ([a10c0f4](https://github.com/juspay/xyne-spaces/commit/a10c0f444f6035f9693d693a5294da82f2048961))
+
+## [1.297.2](https://github.com/juspay/xyne-spaces/compare/v1.297.1...v1.297.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* sync stage icons on ticket surfaces with the board definition ([#1523](https://github.com/juspay/xyne-spaces/issues/1523)) ([7d5f242](https://github.com/juspay/xyne-spaces/commit/7d5f2425ebf854a7a2b0117acd0c81b6707ab9a9))
+* word split fix in subject contains and body contains … ([#1644](https://github.com/juspay/xyne-spaces/issues/1644)) ([3f48772](https://github.com/juspay/xyne-spaces/commit/3f48772c976dbb7d33218ec1cdfaaa845744b149))
+
+## [1.297.1](https://github.com/juspay/xyne-spaces/compare/v1.297.0...v1.297.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* Modifying ci.yaml with flag to enable our own runners ([#1607](https://github.com/juspay/xyne-spaces/issues/1607)) ([4db2207](https://github.com/juspay/xyne-spaces/commit/4db22074e22a473c75e31a18137f08cc50eb54fc))
+
+## [1.297.0](https://github.com/juspay/xyne-spaces/compare/v1.296.2...v1.297.0) (2026-09-09)
+
+
+### Features
+
+* make URLs inert in the activity sidebar ([#1619](https://github.com/juspay/xyne-spaces/issues/1619)) ([b735517](https://github.com/juspay/xyne-spaces/commit/b73551702187ce012381381cfc23df277f576c3b))
+
+
+### Bug Fixes
+
+* correct Kanban column membership under Vespa-backed filters (61697) ([#1392](https://github.com/juspay/xyne-spaces/issues/1392)) ([2a5a743](https://github.com/juspay/xyne-spaces/commit/2a5a743b58dfa1a72b0b64b9e1675a150d3ca0fb))
+* prevent canvas restore loop for deleted canvas ([#1676](https://github.com/juspay/xyne-spaces/issues/1676)) ([47b3190](https://github.com/juspay/xyne-spaces/commit/47b3190cd3be4f79b66076f65bf10901cc5aeaf6))
+
+## [1.296.2](https://github.com/juspay/xyne-spaces/compare/v1.296.1...v1.296.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* added index to fix the kanban query ([#1696](https://github.com/juspay/xyne-spaces/issues/1696)) ([0047789](https://github.com/juspay/xyne-spaces/commit/004778959234d6f792cf7c615979ea9e913394db))
+
+## [1.296.1](https://github.com/juspay/xyne-spaces/compare/v1.296.0...v1.296.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* harden agent-auth against process spoofing and validate ask-ai d… ([#1180](https://github.com/juspay/xyne-spaces/issues/1180)) ([c048ce6](https://github.com/juspay/xyne-spaces/commit/c048ce6edcf932a2120a1b1da3633179ab44dfd7)), closes [#1](https://github.com/juspay/xyne-spaces/issues/1) [#2](https://github.com/juspay/xyne-spaces/issues/2) [#3](https://github.com/juspay/xyne-spaces/issues/3)
+
+## [1.296.0](https://github.com/juspay/xyne-spaces/compare/v1.295.0...v1.296.0) (2026-09-09)
+
+
+### Features
+
+* channel count correction ([#1621](https://github.com/juspay/xyne-spaces/issues/1621)) ([5c44b5d](https://github.com/juspay/xyne-spaces/commit/5c44b5db638443831b9884ea2fd8e939ccc28308))
+
+## [1.295.0](https://github.com/juspay/xyne-spaces/compare/v1.294.0...v1.295.0) (2026-09-09)
+
+
+### Features
+
+* make radar work in DMs ([#1623](https://github.com/juspay/xyne-spaces/issues/1623)) ([98c7aad](https://github.com/juspay/xyne-spaces/commit/98c7aadc30997bbc0ffb81b816efbfd90edfafe9))
+* questionnaire screen responsiveness fix ([#1672](https://github.com/juspay/xyne-spaces/issues/1672)) ([253c0a8](https://github.com/juspay/xyne-spaces/commit/253c0a8d264565f273fb3e07a5f30714d57524c9))
+
+
+### Bug Fixes
+
+* bump next override to 16.3.3 (CVE-2026-75604 Trivy CRITICAL) ([#1687](https://github.com/juspay/xyne-spaces/issues/1687)) ([48cbf8d](https://github.com/juspay/xyne-spaces/commit/48cbf8d27472984c1f36fa35ff600f2f03038199))
+* derive github credential owner from the token ([#1597](https://github.com/juspay/xyne-spaces/issues/1597)) ([c5fb365](https://github.com/juspay/xyne-spaces/commit/c5fb3655883805f8a79e9c1f8e797a9dd103c835))
+* show attachment label when DM preview content is empty markup ([#1633](https://github.com/juspay/xyne-spaces/issues/1633)) ([959a8df](https://github.com/juspay/xyne-spaces/commit/959a8dfd04f4b2a9d5a777a2ce0f59a8be5e9450))
+
 ## [1.294.0](https://github.com/juspay/xyne-spaces/compare/v1.293.0...v1.294.0) (2026-09-08)
 
 

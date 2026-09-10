@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { extractUserMentions } from '@/utils/mentionParser';
 import { radarParser, type ParserOperation } from '@/services/radar/radarParser';
 import { radarApplier } from '@/services/radar/radarApplier';
+import { radarScopeFor } from '@/services/radar/radarScope';
 
 const prisma = DatabaseClient.getInstance();
 const TAG = '[RADAR-REACTION]';
@@ -48,9 +49,19 @@ class RadarReactionResolver {
 
     const conversation = await prisma.conversation.findUnique({
       where: { conversationId: message.conversationId },
-      select: { channelId: true },
+      select: { channelId: true, channel: { select: { scopeType: true } } },
     });
     if (!conversation?.channelId) return;
+
+    // A DM spreads its items across sibling conversations, so a tick on the
+    // answer sits in a different one from the ask it settles. Scoped to the
+    // conversation, the candidate query below would find nothing in exactly the
+    // case reactions are most useful.
+    const scope = radarScopeFor(
+      conversation.channel?.scopeType ?? null,
+      conversation.channelId,
+      message.conversationId,
+    );
 
     // The candidate set IS the authorization boundary: only items the reactor
     // already holds or already asked for. requestedBy counts as much as
@@ -64,7 +75,9 @@ class RadarReactionResolver {
     const candidates = await prisma.executionItem.findMany({
       where: {
         workspaceId: reaction.workspaceId,
-        conversationId: message.conversationId,
+        ...(scope.isDmChannel
+          ? { channelId: scope.channelId }
+          : { conversationId: message.conversationId }),
         status: 'OPEN',
         OR: [{ pendingOn: { has: reaction.userId } }, { requestedBy: { has: reaction.userId } }],
       },
@@ -89,7 +102,10 @@ class RadarReactionResolver {
     const startedAt = Date.now();
     const run = {
       workspaceId: reaction.workspaceId,
-      conversationId: message.conversationId,
+      // Keyed by scope like every other pass: debugRuns reads a DM's trail by
+      // dm:<channelId>, so a raw conversationId here would be invisible in the
+      // drawer — "I reacted and nothing happened" has to stay answerable.
+      conversationId: scope.key,
       gatePassed: false,
       gateReason: 'reaction-no-candidates',
       parserRan: false,
@@ -189,7 +205,7 @@ class RadarReactionResolver {
       run.applied = await radarApplier.apply({
         workspaceId: reaction.workspaceId,
         conversationId: message.conversationId,
-        channelId: conversation.channelId,
+        scope,
         operations,
         // No watermark: this settles one item and consumes no window.
         // Advancing it would silently swallow every unparsed message here.
