@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.4](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.3...v1.295.0-release-20260909.4) (2026-09-10)
+
+
+### Bug Fixes
+
+* ticket fixes ([#1744](https://github.com/juspay/xyne-spaces/issues/1744)) ([8165fb8](https://github.com/juspay/xyne-spaces/commit/8165fb8202ec554448053f50880434bed9937b13))
+
 ## [1.295.0-release-20260909.3](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.2...v1.295.0-release-20260909.3) (2026-09-10)
 
 
