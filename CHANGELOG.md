@@ -1,3 +1,10 @@
+## [1.299.0](https://github.com/juspay/xyne-spaces/compare/v1.298.0...v1.299.0) (2026-09-10)
+
+
+### Features
+
+* auto label rule for existing emails ([#1437](https://github.com/juspay/xyne-spaces/issues/1437)) ([70cc25d](https://github.com/juspay/xyne-spaces/commit/70cc25dea8f615fd26f906f5625f046ded00aebd))
+
 ## [1.298.0](https://github.com/juspay/xyne-spaces/compare/v1.297.2...v1.298.0) (2026-09-09)
 
 
