@@ -18,6 +18,7 @@ export {
   extractUserMentions,
   extractGroupMentions,
   extractAllMentions,
+  stripCodeRegions,
 } from './mentionParser.js';
 export {
   matchKind,
