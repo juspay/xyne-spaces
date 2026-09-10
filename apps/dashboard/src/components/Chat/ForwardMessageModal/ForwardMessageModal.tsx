@@ -3,6 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Badge } from '../../ui/Badge';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { X, Hash, Lock, Users, Loader2 } from 'lucide-react';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
@@ -450,6 +451,15 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const agentLabel = dmAgent?.name ?? dmAgent?.agentSlug ?? 'this agent';
   const destinationNoun =
     shareStatus?.channelScopeType === ChannelScopeType.GROUP_DM ? 'group' : 'channel';
+  const addAgentLabel = !shareStatus
+    ? ''
+    : shareStatus.agentInChannel
+      ? `${agentLabel} is already present in the ${destinationNoun}.`
+      : shareStatus.canAddAgent
+        ? `Also add ${agentLabel} to this ${destinationNoun}`
+        : shareStatus.agentInstalled
+          ? `You do not have permission to add ${agentLabel} to this ${destinationNoun}.`
+          : 'This agent is not installed as an app and cannot be added to a channel.';
   const lastSharedLabel = shareStatus?.lastSharedAt ? (
     <>
       shared it{' '}
@@ -1048,22 +1058,17 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               </div>
             )}
             <div className='flex items-center gap-2 text-sm'>
-              <input
-                type='checkbox'
+              <Checkbox
+                checked={shareStatus.agentInChannel || (shareStatus.canAddAgent && addAgent)}
+                onChange={setAddAgent}
+                disabled={!shareStatus.canAddAgent}
+                label=''
+                ariaLabel={addAgentLabel}
                 data-track-category='FORWARD_MESSAGE_MODAL'
                 data-track-name='ADD_AGENT_WHILE_SHARING_CONVERSATION'
-                disabled={!shareStatus.canAddAgent}
-                checked={shareStatus.agentInChannel || (shareStatus.canAddAgent && addAgent)}
-                onChange={event => setAddAgent(event.target.checked)}
               />
               <span className={shareStatus.canAddAgent ? undefined : 'text-muted-foreground'}>
-                {shareStatus.agentInChannel
-                  ? `${agentLabel} is already present in the ${destinationNoun}.`
-                  : shareStatus.canAddAgent
-                    ? `Also add ${agentLabel} to this ${destinationNoun}`
-                    : shareStatus.agentInstalled
-                      ? `You do not have permission to add ${agentLabel} to this ${destinationNoun}.`
-                      : 'This agent is not installed as an app and cannot be added to a channel.'}
+                {addAgentLabel}
               </span>
             </div>
           </div>
