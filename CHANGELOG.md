@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.8](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.7...v1.295.0-release-20260909.8) (2026-09-10)
+
+
+### Bug Fixes
+
+* stop keying a stored preference on the ?track= param ([#1763](https://github.com/juspay/xyne-spaces/issues/1763)) ([3c25641](https://github.com/juspay/xyne-spaces/commit/3c25641bc2c5e8ceb89401ba263cea850ae939d2))
+
 ## [1.295.0-release-20260909.7](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.6...v1.295.0-release-20260909.7) (2026-09-10)
 
 
