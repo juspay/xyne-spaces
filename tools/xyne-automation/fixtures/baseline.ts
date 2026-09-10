@@ -485,6 +485,8 @@ async function ensureBaselineChannelMembership(
 // The chat view can hit a transient render race on the first cold load in a fresh
 // container, tripping the app's error boundary. It recovers on reload, so navigate
 // and reload until the expected control renders (later navigations are unaffected).
+// Tracked in XYNE-62732: the retry masks the app-side race, so this helper should go
+// once the cold-start render race is fixed.
 async function gotoChatViewUntilReady(url: string, readySelector: string): Promise<void> {
   const page = testContext.activePage;
   const maxAttempts = 4;
