@@ -206,18 +206,22 @@ function applyWindowPolicy(win: BrowserWindow): void {
 
       const currentAppUrl = new URL(config.FRONTEND_URL);
       const currentUrl = win.webContents.getURL();
-      const currentUrlObj = new URL(currentUrl || '');
+      // A window that has not loaded anything yet returns '', and new URL('')
+      // throws. That threw the whole handler into the catch below before it
+      // reached the external-link branch, so the first navigation of a brand new
+      // window — every standalone window the app opens — escaped that routing.
+      const currentUrlObj = currentUrl ? new URL(currentUrl) : null;
 
       // Allow in-app navigation (same origin as configured frontend or current page)
       if (
         navUrlObj.origin === currentAppUrl.origin ||
-        navUrlObj.origin === currentUrlObj.origin
+        navUrlObj.origin === currentUrlObj?.origin
       ) {
         return;
       }
 
       // Mirror the mTLS branch from setWindowOpenHandler
-      if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+      if (currentUrlObj?.origin === config.MTLS_FRONTEND_URL) {
         event.preventDefault();
         shell.openExternal(navUrl);
         notifyExternalOpen(navUrl);
