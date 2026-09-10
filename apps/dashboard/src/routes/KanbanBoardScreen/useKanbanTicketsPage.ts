@@ -431,18 +431,13 @@ export const useKanbanTicketsPage = (
     : null;
   // Only send to Vespa when we have real IDs and not inverted/includeUnassigned
   // (those semantics require the Zero/local filter path).
-  // Send all 4 identity forms to match prefixedKanbanIdentityValues storage variants.
+  // Send bare IDs - the backend expands to all identity forms for Vespa matching.
   const vespaAssignee =
     parsedAssignee &&
     parsedAssignee.ids.length > 0 &&
     !parsedAssignee.inverted &&
     !parsedAssignee.includeUnassigned
-      ? parsedAssignee.ids
-          .flatMap(id => {
-            const bareId = id.replace(/^(user:|group:|userGroup:)/, '');
-            return [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`];
-          })
-          .join(',')
+      ? parsedAssignee.ids.map(id => id.replace(/^(user:|group:|userGroup:)/, '')).join(',')
       : undefined;
 
   const vespaTags =
@@ -450,15 +445,10 @@ export const useKanbanTicketsPage = (
       ? options.filters.tags.join(',')
       : undefined;
 
-  // Send all 4 identity forms to match prefixedKanbanIdentityValues storage variants.
+  // Send bare IDs - the backend expands to all identity forms for Vespa matching.
   const vespaCreatedBy =
     options.filters?.createdBy && options.filters.createdBy.length > 0
-      ? options.filters.createdBy
-          .flatMap(id => {
-            const bareId = id.replace(/^(user:|group:|userGroup:)/, '');
-            return [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`];
-          })
-          .join(',')
+      ? options.filters.createdBy.map(id => id.replace(/^(user:|group:|userGroup:)/, '')).join(',')
       : undefined;
 
   // Compute group-specific filter for Vespa based on groupBy/groupKey
@@ -475,12 +465,9 @@ export const useKanbanTicketsPage = (
     if (options.groupBy === 'assignee') {
       // Don't filter if groupKey is "Unassigned" - Vespa can't filter for null assignee easily
       if (options.groupKey === 'Unassigned') return {};
-      // Vespa may store assignedTo in any of these forms (see prefixedKanbanIdentityValues).
-      // Send all variants so we match regardless of storage format.
+      // Send bare ID - the backend expands to all identity forms for Vespa matching.
       const bareId = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
-      return {
-        assignee: [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`].join(','),
-      };
+      return { assignee: bareId };
     }
     if (options.groupBy === 'status') {
       // Filter by the group's status value
@@ -490,34 +477,68 @@ export const useKanbanTicketsPage = (
     return {};
   })();
 
+  // When searching, skip stage/status/groupBy filters - fetch all results and segregate in frontend.
+  // For dynamic field grouping, keep the filters as-is.
+  const isFormFieldGroupBy =
+    typeof options.groupBy === 'object' && options.groupBy?.type === 'formField';
+  const skipColumnFiltersForSearch = hasSearchTerm && !isFormFieldGroupBy;
+
   // Create a search key that changes when the group context changes
   // This forces the search to re-trigger when switching views
+  // When searching without column filters, use a shared key so all columns share one search call
+  // Include filter values in the key so that filter changes trigger a new search
   const groupByKey =
     typeof options.groupBy === 'object'
       ? `${options.groupBy.type}:${options.groupBy.fieldId}`
       : String(options.groupBy ?? 'none');
-  const vespaSearchKey = `${groupByKey}:${options.groupKey ?? ''}:${options.stageName}`;
+  // Include ALL filter values in search key so all columns re-search when filters change
+  // Previously this only included priority, assignee, tags, createdBy - missing boards, stages, etc.
+  const filterKey = skipColumnFiltersForSearch
+    ? JSON.stringify({
+        priority: vespaPriority ?? '',
+        assignee: vespaAssignee ?? '',
+        tags: vespaTags ?? '',
+        createdBy: vespaCreatedBy ?? '',
+        boards: options.filters?.boards ?? [],
+        stages: options.filters?.stages ?? [],
+        ticketTypes: options.filters?.ticketTypes ?? [],
+        sourceChannels: options.filters?.sourceChannels ?? [],
+        userGroups: options.filters?.userGroups ?? [],
+        dynamicFields: options.filters?.dynamicFields ?? {},
+        boardId: effectiveVespaBoardId ?? '',
+        projectId: options.projectId ?? '',
+      })
+    : '';
+  const vespaSearchKey = skipColumnFiltersForSearch
+    ? `search:${groupByKey}:${filterKey}` // Shared key includes filters
+    : `${groupByKey}:${options.groupKey ?? ''}:${options.stageName}`;
 
   const vespaTicketSearch = useVespaTicketSearch({
     searchTerm: trimmedSearchTerm,
     dynamicFieldValues: pageVespaTokens,
     enabled: requiresVespaTicketIds,
-    limit: 200,
+    limit: hasSearchTerm ? 400 : 200,
     fetchAllDynamicFieldMatches: true,
-    maxFetchedResults: 400,
+    maxFetchedResults: hasSearchTerm ? 800 : 400,
     searchKey: vespaSearchKey,
     ...(options.dynamicFieldDateRanges
       ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
       : {}),
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(effectiveVespaBoardId ? { boardId: effectiveVespaBoardId } : {}),
-    ...(options.columnType === 'status' ? { status: options.stageName } : {}),
-    ...(options.columnType === 'stage' ? { stage: options.stageName } : {}),
+    // Skip column filters when searching (will segregate in frontend)
+    ...(!skipColumnFiltersForSearch && options.columnType === 'status'
+      ? { status: options.stageName }
+      : {}),
+    ...(!skipColumnFiltersForSearch && options.columnType === 'stage'
+      ? { stage: options.stageName }
+      : {}),
     ...(vespaPriority ? { priority: vespaPriority } : {}),
     ...(vespaAssignee ? { assignee: vespaAssignee } : {}),
     ...(vespaTags ? { tags: vespaTags } : {}),
     ...(vespaCreatedBy ? { createdBy: vespaCreatedBy } : {}),
-    ...vespaGroupFilter,
+    // Skip group filters when searching (will segregate in frontend)
+    ...(!skipColumnFiltersForSearch ? vespaGroupFilter : {}),
   });
   const localFilterKey = JSON.stringify({
     priority: options.filters?.priority ?? [],
@@ -530,20 +551,76 @@ export const useKanbanTicketsPage = (
     ticketTypes: options.filters?.ticketTypes ?? [],
     sourceChannels: options.filters?.sourceChannels ?? [],
   });
-  const directVespaPage = useMemo(
-    () =>
-      shouldUseDirectVespaRows
-        ? applyLocalVespaFilters(
-            options.channelId
-              ? (vespaTicketSearch.searchResults?.filter(
-                  ticket => ticket.channelId === options.channelId,
-                ) ?? null)
-              : vespaTicketSearch.searchResults,
-            options.filters,
-          )
-        : null,
-    [localFilterKey, options.channelId, shouldUseDirectVespaRows, vespaTicketSearch.searchResults],
-  );
+  const directVespaPage = useMemo(() => {
+    if (!shouldUseDirectVespaRows) return null;
+
+    // When a new search is in progress, don't apply current filters to stale results
+    // as they may not match (e.g., user added a filter while search was cached).
+    // Return null to show loading state until fresh results arrive.
+    if (vespaTicketSearch.isSearching) return null;
+
+    let results = vespaTicketSearch.searchResults;
+    if (!results) return null;
+
+    // Filter by channelId if specified
+    if (options.channelId) {
+      results = results.filter(ticket => ticket.channelId === options.channelId);
+    }
+
+    // Apply local filters (priority, boards, assignee, etc.)
+    const filtered = applyLocalVespaFilters(results, options.filters);
+    if (!filtered) return null;
+
+    // When searching without column filters, segregate by stage/status in frontend
+    if (skipColumnFiltersForSearch) {
+      const segregated = filtered.filter(ticket => {
+        // Filter by column stage/status
+        if (options.columnType === 'status' && (ticket.statusV2 as string) !== options.stageName) {
+          return false;
+        }
+        if (options.columnType === 'stage' && ticket.stageName !== options.stageName) {
+          return false;
+        }
+
+        // Filter by groupBy (assignee, priority, status)
+        if (options.groupBy === 'assignee' && options.groupKey) {
+          const ticketAssignee = normalizeIdentity(ticket.assignedTo);
+          if (options.groupKey === 'Unassigned') {
+            if (ticketAssignee) return false;
+          } else {
+            const groupAssignee = normalizeIdentity(options.groupKey);
+            if (ticketAssignee !== groupAssignee) return false;
+          }
+        }
+        if (options.groupBy === 'priority' && options.groupKey) {
+          if (options.groupKey === 'No Priority') {
+            if (ticket.priority) return false;
+          } else {
+            if ((ticket.priority as string) !== options.groupKey) return false;
+          }
+        }
+        if (options.groupBy === 'status' && options.groupKey) {
+          if ((ticket.statusV2 as string) !== options.groupKey) return false;
+        }
+
+        return true;
+      });
+      return segregated;
+    }
+
+    return filtered;
+  }, [
+    localFilterKey,
+    options.channelId,
+    options.columnType,
+    options.stageName,
+    options.groupBy,
+    options.groupKey,
+    shouldUseDirectVespaRows,
+    skipColumnFiltersForSearch,
+    vespaTicketSearch.isSearching,
+    vespaTicketSearch.searchResults,
+  ]);
   const vespaTicketIds = requiresVespaTicketIds
     ? (vespaTicketSearch.searchResults?.map(ticket => ticket.id) ?? [])
     : undefined;
@@ -575,7 +652,41 @@ export const useKanbanTicketsPage = (
       !shouldUseDirectVespaRows &&
       (!requiresVespaTicketIds || vespaTicketSearch.searchResults !== null),
   });
-  const effectivePage = shouldUseDirectVespaRows ? directVespaPage : page;
+  // Overlay live Zero fields onto direct-Vespa payload rows. Vespa is an async
+  // search index, so a row's statusV2/stageName can lag a just-applied status
+  // change; rendering that stale stage places the card in its OLD kanban column
+  // (ticket 61697: status changed to B but card stays in A/C until reindex).
+  // Hydrating the live stage/status by id from the Zero store keeps column
+  // membership correct immediately, before Vespa catches up.
+  const [liveDirectRows] = useCachedQuery(
+    queries.ticketsByIds({
+      ticketIds: shouldUseDirectVespaRows ? (vespaTicketIds ?? []) : [],
+    }),
+    { enabled: shouldUseDirectVespaRows && (vespaTicketIds?.length ?? 0) > 0 },
+  );
+  const liveDirectRowsById = useMemo(() => {
+    const byId = new Map<string, Ticket>();
+    for (const row of liveDirectRows ?? []) byId.set(row.id, row as Ticket);
+    return byId;
+  }, [liveDirectRows]);
+  const overlaidDirectVespaPage = useMemo(() => {
+    if (!shouldUseDirectVespaRows || directVespaPage === null) return directVespaPage;
+    if (liveDirectRowsById.size === 0) return directVespaPage;
+    return directVespaPage.map(ticket => {
+      const live = liveDirectRowsById.get(ticket.id);
+      if (!live) return ticket;
+      return {
+        ...ticket,
+        statusV2: live.statusV2,
+        stageName: live.stageName,
+        boardId: live.boardId,
+        priority: live.priority,
+        assignedTo: live.assignedTo,
+      };
+    });
+  }, [shouldUseDirectVespaRows, directVespaPage, liveDirectRowsById]);
+
+  const effectivePage = shouldUseDirectVespaRows ? overlaidDirectVespaPage : page;
   const effectivePageDetailsType = shouldUseDirectVespaRows
     ? directVespaPage === null
       ? 'unknown'

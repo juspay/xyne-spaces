@@ -5,8 +5,9 @@ import type { Ticket } from '@xyne/shared';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 
-const MAX_VESPA_TICKET_SEARCH_LIMIT = 200;
+const MAX_VESPA_TICKET_SEARCH_LIMIT = 400;
 const FILTER_ONLY_DYNAMIC_FIELD_CACHE_TTL_MS = 30_000;
+const SEARCH_CACHE_TTL_MS = 10_000;
 const SEARCH_DEBOUNCE_MS = 300;
 
 interface UseVespaTicketSearchParams {
@@ -42,6 +43,10 @@ const filterOnlyDynamicFieldCache = new Map<
   { expiresAt: number; results: DisplaySearchResult[] }
 >();
 const filterOnlyDynamicFieldInflight = new Map<string, Promise<DisplaySearchResult[]>>();
+
+// Shared cache for search results (keyed by searchKey from caller)
+const searchKeyCache = new Map<string, { expiresAt: number; results: Ticket[] }>();
+const searchKeyInflight = new Map<string, Promise<Ticket[]>>();
 
 const getFilterOnlyDynamicFieldCacheKey = (filters: VespaSearchFilters): string =>
   JSON.stringify({
@@ -282,6 +287,57 @@ export const useVespaTicketSearch = ({
           );
           if (!abortController.signal.aborted) {
             setSearchResults(results.map(toTicket));
+            setIsSearching(false);
+          }
+          return;
+        }
+
+        // Use shared cache when searchKey is provided (for deduplicating calls across columns)
+        if (searchKey) {
+          // Include all filters in cache key so different filter combinations don't return stale results
+          const fullCacheKey = `${searchKey}:${JSON.stringify(vespaFilters)}`;
+
+          // Check cache first
+          const cached = searchKeyCache.get(fullCacheKey);
+          if (cached && cached.expiresAt > Date.now()) {
+            if (!abortController.signal.aborted) {
+              setSearchResults(cached.results);
+              setIsSearching(false);
+            }
+            return;
+          }
+
+          // Check for inflight request
+          const inflight = searchKeyInflight.get(fullCacheKey);
+          if (inflight) {
+            const results = await inflight;
+            if (!abortController.signal.aborted) {
+              setSearchResults(results);
+              setIsSearching(false);
+            }
+            return;
+          }
+
+          // Make request and cache it
+          const request = (async (): Promise<Ticket[]> => {
+            const response = await searchService.vespaSearch(vespaFilters);
+            return response.results.map(toTicket);
+          })();
+
+          searchKeyInflight.set(fullCacheKey, request);
+
+          try {
+            const results = await request;
+            searchKeyCache.set(fullCacheKey, {
+              expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+              results,
+            });
+            if (!abortController.signal.aborted) {
+              setSearchResults(results);
+              setIsSearching(false);
+            }
+          } finally {
+            searchKeyInflight.delete(fullCacheKey);
           }
           return;
         }
@@ -315,12 +371,57 @@ export const useVespaTicketSearch = ({
       fetchAllDynamicFieldMatches,
       maxFetchedResults,
       rankProfile,
+      searchKey,
     ],
   );
+
+  // Build cache key for immediate lookup (must match performSearch logic)
+  const immediateCacheKey = useMemo(() => {
+    if (!searchKey) return null;
+    const query = searchTerm.trim() || '*';
+    const vespaFilters: VespaSearchFilters = {
+      query,
+      type: 'tickets',
+      apps: 'ticket',
+      limit: safeLimit,
+      rankProfile,
+    };
+    if (projectId) vespaFilters.projectId = projectId;
+    if (boardId) vespaFilters.board = boardId;
+    if (status) vespaFilters.status = status;
+    if (stage) vespaFilters.stage = stage;
+    if (priority) vespaFilters.priority = priority;
+    if (assignee) vespaFilters.assignee = assignee;
+    if (tags) vespaFilters.tags = tags;
+    if (createdBy) vespaFilters.from = createdBy;
+    if (normalizedDynamicFieldValues.length > 0) {
+      vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
+    }
+    if (Object.keys(normalizedDynamicFieldDateRanges).length > 0) {
+      vespaFilters.dynamicFieldDateRanges = normalizedDynamicFieldDateRanges;
+    }
+    return `${searchKey}:${JSON.stringify(vespaFilters)}`;
+  }, [
+    searchKey,
+    searchTerm,
+    safeLimit,
+    rankProfile,
+    projectId,
+    boardId,
+    status,
+    stage,
+    priority,
+    assignee,
+    tags,
+    createdBy,
+    normalizedDynamicFieldValues,
+    normalizedDynamicFieldDateRanges,
+  ]);
 
   useEffect(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
 
     const trimmed = searchTerm.trim();
@@ -333,7 +434,28 @@ export const useVespaTicketSearch = ({
       return;
     }
 
+    // Check cache immediately for instant results when filters change
+    if (immediateCacheKey) {
+      const cached = searchKeyCache.get(immediateCacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        setSearchResults(cached.results);
+        setIsSearching(false);
+        return;
+      }
+      // Check for inflight request - wait for it instead of starting new one
+      const inflight = searchKeyInflight.get(immediateCacheKey);
+      if (inflight) {
+        setIsSearching(true);
+        void inflight.then(results => {
+          setSearchResults(results);
+          setIsSearching(false);
+        });
+        return;
+      }
+    }
+
     setIsSearching(true);
+
     debounceTimerRef.current = setTimeout(() => {
       void performSearch(trimmed || '*');
     }, SEARCH_DEBOUNCE_MS);
@@ -341,6 +463,7 @@ export const useVespaTicketSearch = ({
     return (): void => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
       }
     };
   }, [
@@ -349,7 +472,9 @@ export const useVespaTicketSearch = ({
     normalizedDynamicFieldDateRanges,
     enabled,
     performSearch,
+    immediateCacheKey,
     searchKey,
+    assignee,
   ]);
 
   useEffect(() => {
@@ -360,5 +485,7 @@ export const useVespaTicketSearch = ({
     };
   }, []);
 
+  // With the shared debounce mechanism, we can trust the isSearching state directly.
+  // The effect properly coordinates across hook instances via pendingDebounces map.
   return { searchResults, isSearching };
 };
