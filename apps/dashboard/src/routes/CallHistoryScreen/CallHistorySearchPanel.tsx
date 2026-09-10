@@ -93,6 +93,7 @@ export function CallHistorySearchPanel({
               disabled={isSyncing}
               data-track-category='CALLS'
               data-track-name='calendar-sync'
+              data-track-kind='passive'
               title={`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 h-8 rounded-lg text-sm font-medium border transition-colors disabled:opacity-60',
@@ -195,6 +196,7 @@ export function CallHistorySearchPanel({
                           )}
                           data-track-category='CALLS'
                           data-track-name='call-search-select-user-filter'
+                          data-track-kind='passive'
                           onMouseEnter={() => {
                             setSelectedMentionIndex(index);
                             setHasNavigatedMentions(true);
@@ -238,6 +240,7 @@ export function CallHistorySearchPanel({
                           )}
                           data-track-category='CALLS'
                           data-track-name='call-search-select-channel-filter'
+                          data-track-kind='passive'
                           onMouseEnter={() => {
                             setSelectedMentionIndex(index);
                             setHasNavigatedMentions(true);

@@ -66,6 +66,7 @@ export const RCASidebar = ({
               onClick={() => onRecordClick(record)}
               data-track-category='RCA'
               data-track-name='SelectRCARecord'
+              data-track-kind='passive'
               className={cn(
                 'w-full text-left border-b border-border px-4 py-3 transition-colors',
                 'bg-background hover:bg-muted',
@@ -138,6 +139,7 @@ export const RCASidebar = ({
               onClick={onPreviousPage}
               data-track-category='RCA'
               data-track-name='RCA_PREV_PAGE'
+              data-track-kind='passive'
               disabled={!hasPreviousPage || isSubmitting}
               className='gap-1'
             >
@@ -150,6 +152,7 @@ export const RCASidebar = ({
               onClick={onNextPage}
               data-track-category='RCA'
               data-track-name='RCA_NEXT_PAGE'
+              data-track-kind='passive'
               disabled={!hasNextPage || isSubmitting}
               className='gap-1'
             >

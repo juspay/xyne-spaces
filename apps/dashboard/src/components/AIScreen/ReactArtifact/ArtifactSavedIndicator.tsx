@@ -77,6 +77,7 @@ export const ArtifactSavedIndicator = ({
         }
         data-track-category='AskAI'
         data-track-name='ReactArtifactOpenNewerVersion'
+        data-track-kind='passive'
       >
         <History className='h-3 w-3' aria-hidden='true' />
         {headNumber ? `Newer version (v${headNumber})` : 'Newer version'}
@@ -91,6 +92,7 @@ export const ArtifactSavedIndicator = ({
       title='Saved to your apps. Open it in the Library.'
       data-track-category='AskAI'
       data-track-name='ReactArtifactOpenSavedApp'
+      data-track-kind='passive'
     >
       <Check className='h-3 w-3' aria-hidden='true' />
       Saved

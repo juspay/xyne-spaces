@@ -132,6 +132,7 @@ function WeekViewCallCard({
           title={call.title ?? 'Call'}
           data-track-category='CALLS'
           data-track-name='calendar-week-call-card'
+          data-track-kind='passive'
           className='group absolute right-1 rounded overflow-hidden text-left z-[5] focus:outline-none'
           style={{
             top,
@@ -206,6 +207,7 @@ function WeekViewCallCard({
               onKeyDown={e => e.stopPropagation()}
               data-track-category='CALLS'
               data-track-name='calendar-resize-handle'
+              data-track-kind='passive'
             >
               <div className='w-6 h-0.5 rounded-full bg-blue-500' />
             </div>
@@ -301,6 +303,7 @@ function DroppableDayColumn({
       onDragCreatePointerDown={onDragCreatePointerDown}
       consumeDragEnd={consumeDragEnd}
       trackName='calendar-week-slot-create'
+      trackKind='active'
       className={cn(
         'border-r last:border-r-0 border-border',
         isToday && 'bg-primary/[0.02]',

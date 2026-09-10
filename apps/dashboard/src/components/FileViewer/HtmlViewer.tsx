@@ -67,6 +67,7 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
             className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
             data-track-category='FileViewer'
             data-track-name='RetryLoadHtml'
+            data-track-kind='passive'
             data-ph-capture-attribute-track-id='retry_load_html'
           >
             Try Again

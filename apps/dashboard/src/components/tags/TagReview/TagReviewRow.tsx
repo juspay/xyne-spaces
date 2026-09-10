@@ -56,6 +56,7 @@ export const TagReviewRow = ({ entry, isSelected, onSelect }: TagReviewRowProps)
       }}
       data-track-category='TagReview'
       data-track-name='SelectTag'
+      data-track-kind='passive'
       className={cn(
         'grid items-center gap-x-3 px-6 py-3 border-b border-border last:border-b-0 w-full',
         'cursor-pointer transition-colors text-sm',

@@ -159,6 +159,7 @@ export const TopicsFilterBar = ({
             aria-label={`Filter${activeChips.length ? `, ${activeChips.length} active` : ''}`}
             data-track-category='TOPICS_EXPLORER'
             data-track-name='OPEN_FILTERS'
+            data-track-kind='passive'
           >
             <FilterLines size={14} />
             Filter
@@ -174,6 +175,7 @@ export const TopicsFilterBar = ({
               className='mb-1 flex w-full items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground'
               data-track-category='TOPICS_EXPLORER'
               data-track-name='FILTER_BACK'
+              data-track-kind='passive'
             >
               <ChevronLeft size={13} />
               {MENU.find(m => m.id === active)?.label}
@@ -192,6 +194,7 @@ export const TopicsFilterBar = ({
                 className='flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent'
                 data-track-category='TOPICS_EXPLORER'
                 data-track-name='OPEN_FILTER_SUBMENU'
+                data-track-kind='passive'
               >
                 <Icon size={14} className='text-muted-foreground' />
                 <span className='flex-1 text-left'>{item.label}</span>
@@ -223,6 +226,7 @@ export const TopicsFilterBar = ({
               aria-label={`Clear ${item.label} filter`}
               data-track-category='TOPICS_EXPLORER'
               data-track-name='CLEAR_ONE_FILTER'
+              data-track-kind='passive'
             >
               <MultipleCrossCancelDefault size={12} />
             </button>
@@ -237,6 +241,7 @@ export const TopicsFilterBar = ({
           className='text-xs text-muted-foreground underline hover:text-foreground'
           data-track-category='TOPICS_EXPLORER'
           data-track-name='CLEAR_FILTERS'
+          data-track-kind='passive'
         >
           Clear all
         </button>

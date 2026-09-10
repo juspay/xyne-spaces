@@ -26,6 +26,7 @@ export interface ActivityEventNudgePayload {
   url: string;
   triggerType: string;
   contextMetadata?: Record<string, unknown>;
+  interactionKind?: string | null;
   platform: string;
   timestamp: Date;
 }
@@ -51,6 +52,7 @@ export interface ActivityHistoryEvent {
   url: string;
   triggerType: string;
   contextMetadata?: Record<string, unknown>;
+  interactionKind?: string | null;
   platform: string;
   timestamp: Date;
 }

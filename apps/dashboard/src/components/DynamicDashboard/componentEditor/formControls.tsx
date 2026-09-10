@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import type { DataSourceColumn } from '../../../services/DynamicDashboard/dataSourceSchemaService';
+import type { InteractionKind } from '@xyne/shared';
 
 interface SelectOption {
   value: string;
@@ -14,6 +15,7 @@ export const Select = ({
   className,
   disabled,
   trackName,
+  trackKind,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -22,6 +24,7 @@ export const Select = ({
   className?: string;
   disabled?: boolean;
   trackName: string;
+  trackKind?: InteractionKind;
 }): ReactElement => (
   <select
     value={value}
@@ -29,6 +32,7 @@ export const Select = ({
     disabled={disabled}
     data-track-category='COMPONENT_EDITOR'
     data-track-name={trackName}
+    data-track-kind={trackKind}
     className={`text-sm px-2 py-1.5 bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${
       className ?? ''
     }`}
@@ -73,6 +77,7 @@ export const ColumnMultiSelect = ({
               }}
               data-track-category='COMPONENT_EDITOR'
               data-track-name='Column_Toggle_Change'
+              data-track-kind='passive'
               className='h-3.5 w-3.5'
             />
             <span className='truncate flex-1'>{c.columnName}</span>

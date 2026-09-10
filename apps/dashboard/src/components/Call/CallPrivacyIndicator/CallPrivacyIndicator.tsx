@@ -74,6 +74,7 @@ export function CallPrivacyIndicator({
         title={isPaused ? 'Transcription is off' : 'Xyne Automatic is transcribing'}
         data-track-category='CALLS'
         data-track-name='OPEN_CALL_PRIVACY_INDICATOR'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify(trackMetadata ?? {})}
         className={cn(
           'flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold shadow-lg transition-colors',
@@ -128,6 +129,7 @@ export function CallPrivacyIndicator({
               data-testid='transcription-toggle-button'
               data-track-category='CALLS'
               data-track-name='TRANSCRIPTION_TOGGLE'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ enabled: isTranscriptionEnabled })}
               className={cn(
                 'mt-4 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',

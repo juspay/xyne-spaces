@@ -262,6 +262,7 @@ export function FiltersModal({
                 className={cn(FIELD_BOX, 'mt-2')}
                 data-track-category='SEARCH_FILTERS'
                 data-track-name='EDIT_DATE_MODE'
+                data-track-kind='active'
               >
                 {describeDateBounds(draft.after, draft.before)}
               </button>
@@ -298,6 +299,7 @@ export function FiltersModal({
           className={cn(CHIP_BASE, appliedCount > 0 && CHIP_ACTIVE)}
           data-track-category='SEARCH_FILTERS'
           data-track-name='OPEN_FILTERS'
+          data-track-kind='passive'
         >
           <SlidersHorizontal className='size-3' />
           Filters
@@ -318,6 +320,7 @@ export function FiltersModal({
           aria-label='Close filters'
           data-track-category='SEARCH_FILTERS'
           data-track-name='CLOSE_FILTERS'
+          data-track-kind='passive'
         >
           <X className='size-4' />
         </button>
@@ -363,6 +366,7 @@ export function FiltersModal({
             className='h-8 rounded-lg text-[13px] font-medium'
             data-track-category='SEARCH_FILTERS'
             data-track-name='CLEAR_ALL_FILTERS'
+            data-track-kind='passive'
           >
             {draftCount > 0 ? `Clear filters (${draftCount})` : 'Clear filters'}
           </Button>
@@ -372,6 +376,7 @@ export function FiltersModal({
             className='h-8 rounded-lg text-[13px] font-medium'
             data-track-category='SEARCH_FILTERS'
             data-track-name='APPLY_FILTERS'
+            data-track-kind='passive'
           >
             Search
           </Button>
@@ -390,6 +395,7 @@ function CarriedChip({ label, onRemove }: { label: string; onRemove: () => void 
         className='text-muted-foreground hover:text-foreground'
         data-track-category='SEARCH_FILTERS'
         data-track-name='REMOVE_CARRIED_CHIP'
+        data-track-kind='active'
       >
         <X className='size-3' />
       </button>

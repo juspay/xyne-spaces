@@ -97,6 +97,7 @@ const SectionSettingsMenu = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='SECTION_SET_FILTER'
+              data-track-kind='passive'
             >
               <span className='flex-1'>
                 <span className='block'>{opt.label}</span>
@@ -127,6 +128,7 @@ const SectionSettingsMenu = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='SECTION_SET_SORT'
+              data-track-kind='passive'
             >
               <span className='flex-1'>{opt.label}</span>
               {sortOrder === opt.value && <CheckTickSingle size={16} className='shrink-0' />}

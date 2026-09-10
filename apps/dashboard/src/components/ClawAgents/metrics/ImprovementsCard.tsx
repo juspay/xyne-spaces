@@ -70,6 +70,7 @@ const ImprovementRow = ({
           onClick={onDismiss}
           data-track-category='Claw Agents'
           data-track-name='DISMISS_IMPROVEMENT'
+          data-track-kind='passive'
         >
           Dismiss
         </Button>
@@ -81,6 +82,7 @@ const ImprovementRow = ({
           onClick={onApply}
           data-track-category='Claw Agents'
           data-track-name='APPLY_IMPROVEMENT'
+          data-track-kind='active'
         >
           Mark as handled
         </Button>
@@ -152,6 +154,7 @@ export const ImprovementsCard = ({ agentSlug }: { agentSlug: string }): ReactEle
                   onClick={() => setOpenBucket(open ? null : bucket.key)}
                   data-track-category='Claw Agents'
                   data-track-name='Toggle improvement bucket'
+                  data-track-kind='passive'
                   className='flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/40'
                 >
                   {open ? (

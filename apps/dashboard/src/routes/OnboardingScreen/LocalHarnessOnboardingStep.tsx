@@ -235,6 +235,7 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) 
               disabled={busy}
               data-track-category='Onboarding'
               data-track-name='Connect local harness'
+              data-track-kind='active'
               className='rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background transition hover:opacity-90 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:opacity-50 motion-reduce:active:scale-100'
             >
               {busy ? 'Connecting…' : `Connect this ${noun}`}
@@ -245,6 +246,7 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) 
               disabled={busy}
               data-track-category='Onboarding'
               data-track-name='Skip local harness'
+              data-track-kind='passive'
               className='text-sm text-muted-foreground underline-offset-4 transition hover:text-foreground hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:opacity-50'
             >
               Not now

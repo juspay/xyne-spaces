@@ -225,6 +225,7 @@ const KnowledgeTab = ({
                 }
                 data-track-category='Claw Agents'
                 data-track-name='ADD_PROGRESS_LABEL'
+                data-track-kind='active'
               >
                 <Plus className='size-3.5' /> Add label
               </Button>
@@ -259,6 +260,7 @@ const KnowledgeTab = ({
                   }
                   data-track-category='Claw Agents'
                   data-track-name='REMOVE_PROGRESS_LABEL'
+                  data-track-kind='active'
                   aria-label='Remove progress label'
                 >
                   <X className='size-4' />
@@ -294,6 +296,7 @@ const KnowledgeTab = ({
                   onClick={() => toggleSkill(skill.id)}
                   data-track-category='Claw Agents'
                   data-track-name='Toggle subagent skill'
+                  data-track-kind='passive'
                 >
                   <Badge variant={selected ? 'primary' : 'outline'}>{skill.name}</Badge>
                 </button>
@@ -418,6 +421,7 @@ const ContributorsTab = ({
             onClick={() => void addShare()}
             data-track-category='Claw Agents'
             data-track-name='ADD_SUBAGENT_SHARE'
+            data-track-kind='active'
             loading={add.isPending}
             disabled={!input.trim()}
           >
@@ -455,6 +459,7 @@ const ContributorsTab = ({
                   onClick={() => void removeShare(share)}
                   data-track-category='Claw Agents'
                   data-track-name='REMOVE_SUBAGENT_SHARE'
+                  data-track-kind='active'
                   aria-label={`Remove ${share.name || share.email}`}
                 >
                   <Trash2 className='size-4 text-destructive' />
@@ -482,6 +487,7 @@ const TabButton = ({
     onClick={onClick}
     data-track-category='Claw Agents'
     data-track-name={`Subagent Detail Tab: ${label}`}
+    data-track-kind='passive'
     className={cn(
       'w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors',
       active
@@ -661,6 +667,7 @@ const ClawSubagentDetailScreen = (): ReactElement => {
                   onClick={() => setDeleteOpen(true)}
                   data-track-category='Claw Agents'
                   data-track-name='OPEN_DELETE_SUBAGENT_CONFIRM'
+                  data-track-kind='passive'
                   disabled={toggle.isPending}
                 >
                   <Trash2 className='size-4' /> Delete
@@ -681,6 +688,7 @@ const ClawSubagentDetailScreen = (): ReactElement => {
                   onClick={() => void save()}
                   data-track-category='Claw Agents'
                   data-track-name='SAVE_SUBAGENT'
+                  data-track-kind='active'
                   loading={update.isPending}
                   disabled={!dirty || !draft.systemPrompt.trim()}
                 >

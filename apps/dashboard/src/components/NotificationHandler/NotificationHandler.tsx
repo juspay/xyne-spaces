@@ -351,6 +351,9 @@ export const NotificationHandler: React.FC = () => {
                 globalClickTracker.trackManualEvent(
                   'NOTIFICATIONS',
                   'CLICK_NOTIFICATION_TOAST_VIEW',
+                  undefined,
+                  undefined,
+                  'passive',
                 );
                 void handleNotificationClick(resolvedActionUrl, notificationWorkspaceId);
               },
@@ -612,9 +615,13 @@ export const NotificationHandler: React.FC = () => {
         // The navigate-to IPC fires for notifications, deep links, tray and
         // overlay navigations alike — the renderer cannot tell them apart, so
         // this is recorded as a generic externally-triggered navigation.
-        globalClickTracker.trackManualEvent('NAVIGATION', 'ELECTRON_NAVIGATE', undefined, {
-          to: url,
-        });
+        globalClickTracker.trackManualEvent(
+          'NAVIGATION',
+          'ELECTRON_NAVIGATE',
+          undefined,
+          { to: url },
+          'passive',
+        );
         void handleNotificationClick(url, workspaceId);
       };
 

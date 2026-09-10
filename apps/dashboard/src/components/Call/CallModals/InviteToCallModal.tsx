@@ -94,6 +94,7 @@ export function InviteToCallModal({
             disabled={isInviting}
             data-track-category='CALLS'
             data-track-name='Close_Invite_To_Call_Modal'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ callId })}
           >
             Cancel
@@ -107,6 +108,7 @@ export function InviteToCallModal({
             data-testid='invite-button'
             data-track-category='CALLS'
             data-track-name='Submit_Invite_To_Call_Modal'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ callId, userCount: selectedUsers.length })}
           >
             {isInviting

@@ -81,6 +81,7 @@ const RadioOption = ({
     onClick={onSelect}
     data-track-category='Claw Agents'
     data-track-name={`Select model provider option: ${title}`}
+    data-track-kind='passive'
     className={cn(
       'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
       selected ? 'border-primary bg-muted/40' : 'border-border hover:bg-muted/40',
@@ -224,6 +225,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
                   onClick={() => moveProvider(i, -1)}
                   data-track-category='Claw Agents'
                   data-track-name='Move provider up'
+                  data-track-kind='active'
                   disabled={i === 0}
                   aria-label='Move up'
                   className={iconBtn}
@@ -235,6 +237,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
                   onClick={() => moveProvider(i, 1)}
                   data-track-category='Claw Agents'
                   data-track-name='Move provider down'
+                  data-track-kind='active'
                   disabled={i === draft.providerOrder.length - 1}
                   aria-label='Move down'
                   className={iconBtn}
@@ -246,6 +249,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
                   onClick={() => removeProvider(i)}
                   data-track-category='Claw Agents'
                   data-track-name='Remove provider'
+                  data-track-kind='active'
                   disabled={!localHarnessAvailable && isLocalHarnessProvider(p)}
                   aria-label={`Remove ${PROVIDER_DISPLAY[p] ?? p}`}
                   className={cn(iconBtn, 'hover:text-destructive')}
@@ -266,6 +270,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
                 onClick={() => addProvider(p)}
                 data-track-category='Claw Agents'
                 data-track-name='Add provider'
+                data-track-kind='active'
                 className='inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
               >
                 <Plus className='size-3' />
@@ -442,6 +447,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
           onClick={() => void handleSave()}
           data-track-category='Claw Agents'
           data-track-name='SAVE_MODEL_PROVIDER'
+          data-track-kind='active'
         >
           {saving ? 'Saving…' : 'Save changes'}
         </Button>

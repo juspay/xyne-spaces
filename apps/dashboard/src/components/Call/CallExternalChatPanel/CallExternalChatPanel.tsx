@@ -24,6 +24,7 @@ export function CallExternalChatPanel({ callExternalId }: CallExternalChatPanelP
           aria-label='Go back'
           data-track-category='CALLS'
           data-track-name='Go_Back_From_External_Chat'
+          data-track-kind='passive'
         >
           <ArrowLeft size={16} />
         </Button>

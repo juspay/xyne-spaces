@@ -112,6 +112,7 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
                     onChange={() => toggleSelection(item.itemId)}
                     data-track-category='MESSAGE'
                     data-track-name='TOGGLE_PULSE_TICKET'
+                    data-track-kind='passive'
                     className='mt-1 h-4 w-4 shrink-0 rounded border-input cursor-pointer'
                   />
                   <label htmlFor={checkboxId} className='text-sm text-left flex-1 cursor-pointer'>
@@ -139,6 +140,7 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
             onClick={startCreation}
             data-track-category='MESSAGE'
             data-track-name='START_TICKET_FROM_PULSE'
+            data-track-kind='active'
             className='text-sm font-medium text-action-primary hover:underline bg-transparent border-none p-0 cursor-pointer'
           >
             Create Actionable ({selectedIds.length})

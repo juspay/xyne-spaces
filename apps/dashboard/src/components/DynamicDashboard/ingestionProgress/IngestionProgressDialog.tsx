@@ -296,6 +296,7 @@ export const IngestionProgressDialog = ({
                 placeholder='Filter tables…'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Filter_Ingestion_Tables'
+                data-track-kind='passive'
                 className='w-full h-8 pl-8 pr-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] text-xyne-gray-900 placeholder:text-xyne-gray-400 outline-none focus:border-xyne-gray-400 transition-colors'
               />
             </div>
@@ -352,6 +353,7 @@ export const IngestionProgressDialog = ({
                     onClick={() => toggleGroup(g.schema)}
                     data-track-category='DYNAMIC_DASHBOARD'
                     data-track-name='Toggle_Ingestion_Schema_Group'
+                    data-track-kind='passive'
                     className='w-full flex items-center gap-2 px-4 h-9 text-[13px] hover:bg-xyne-gray-25 transition-colors'
                   >
                     {isOpen ? (
@@ -391,6 +393,7 @@ export const IngestionProgressDialog = ({
               onClick={onMinimize}
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Minimize_Ingestion_Progress'
+              data-track-kind='passive'
               className='ml-auto inline-flex items-center gap-1.5 px-3 h-8 rounded-lg text-[13px] font-medium text-xyne-gray-600 hover:bg-xyne-gray-100 transition-colors'
             >
               <Minus size={14} />
@@ -402,6 +405,7 @@ export const IngestionProgressDialog = ({
               onClick={onDismiss}
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Close_Ingestion_Progress'
+              data-track-kind='passive'
               className='ml-auto inline-flex items-center px-3 h-8 rounded-lg text-[13px] font-medium bg-xyne-gray-900 text-white hover:bg-xyne-gray-700 transition-colors'
             >
               Close

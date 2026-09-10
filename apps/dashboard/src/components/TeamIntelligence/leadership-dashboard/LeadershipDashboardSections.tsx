@@ -239,6 +239,7 @@ export const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement =
                   to={`/team-intelligence/member/${encodeURIComponent(email)}`}
                   data-track-category='team-intelligence'
                   data-track-name='open-mettle-team-member'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ email })}
                   className='block focus:outline-none focus-visible:ring-2 focus-visible:ring-action-accent'
                 >
@@ -253,6 +254,7 @@ export const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement =
             pagination={pagination}
             setPage={nextPage => setPage(nextPage + 1)}
             trackName='mettle-team-member'
+            trackKind='passive'
           />
         </div>
       )}
@@ -305,6 +307,7 @@ export const BulletBrief = ({ request }: { request: SectionRequest }): ReactElem
                 aria-expanded={isExpanded}
                 data-track-category='team-intelligence'
                 data-track-name='toggle-leadership-summary-bullet'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   bulletId: bullet.id,
                   isExpanded: !isExpanded,
@@ -345,6 +348,7 @@ export const BulletBrief = ({ request }: { request: SectionRequest }): ReactElem
         pagination={pagination}
         setPage={nextPage => setPage(nextPage + 1)}
         trackName='leadership-bullet'
+        trackKind='passive'
         className='px-5 sm:px-6'
       />
     </div>

@@ -86,6 +86,7 @@ export const AddDriveLinkModal = ({
               placeholder='https://drive.google.com/file/d/…'
               data-track-category='knowledge-base'
               data-track-name='drive-link-input'
+              data-track-kind='passive'
             />
             {url && !valid ? (
               <p className='mt-1 text-xs text-red-500'>
@@ -102,6 +103,7 @@ export const AddDriveLinkModal = ({
             onClick={handleClose}
             data-track-category='knowledge-base'
             data-track-name='drive-link-cancel'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -110,6 +112,7 @@ export const AddDriveLinkModal = ({
             disabled={!valid || !collectionId}
             data-track-category='knowledge-base'
             data-track-name='drive-link-import'
+            data-track-kind='active'
           >
             <Link2 size={16} />
             Import

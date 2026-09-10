@@ -33,6 +33,7 @@ export function BriefIntroBanner({
         onClick={onDismiss}
         data-track-category='DailyBrief'
         data-track-name='daily-brief-intro-dismiss'
+        data-track-kind='passive'
         className='absolute right-3 top-3 flex size-6 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
       >
         <MultipleCrossCancelDefault size={14} />
@@ -57,6 +58,7 @@ export function BriefIntroBanner({
               disabled={enabling}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-intro-enable'
+              data-track-kind='active'
               className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50'
             >
               {enabling ? 'Turning on…' : 'Turn on morning brief'}
@@ -67,6 +69,7 @@ export function BriefIntroBanner({
             onClick={onSeeMore}
             data-track-category='DailyBrief'
             data-track-name='daily-brief-intro-see-more'
+            data-track-kind='passive'
             className='flex h-7 items-center rounded-[8px] border border-border bg-background px-2.5 text-[14px] font-semibold leading-[20px] text-foreground shadow-sm transition-colors hover:bg-accent'
           >
             Learn more

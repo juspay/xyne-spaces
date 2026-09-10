@@ -54,6 +54,7 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
                   className='w-full text-left p-4 hover:bg-muted transition-colors cursor-pointer group'
                   data-track-category='CALENDAR_DAY_VIEW'
                   data-track-name='OpenTicket'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
                     xyneId: ticket.xyneId,

@@ -334,6 +334,7 @@ const Info = ({
           className='w-7 h-7 flex items-center justify-center border border-border rounded-[8px] cursor-pointer'
           data-track-category='CHAT_INFO'
           data-track-name='CLOSE_INFO'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <LucideX className='text-muted-foreground' size={16} />
@@ -350,6 +351,7 @@ const Info = ({
           ].join(' ')}
           data-track-category='CHAT_INFO'
           data-track-name='TOGGLE_STAR'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({
             isStarred: channelUserStatus?.isStarred,
             channelId: channel.id,
@@ -375,6 +377,7 @@ const Info = ({
             data-track-event='BUTTON_CLICK'
             data-track-category='CHAT_INFO'
             data-track-name='ADD_PEOPLE_TO_CHANNEL'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({
               channelId: channel.id,
               currentParticipantCount: participants.length,
@@ -390,6 +393,7 @@ const Info = ({
           className={`${headerLinkContainerStyle} ${participants.length === 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
           data-track-category='CHAT_INFO'
           data-track-name='START_CALL'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           {isUserInCurrentChannelCall ? (
@@ -411,6 +415,7 @@ const Info = ({
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
             data-track-name='PROMOTE_GROUP_DM'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
           >
             <ArrowUpCircle size={16} className='text-muted-foreground' />
@@ -423,6 +428,7 @@ const Info = ({
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
             data-ph-capture-attribute-track-id='leave_channel'
           >
@@ -664,6 +670,7 @@ const ParticipantListItem = ({
                       onClick={() => onRemoveAdmin(participant.userId)}
                       data-track-category='CHAT_INFO'
                       data-track-name='REMOVE_ADMIN'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
                       data-ph-capture-attribute-track-id='remove_channel_admin'
                     >
@@ -676,6 +683,7 @@ const ParticipantListItem = ({
                       onClick={() => onMakeAdmin(participant.userId)}
                       data-track-category='CHAT_INFO'
                       data-track-name='MAKE_ADMIN'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
                       data-ph-capture-attribute-track-id='make_channel_admin'
                     >
@@ -691,6 +699,7 @@ const ParticipantListItem = ({
                     }
                     data-track-category='CHAT_INFO'
                     data-track-name='RemoveParticipant'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >
                     <Trash size={14} className='text-destructive' />
@@ -986,6 +995,7 @@ const ChannelMembers = ({
               onClick={() => setRemoveDialogOpen(false)}
               data-track-category='CHAT_INFO'
               data-track-name='CANCEL_REMOVE_PARTICIPANT'
+              data-track-kind='passive'
               className='px-6'
             >
               Cancel
@@ -995,6 +1005,7 @@ const ChannelMembers = ({
               onClick={() => userToRemove && handleRemoveParticipant(userToRemove.id)}
               data-track-category='CHAT_INFO'
               data-track-name='CONFIRM_REMOVE_PARTICIPANT'
+              data-track-kind='active'
               className='px-6'
               trackId='remove_channel_participant'
             >

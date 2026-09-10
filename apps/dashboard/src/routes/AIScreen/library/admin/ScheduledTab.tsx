@@ -121,6 +121,7 @@ export function ScheduledTab({
         placeholder='Search scheduled jobs'
         ariaLabel='Search scheduled jobs'
         trackName='Admin: search scheduled jobs'
+        trackKind='passive'
         className='w-full'
       />
       <div className='flex flex-wrap items-center justify-end gap-2'>
@@ -270,6 +271,7 @@ export function ScheduledTab({
                     aria-label='Cancel scheduled job'
                     data-track-category='Claw Admin'
                     data-track-name='Cancel scheduled job'
+                    data-track-kind='passive'
                   >
                     <DeleteDustbin01 className='size-3.5 text-current' />
                   </Button>

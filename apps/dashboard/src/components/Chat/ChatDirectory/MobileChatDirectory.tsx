@@ -126,6 +126,7 @@ const MobileChatDirectory = ({
           className='w-full flex items-center gap-3 px-4 py-3 bg-background rounded-full text-left border border-border'
           data-track-category='MOBILE_CHAT_DIRECTORY'
           data-track-name='OPEN_SEARCH_MOBILE'
+          data-track-kind='passive'
         >
           <SearchDefault size={20} className='text-muted-foreground shrink-0' />
           <span className='text-sm text-muted-foreground'>Search...</span>
@@ -197,6 +198,7 @@ const MobileChatDirectory = ({
                           }}
                           data-track-category='MOBILE_CHAT_DIRECTORY'
                           data-track-name='SORT_CHANNELS_MOBILE'
+                          data-track-kind='passive'
                         >
                           <ChevronSortVertical size={20} />
                         </button>
@@ -214,6 +216,7 @@ const MobileChatDirectory = ({
                         }}
                         data-track-category='MOBILE_CHAT_DIRECTORY'
                         data-track-name='SORT_CHANNELS_BY_UNREAD'
+                        data-track-kind='passive'
                         className='gap-2'
                       >
                         <NotificationBellOn size={14} className='shrink-0' />
@@ -229,6 +232,7 @@ const MobileChatDirectory = ({
                         }}
                         data-track-category='MOBILE_CHAT_DIRECTORY'
                         data-track-name='SORT_CHANNELS_BY_RECENCY'
+                        data-track-kind='passive'
                         className='gap-2'
                       >
                         <ClockDefault size={14} className='shrink-0' />
@@ -244,6 +248,7 @@ const MobileChatDirectory = ({
                         }}
                         data-track-category='MOBILE_CHAT_DIRECTORY'
                         data-track-name='SORT_CHANNELS_BY_ALPHABETICAL'
+                        data-track-kind='passive'
                         className='gap-2'
                       >
                         <ListSortAlphabetically size={14} className='shrink-0' />
@@ -264,6 +269,7 @@ const MobileChatDirectory = ({
                       }}
                       data-track-category='MOBILE_CHAT_DIRECTORY'
                       data-track-name='ADD_CHANNEL_MOBILE'
+                      data-track-kind='active'
                     >
                       <PlusDefault size={20} />
                     </button>
@@ -306,6 +312,7 @@ const MobileChatDirectory = ({
                     }}
                     data-track-category='MOBILE_CHAT_DIRECTORY'
                     data-track-name='ADD_DM_MOBILE'
+                    data-track-kind='active'
                   >
                     <PlusDefault size={20} />
                   </button>

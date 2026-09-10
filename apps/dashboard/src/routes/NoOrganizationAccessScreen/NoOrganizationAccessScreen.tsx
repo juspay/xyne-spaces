@@ -78,6 +78,7 @@ const NoOrganizationAccessScreen = (): ReactElement => {
               className='inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors'
               data-track-category='Auth'
               data-track-name='TryDifferentAccount'
+              data-track-kind='passive'
             >
               <ArrowLeft className='w-4 h-4' />
               Try with a different account

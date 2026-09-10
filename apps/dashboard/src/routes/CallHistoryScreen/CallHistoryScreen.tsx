@@ -982,6 +982,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsInstantCallModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='start-instant-call'
+              data-track-kind='active'
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-action-primary flex items-center justify-center shrink-0'>
@@ -1002,6 +1003,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsScheduleModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='schedule-call'
+              data-track-kind='active'
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-blue-500 flex items-center justify-center shrink-0'>
@@ -1045,6 +1047,7 @@ const CallHistoryScreen = (): ReactElement => {
                           disabled={isPrevDisabled}
                           data-track-category='CALLS'
                           data-track-name='upcoming-prev-day'
+                          data-track-kind='passive'
                           className={cn(
                             'p-1.5 rounded transition-colors',
                             isPrevDisabled
@@ -1065,6 +1068,7 @@ const CallHistoryScreen = (): ReactElement => {
                           }
                           data-track-category='CALLS'
                           data-track-name='upcoming-next-day'
+                          data-track-kind='passive'
                           className='p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground'
                           aria-label='Next day'
                         >
@@ -1084,6 +1088,7 @@ const CallHistoryScreen = (): ReactElement => {
                         onClick={handleCalendarPrev}
                         data-track-category='CALLS'
                         data-track-name='calendar-prev'
+                        data-track-kind='passive'
                         className='p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground'
                         aria-label='Previous'
                       >
@@ -1094,6 +1099,7 @@ const CallHistoryScreen = (): ReactElement => {
                         disabled={isNextDisabled}
                         data-track-category='CALLS'
                         data-track-name='calendar-next'
+                        data-track-kind='passive'
                         className={cn(
                           'p-1.5 rounded transition-colors',
                           isNextDisabled
@@ -1123,6 +1129,7 @@ const CallHistoryScreen = (): ReactElement => {
                       disabled={isTodayDisabled}
                       data-track-category='CALLS'
                       data-track-name='calendar-today'
+                      data-track-kind='passive'
                       className={cn(
                         'px-2.5 py-1.5 text-sm font-medium border border-border rounded-lg transition-colors',
                         isTodayDisabled
@@ -1163,6 +1170,7 @@ const CallHistoryScreen = (): ReactElement => {
                     onClick={() => setViewMode('list')}
                     data-track-category='CALLS'
                     data-track-name='switch-to-list'
+                    data-track-kind='passive'
                     className={cn(
                       'p-2 transition-colors',
                       viewMode === 'list'
@@ -1177,6 +1185,7 @@ const CallHistoryScreen = (): ReactElement => {
                     onClick={() => setViewMode('calendar')}
                     data-track-category='CALLS'
                     data-track-name='switch-to-calendar'
+                    data-track-kind='passive'
                     className={cn(
                       'p-2 transition-colors',
                       viewMode === 'calendar'

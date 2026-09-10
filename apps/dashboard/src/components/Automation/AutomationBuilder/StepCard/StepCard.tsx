@@ -63,6 +63,7 @@ export function StepCard({
           aria-label={`Step ${index} — ${heading}. ${collapsed ? 'Expand' : 'Collapse'} configuration.`}
           data-track-category='automation-builder'
           data-track-name='step-card-toggle-collapse'
+          data-track-kind='passive'
           className={cn(
             'flex flex-1 items-start gap-3 rounded-md text-left',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
@@ -97,6 +98,7 @@ export function StepCard({
             aria-label={`Move step ${index} up`}
             data-track-category='automation-builder'
             data-track-name='step-card-move-up'
+            data-track-kind='active'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
@@ -114,6 +116,7 @@ export function StepCard({
             aria-label={`Move step ${index} down`}
             data-track-category='automation-builder'
             data-track-name='step-card-move-down'
+            data-track-kind='active'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
@@ -155,6 +158,7 @@ export function StepCard({
               }}
               data-track-category='automation-builder'
               data-track-name='step-card-delete'
+              data-track-kind='active'
               className='flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-500/10'
             >
               <Trash2 className='size-4' />
@@ -301,6 +305,7 @@ function SchemaPeek({
         onClick={onToggle}
         data-track-category='automation-builder'
         data-track-name='step-card-schema-peek-toggle'
+        data-track-kind='passive'
         className='flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent/40'
       >
         {open ? <ChevronDown className='size-3' /> : <ChevronRight className='size-3' />}

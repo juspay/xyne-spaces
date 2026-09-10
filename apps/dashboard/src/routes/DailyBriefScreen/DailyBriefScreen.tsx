@@ -453,6 +453,7 @@ const DailyBriefScreen = (): ReactElement => {
               disabled={briefEnabling}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-empty-enable'
+              data-track-kind='active'
               className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50'
             >
               {briefEnabling ? 'Turning on…' : 'Turn on morning brief'}
@@ -541,6 +542,7 @@ const DailyBriefScreen = (): ReactElement => {
               style={APP_NO_DRAG_STYLE}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-toggle-raw'
+              data-track-kind='passive'
               className={cn(
                 'mr-1 rounded-[8px] border px-3 py-1.5 text-[13px] transition-colors',
                 showRaw
@@ -558,6 +560,7 @@ const DailyBriefScreen = (): ReactElement => {
             style={APP_NO_DRAG_STYLE}
             data-track-category='DailyBrief'
             data-track-name='daily-brief-regenerate'
+            data-track-kind='active'
             className='mr-1 flex items-center gap-1.5 rounded-[8px] border border-border px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           >
             <ListAiGenerated size={16} className='shrink-0' />
@@ -570,6 +573,7 @@ const DailyBriefScreen = (): ReactElement => {
             style={APP_NO_DRAG_STYLE}
             data-track-category='DailyBrief'
             data-track-name='daily-brief-open-settings'
+            data-track-kind='passive'
             className={cn(HEADER_ICON_CLASS, settingsOpen && 'bg-accent text-foreground')}
           >
             <Settings01 size={18} />
@@ -587,6 +591,7 @@ const DailyBriefScreen = (): ReactElement => {
             style={APP_NO_DRAG_STYLE}
             data-track-category='DailyBrief'
             data-track-name='daily-brief-open-features'
+            data-track-kind='passive'
             className={cn(HEADER_ICON_CLASS, featuresOpen && 'bg-accent text-foreground')}
           >
             <InformationCircle size={18} />
@@ -622,6 +627,7 @@ const DailyBriefScreen = (): ReactElement => {
               onClick={() => void navigate(todayPath)}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-view-generating'
+              data-track-kind='passive'
               className='mb-6 flex w-full items-center justify-center gap-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground'
             >
               <span

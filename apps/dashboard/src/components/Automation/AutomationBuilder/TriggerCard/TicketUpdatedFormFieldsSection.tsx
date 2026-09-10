@@ -226,6 +226,7 @@ export function TicketUpdatedFormFieldsSection({
                   }}
                   data-track-category='automation-builder'
                   data-track-name={`form-fields-toggle-${boardId}`}
+                  data-track-kind='passive'
                   className={cn(
                     'flex w-full items-center gap-2 px-2 py-1.5 text-left cursor-pointer',
                     'hover:bg-accent/40 rounded-md transition-colors',
@@ -246,6 +247,7 @@ export function TicketUpdatedFormFieldsSection({
                     onKeyDown={e => e.stopPropagation()}
                     data-track-category='automation-builder'
                     data-track-name={`form-fields-select-all-${boardId}`}
+                    data-track-kind='passive'
                     className='flex items-center gap-1'
                   >
                     <Checkbox
@@ -286,6 +288,7 @@ export function TicketUpdatedFormFieldsSection({
                                 className='h-7 rounded-md border border-border bg-background px-2 text-[11px] text-foreground'
                                 data-track-category='automation-builder'
                                 data-track-name='form-field-match-operator'
+                                data-track-kind='passive'
                               >
                                 <option value='changed'>Changed</option>
                                 <option value='contains'>Contains</option>
@@ -301,6 +304,7 @@ export function TicketUpdatedFormFieldsSection({
                                   className='h-7 min-w-[140px] flex-1 rounded-md border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground'
                                   data-track-category='automation-builder'
                                   data-track-name='form-field-contains-value'
+                                  data-track-kind='passive'
                                 />
                               )}
                             </div>

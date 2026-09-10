@@ -51,6 +51,7 @@ export function Clamped({
           onClick={() => setExpanded(value => !value)}
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle clamped block'
+          data-track-kind='active'
           className='self-start text-xs font-normal leading-4 tracking-[-0.24px] text-foreground underline underline-offset-2'
         >
           {expanded ? 'Show less' : 'Show more'}

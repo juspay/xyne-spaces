@@ -5,6 +5,7 @@ import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
 import { RangeCalendar } from './RangeCalendar';
+import type { InteractionKind } from '@xyne/shared';
 
 type Mode = 'today' | 'last-7d' | 'last-30d' | 'last-3mo' | 'last-6mo' | 'custom';
 
@@ -126,6 +127,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
         )}
         data-track-category='Support'
         data-track-name='RefetchRangePreset'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ mode: value })}
       >
         <span className='text-sm font-medium'>{label}</span>
@@ -180,6 +182,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                 placeholder='Start date'
                 maxDate={customEnd ?? new Date()}
                 trackName='FetchRangeFromTrigger'
+                trackKind='passive'
               />
               <DateField
                 label='To'
@@ -190,6 +193,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                 {...(customStart && { minDate: customStart })}
                 maxDate={new Date()}
                 trackName='FetchRangeToTrigger'
+                trackKind='passive'
               />
             </div>
 
@@ -225,6 +229,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
             disabled={isPending}
             data-track-category='Support'
             data-track-name='FetchRangeCancel'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -235,6 +240,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
             loading={isPending}
             data-track-category='Support'
             data-track-name='FetchRangeConfirm'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ mode })}
             trackId='refetch_emails'
           >
@@ -255,6 +261,7 @@ interface DateFieldProps {
   minDate?: Date;
   maxDate?: Date;
   trackName: string;
+  trackKind?: InteractionKind;
 }
 
 const formatTriggerDate = (d: Date | null, placeholder: string): string => {
@@ -285,6 +292,7 @@ const DateField: React.FC<DateFieldProps> = ({
   minDate,
   maxDate,
   trackName,
+  trackKind,
 }) => {
   const [open, setOpen] = useState(false);
   return (
@@ -301,6 +309,7 @@ const DateField: React.FC<DateFieldProps> = ({
             )}
             data-track-category='Support'
             data-track-name={trackName}
+            data-track-kind={trackKind}
           >
             <span className='truncate'>{formatTriggerDate(value, placeholder)}</span>
             <CalendarIcon className='size-3.5 text-muted-foreground shrink-0' />

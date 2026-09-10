@@ -88,6 +88,7 @@ export const FeatureCard = ({
           rel='noopener noreferrer'
           data-track-category='USER_GUIDE'
           data-track-name='Watch_Video'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ featureId })}
           className='mb-3.5 inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted'
         >

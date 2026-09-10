@@ -1890,6 +1890,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       title='Add to conversation'
                       data-track-category='XyneAI'
                       data-track-name='OPEN_PLUS_MENU'
+                      data-track-kind='passive'
                     >
                       <PlusDefault className='w-4 h-4 text-muted-foreground' />
                     </button>
@@ -1908,6 +1909,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     {...{ [CONTEXT_PICKER_TOGGLE_ATTR]: '' }}
                     data-track-category='XyneAI'
                     data-track-name='OPEN_CONTEXT_MODAL'
+                    data-track-kind='passive'
                   >
                     <span className='w-4 h-4 leading-4 text-center text-muted-foreground font-semibold text-sm'>
                       /
@@ -1997,6 +1999,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     aria-label='Back'
                     data-track-category='XyneAI'
                     data-track-name='KB_FOLDER_BACK'
+                    data-track-kind='passive'
                   >
                     <ArrowLeft className='w-3.5 h-3.5' />
                   </button>
@@ -2038,6 +2041,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           title='Click to select · double-click to open'
                           data-track-category='XyneAI'
                           data-track-name='SELECT_KB_FOLDER'
+                          data-track-kind='passive'
                         >
                           <FolderDefault className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                           <span className='flex-1 truncate'>{folder.name}</span>
@@ -2058,6 +2062,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           }`}
                           data-track-category='XyneAI'
                           data-track-name='SELECT_FILE_SCOPE'
+                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ fileId: file.fileId })}
                         >
                           <FileText className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
@@ -2096,6 +2101,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         title='Click to select · double-click to open'
                         data-track-category='XyneAI'
                         data-track-name='SELECT_COLLECTION'
+                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ collectionId: collection.id })}
                       >
                         <Notebook className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />

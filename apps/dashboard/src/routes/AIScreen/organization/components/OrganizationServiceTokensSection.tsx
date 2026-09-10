@@ -175,6 +175,7 @@ export function OrganizationServiceTokensSection({
               onClick={() => setCreateOpen(true)}
               data-track-category='Claw Organization'
               data-track-name='Organization: new service token'
+              data-track-kind='active'
             >
               <Plus className='size-4' aria-hidden />
               New token
@@ -195,6 +196,7 @@ export function OrganizationServiceTokensSection({
               onClick={() => void tokens.refetch()}
               data-track-category='Claw Organization'
               data-track-name='Organization: retry service tokens'
+              data-track-kind='passive'
             >
               Retry
             </Button>
@@ -237,6 +239,7 @@ export function OrganizationServiceTokensSection({
                       onClick={() => setRevokeTarget(token)}
                       data-track-category='Claw Organization'
                       data-track-name='Organization: open revoke service token'
+                      data-track-kind='passive'
                       className='text-muted-foreground hover:text-destructive'
                     >
                       <Trash2 className='size-4' aria-hidden />
@@ -271,6 +274,7 @@ export function OrganizationServiceTokensSection({
               onClick={closeCreate}
               data-track-category='Claw Organization'
               data-track-name='Organization: close minted token dialog'
+              data-track-kind='passive'
             >
               Done
             </Button>
@@ -281,6 +285,7 @@ export function OrganizationServiceTokensSection({
                 onClick={closeCreate}
                 data-track-category='Claw Organization'
                 data-track-name='Organization: cancel create service token'
+                data-track-kind='passive'
                 disabled={mintToken.isPending}
               >
                 Cancel
@@ -289,6 +294,7 @@ export function OrganizationServiceTokensSection({
                 onClick={() => void createToken()}
                 data-track-category='Claw Organization'
                 data-track-name='Organization: create service token'
+                data-track-kind='active'
                 loading={mintToken.isPending}
                 disabled={
                   !name.trim() ||
@@ -318,6 +324,7 @@ export function OrganizationServiceTokensSection({
                 onClick={() => void copyToken()}
                 data-track-category='Claw Organization'
                 data-track-name='Organization: copy service token'
+                data-track-kind='passive'
               >
                 {copied ? <Check className='size-4' /> : <Copy className='size-4' />}
                 {copied ? 'Copied' : 'Copy'}
@@ -339,6 +346,7 @@ export function OrganizationServiceTokensSection({
                 variant='flat'
                 data-track-category='Claw Organization'
                 data-track-name='Organization: service token name'
+                data-track-kind='passive'
               />
               <span className='font-normal text-muted-foreground'>{name.length}/60 characters</span>
             </label>
@@ -363,6 +371,7 @@ export function OrganizationServiceTokensSection({
                     className='shrink-0 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
                     data-track-category='Claw Organization'
                     data-track-name='Organization: change service token member'
+                    data-track-kind='active'
                   >
                     Change
                   </button>
@@ -378,6 +387,7 @@ export function OrganizationServiceTokensSection({
                     variant='flat'
                     data-track-category='Claw Organization'
                     data-track-name='Organization: service token member search'
+                    data-track-kind='passive'
                   />
                   {memberQuery.trim().length < 2 ? (
                     <span className='font-normal text-muted-foreground'>
@@ -402,6 +412,7 @@ export function OrganizationServiceTokensSection({
                           className='flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-muted'
                           data-track-category='Claw Organization'
                           data-track-name='Organization: select service token member'
+                          data-track-kind='passive'
                         >
                           <span className='min-w-0 flex-1 truncate text-sm font-normal text-foreground'>
                             {member.name ? `${member.name} (${member.email})` : member.email}
@@ -431,6 +442,7 @@ export function OrganizationServiceTokensSection({
                         className='text-muted-foreground transition-colors hover:text-destructive'
                         data-track-category='Claw Organization'
                         data-track-name='Organization: remove service token agent'
+                        data-track-kind='active'
                       >
                         <X className='size-3' aria-hidden />
                       </button>
@@ -447,6 +459,7 @@ export function OrganizationServiceTokensSection({
                 variant='flat'
                 data-track-category='Claw Organization'
                 data-track-name='Organization: filter service token agents'
+                data-track-kind='passive'
               />
               {agents.isLoading ? (
                 <span className='font-normal text-muted-foreground'>Loading agents…</span>
@@ -498,6 +511,7 @@ export function OrganizationServiceTokensSection({
                 variant='flat'
                 data-track-category='Claw Organization'
                 data-track-name='Organization: service token expiry'
+                data-track-kind='passive'
               />
             </label>
           </div>

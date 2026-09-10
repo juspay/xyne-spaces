@@ -75,6 +75,7 @@ export const SearchResultsV2: React.FC<SearchResultsV2Props> = ({
                 className='group flex w-full items-center gap-3 rounded-lg border border-border bg-secondary px-3.5 py-2.5 text-left transition hover:border-ring/40 hover:bg-muted'
                 data-track-category='knowledge-base'
                 data-track-name='open-search-result'
+                data-track-kind='passive'
               >
                 <StatusBadgeV2 name={hit.name} />
                 <div className='flex min-w-0 flex-1 flex-col'>

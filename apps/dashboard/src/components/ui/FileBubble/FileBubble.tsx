@@ -69,6 +69,7 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
         onClick={handleClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_FILE_BUBBLE'
+        data-track-kind='passive'
         title={attachment.originalFilename}
       >
         <div className='pointer-events-none'>
@@ -87,6 +88,7 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
         onClick={handleClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_FILE_BUBBLE'
+        data-track-kind='passive'
       >
         {/* Attachment Preview */}
         <div className='flex items-center gap-3'>

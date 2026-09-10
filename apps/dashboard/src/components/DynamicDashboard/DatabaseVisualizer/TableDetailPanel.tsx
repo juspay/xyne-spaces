@@ -250,6 +250,7 @@ function DataPanel({
           onClick={() => void query.refetch()}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Db_Browser_Data_Retry'
+          data-track-kind='passive'
           className='mt-1 text-sm text-primary hover:underline'
         >
           Retry
@@ -303,6 +304,7 @@ function RelRow({ label, onClick }: { label: string; onClick: () => void }): Rea
       onClick={onClick}
       data-track-category='DYNAMIC_DASHBOARD'
       data-track-name='Db_Browser_Jump_Relation'
+      data-track-kind='passive'
       className='group w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card hover:bg-accent hover:border-primary/40 text-left text-[12px] text-foreground transition-colors'
     >
       <Link2 size={13} className='shrink-0 text-primary' />

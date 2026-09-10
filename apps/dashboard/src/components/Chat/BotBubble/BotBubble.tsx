@@ -126,6 +126,7 @@ const TicketDisplayModeV2: React.FC<{
       className='w-full mt-2'
       data-track-category='CHAT_BUBBLE'
       data-track-name='OPEN_TICKET_FROM_BOT_BUBBLE'
+      data-track-kind='passive'
     >
       <TicketCardV2
         ticket={ticket}
@@ -198,6 +199,7 @@ const SubTicketsTree: React.FC<{
               onClick={e => openTicketCard(parentTicket, e)}
               data-track-category='TICKET_CARD'
               data-track-name='VIEW_ALL_SUB_TICKETS'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ ticketId: parentTicket.id })}
             >
               View all {total} sub-tickets

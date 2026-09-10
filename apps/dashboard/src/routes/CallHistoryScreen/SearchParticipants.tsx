@@ -346,6 +346,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
           data-track-category='CALLS'
           data-track-name='remove-participant'
+          data-track-kind='active'
         >
           <X className='size-3' />
         </button>
@@ -397,6 +398,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                       checked={!!allSelected}
                       data-track-category='CALLS'
                       data-track-name='select-all-channel-members'
+                      data-track-kind='passive'
                       ref={el => {
                         if (el) {
                           el.indeterminate = !!someSelected;
@@ -416,6 +418,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                     type='button'
                     data-track-category='CALLS'
                     data-track-name='toggle-channel-members-expand'
+                    data-track-kind='passive'
                     onClick={e => {
                       e.stopPropagation();
                       setIsOpen(!isOpen);
@@ -439,6 +442,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground shrink-0'
               data-track-category='CALLS'
               data-track-name='remove-participant'
+              data-track-kind='active'
             >
               <X className='size-3' />
             </button>
@@ -453,6 +457,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               className='text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0'
               data-track-category='CALLS'
               data-track-name='change-selection'
+              data-track-kind='passive'
             >
               Change
             </button>
@@ -477,6 +482,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           className='relative flex items-center h-10 border border-border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background'
           data-track-category='CALLS'
           data-track-name='search-participants-input'
+          data-track-kind='passive'
         >
           <span className='px-2 bg-background'>
             <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-muted-foreground z-50 pointer-events-none bg-background' />
@@ -530,6 +536,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                     onKeyDown={e => e.stopPropagation()}
                     data-track-category='CALLS'
                     data-track-name='channel-member-search'
+                    data-track-kind='passive'
                     className='flex-1 bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted-foreground'
                   />
                 </div>
@@ -558,6 +565,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                             onChange={() => toggleExcludedChannelMember(userId)}
                             data-track-category='CALLS'
                             data-track-name='toggle-channel-member-inclusion'
+                            data-track-kind='active'
                             className='shrink-0'
                           />
                         </label>
@@ -625,6 +633,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                             onMouseEnter={() => setIndex(index)}
                             data-track-category='CALLS'
                             data-track-name='select-participant-option'
+                            data-track-kind='passive'
                             data-testid='participant-option'
                           >
                             {option.children ? (
@@ -688,6 +697,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   className='shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors'
                   data-track-category='CALLS'
                   data-track-name='clear-all-participants'
+                  data-track-kind='passive'
                 >
                   Clear all
                 </button>
@@ -718,6 +728,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
             className='ml-2 shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5'
             data-track-category='CALLS'
             data-track-name='clear-all-participants'
+            data-track-kind='passive'
           >
             Clear all
           </button>

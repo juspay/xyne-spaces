@@ -125,6 +125,7 @@ export const DateRangeSubmenu = ({
               size='sm'
               data-track-category='Tickets'
               data-track-name='SelectDatePresetToday'
+              data-track-kind='passive'
             >
               Today
             </Button>
@@ -134,6 +135,7 @@ export const DateRangeSubmenu = ({
               size='sm'
               data-track-category='Tickets'
               data-track-name='SelectDatePresetWeek'
+              data-track-kind='passive'
             >
               Last 7 days
             </Button>
@@ -143,6 +145,7 @@ export const DateRangeSubmenu = ({
               size='sm'
               data-track-category='Tickets'
               data-track-name='SelectDatePresetMonth'
+              data-track-kind='passive'
             >
               Last 30 days
             </Button>
@@ -175,6 +178,7 @@ export const DateRangeSubmenu = ({
                 className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                 data-track-category='Tickets'
                 data-track-name='DateRangeStart'
+                data-track-kind='active'
               />
             </div>
 
@@ -192,6 +196,7 @@ export const DateRangeSubmenu = ({
                 className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                 data-track-category='Tickets'
                 data-track-name='DateRangeEnd'
+                data-track-kind='passive'
               />
             </div>
           </div>
@@ -207,6 +212,7 @@ export const DateRangeSubmenu = ({
               className='w-full'
               data-track-category='Tickets'
               data-track-name='ClearDateRangeFilter'
+              data-track-kind='passive'
             >
               Clear date range
             </Button>

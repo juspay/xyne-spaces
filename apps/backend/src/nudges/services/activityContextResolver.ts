@@ -26,6 +26,7 @@ interface RawEvent {
   url: string;
   triggerType: string;
   contextMetadata: unknown;
+  interactionKind: string | null;
   platform: string;
   timestamp: Date;
 }

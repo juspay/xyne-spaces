@@ -43,6 +43,7 @@ const DigitalTwinHotTab = (): ReactElement => {
           ariaLabel='Search hot memories'
           trackCategory='Claw Agents'
           trackName='Digital Twin: search hot memories'
+          trackKind='passive'
           className='w-full'
         />
 
@@ -95,6 +96,7 @@ const DigitalTwinHotTab = (): ReactElement => {
                         aria-label='Delete memory'
                         data-track-category='Claw Agents'
                         data-track-name='Digital Twin delete hot memory'
+                        data-track-kind='active'
                         className='shrink-0 text-muted-foreground hover:text-destructive focus-visible:bg-muted focus-visible:ring-0'
                       >
                         <DeleteDustbin01 className='size-4' aria-hidden />

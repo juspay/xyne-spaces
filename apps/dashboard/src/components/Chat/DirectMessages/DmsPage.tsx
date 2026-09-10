@@ -445,6 +445,7 @@ const DmsPage = (): ReactElement => {
                 onClick={() => void handleDmSelect(channel.id)}
                 data-track-category='DM'
                 data-track-name='SELECT_DM_SEARCH_RESULT'
+                data-track-kind='passive'
               >
                 <DmSearchResultItem channel={channel} isSelected={isSelected} />
               </button>
@@ -480,6 +481,7 @@ const DmsPage = (): ReactElement => {
                       onClick={() => handleUserSelect(user.id)}
                       data-track-category='DM'
                       data-track-name='SELECT_NEW_DM_USER'
+                      data-track-kind='passive'
                     >
                       <DmUserSearchResultItem
                         user={user}
@@ -527,6 +529,7 @@ const DmsPage = (): ReactElement => {
                 title='Replay Tour'
                 data-track-category='DM'
                 data-track-name='REPLAY_TOUR_MOBILE'
+                data-track-kind='passive'
               >
                 <QuestionMarkCircle size={20} />
               </button>
@@ -558,6 +561,7 @@ const DmsPage = (): ReactElement => {
               data-track-event='blur'
               data-track-category='DM'
               data-track-name='SEARCH_DMS_INPUT'
+              data-track-kind='passive'
             />
             {dmSearchQuery && (
               <Button
@@ -568,6 +572,7 @@ const DmsPage = (): ReactElement => {
                 }}
                 data-track-category='DM'
                 data-track-name='CLEAR_DM_SEARCH'
+                data-track-kind='passive'
                 aria-label='Clear search'
                 variant='link'
                 size='icon'
@@ -637,6 +642,7 @@ const DmsPage = (): ReactElement => {
           data-testid='create-new-message-btn'
           data-track-category='DM'
           data-track-name='CREATE_DM'
+          data-track-kind='active'
         >
           <PenBox className='size-5 text-action-primary-foreground' />
         </button>
@@ -693,6 +699,7 @@ const DmsPage = (): ReactElement => {
                     title='Replay Tour'
                     data-track-category='DM'
                     data-track-name='REPLAY_TOUR_DESKTOP'
+                    data-track-kind='passive'
                   >
                     <QuestionMarkCircle size={16} />
                   </button>
@@ -709,6 +716,7 @@ const DmsPage = (): ReactElement => {
                       data-testid='create-new-message-btn'
                       data-track-category='DM'
                       data-track-name='CREATE_DM_DESKTOP'
+                      data-track-kind='active'
                     >
                       <PencilEditBox size={16} />
                     </button>
@@ -739,6 +747,7 @@ const DmsPage = (): ReactElement => {
                     data-track-event='blur'
                     data-track-category='DM'
                     data-track-name='SEARCH_DMS_INPUT_DESKTOP'
+                    data-track-kind='passive'
                   />
                   {dmSearchQuery && (
                     <Button
@@ -749,6 +758,7 @@ const DmsPage = (): ReactElement => {
                       }}
                       data-track-category='DM'
                       data-track-name='CLEAR_DM_SEARCH'
+                      data-track-kind='passive'
                       aria-label='Clear search'
                       variant='link'
                       size='icon'
@@ -782,6 +792,7 @@ const DmsPage = (): ReactElement => {
                             data-testid={`dm-filter-${tab.value}`}
                             data-track-category='DM'
                             data-track-name='TAB_CHANGE'
+                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ tab: tab.value })}
                             className={cn(
                               'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none',

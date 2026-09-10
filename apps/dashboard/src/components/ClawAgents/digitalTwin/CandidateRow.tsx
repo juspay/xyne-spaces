@@ -79,6 +79,7 @@ export const CandidateRow = ({
             onChange={e => setText(e.target.value)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin edit candidate text'
+            data-track-kind='active'
             disabled={isBusy}
             rows={3}
             autoFocus
@@ -114,6 +115,7 @@ export const CandidateRow = ({
                 data-ph-capture-attribute-track-id='digital_twin_save_candidate_edit'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin save candidate edit'
+                data-track-kind='active'
                 disabled={isBusy}
                 className={cn(iconBtn, 'bg-primary text-primary-foreground hover:opacity-85')}
               >
@@ -133,6 +135,7 @@ export const CandidateRow = ({
                 }}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin cancel candidate edit'
+                data-track-kind='passive'
                 disabled={isBusy}
                 className={cn(
                   iconBtn,
@@ -151,6 +154,7 @@ export const CandidateRow = ({
                 onClick={() => setEditing(true)}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin edit candidate'
+                data-track-kind='active'
                 disabled={isBusy}
                 className={cn(
                   iconBtn,
@@ -167,6 +171,7 @@ export const CandidateRow = ({
                 data-ph-capture-attribute-track-id='digital_twin_approve_candidate'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin approve candidate'
+                data-track-kind='active'
                 disabled={isBusy}
                 className={cn(iconBtn, 'bg-emerald-600 text-white hover:opacity-85')}
               >
@@ -184,6 +189,7 @@ export const CandidateRow = ({
                 data-ph-capture-attribute-track-id='digital_twin_reject_candidate'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin reject candidate'
+                data-track-kind='active'
                 disabled={isBusy}
                 className={cn(
                   iconBtn,

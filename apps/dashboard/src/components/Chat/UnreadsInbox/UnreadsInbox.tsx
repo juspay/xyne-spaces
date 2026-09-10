@@ -134,6 +134,7 @@ const UnreadsInbox = (): ReactElement => {
                     className={`p-1 cursor-pointer flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 rounded-t-lg bg-background border-b border-border/20' : ''}`}
                     data-track-category='UNREADS_INBOX'
                     data-track-name='TOGGLE_CHANNEL_ACCORDION'
+                    data-track-kind='passive'
                   >
                     <div className='flex-1 pointer-events-none'>
                       <ChannelItemV2 channel={channel} unreadCount={0} hideDraftIndicator />
@@ -152,6 +153,7 @@ const UnreadsInbox = (): ReactElement => {
                             }}
                             data-track-category='UNREADS_INBOX'
                             data-track-name='MARK_AS_READ'
+                            data-track-kind='active'
                           >
                             <Check className='w-3.5 h-3.5' />
                           </Button>

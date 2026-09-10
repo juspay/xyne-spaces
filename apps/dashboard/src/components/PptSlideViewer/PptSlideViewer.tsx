@@ -407,6 +407,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
                 className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40'
                 data-track-category='XyneAI'
                 data-track-name='PPT_PRESENT'
+                data-track-kind='passive'
               >
                 <Maximize2 size={12} />
                 Present
@@ -419,6 +420,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
                 className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
                 data-track-category='XyneAI'
                 data-track-name='PPT_DOWNLOAD'
+                data-track-kind='passive'
               >
                 <Download size={12} />
                 Download
@@ -449,6 +451,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
                 className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
                 data-track-category='XyneAI'
                 data-track-name='PPT_PREV'
+                data-track-kind='passive'
               >
                 <ChevronLeft size={14} />
               </button>
@@ -461,6 +464,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
                 className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
                 data-track-category='XyneAI'
                 data-track-name='PPT_NEXT'
+                data-track-kind='passive'
               >
                 <ChevronRight size={14} />
               </button>
@@ -489,6 +493,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
             }}
             data-track-category='XyneAI'
             data-track-name='PPT_BG_EXIT'
+            data-track-kind='passive'
           >
             {/* Close */}
             <button
@@ -513,6 +518,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
               }}
               data-track-category='XyneAI'
               data-track-name='PPT_EXIT'
+              data-track-kind='passive'
             >
               <X size={20} />
             </button>
@@ -551,6 +557,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
               }}
               data-track-category='XyneAI'
               data-track-name='PPT_SLIDE_CONTAINER'
+              data-track-kind='passive'
             >
               {current && <Slide slide={current} />}
 
@@ -578,6 +585,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
                   }}
                   data-track-category='XyneAI'
                   data-track-name='PPT_FS_PREV'
+                  data-track-kind='passive'
                 >
                   <ChevronLeft size={32} />
                 </button>
@@ -607,6 +615,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
                   }}
                   data-track-category='XyneAI'
                   data-track-name='PPT_FS_NEXT'
+                  data-track-kind='passive'
                 >
                   <ChevronRight size={32} />
                 </button>

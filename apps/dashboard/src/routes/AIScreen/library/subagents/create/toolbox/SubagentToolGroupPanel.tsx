@@ -54,6 +54,7 @@ export function SubagentToolGroupPanel({
           }
           data-track-category='Claw Agents'
           data-track-name='Create subagent v2: toggle tool group from detail'
+          data-track-kind='active'
           className={cn(
             'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             enabled
@@ -79,6 +80,7 @@ export function SubagentToolGroupPanel({
               }
               data-track-category='Claw Agents'
               data-track-name='Create subagent v2: toggle all tools in group'
+              data-track-kind='active'
               className='shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground'
             >
               {allChosen ? 'Clear all' : `Select all (${chosen.length}/${group.tools.length})`}
@@ -99,6 +101,7 @@ export function SubagentToolGroupPanel({
                 }
                 data-track-category='Claw Agents'
                 data-track-name='Create subagent v2: toggle tool'
+                data-track-kind='active'
                 className='flex w-full items-center gap-2 text-left'
               >
                 {checked ? (

@@ -121,6 +121,7 @@ export const ConversationLabelSubmenu = ({
                   `}
                   data-track-category='Tickets'
                   data-track-name='ToggleConversationLabelFilter'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ labelId: label.id, selected: !isSelected })}
                 >
                   <div className='flex items-center gap-2 min-w-0'>

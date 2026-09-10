@@ -112,6 +112,7 @@ export const ClawAgentDetailHeader = ({
             onClick={() => onModerate(isGlobal ? 'demote' : 'promote')}
             data-track-category='Claw Agents'
             data-track-name='MODERATE_AGENT'
+            data-track-kind='active'
           >
             {!moderating &&
               (isGlobal ? <ArrowDown className='size-4' /> : <ArrowUp className='size-4' />)}
@@ -135,6 +136,7 @@ export const ClawAgentDetailHeader = ({
             onClick={onPublish}
             data-track-category='Claw Agents'
             data-track-name='PUBLISH_AGENT'
+            data-track-kind='active'
           >
             {!publishing && <Globe className='size-4' />}
             <span className='hidden sm:inline'>{publishing ? 'Publishing…' : 'Publish'}</span>
@@ -149,6 +151,7 @@ export const ClawAgentDetailHeader = ({
           onClick={onClone}
           data-track-category='Claw Agents'
           data-track-name='CLONE_AGENT'
+          data-track-kind='active'
         >
           {!cloning && <Copy className='size-4' />}
           <span className='hidden sm:inline'>
@@ -165,6 +168,7 @@ export const ClawAgentDetailHeader = ({
             onClick={onSave}
             data-track-category='Claw Agents'
             data-track-name='SAVE_AGENT'
+            data-track-kind='active'
             title={dirty ? 'Save changes' : 'Nothing to save'}
           >
             {!saving && <Save className='size-4' />}
@@ -195,6 +199,7 @@ export const ClawAgentDetailHeader = ({
               onClick={onDelete}
               data-track-category='Claw Agents'
               data-track-name='DELETE_AGENT'
+              data-track-kind='active'
               aria-label='Delete agent'
               className='text-muted-foreground hover:text-destructive'
             >

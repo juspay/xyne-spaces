@@ -67,6 +67,7 @@ export function CallRow({
         }
         data-track-category='CALLS'
         data-track-name='upcoming-call-click'
+        data-track-kind='passive'
       >
         <div
           className={cn(
@@ -90,6 +91,7 @@ export function CallRow({
           }}
           data-track-category='CALLS'
           data-track-name='JOIN_UPCOMING_CALL'
+          data-track-kind='active'
           className={cn(
             'shrink-0 text-sm',
             isActive
@@ -107,6 +109,7 @@ export function CallRow({
             className='shrink-0 size-6 p-0 text-muted-foreground hover:text-foreground'
             data-track-category='CALLS'
             data-track-name='upcoming-call-more-options'
+            data-track-kind='passive'
             onClick={e => e.stopPropagation()}
             aria-label='More options'
           >

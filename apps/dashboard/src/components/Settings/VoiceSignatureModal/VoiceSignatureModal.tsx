@@ -209,6 +209,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
               onClick={handleClose}
               data-track-category='voice-signature'
               data-track-name='close-modal'
+              data-track-kind='passive'
               className='text-muted-foreground hover:text-foreground transition-colors rounded-md p-1 hover:bg-muted'
             >
               <X className='size-4' />
@@ -228,6 +229,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                   onClick={() => void handleDelete()}
                   data-track-category='voice-signature'
                   data-track-name='delete-signature'
+                  data-track-kind='active'
                   className='flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 transition-colors'
                 >
                   <Trash2 className='size-3' />
@@ -262,6 +264,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                       onClick={() => setActiveTab(tab)}
                       data-track-category='voice-signature'
                       data-track-name={`tab-${tab}`}
+                      data-track-kind='passive'
                       className={cn(
                         'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
                         activeTab === tab
@@ -317,6 +320,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                               onClick={handleStopRecording}
                               data-track-category='voice-signature'
                               data-track-name='stop-recording'
+                              data-track-kind='active'
                               className='relative z-10 flex items-center justify-center w-12 h-12 rounded-full bg-destructive text-white hover:bg-destructive/90 transition-colors shadow-lg'
                             >
                               <Square className='size-4 fill-white' />
@@ -354,6 +358,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                             onClick={() => void handleStartRecording()}
                             data-track-category='voice-signature'
                             data-track-name='start-recording'
+                            data-track-kind='active'
                             className='flex items-center justify-center w-14 h-14 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-md hover:shadow-lg hover:scale-105'
                           >
                             <Mic className='size-6' />
@@ -390,6 +395,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                       onClick={() => fileInputRef.current?.click()}
                       data-track-category='voice-signature'
                       data-track-name='upload-file'
+                      data-track-kind='active'
                       className={cn(
                         'w-full flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-10 transition-colors',
                         'border-border bg-muted/30 hover:border-primary/50 hover:bg-primary/5',
@@ -428,6 +434,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
               onClick={handleClose}
               data-track-category='voice-signature'
               data-track-name='CLOSE_VOICE_SIGNATURE_MODAL'
+              data-track-kind='passive'
             >
               {isProcessing ? 'Processing…' : 'Done'}
             </Button>

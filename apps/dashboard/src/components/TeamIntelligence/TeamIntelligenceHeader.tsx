@@ -76,6 +76,7 @@ const TeamIntelligenceHeader = ({
           onClick={() => setIsSidebarOpen(true)}
           data-track-category='team-intelligence'
           data-track-name='open-team-intelligence-sidebar'
+          data-track-kind='passive'
           className='rounded-md transition-colors text-muted-foreground shrink-0'
           aria-label='Open sidebar'
         >

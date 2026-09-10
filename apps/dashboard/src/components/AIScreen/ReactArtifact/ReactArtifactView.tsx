@@ -327,6 +327,7 @@ export const ReactArtifactView = ({
                   }`}
                   data-track-category='AskAI'
                   data-track-name='ReactArtifactTab'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ tab: value })}
                 >
                   <Icon className='h-3.5 w-3.5' aria-hidden='true' />
@@ -370,6 +371,7 @@ export const ReactArtifactView = ({
               title='Refresh data'
               data-track-category='AskAI'
               data-track-name='ReactArtifactRefreshData'
+              data-track-kind='passive'
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
@@ -388,6 +390,7 @@ export const ReactArtifactView = ({
               title={saveState === 'saved' ? 'Saved to your apps' : 'Save app'}
               data-track-category='AskAI'
               data-track-name='ReactArtifactSave'
+              data-track-kind='active'
             >
               {saveState === 'saving' ? (
                 <Loader2 className='h-3.5 w-3.5 animate-spin' aria-hidden='true' />
@@ -407,6 +410,7 @@ export const ReactArtifactView = ({
               title={expandLabel}
               data-track-category='AskAI'
               data-track-name='ReactArtifactExpand'
+              data-track-kind='passive'
             >
               <Maximize2 className='h-3.5 w-3.5' aria-hidden='true' />
             </button>
@@ -419,6 +423,7 @@ export const ReactArtifactView = ({
               aria-label='Close'
               data-track-category='AskAI'
               data-track-name='ReactArtifactClose'
+              data-track-kind='passive'
             >
               <X className='h-4 w-4' aria-hidden='true' />
             </button>

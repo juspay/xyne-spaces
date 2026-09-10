@@ -107,6 +107,7 @@ export function AgentKeysDialog({
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: done agent keys'
+            data-track-kind='passive'
           >
             Done
           </Button>
@@ -119,6 +120,7 @@ export function AgentKeysDialog({
               className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: cancel agent key'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -129,6 +131,7 @@ export function AgentKeysDialog({
               className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: save agent key'
+              data-track-kind='active'
             >
               Save
             </Button>
@@ -177,6 +180,7 @@ export function AgentKeysDialog({
                       aria-label={`Edit ${label(entry.provider)} credential`}
                       data-track-category='Claw Agents'
                       data-track-name='Agent detail v2: edit agent key'
+                      data-track-kind='active'
                       className={ICON_BUTTON}
                     >
                       <PencilEditLine className='size-4' aria-hidden />
@@ -188,6 +192,7 @@ export function AgentKeysDialog({
                       aria-label={`Remove ${label(entry.provider)} credential`}
                       data-track-category='Claw Agents'
                       data-track-name='Agent detail v2: remove agent key'
+                      data-track-kind='active'
                       className={ICON_BUTTON}
                     >
                       {removing ? (
@@ -218,6 +223,7 @@ export function AgentKeysDialog({
                 }}
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: add agent key'
+                data-track-kind='active'
                 className='flex h-7 shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-dashed border-border bg-card px-2 transition-colors hover:bg-muted/50'
               >
                 <span className='max-w-[200px] truncate text-sm font-medium leading-5 text-foreground/80'>

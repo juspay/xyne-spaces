@@ -185,13 +185,25 @@ export const SosAlertBanner: React.FC = () => {
         action: {
           label: 'View',
           onClick: (): void => {
-            globalClickTracker.trackManualEvent('CALLS', 'VIEW_SOS_ALERT');
+            globalClickTracker.trackManualEvent(
+              'CALLS',
+              'VIEW_SOS_ALERT',
+              undefined,
+              undefined,
+              'passive',
+            );
             void view(alert);
           },
         },
         // Fires when the user closes the toast (X) — that's the acknowledgment.
         onDismiss: (): void => {
-          globalClickTracker.trackManualEvent('CALLS', 'DISMISS_SOS_ALERT');
+          globalClickTracker.trackManualEvent(
+            'CALLS',
+            'DISMISS_SOS_ALERT',
+            undefined,
+            undefined,
+            'passive',
+          );
           acknowledge(alert.id);
         },
       });

@@ -92,6 +92,7 @@ const ReleaseRepoConfigModal = ({
             className='shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground'
             data-track-category='ReleaseRepoConfig'
             data-track-name='CloseModal'
+            data-track-kind='passive'
           >
             <X className='size-[18px]' />
           </button>
@@ -142,6 +143,7 @@ const ReleaseRepoConfigModal = ({
             className='flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border py-3.5 text-sm font-medium text-primary transition-colors hover:bg-primary/5'
             data-track-category='ReleaseRepoConfig'
             data-track-name='AddRepository'
+            data-track-kind='active'
           >
             <Plus className='size-4' /> Add repository
           </button>

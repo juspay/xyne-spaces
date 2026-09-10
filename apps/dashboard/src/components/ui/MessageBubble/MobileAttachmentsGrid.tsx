@@ -135,6 +135,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
                         onClick={handleOpenAll}
                         data-track-category='MESSAGE'
                         data-track-name='OPEN_ALL_ATTACHMENTS'
+                        data-track-kind='passive'
                         className='absolute inset-0 bg-black/60 flex items-center justify-center rounded-lg'
                       >
                         <span className='text-white text-2xl font-semibold'>+{remainingCount}</span>
@@ -172,6 +173,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
                         onClick={handleClose}
                         data-track-category='MESSAGE'
                         data-track-name='CLOSE_ATTACHMENTS_GRID'
+                        data-track-kind='passive'
                         className='p-2'
                       >
                         <X className='w-6 h-6' />

@@ -42,6 +42,7 @@ export const RecordingDeleteDialog = ({
           className='flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           data-track-category='RecordingsV2'
           data-track-name='close_delete_recording_dialog'
+          data-track-kind='passive'
         >
           <MultipleCrossCancelDefault size={14} />
         </button>
@@ -71,6 +72,7 @@ export const RecordingDeleteDialog = ({
           onClick={() => onOpenChange(false)}
           data-track-category='RecordingsV2'
           data-track-name='cancel_delete_recording'
+          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -81,6 +83,7 @@ export const RecordingDeleteDialog = ({
           onClick={onConfirm}
           data-track-category='RecordingsV2'
           data-track-name='confirm_delete_recording'
+          data-track-kind='active'
         >
           Delete
         </Button>

@@ -128,6 +128,7 @@ export const UserGroupSubmenu = ({
               `}
               data-track-category='Tickets'
               data-track-name='ToggleSelectAllUserGroups'
+              data-track-kind='passive'
             >
               <span className='flex-1 text-left text-sm font-medium text-primary'>
                 {allVisibleSelected ? 'Deselect all' : 'Select all'}
@@ -151,6 +152,7 @@ export const UserGroupSubmenu = ({
                   `}
                   data-track-category='Tickets'
                   data-track-name='ToggleUserGroupFilter'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ groupId: group.id, groupName: group.name })}
                 >
                   <Users className='w-4 h-4 text-muted-foreground shrink-0' />

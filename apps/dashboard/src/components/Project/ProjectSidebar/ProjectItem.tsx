@@ -37,6 +37,7 @@ const ProjectItem = ({
         isActive={isActive}
         data-track-category='Projects'
         data-track-name='ToggleProjectExpand'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ projectId: project.id, projectName: project.name })}
       />
 
@@ -53,6 +54,7 @@ const ProjectItem = ({
               dataTestId={`board-item-${board.id}`}
               data-track-category='Projects'
               data-track-name='SelectBoard'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 boardId: board.id,
                 boardName: board.name,

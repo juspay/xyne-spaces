@@ -204,6 +204,7 @@ const Settings = ({
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceOnline'
+                data-track-kind='active'
               >
                 <div className='w-2 h-2 rounded-full bg-green-500' />
                 <span>Active</span>
@@ -220,6 +221,7 @@ const Settings = ({
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceAway'
+                data-track-kind='active'
               >
                 <div className='w-2 h-2 rounded-full border border-muted-foreground' />
                 <span>Away</span>
@@ -244,6 +246,7 @@ const Settings = ({
           onClick={handleStatusClick}
           data-track-category='Settings'
           data-track-name='EditUserStatus'
+          data-track-kind='active'
           data-testid='set-status-btn'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -280,6 +283,7 @@ const Settings = ({
                 title='Clear status'
                 data-track-category='Settings'
                 data-track-name='ClearUserStatus'
+                data-track-kind='active'
               >
                 <X className='size-3 text-muted-foreground' />
               </Button>
@@ -314,6 +318,7 @@ const Settings = ({
                 trackId='resume_notifications'
                 data-track-category='Settings'
                 data-track-name='ResumeNotifications'
+                data-track-kind='active'
               >
                 <X className='size-3 text-muted-foreground' />
               </Button>
@@ -331,6 +336,7 @@ const Settings = ({
                 className='w-full px-2 py-1 rounded-lg border border-border bg-muted/50 hover:bg-secondary transition-colors flex items-center justify-between gap-2'
                 data-track-category='Settings'
                 data-track-name='OpenPauseNotificationsMenu'
+                data-track-kind='passive'
               >
                 <div className='flex items-center p-1 gap-2 text-muted-foreground'>
                   <Bell className='size-4 flex-shrink-0' />
@@ -362,6 +368,7 @@ const Settings = ({
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='Settings'
                     data-track-name='PauseNotifications'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ duration: option.minutes })}
                   >
                     <span>{option.label}</span>
@@ -375,6 +382,7 @@ const Settings = ({
                   className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                   data-track-category='Settings'
                   data-track-name='PauseNotificationsCustom'
+                  data-track-kind='active'
                 >
                   <span>Custom</span>
                   <Calendar className='size-4 text-muted-foreground' />
@@ -403,6 +411,7 @@ const Settings = ({
           onClick={handleProfileClick}
           data-track-category='Settings'
           data-track-name='OpenProfile'
+          data-track-kind='passive'
         >
           <User className='size-4' />
           Profile
@@ -415,6 +424,7 @@ const Settings = ({
           onClick={onOpenPreferences}
           data-track-category='Settings'
           data-track-name='OpenPreferences'
+          data-track-kind='passive'
         >
           <Settings2 className='size-4' />
           Preferences
@@ -433,6 +443,7 @@ const Settings = ({
           trackId='logout'
           data-track-category='Settings'
           data-track-name='Logout'
+          data-track-kind='passive'
         >
           Sign out of Xyne Space
         </Button>

@@ -46,6 +46,7 @@ const MemoryCompareView: React.FC<MemoryCompareViewProps> = ({
             className='p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors'
             data-track-category='Memory'
             data-track-name='CloseCompareView'
+            data-track-kind='passive'
           >
             <X size={18} />
           </button>

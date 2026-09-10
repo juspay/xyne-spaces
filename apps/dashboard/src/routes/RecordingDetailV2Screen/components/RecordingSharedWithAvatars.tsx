@@ -56,6 +56,7 @@ export const RecordingSharedWithAvatars = ({
         aria-label={`${tooltipLabel}. Open share settings`}
         data-track-category='RecordingDetailV2'
         data-track-name='open_share_modal_from_avatars'
+        data-track-kind='passive'
       >
         {visibleUserIds.map((userId, index) => (
           <Avatar

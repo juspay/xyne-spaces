@@ -105,6 +105,7 @@ const ArtifactAppScreen = (): ReactElement => {
           onClick={() => void refetch()}
           data-track-category='AskAI'
           data-track-name='ArtifactAppRetryLoad'
+          data-track-kind='passive'
         >
           Try again
         </Button>
@@ -130,6 +131,7 @@ const ArtifactAppScreen = (): ReactElement => {
           aria-label='Back to apps'
           data-track-category='AskAI'
           data-track-name='ArtifactAppBack'
+          data-track-kind='passive'
         >
           <ArrowLeft className='h-4 w-4' />
         </button>

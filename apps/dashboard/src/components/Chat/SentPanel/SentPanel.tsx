@@ -143,6 +143,7 @@ const SentGroupMessageRow = ({
       onClick={handleClick}
       trackCategory='CHAT_SIDEBAR'
       trackName='OPEN_SENT_MESSAGE'
+      trackKind='passive'
       attachments={panelAttachments}
     />
   );

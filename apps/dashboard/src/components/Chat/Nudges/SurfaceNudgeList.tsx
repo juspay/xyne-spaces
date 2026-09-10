@@ -301,6 +301,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
                 )}
                 data-track-category='NUDGES'
                 data-track-name='PreviousNudge'
+                data-track-kind='passive'
               >
                 <ChevronLeft className='h-3.5 w-3.5' />
               </button>
@@ -322,6 +323,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
                 )}
                 data-track-category='NUDGES'
                 data-track-name='NextNudge'
+                data-track-kind='passive'
               >
                 <ChevronRight className='h-3.5 w-3.5' />
               </button>

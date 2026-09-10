@@ -147,6 +147,7 @@ const DynamicDashboardPanel = (): ReactElement => {
               aria-label='Create dashboard'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Open_Create_Dashboard_Modal'
+              data-track-kind='passive'
             >
               <Plus size={18} />
             </button>
@@ -180,12 +181,14 @@ const DynamicDashboardPanel = (): ReactElement => {
               label='Data Sources'
               onClick={() => setDataSourcesOpen(true)}
               trackName='Open_Data_Sources_Admin'
+              trackKind='passive'
             />
             <SidebarNavItem
               icon={<Network size={16} />}
               label='Schema'
               onClick={() => setSchemaVizOpen(true)}
               trackName='Open_Database_Visualizer'
+              trackKind='passive'
             />
             <SidebarNavItem icon={<Workflow size={16} />} label='Automations' disabled />
             <SidebarNavItem icon={<Bell size={16} />} label='Notification' disabled />
@@ -215,6 +218,7 @@ const DynamicDashboardPanel = (): ReactElement => {
                     }`}
                     data-track-category='DYNAMIC_DASHBOARD'
                     data-track-name={`Tab_${label}`}
+                    data-track-kind='passive'
                   >
                     {label}
                   </button>
@@ -270,6 +274,7 @@ const DynamicDashboardPanel = (): ReactElement => {
                       aria-disabled={disabled}
                       data-track-category='DYNAMIC_DASHBOARD'
                       data-track-name='Select_Dashboard'
+                      data-track-kind='passive'
                     >
                       <LayoutDashboard
                         size={16}
@@ -287,6 +292,7 @@ const DynamicDashboardPanel = (): ReactElement => {
                         aria-label={`Delete ${d.name}`}
                         data-track-category='DYNAMIC_DASHBOARD'
                         data-track-name='Open_Delete_Dashboard_Modal'
+                        data-track-kind='passive'
                       >
                         <Trash2 size={13} />
                       </button>

@@ -111,6 +111,7 @@ const ProjectsListView = (): ReactElement => {
                   className='inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent'
                   data-track-category='TicketReports'
                   data-track-name='OpenReportsFromProjectList'
+                  data-track-kind='passive'
                 >
                   <Download className='size-4' />
                   Export report
@@ -121,6 +122,7 @@ const ProjectsListView = (): ReactElement => {
                 onClick={() => setShowCreateModal(true)}
                 data-track-category='Projects'
                 data-track-name='CreateProject'
+                data-track-kind='active'
               >
                 New
               </Button>
@@ -137,6 +139,7 @@ const ProjectsListView = (): ReactElement => {
               className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='Projects'
               data-track-name='SearchProjects'
+              data-track-kind='passive'
             />
           </div>
         </div>

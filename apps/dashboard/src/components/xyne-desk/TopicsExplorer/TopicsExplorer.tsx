@@ -606,6 +606,7 @@ export const TopicsExplorer = ({
           aria-label='Close topics explorer'
           data-track-category='TOPICS_EXPLORER'
           data-track-name='CloseButton'
+          data-track-kind='passive'
         >
           <MultipleCrossCancelDefault size={16} />
         </button>
@@ -681,6 +682,7 @@ export const TopicsExplorer = ({
                     aria-label={`Group level ${level + 1}`}
                     data-track-category='TOPICS_EXPLORER'
                     data-track-name='CHANGE_DIMENSION'
+                    data-track-kind='passive'
                   >
                     {/* Current dim first, then anything not already used at another
                         level. `available` alone drops the selected dim once it stops
@@ -705,6 +707,7 @@ export const TopicsExplorer = ({
                       aria-label={`Remove level ${level + 1}`}
                       data-track-category='TOPICS_EXPLORER'
                       data-track-name='REMOVE_LEVEL'
+                      data-track-kind='active'
                     >
                       <MultipleCrossCancelDefault size={12} aria-hidden />
                     </button>
@@ -723,6 +726,7 @@ export const TopicsExplorer = ({
                   className='rounded-md border border-dashed border-border px-2 py-1 text-sm text-muted-foreground hover:text-foreground'
                   data-track-category='TOPICS_EXPLORER'
                   data-track-name='ADD_LEVEL'
+                  data-track-kind='active'
                 >
                   + Level
                 </button>
@@ -817,6 +821,7 @@ export const TopicsExplorer = ({
                         aria-label='Previous page'
                         data-track-category='TOPICS_EXPLORER'
                         data-track-name='PREV_PAGE'
+                        data-track-kind='passive'
                       >
                         <ChevronLeft size={13} />
                       </button>
@@ -832,6 +837,7 @@ export const TopicsExplorer = ({
                         aria-label='Next page'
                         data-track-category='TOPICS_EXPLORER'
                         data-track-name='NEXT_PAGE'
+                        data-track-kind='passive'
                       >
                         <ChevronRight size={13} />
                       </button>

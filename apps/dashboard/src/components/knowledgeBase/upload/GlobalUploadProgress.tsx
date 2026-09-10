@@ -187,6 +187,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
               onTouchStart={e => e.stopPropagation()}
               data-track-category='knowledge-base'
               data-track-name='toggle-upload-progress'
+              data-track-kind='passive'
               className='p-1 rounded hover:bg-gray-200 transition-colors text-gray-500'
             >
               {isExpanded ? <Minus size={14} /> : <ChevronUp size={14} />}
@@ -203,6 +204,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
                 onTouchStart={e => e.stopPropagation()}
                 data-track-category='knowledge-base'
                 data-track-name='dismiss-upload-progress'
+                data-track-kind='passive'
                 className='p-1 rounded hover:bg-gray-200 transition-colors text-gray-500'
               >
                 <X size={14} />

@@ -132,6 +132,7 @@ export function ModelThinkingSelector({
             aria-label='Model and thinking'
             data-track-category='XyneAI'
             data-track-name='OPEN_MODEL_SELECTOR'
+            data-track-kind='passive'
             className={cn(
               'flex h-7 items-center gap-1.5 rounded-lg border border-border px-2 text-sm transition-colors',
               disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
@@ -166,6 +167,7 @@ export function ModelThinkingSelector({
           }}
           data-track-category='XyneAI'
           data-track-name='SELECT_MODEL'
+          data-track-kind='passive'
           data-track-metadata='{"model":"recommended"}'
           className={rowClass(selectedModel === null)}
         >
@@ -195,6 +197,7 @@ export function ModelThinkingSelector({
                 data-id='model-search'
                 data-track-category='XyneAI'
                 data-track-name='SEARCH_MODELS'
+                data-track-kind='passive'
                 className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
               />
             </div>
@@ -213,6 +216,7 @@ export function ModelThinkingSelector({
                     }}
                     data-track-category='XyneAI'
                     data-track-name='SELECT_MODEL'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ model: m.id })}
                     className={rowClass(selectedModel === m.id)}
                   >
@@ -242,6 +246,7 @@ export function ModelThinkingSelector({
             data-id='thinking-expand'
             data-track-category='XyneAI'
             data-track-name='TOGGLE_THINKING_MENU'
+            data-track-kind='passive'
             aria-expanded={thinkingOpen}
             className='flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
           >
@@ -278,6 +283,7 @@ export function ModelThinkingSelector({
                   data-id={`thinking-option-${o.label.toLowerCase()}`}
                   data-track-category='XyneAI'
                   data-track-name='SELECT_THINKING_LEVEL'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ level: o.label })}
                   className={rowClass(o.value === thinkingLevel)}
                 >

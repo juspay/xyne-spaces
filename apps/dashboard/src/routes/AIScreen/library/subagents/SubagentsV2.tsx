@@ -92,6 +92,7 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
             activeId={activeSource}
             onSelect={setActiveSource}
             trackName='Subagents filter'
+            trackKind='passive'
           />
         </LibraryToolbarPortal>
       }

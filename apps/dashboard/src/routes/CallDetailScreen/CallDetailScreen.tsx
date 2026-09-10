@@ -402,6 +402,7 @@ export default function CallDetailScreen(): ReactElement {
                 onClick={() => void navigate('..')}
                 data-track-category='CallDetail'
                 data-track-name='breadcrumb-calls'
+                data-track-kind='passive'
                 className='text-[13px] text-muted-foreground hover:text-foreground transition-colors shrink-0'
               >
                 Calls Home
@@ -419,6 +420,7 @@ export default function CallDetailScreen(): ReactElement {
                     onClick={openAI}
                     data-track-category='CallDetail'
                     data-track-name='open-ask-ai'
+                    data-track-kind='passive'
                     className='size-8 shrink-0 flex items-center justify-center rounded-lg transition-colors hover:bg-accent'
                   >
                     <img
@@ -460,6 +462,7 @@ export default function CallDetailScreen(): ReactElement {
                       disabled={!isChannelMember}
                       data-track-category='CallDetail'
                       data-track-name='goto-call-message'
+                      data-track-kind='passive'
                       className='truncate underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:text-foreground hover:decoration-muted-foreground disabled:pointer-events-none disabled:no-underline disabled:opacity-60'
                     >
                       {postedInLabel}
@@ -504,6 +507,7 @@ export default function CallDetailScreen(): ReactElement {
                   }}
                   data-track-category='CallDetail'
                   data-track-name='tabs-scroll-left'
+                  data-track-kind='passive'
                   className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                 >
                   <ChevronLeft className='size-3.5' />
@@ -532,6 +536,7 @@ export default function CallDetailScreen(): ReactElement {
                     onClick={() => setSelectedTab(prd.id)}
                     data-track-category='CallDetail'
                     data-track-name='tab-prd'
+                    data-track-kind='passive'
                     className={cn(pillClassName(activeTab === prd.id), 'max-w-[160px]')}
                   >
                     {prd.canvasId === null ? (
@@ -551,6 +556,7 @@ export default function CallDetailScreen(): ReactElement {
                   }}
                   data-track-category='CallDetail'
                   data-track-name='tabs-scroll-right'
+                  data-track-kind='passive'
                   className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                 >
                   <ChevronRight className='size-3.5' />
@@ -567,6 +573,7 @@ export default function CallDetailScreen(): ReactElement {
                       className={cn(POST_BUTTON_CLASS, 'text-xs font-semibold !rounded-2xl')}
                       data-track-category='CallDetail'
                       data-track-name='open_post_to_channel_modal'
+                      data-track-kind='passive'
                     >
                       <Hashtag className='size-3.5' />
                       Post to channel
@@ -583,6 +590,7 @@ export default function CallDetailScreen(): ReactElement {
                             className={POST_BUTTON_CLASS}
                             data-track-category='CallDetail'
                             data-track-name='open_call_actions_menu'
+                            data-track-kind='passive'
                           >
                             <ChevronDown className='size-3.5' />
                           </Button>
@@ -603,6 +611,7 @@ export default function CallDetailScreen(): ReactElement {
                       className='rounded-lg px-2.5 py-2'
                       data-track-category='CallDetail'
                       data-track-name='open_post_to_channel_from_menu'
+                      data-track-kind='passive'
                     >
                       <Hashtag className='size-4 text-muted-foreground' />
                       Post to channel
@@ -615,6 +624,7 @@ export default function CallDetailScreen(): ReactElement {
                       className='rounded-lg px-2.5 py-2'
                       data-track-category='CallDetail'
                       data-track-name='open_post_to_email_modal'
+                      data-track-kind='passive'
                     >
                       <EnvelopeDefault className='size-4 text-muted-foreground' />
                       Draft follow-up email
@@ -625,6 +635,7 @@ export default function CallDetailScreen(): ReactElement {
                       className='rounded-lg px-2.5 py-2'
                       data-track-category='CallDetail'
                       data-track-name='export_call_google_doc'
+                      data-track-kind='passive'
                     >
                       <File02Text className='size-4 text-muted-foreground' />
                       {googleDocExport.isExporting

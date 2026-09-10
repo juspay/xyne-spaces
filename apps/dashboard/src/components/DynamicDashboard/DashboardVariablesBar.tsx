@@ -71,6 +71,7 @@ export const DashboardVariablesBar = ({
             className='inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors'
             data-track-category='DYNAMIC_DASHBOARD'
             data-track-name='Add_Dashboard_Variable'
+            data-track-kind='active'
           >
             <Plus size={11} />
             Variable
@@ -123,6 +124,7 @@ export const DashboardVariablesBar = ({
               onClick={() => setDeletingName(null)}
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Cancel_Delete_Variable'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -132,6 +134,7 @@ export const DashboardVariablesBar = ({
               trackId='delete_dashboard_variable'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Confirm_Delete_Variable'
+              data-track-kind='active'
             >
               Delete
             </Button>
@@ -211,6 +214,7 @@ const VariableChip = ({
                 className='text-[10px] text-muted-foreground hover:text-foreground px-1'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Clear_Variable_Selection'
+                data-track-kind='passive'
               >
                 Clear
               </button>
@@ -244,6 +248,7 @@ const VariableChip = ({
                 }`}
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Toggle_Variable_Option'
+                data-track-kind='passive'
               >
                 <span className='truncate'>{opt}</span>
                 {isSel && <Check size={12} />}
@@ -271,6 +276,7 @@ const IconAction = ({
     className='p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground'
     data-track-category='DYNAMIC_DASHBOARD'
     data-track-name='Variable_Icon_Action'
+    data-track-kind='passive'
     {...rest}
   >
     {children}
@@ -381,6 +387,7 @@ const VariableEditor = ({
           className='h-3.5 w-3.5'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Toggle_Variable_Multi'
+          data-track-kind='passive'
         />
         Allow multiple selection
       </label>
@@ -401,6 +408,7 @@ const VariableEditor = ({
           onClick={onCancel}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CANCEL_DASHBOARD_VARIABLES'
+          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -409,6 +417,7 @@ const VariableEditor = ({
           trackId='save_dashboard_variable'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='SAVE_DASHBOARD_VARIABLES'
+          data-track-kind='active'
         >
           {initial ? 'Save changes' : 'Create variable'}
         </Button>

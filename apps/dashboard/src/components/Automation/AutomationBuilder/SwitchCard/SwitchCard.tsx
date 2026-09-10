@@ -135,6 +135,7 @@ export function SwitchCard({
           onClick={() => setCollapsed(prev => !prev)}
           data-track-category='automation-builder'
           data-track-name='switch-toggle-collapse'
+          data-track-kind='passive'
         >
           <div className='flex size-8 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400'>
             <ListTree className='size-4' />
@@ -161,6 +162,7 @@ export function SwitchCard({
             aria-label='Move up'
             data-track-category='automation-builder'
             data-track-name='switch-move-up'
+            data-track-kind='active'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
               index === 1
@@ -177,6 +179,7 @@ export function SwitchCard({
             aria-label='Move down'
             data-track-category='automation-builder'
             data-track-name='switch-move-down'
+            data-track-kind='active'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
               index === total
@@ -211,6 +214,7 @@ export function SwitchCard({
               }}
               data-track-category='automation-builder'
               data-track-name='switch-delete'
+              data-track-kind='active'
               className='flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-500/10'
             >
               <Trash2 className='size-4' />
@@ -244,6 +248,7 @@ export function SwitchCard({
                         onClick={() => setEditingCaseIndex(caseIndex)}
                         data-track-category='automation-builder'
                         data-track-name='switch-open-case-editor'
+                        data-track-kind='passive'
                         className='gap-1 h-7 text-xs'
                       >
                         <Pencil className='size-3' />
@@ -255,6 +260,7 @@ export function SwitchCard({
                         aria-label={`Remove case ${caseIndex + 1}`}
                         data-track-category='automation-builder'
                         data-track-name='switch-remove-case'
+                        data-track-kind='active'
                         className='flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-red-600 hover:bg-red-500/10'
                       >
                         <X className='size-3.5' />
@@ -266,6 +272,7 @@ export function SwitchCard({
                     onClick={() => setEditingCaseIndex(caseIndex)}
                     data-track-category='automation-builder'
                     data-track-name='switch-open-case-editor'
+                    data-track-kind='passive'
                     className={cn(
                       'rounded-md border px-3 py-1.5 text-left text-xs truncate',
                       caseConditionUnset
@@ -332,6 +339,7 @@ export function SwitchCard({
             className='gap-1.5 self-start'
             data-track-category='automation-builder'
             data-track-name='switch-add-case'
+            data-track-kind='active'
           >
             <Plus className='size-3.5' />
             Add case
@@ -377,6 +385,7 @@ export function SwitchCard({
                 }}
                 data-track-category='automation-builder'
                 data-track-name='CANCEL_SWITCH_CASE'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -385,6 +394,7 @@ export function SwitchCard({
                 onClick={handleCaseConditionSave}
                 data-track-category='automation-builder'
                 data-track-name='SAVE_SWITCH_CASE'
+                data-track-kind='active'
               >
                 Save condition
               </Button>

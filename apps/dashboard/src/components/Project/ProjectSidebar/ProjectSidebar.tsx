@@ -150,6 +150,7 @@ const ProjectSidebar = ({
                     className='p-1 hover:bg-muted rounded transition-colors'
                     data-track-category='Projects'
                     data-track-name='OpenProjectSearch'
+                    data-track-kind='passive'
                   >
                     <Search className='size-3 text-muted-foreground' />
                   </button>
@@ -218,6 +219,7 @@ const ProjectSidebar = ({
                     className='p-1 hover:bg-muted rounded transition-colors'
                     data-track-category='Projects'
                     data-track-name='OpenGroupSearch'
+                    data-track-kind='passive'
                   >
                     <Search className='size-3 text-muted-foreground' />
                   </button>
@@ -242,6 +244,7 @@ const ProjectSidebar = ({
                       }}
                       data-track-category='Projects'
                       data-track-name='SelectGroupFilter'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         groupId: group.id,
                         groupName: group.name,
@@ -277,6 +280,7 @@ const ProjectSidebar = ({
                     className='p-1 hover:bg-muted rounded transition-colors'
                     data-track-category='Projects'
                     data-track-name='OpenPersonSearch'
+                    data-track-kind='passive'
                   >
                     <Search className='size-3 text-muted-foreground' />
                   </button>
@@ -321,6 +325,7 @@ const ProjectSidebar = ({
                           }}
                           data-track-category='Projects'
                           data-track-name='SelectPersonFilter'
+                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({
                             personId: person.id,
                             personName: displayName,
@@ -335,6 +340,7 @@ const ProjectSidebar = ({
                         className='w-full flex items-center gap-2 px-3 py-1.5 rounded-[10px] transition-colors hover:bg-sidebar-accent group'
                         data-track-category='Projects'
                         data-track-name='ShowMorePersons'
+                        data-track-kind='passive'
                       >
                         <ChevronDown className='size-2 text-muted-foreground group-hover:text-muted-foreground' />
                         <span className='text-[10px] text-muted-foreground group-hover:text-muted-foreground'>

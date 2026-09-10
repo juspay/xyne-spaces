@@ -103,6 +103,7 @@ const FilterButton = ({
     onClick={onClick}
     data-track-category='Claw Agents'
     data-track-name={`Subagents filter: ${label}`}
+    data-track-kind='passive'
     className={cn(
       'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
       active
@@ -219,6 +220,7 @@ const SubagentsTab = (): ReactElement => {
                   placeholder='Search subagents'
                   data-track-category='Claw Agents'
                   data-track-name='Search subagents'
+                  data-track-kind='passive'
                   className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
                 />
               </div>
@@ -227,6 +229,7 @@ const SubagentsTab = (): ReactElement => {
                 className='shrink-0'
                 data-track-category='Claw Agents'
                 data-track-name='Create subagent'
+                data-track-kind='active'
                 onClick={() => void navigate('/claw-agents/subagents/create')}
               >
                 <Plus className='size-4' />
@@ -250,6 +253,7 @@ const SubagentsTab = (): ReactElement => {
                   onClick={() => void refetch()}
                   data-track-category='Claw Agents'
                   data-track-name='Retry subagents load'
+                  data-track-kind='passive'
                   className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
                 >
                   Retry

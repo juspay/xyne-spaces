@@ -143,6 +143,7 @@ const SimplePieChart = ({
               onClick={() => onSelect(slice.metaTheme)}
               data-track-category='ProductInsights'
               data-track-name='SelectPieSlice'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 themeName: slice.metaTheme.meta_theme,
                 clusterCount: slice.value,
@@ -227,6 +228,7 @@ const MetaThemeItem = ({
     }`}
     data-track-category='ProductInsights'
     data-track-name='SelectMetaTheme'
+    data-track-kind='passive'
     data-track-metadata={JSON.stringify({ themeName: theme.meta_theme, isSelected })}
   >
     <div className='flex items-start gap-3'>
@@ -273,6 +275,7 @@ const ClusterBarItem = ({
       onClick={onClick}
       data-track-category='ProductInsights'
       data-track-name='SelectCluster'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ clusterTitle: cluster.theme_title })}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -355,6 +358,7 @@ const TicketItem = ({
       className='p-5 rounded-lg bg-card mb-3 border border-transparent shadow-sm hover:shadow-md hover:border-border transition-all duration-200 group cursor-pointer'
       data-track-category='ProductInsights'
       data-track-name='NavigateToTicket'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({
         ticketId: ticket.docId,
         projectId: ticketData?.projectId,
@@ -625,6 +629,7 @@ const ProductInsightsScreen = (): ReactElement => {
                       onClick={() => handleMetaThemeSelect(theme)}
                       data-track-category='ProductInsights'
                       data-track-name='SelectMetaTheme'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ metaTheme: theme.meta_theme })}
                     />
                   ))}
@@ -673,6 +678,7 @@ const ProductInsightsScreen = (): ReactElement => {
                               maxCount={maxCount}
                               data-track-category='ProductInsights'
                               data-track-name='SelectCluster'
+                              data-track-kind='passive'
                               data-track-metadata={JSON.stringify({ clusterId })}
                             />
                           );

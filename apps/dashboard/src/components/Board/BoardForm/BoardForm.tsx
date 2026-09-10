@@ -605,6 +605,7 @@ export const BoardForm = ({
           className='w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-muted disabled:cursor-not-allowed resize-none'
           data-track-category='Board_Form'
           data-track-name='Enter_Description'
+          data-track-kind='passive'
         />
       </div>
 
@@ -625,6 +626,7 @@ export const BoardForm = ({
             data-track-event='change'
             data-track-category='Board_Form'
             data-track-name='Select_Project'
+            data-track-kind='passive'
           >
             <option value=''>{loadingProjects ? 'Loading projects...' : 'Select a project'}</option>
             {projects?.map(project => (
@@ -656,6 +658,7 @@ export const BoardForm = ({
                 data-track-event='change'
                 data-track-category='Board_Form'
                 data-track-name='Select_Stage_Template'
+                data-track-kind='active'
               >
                 <option value='none'>No Template</option>
                 <option value='default'>Default stages</option>
@@ -667,6 +670,7 @@ export const BoardForm = ({
               disabled={isLoading}
               data-track-category='Board_Form'
               data-track-name='Add_Stage'
+              data-track-kind='active'
             >
               Add Stage
             </Button>
@@ -723,6 +727,7 @@ export const BoardForm = ({
                           data-testid={`stage-eta-toggle-${index}`}
                           data-track-category='Board_Form'
                           data-track-name='Toggle_Stage_ETA'
+                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({
                             stageIndex: index,
                             stageName: stage.name,
@@ -764,6 +769,7 @@ export const BoardForm = ({
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Status'
+                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({
                           stageIndex: index,
                           stageName: stage.name,
@@ -820,6 +826,7 @@ export const BoardForm = ({
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Form'
+                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({
                           stageIndex: index,
                           stageName: stage.name,
@@ -843,6 +850,7 @@ export const BoardForm = ({
                       type='button'
                       data-track-category='Board_Form'
                       data-track-name='Remove_Stage'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({
                         stageName: stage.name,
                         stageIndex: index,
@@ -893,6 +901,7 @@ export const BoardForm = ({
           disabled={isLoading}
           data-track-category='Board_Form'
           data-track-name='Cancel_Board_Form'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ isEdit })}
         >
           Cancel
@@ -904,6 +913,7 @@ export const BoardForm = ({
           loading={isLoading}
           data-track-category='Board_Form'
           data-track-name='Submit_Board_Form'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ isEdit, boardName: name })}
         >
           {isLoading

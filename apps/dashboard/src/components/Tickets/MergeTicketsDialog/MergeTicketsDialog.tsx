@@ -215,6 +215,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                     )}
                     data-track-category='Support'
                     data-track-name='SelectMergeParent'
+                    data-track-kind='passive'
                   >
                     {isParent && (
                       <span className='absolute inset-y-1.5 left-1 w-[3px] rounded-full bg-primary' />
@@ -230,6 +231,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                       aria-label={`Remove ${plainTitle || 'ticket'} from merge`}
                       data-track-category='Support'
                       data-track-name='RemoveTicketFromMerge'
+                      data-track-kind='active'
                     >
                       <X className='size-2.5' strokeWidth={2.5} />
                     </button>
@@ -301,6 +303,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
             onClick={() => onOpenChange(false)}
             data-track-category='Support'
             data-track-name='CancelMergeTickets'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -314,6 +317,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
             }
             data-track-category='Support'
             data-track-name='ConfirmMergeTickets'
+            data-track-kind='active'
           >
             {isMerging ? 'Merging...' : 'Merge'}
           </Button>

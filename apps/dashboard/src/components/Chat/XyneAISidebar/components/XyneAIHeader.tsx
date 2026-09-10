@@ -86,6 +86,7 @@ export const XyneAIHeader = ({
           onClick={() => setIsAgentInfoModalOpen(true)}
           data-track-category='XyneAI'
           data-track-name='OpenAgentInfo'
+          data-track-kind='passive'
         >
           <InformationCircle size={16} className='shrink-0' />
           <span className='flex-1'>Agent info</span>
@@ -97,6 +98,7 @@ export const XyneAIHeader = ({
           onClick={onShowHistory}
           data-track-category='XyneAI'
           data-track-name='SHOW_HISTORY'
+          data-track-kind='passive'
         >
           <ClockDefault size={16} className='shrink-0' />
           <span className='flex-1'>Chat history</span>
@@ -108,6 +110,7 @@ export const XyneAIHeader = ({
           onClick={onShowUserActivity}
           data-track-category='XyneAI'
           data-track-name='SHOW_USER_ACTIVITY'
+          data-track-kind='passive'
         >
           <Activity size={16} className='shrink-0' />
           <span className='flex-1'>Your activity</span>
@@ -119,6 +122,7 @@ export const XyneAIHeader = ({
         onClick={() => setIsSettingsModalOpen(true)}
         data-track-category='XyneAI'
         data-track-name='OpenSettings'
+        data-track-kind='passive'
       >
         <Settings01 size={16} className='shrink-0' />
         <span className='flex-1'>Settings</span>
@@ -129,6 +133,7 @@ export const XyneAIHeader = ({
           onClick={onShowDebugger}
           data-track-category='XyneAI'
           data-track-name='OPEN_DEBUGGER'
+          data-track-kind='passive'
         >
           <Bug size={16} className='shrink-0' />
           <span className='flex-1'>Debugger</span>
@@ -157,6 +162,7 @@ export const XyneAIHeader = ({
                   title='More'
                   data-track-category='XyneAI'
                   data-track-name='OPEN_HEADER_MENU_MOBILE'
+                  data-track-kind='passive'
                 >
                   <ThreeDotsMenuVertical size={16} />
                 </button>
@@ -175,6 +181,7 @@ export const XyneAIHeader = ({
               title='New chat'
               data-track-category='XyneAI'
               data-track-name='NEW_CHAT'
+              data-track-kind='active'
             >
               <PencilEditBox size={16} />
             </button>
@@ -185,6 +192,7 @@ export const XyneAIHeader = ({
                 title='Close'
                 data-track-category='XyneAI'
                 data-track-name='CLOSE_MOBILE'
+                data-track-kind='passive'
               >
                 <MultipleCrossCancelDefault size={16} />
               </button>
@@ -245,6 +253,7 @@ export const XyneAIHeader = ({
             title='New chat'
             data-track-category='XyneAI'
             data-track-name='NEW_CHAT_DESKTOP'
+            data-track-kind='active'
           >
             <PencilEditBox size={16} />
           </Button>
@@ -258,6 +267,7 @@ export const XyneAIHeader = ({
               title='Chat history'
               data-track-category='XyneAI'
               data-track-name='SHOW_HISTORY'
+              data-track-kind='passive'
             >
               <ReminderAnticlockwise size={16} />
             </Button>
@@ -272,6 +282,7 @@ export const XyneAIHeader = ({
                 title='More'
                 data-track-category='XyneAI'
                 data-track-name='OPEN_HEADER_MENU_DESKTOP'
+                data-track-kind='passive'
               >
                 <ThreeDotsMenuVertical size={16} />
               </Button>
@@ -294,6 +305,7 @@ export const XyneAIHeader = ({
               title='Close'
               data-track-category='XyneAI'
               data-track-name='CLOSE_DESKTOP'
+              data-track-kind='passive'
             >
               <MultipleCrossCancelDefault size={16} />
             </Button>

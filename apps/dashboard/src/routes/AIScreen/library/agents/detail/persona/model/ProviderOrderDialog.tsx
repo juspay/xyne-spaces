@@ -55,6 +55,7 @@ export function ProviderOrderDialog({
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: cancel provider order'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -64,6 +65,7 @@ export function ProviderOrderDialog({
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: save provider order'
+            data-track-kind='active'
           >
             Save
           </Button>
@@ -103,6 +105,7 @@ export function ProviderOrderDialog({
                   aria-label={`Move ${provider} up`}
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: move provider up'
+                  data-track-kind='active'
                   className={ICON_BUTTON}
                 >
                   <ChevronBigUp className='size-4' aria-hidden />
@@ -114,6 +117,7 @@ export function ProviderOrderDialog({
                   aria-label={`Move ${provider} down`}
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: move provider down'
+                  data-track-kind='active'
                   className={ICON_BUTTON}
                 >
                   <ChevronBigDown className='size-4' aria-hidden />
@@ -124,6 +128,7 @@ export function ProviderOrderDialog({
                   aria-label={`Remove ${provider}`}
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: remove provider'
+                  data-track-kind='active'
                   className={ICON_BUTTON}
                 >
                   <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -147,6 +152,7 @@ export function ProviderOrderDialog({
                 onClick={() => setDraft([...draft, provider])}
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: add provider'
+                data-track-kind='active'
                 className='flex h-7 shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-dashed border-border bg-card px-2 transition-colors hover:bg-muted/50'
               >
                 <span className='max-w-[200px] truncate text-sm font-medium leading-5 text-foreground/80'>

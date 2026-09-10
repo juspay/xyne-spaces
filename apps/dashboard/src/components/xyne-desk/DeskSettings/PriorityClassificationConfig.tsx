@@ -74,6 +74,7 @@ export const PriorityClassificationConfigPanel: React.FC<
         onClick={onBack}
         data-track-category='DeskSettings'
         data-track-name='BackFromPriorityConfig'
+        data-track-kind='passive'
       >
         <ArrowLeft size={16} />
         Configure AI Priority Detection
@@ -114,6 +115,7 @@ export const PriorityClassificationConfigPanel: React.FC<
             className='h-2 w-full cursor-pointer appearance-none rounded-lg bg-secondary accent-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
             data-track-category='DeskSettings'
             data-track-name='PriorityThresholdSlider'
+            data-track-kind='passive'
           />
           <div className='text-desk-helper flex justify-between'>
             <span>0% (Always)</span>
@@ -156,6 +158,7 @@ export const PriorityClassificationConfigPanel: React.FC<
           className='min-h-[240px] w-full resize-y rounded-[10px] border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='PriorityPrompt'
+          data-track-kind='passive'
         />
         {canManage && (
           <button
@@ -164,6 +167,7 @@ export const PriorityClassificationConfigPanel: React.FC<
             className='w-fit text-xs text-desk-accent hover:underline'
             data-track-category='DeskSettings'
             data-track-name='ResetPriorityPrompt'
+            data-track-kind='active'
           >
             Reset to default prompt
           </button>

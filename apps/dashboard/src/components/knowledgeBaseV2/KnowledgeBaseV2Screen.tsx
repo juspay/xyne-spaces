@@ -1059,6 +1059,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           aria-label='Ask AI'
           data-track-category='knowledge-base'
           data-track-name='kb-open-ai-chat'
+          data-track-kind='passive'
           className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
         >
           <XyneAIStar size={22} />
@@ -1075,6 +1076,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-sm transition hover:bg-muted'
           data-track-category='knowledge-base'
           data-track-name='new-collection'
+          data-track-kind='active'
         >
           <Plus className='h-4 w-4' strokeWidth={1.75} />
           New collection
@@ -1088,6 +1090,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-sm transition hover:bg-muted'
                 data-track-category='knowledge-base'
                 data-track-name='open-new-menu'
+                data-track-kind='passive'
               >
                 {isUploadingForThisCollection ? (
                   <Loader2 className='h-4 w-4 animate-spin' strokeWidth={1.75} />
@@ -1103,6 +1106,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 onClick={() => setDialog('folder')}
                 data-track-category='knowledge-base'
                 data-track-name='new-folder'
+                data-track-kind='active'
               >
                 <FolderPlus className='h-4 w-4' strokeWidth={1.75} />
                 New folder
@@ -1111,6 +1115,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 onClick={onPickFiles}
                 data-track-category='knowledge-base'
                 data-track-name='PICK_KB_FILES'
+                data-track-kind='passive'
               >
                 <File className='h-4 w-4' strokeWidth={1.75} />
                 Upload files
@@ -1119,6 +1124,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 onClick={() => folderInputRef.current?.click()}
                 data-track-category='knowledge-base'
                 data-track-name='PICK_KB_FOLDER'
+                data-track-kind='passive'
               >
                 <FolderOpen className='h-4 w-4' strokeWidth={1.75} />
                 Upload folder
@@ -1127,6 +1133,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 onClick={() => setDriveLinkOpen(true)}
                 data-track-category='knowledge-base'
                 data-track-name='add-from-drive'
+                data-track-kind='active'
               >
                 <Link2 className='h-4 w-4' strokeWidth={1.75} />
                 Add from Drive
@@ -1173,6 +1180,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         title={isAtRoot ? 'Back to Ask AI' : isAtCollectionRoot ? 'Back to collections' : 'Up'}
         data-track-category='knowledge-base'
         data-track-name='navigate-up'
+        data-track-kind='passive'
       >
         <ArrowLeft className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
       </button>
@@ -1207,6 +1215,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       onClick={handleOpenAI}
       data-track-category='knowledge-base'
       data-track-name='kb-open-ai-chat-pill'
+      data-track-kind='passive'
       className='inline-flex h-8 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-[12.5px] font-medium text-foreground transition hover:bg-primary/15'
     >
       <XyneAIStar size={14} />
@@ -1262,6 +1271,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                     )}
                     data-track-category='knowledge-base'
                     data-track-name='kb-type-filter'
+                    data-track-kind='passive'
                   >
                     {typeFilter === 'ALL'
                       ? 'Type'
@@ -1280,6 +1290,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                     onClick={() => setTypeFilter('ALL')}
                     data-track-category='knowledge-base'
                     data-track-name='kb-type-filter-all'
+                    data-track-kind='passive'
                   >
                     All
                   </DropdownMenuItem>
@@ -1289,6 +1300,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                       onClick={() => setTypeFilter(opt.value)}
                       data-track-category='knowledge-base'
                       data-track-name='kb-type-filter-select'
+                      data-track-kind='passive'
                     >
                       <span className='flex items-center gap-2'>
                         {typeFilterIcon(opt.value)}
@@ -1307,6 +1319,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   className='grid h-8 w-8 place-items-center rounded-full border border-primary/20 bg-primary/10 text-foreground transition hover:bg-primary/15'
                   data-track-category='knowledge-base'
                   data-track-name='kb-type-filter-clear'
+                  data-track-kind='passive'
                 >
                   <X className='h-3.5 w-3.5' strokeWidth={1.75} />
                 </button>
@@ -1325,6 +1338,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                     )}
                     data-track-category='knowledge-base'
                     data-track-name='kb-status-filter'
+                    data-track-kind='passive'
                   >
                     {statusFilter === 'ALL'
                       ? 'Status'
@@ -1344,6 +1358,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                     onClick={() => setStatusFilter('ALL')}
                     data-track-category='knowledge-base'
                     data-track-name='kb-status-filter-all'
+                    data-track-kind='passive'
                   >
                     All
                   </DropdownMenuItem>
@@ -1353,6 +1368,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                       onClick={() => setStatusFilter(opt.value)}
                       data-track-category='knowledge-base'
                       data-track-name='kb-status-filter-select'
+                      data-track-kind='passive'
                     >
                       <span className='flex items-center gap-2'>
                         {statusFilterIcon(opt.value)}
@@ -1371,6 +1387,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   className='grid h-8 w-8 place-items-center rounded-full border border-primary/20 bg-primary/10 text-foreground transition hover:bg-primary/15'
                   data-track-category='knowledge-base'
                   data-track-name='kb-status-filter-clear'
+                  data-track-kind='passive'
                 >
                   <X className='h-3.5 w-3.5' strokeWidth={1.75} />
                 </button>

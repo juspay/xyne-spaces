@@ -134,6 +134,7 @@ export function CallSummaryTemplatePicker({
       title={isRegenerating ? regeneratingTooltip : fullLabel}
       data-track-category='CallDetail'
       data-track-name='open_summary_templates'
+      data-track-kind='passive'
       className={cn('max-w-[200px]', isRegenerating && 'cursor-wait', className)}
     >
       {isRegenerating ? (

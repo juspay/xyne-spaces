@@ -439,6 +439,7 @@ const RecapPanel = (): ReactElement => {
                 title={`Go to #${card.channelName}`}
                 data-track-category='RECAP_PANEL'
                 data-track-name='OPEN_CHANNEL_FROM_RECAP'
+                data-track-kind='passive'
               >
                 <Hash size={16} className='text-muted-foreground' />
                 <span>{card.channelName}</span>
@@ -460,6 +461,7 @@ const RecapPanel = (): ReactElement => {
                     }`}
                     data-track-category='RECAP_PANEL'
                     data-track-name='VIEW_BASE_RECAP'
+                    data-track-kind='passive'
                   >
                     Default Recap
                   </button>
@@ -478,6 +480,7 @@ const RecapPanel = (): ReactElement => {
                     }`}
                     data-track-category='RECAP_PANEL'
                     data-track-name='VIEW_CUSTOM_RECAP'
+                    data-track-kind='passive'
                   >
                     Custom Recap
                   </button>
@@ -516,6 +519,7 @@ const RecapPanel = (): ReactElement => {
                       title={`View source for point ${idx + 1}`}
                       data-track-category='RECAP_PANEL'
                       data-track-name='CLICK_CITATION'
+                      data-track-kind='passive'
                     >
                       {idx + 1}
                     </button>
@@ -541,6 +545,7 @@ const RecapPanel = (): ReactElement => {
                     className='flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
                     data-track-category='RECAP_PANEL'
                     data-track-name='ASK_AI_RECAP_REFERENCE'
+                    data-track-kind='active'
                   >
                     <XyneAIStar size={13} />
                     <span>Ask AI</span>
@@ -632,6 +637,7 @@ const RecapPanel = (): ReactElement => {
                     title='Mark all as read'
                     data-track-category='RECAP_PANEL'
                     data-track-name='MARK_ALL_AS_READ'
+                    data-track-kind='active'
                     data-ph-capture-attribute-track-id='mark_all_recap_read'
                   >
                     <CheckCheck size={12} />
@@ -701,6 +707,7 @@ const RecapPanel = (): ReactElement => {
             className='px-6 py-2.5 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors duration-200 font-medium cursor-pointer'
             data-track-category='RECAP_PANEL'
             data-track-name='OPEN_CHANNEL_SELECTION_FIRST_TIME'
+            data-track-kind='passive'
             type='button'
           >
             Choose Channels
@@ -733,6 +740,7 @@ const RecapPanel = (): ReactElement => {
                     title='Back to today'
                     data-track-category='RECAP_PANEL'
                     data-track-name='BACK_TO_TODAY'
+                    data-track-kind='passive'
                   >
                     <ChevronLeft size={18} />
                   </button>
@@ -751,6 +759,7 @@ const RecapPanel = (): ReactElement => {
                       }`}
                       data-track-category='RECAP_PANEL'
                       data-track-name='TAB_CHANNEL'
+                      data-track-kind='passive'
                     >
                       Channel
                     </button>
@@ -763,6 +772,7 @@ const RecapPanel = (): ReactElement => {
                       }`}
                       data-track-category='RECAP_PANEL'
                       data-track-name='TAB_PROJECT'
+                      data-track-kind='passive'
                     >
                       Project
                     </button>
@@ -784,6 +794,7 @@ const RecapPanel = (): ReactElement => {
                       title='View past recaps'
                       data-track-category='RECAP_PANEL'
                       data-track-name='OPEN_CALENDAR'
+                      data-track-kind='passive'
                     >
                       <Calendar size={18} />
                     </button>
@@ -817,6 +828,7 @@ const RecapPanel = (): ReactElement => {
                     title='Manage channels'
                     data-track-category='RECAP_PANEL'
                     data-track-name='OPEN_SETTINGS'
+                    data-track-kind='passive'
                   >
                     <Settings size={18} />
                   </button>
@@ -863,6 +875,7 @@ const RecapPanel = (): ReactElement => {
           aria-label='Close calendar'
           data-track-category='RECAP_PANEL'
           data-track-name='CLOSE_CALENDAR_OUTSIDE_CLICK'
+          data-track-kind='passive'
         />
       )}
     </>

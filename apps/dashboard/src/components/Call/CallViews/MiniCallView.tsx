@@ -32,6 +32,7 @@ import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOve
 import { CallWhiteboardView } from '../CallWhiteboard';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 import Tooltip from '../../ui/Tooltip';
+import type { InteractionKind } from '@xyne/shared';
 
 interface MiniCallViewProps {
   participants: ParticipantInfo[];
@@ -176,12 +177,14 @@ export function MiniCallView({
     children,
     danger = false,
     trackName,
+    trackKind,
   }: {
     label: string;
     onClick: () => void;
     children: ReactNode;
     danger?: boolean;
     trackName: string;
+    trackKind?: InteractionKind;
   }): React.ReactElement => (
     <Tooltip content={label} side='bottom'>
       <button
@@ -196,6 +199,7 @@ export function MiniCallView({
         )}
         data-track-category='CALLS'
         data-track-name={trackName}
+        data-track-kind={trackKind}
         data-track-metadata={JSON.stringify({ callId })}
       >
         {children}
@@ -327,6 +331,7 @@ export function MiniCallView({
         onMouseDown={e => handleResizeStart(e, 'right')}
         data-track-category='CALLS'
         data-track-name='RESIZE_MINI_CALL_WIDTH'
+        data-track-kind='passive'
         onPointerDown={(e): void => e.stopPropagation()}
         onKeyDown={(e): void => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -345,6 +350,7 @@ export function MiniCallView({
           onMouseDown={e => handleResizeStart(e, 'corner')}
           data-track-category='CALLS'
           data-track-name='RESIZE_MINI_CALL_CORNER'
+          data-track-kind='passive'
           onPointerDown={(e): void => e.stopPropagation()}
           onKeyDown={(e): void => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -403,6 +409,7 @@ export function MiniCallView({
                       onClick={onToggleMic}
                       danger={!isMicEnabled}
                       trackName='TOGGLE_MIC_FROM_LINE_VIEW'
+                      trackKind='passive'
                     >
                       {isMicEnabled ? <Mic className='h-4 w-4' /> : <MicOff className='h-4 w-4' />}
                     </HeaderActionButton>
@@ -410,6 +417,7 @@ export function MiniCallView({
                       label='Open chat'
                       onClick={handleLineViewChatOpen}
                       trackName='OPEN_CHAT_FROM_LINE_VIEW'
+                      trackKind='passive'
                     >
                       <MessageSquare className='h-4 w-4' />
                     </HeaderActionButton>
@@ -417,6 +425,7 @@ export function MiniCallView({
                       label='Expand to mini view'
                       onClick={handleExpandToMini}
                       trackName='EXPAND_CALL_TO_MINI_VIEW'
+                      trackKind='passive'
                     >
                       <ChevronsUp className='h-4 w-4' />
                     </HeaderActionButton>
@@ -424,6 +433,7 @@ export function MiniCallView({
                       label='Expand to full call view'
                       onClick={onExpand}
                       trackName='EXPAND_CALL_TO_FULL_VIEW'
+                      trackKind='passive'
                     >
                       <Maximize2 className='h-4 w-4' />
                     </HeaderActionButton>
@@ -432,6 +442,7 @@ export function MiniCallView({
                       onClick={onDisconnect}
                       danger={true}
                       trackName='END_CALL_FROM_LINE_VIEW'
+                      trackKind='passive'
                     >
                       <PhoneOff className='h-4 w-4' />
                     </HeaderActionButton>
@@ -522,6 +533,7 @@ export function MiniCallView({
                       label='Switch to line view'
                       onClick={handleCollapseToLine}
                       trackName='COLLAPSE_CALL_TO_LINE_VIEW'
+                      trackKind='passive'
                     >
                       <ChevronsDown className='h-4 w-4' />
                     </HeaderActionButton>

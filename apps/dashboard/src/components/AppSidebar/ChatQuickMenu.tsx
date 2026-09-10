@@ -80,6 +80,7 @@ export const ChatQuickMenu = ({
           className={QUICK_NAV_ROW_CLASS}
           data-track-category='App_Sidebar'
           data-track-name='Chat_Quick_Nav'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ path: item.to, label: item.label })}
         >
           <Icon size={16} className='shrink-0' aria-hidden />

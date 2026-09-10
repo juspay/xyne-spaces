@@ -133,6 +133,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
         className='w-full flex items-center justify-between px-3 py-2.5 bg-muted/40 hover:bg-muted/60 transition-colors text-left'
         data-track-category='AIClassification'
         data-track-name='TogglePanel'
+        data-track-kind='passive'
       >
         <div className='flex items-center gap-2'>
           <span className='text-sm font-medium'>AI Classification</span>
@@ -201,6 +202,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                       placeholder='e.g. Feature Request'
                       data-track-category='AIClassification'
                       data-track-name='EditCategoryInput'
+                      data-track-kind='passive'
                     />
                   )}
                 </div>
@@ -234,6 +236,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                       placeholder='optional'
                       data-track-category='AIClassification'
                       data-track-name='EditSubCategoryInput'
+                      data-track-kind='passive'
                     />
                   )}
                 </div>
@@ -246,6 +249,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                   className='text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
                   data-track-category='AIClassification'
                   data-track-name='SaveClassificationOverride'
+                  data-track-kind='active'
                 >
                   {isSaving ? 'Saving...' : 'Save'}
                 </button>
@@ -256,6 +260,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                   className='text-xs px-3 py-1 rounded border border-border hover:bg-muted'
                   data-track-category='AIClassification'
                   data-track-name='CancelClassificationEdit'
+                  data-track-kind='passive'
                 >
                   Cancel
                 </button>
@@ -290,6 +295,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                         }}
                         data-track-category='AIClassification'
                         data-track-name='RawFieldInput'
+                        data-track-kind='passive'
                       />
                       <button
                         onClick={() => void handleSaveField(key)}
@@ -298,6 +304,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                         className='text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground disabled:opacity-50'
                         data-track-category='AIClassification'
                         data-track-name='SaveRawField'
+                        data-track-kind='passive'
                       >
                         {savingField ? '…' : '✓'}
                       </button>
@@ -306,6 +313,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                         className='text-xs px-2 py-0.5 rounded border border-border hover:bg-muted'
                         data-track-category='AIClassification'
                         data-track-name='CancelRawFieldEdit'
+                        data-track-kind='passive'
                       >
                         ✕
                       </button>
@@ -320,6 +328,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                       }}
                       data-track-category='AIClassification'
                       data-track-name='EditRawField'
+                      data-track-kind='passive'
                     >
                       {value}
                       <span className='opacity-0 group-hover:opacity-50 text-xs'>✎</span>
@@ -336,6 +345,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
               className='text-xs text-muted-foreground hover:text-foreground underline'
               data-track-category='AIClassification'
               data-track-name='StartClassificationEdit'
+              data-track-kind='passive'
             >
               Edit classification
             </button>

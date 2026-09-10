@@ -272,6 +272,7 @@ export const GeneralAndMembersTab = ({
                 onChange={e => setDescription(e.target.value)}
                 data-track-category='workspace-management'
                 data-track-name='edit-workspace-description'
+                data-track-kind='active'
                 rows={4}
                 className={cn(
                   'w-full max-w-lg px-3 py-2 rounded-md border border-input bg-background',
@@ -291,6 +292,7 @@ export const GeneralAndMembersTab = ({
                 onClick={() => void handleSaveGeneral()}
                 data-track-category='workspace-management'
                 data-track-name='SAVE_WORKSPACE_GENERAL'
+                data-track-kind='active'
                 disabled={!hasChanges || !name.trim()}
                 className='gap-2'
               >
@@ -415,6 +417,7 @@ export const GeneralAndMembersTab = ({
                               onClick={() => handleUpdateRole(user.id, WorkspaceRole.ADMIN)}
                               data-track-category='workspace-management'
                               data-track-name='SET_MEMBER_ROLE_ADMIN'
+                              data-track-kind='active'
                             >
                               <Shield className='w-4 h-4 mr-2' />
                               Admin
@@ -425,6 +428,7 @@ export const GeneralAndMembersTab = ({
                               onClick={() => handleUpdateRole(user.id, WorkspaceRole.MEMBER)}
                               data-track-category='workspace-management'
                               data-track-name='SET_MEMBER_ROLE_MEMBER'
+                              data-track-kind='active'
                               disabled={!canRemoveAdmin(user)}
                             >
                               <User className='w-4 h-4 mr-2' />
@@ -446,6 +450,7 @@ export const GeneralAndMembersTab = ({
                         onClick={() => handleRemoveMember(user.id, user.name)}
                         data-track-category='workspace-management'
                         data-track-name='OPEN_REMOVE_MEMBER_CONFIRM'
+                        data-track-kind='passive'
                         disabled={processingUserId === user.id || !canRemoveAdmin(user)}
                         className='text-destructive hover:text-destructive hover:bg-destructive/10'
                       >
@@ -477,6 +482,7 @@ export const GeneralAndMembersTab = ({
                   aria-label='Previous page'
                   data-track-category='workspace-management'
                   data-track-name='members-pagination-prev'
+                  data-track-kind='passive'
                 >
                   <ChevronLeft className='w-3.5 h-3.5' />
                 </button>
@@ -491,6 +497,7 @@ export const GeneralAndMembersTab = ({
                   aria-label='Next page'
                   data-track-category='workspace-management'
                   data-track-name='members-pagination-next'
+                  data-track-kind='passive'
                 >
                   <ChevronRight className='w-3.5 h-3.5' />
                 </button>
@@ -529,6 +536,7 @@ export const GeneralAndMembersTab = ({
               }}
               data-track-category='workspace-management'
               data-track-name='CANCEL_REMOVE_MEMBER'
+              data-track-kind='passive'
               disabled={processingUserId === userToRemove?.id}
             >
               Cancel
@@ -538,6 +546,7 @@ export const GeneralAndMembersTab = ({
               onClick={confirmRemoveMember}
               data-track-category='workspace-management'
               data-track-name='CONFIRM_REMOVE_MEMBER'
+              data-track-kind='active'
               disabled={processingUserId === userToRemove?.id}
               className='gap-2'
             >

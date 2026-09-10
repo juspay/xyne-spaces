@@ -55,6 +55,7 @@ export const CardHeader: React.FC<{
         className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         data-track-category={trackCategory}
         data-track-name='EXPAND_ARTIFACT'
+        data-track-kind='passive'
       >
         <MaximizeFourArrow size={16} className='shrink-0' />
       </button>

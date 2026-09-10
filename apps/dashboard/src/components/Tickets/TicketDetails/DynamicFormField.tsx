@@ -73,6 +73,7 @@ const StringFieldComponent: React.FC<{
       })}
       data-track-category='Tickets'
       data-track-name='DynamicTextField'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ fieldName: field.name })}
     />
     {renderDescription(field.description)}
@@ -99,6 +100,7 @@ const NumberFieldComponent: React.FC<{
       })}
       data-track-category='Tickets'
       data-track-name='DynamicNumberField'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ fieldName: field.name })}
     />
     {renderDescription(field.description)}
@@ -136,6 +138,7 @@ const BooleanFieldComponent: React.FC<{
           {...register(field.name)}
           data-track-category='Tickets'
           data-track-name='DynamicBooleanField'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ fieldName: field.name })}
         />
         <div className='w-11 h-6 bg-border dark:bg-gray-700 rounded-full peer peer-checked:bg-blue-600 transition-colors' />
@@ -164,6 +167,7 @@ const TextareaFieldComponent: React.FC<{
       })}
       data-track-category='Tickets'
       data-track-name='DynamicTextarea'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ fieldName: field.name })}
     />
     {renderDescription(field.description)}
@@ -265,6 +269,7 @@ const SelectFieldComponent: React.FC<{
                   className='rounded border-input text-primary focus:ring-ring'
                   data-track-category='Tickets'
                   data-track-name='DynamicMultiSelectOption'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     fieldName: field.name,
                     value: option.value,
@@ -334,6 +339,7 @@ const SelectFieldComponent: React.FC<{
                 className='flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground min-w-0'
                 data-track-category='Tickets'
                 data-track-name='DynamicComboboxInput'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ fieldName: field.name })}
               />
               <ChevronDown
@@ -375,6 +381,7 @@ const SelectFieldComponent: React.FC<{
                     )}
                     data-track-category='Tickets'
                     data-track-name='SelectDynamicFieldOption'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       value: option.value,
                       label: option.label,
@@ -459,6 +466,7 @@ const SelectFieldComponent: React.FC<{
                     )}
                     data-track-category='Tickets'
                     data-track-name='SelectMultiSelectOption'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       value: option.value,
                       label: option.label,

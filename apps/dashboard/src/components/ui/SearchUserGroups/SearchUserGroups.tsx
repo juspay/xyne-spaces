@@ -149,6 +149,7 @@ export const SearchUserGroups: React.FC<SearchUserGroupsProps> = ({
                   onClick={() => handleTagRemove(g)}
                   data-track-category='ENTITY_PICKER'
                   data-track-name='REMOVE_GROUP_CHIP'
+                  data-track-kind='active'
                   className='rounded-full p-0.5 transition-colors'
                   aria-label={`Remove ${g.name}`}
                 >
@@ -225,6 +226,7 @@ export const SearchUserGroups: React.FC<SearchUserGroupsProps> = ({
                     tabIndex={-1}
                     data-track-category='CANVAS'
                     data-track-name='SHARE_MODAL_SELECT_GROUP'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       ...trackMetadata,
                       userGroupId: g.id,

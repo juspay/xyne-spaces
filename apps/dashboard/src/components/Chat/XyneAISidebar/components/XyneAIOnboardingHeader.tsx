@@ -17,6 +17,7 @@ export const XyneAIOnboardingHeader = ({ onClose }: XyneAIOnboardingHeaderProps)
         title='Skip onboarding'
         data-track-category='AIOnboarding'
         data-track-name='SkipOnboarding'
+        data-track-kind='passive'
       >
         <X size={16} className='text-current' />
       </button>

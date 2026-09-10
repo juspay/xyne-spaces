@@ -4,6 +4,7 @@ import {
   MessageCardAttachmentThumbnails,
   type PanelAttachmentRow,
 } from './MessageCardAttachmentThumbnails';
+import type { InteractionKind } from '@xyne/shared';
 
 /**
  * Props for the MessageCard component.
@@ -35,6 +36,7 @@ export interface MessageCardProps {
   /** Activity tracking for card click (local-rules/require-tracking-on-click) */
   trackCategory?: string;
   trackName?: string;
+  trackKind?: InteractionKind;
   /** Optional draft / scheduled attachments (DRAFT or DELAYED_MESSAGE) for panel preview */
   attachments?: PanelAttachmentRow[];
 }
@@ -65,6 +67,7 @@ export function MessageCard({
   variant = 'default',
   trackCategory = 'MESSAGE_CARD',
   trackName = 'MESSAGE_CARD_ROW_CLICK',
+  trackKind = 'passive',
   attachments,
 }: MessageCardProps): ReactElement {
   const hasActions = Boolean(actions);
@@ -84,6 +87,7 @@ export function MessageCard({
       }}
       data-track-category={trackCategory}
       data-track-name={trackName}
+      data-track-kind={trackKind}
       className={cn(
         'group relative flex items-start gap-3 p-3 transition-all duration-200 cursor-pointer',
         isListRow
@@ -142,6 +146,7 @@ export function MessageCard({
           onKeyDown={e => e.stopPropagation()}
           data-track-category={trackCategory}
           data-track-name='MESSAGE_CARD_ACTIONS_ISLAND'
+          data-track-kind='passive'
         >
           {actions}
         </div>

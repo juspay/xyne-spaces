@@ -74,6 +74,7 @@ export function StructuredOutputDialog({
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: cancel structured output'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -83,6 +84,7 @@ export function StructuredOutputDialog({
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: save structured output'
+            data-track-kind='active'
           >
             Save
           </Button>
@@ -104,6 +106,7 @@ export function StructuredOutputDialog({
             aria-label='Output format'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: set output format'
+            data-track-kind='active'
             className='h-9 w-full gap-2 rounded-[10px]'
           >
             <SelectValue />
@@ -131,6 +134,7 @@ export function StructuredOutputDialog({
             placeholder={'{\n  "type": "object",\n  "properties": {}\n}'}
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: output schema'
+            data-track-kind='passive'
             className={`${FIELD} h-[180px] resize-y font-mono text-xs leading-5`}
           />
         </section>
@@ -147,6 +151,7 @@ export function StructuredOutputDialog({
           placeholder='Optional outline the answer should follow'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: output template'
+          data-track-kind='passive'
           className={`${FIELD} h-[86px] resize-y`}
         />
       </section>
@@ -162,6 +167,7 @@ export function StructuredOutputDialog({
           placeholder='search, read-file'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: output required tools'
+          data-track-kind='passive'
           className={`${FIELD} h-11 py-0`}
         />
         <span className='text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>

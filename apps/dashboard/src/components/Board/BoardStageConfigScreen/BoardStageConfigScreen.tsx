@@ -53,6 +53,7 @@ import {
 import { StatusIndicator } from '../../../components/Board/StatusIndicator';
 import { STATUS_OPTIONS, getStatusOption } from './BoardStageConfigScreen.types.tsx';
 import { SlaSettings } from '../../xyne-desk/SlaSettings/SlaSettings';
+import type { InteractionKind } from '@xyne/shared';
 
 interface BoardStageConfigScreenProps {
   boardId: string;
@@ -107,6 +108,7 @@ const ToggleSwitch = ({
   checked,
   onToggle,
   trackName,
+  trackKind,
   disabled = false,
   disabledReason,
   onDisabledToggle,
@@ -114,6 +116,7 @@ const ToggleSwitch = ({
   checked: boolean;
   onToggle: () => void;
   trackName: string;
+  trackKind?: InteractionKind;
   disabled?: boolean;
   disabledReason?: string;
   onDisabledToggle?: () => void;
@@ -133,6 +136,7 @@ const ToggleSwitch = ({
     }}
     data-track-category='board_config'
     data-track-name={trackName}
+    data-track-kind={trackKind}
     className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
       disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
     } ${checked ? 'bg-[#6276be]' : 'bg-muted'}`}
@@ -224,6 +228,7 @@ const LinearStageCard = ({
             onClick={() => handleAddStageAt(0)}
             data-track-category='board_config'
             data-track-name='add_stage_before_first'
+            data-track-kind='active'
             variant='ghost'
             size='iconSm'
             className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
@@ -246,6 +251,7 @@ const LinearStageCard = ({
                 className='flex items-center gap-[6px] outline-none'
                 data-track-category='board_config'
                 data-track-name='change_stage_status'
+                data-track-kind='active'
               >
                 <span className='text-[13px] font-medium text-muted-foreground'>
                   {statusOption.label}
@@ -280,6 +286,7 @@ const LinearStageCard = ({
                 className='flex items-center gap-[4px] text-[12px] text-foreground hover:text-foreground/80 p-[4px] rounded-[6px] h-auto'
                 data-track-category='board_config'
                 data-track-name='start_edit_eta'
+                data-track-kind='passive'
               >
                 <Timer size={12} />
                 <span className='font-[450]'>{stage.eta > 0 ? `${stage.eta}h` : 'Set ETA'}</span>
@@ -302,6 +309,7 @@ const LinearStageCard = ({
                     }}
                     data-track-category='board_config'
                     data-track-name='edit_eta_input'
+                    data-track-kind='passive'
                     placeholder='ETA'
                     className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
                   />
@@ -315,6 +323,7 @@ const LinearStageCard = ({
                 className='text-muted-foreground hover:text-muted-foreground/80 shrink-0'
                 data-track-category='board_config'
                 data-track-name='delete_stage'
+                data-track-kind='active'
               >
                 <X size={14} />
               </Button>
@@ -339,6 +348,7 @@ const LinearStageCard = ({
                 onChange={e => handleUpdateStage(stage.tempId, { name: e.target.value })}
                 data-track-category='board_config'
                 data-track-name='edit_stage_name'
+                data-track-kind='active'
                 placeholder='Stage name...'
                 className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
               />
@@ -355,6 +365,7 @@ const LinearStageCard = ({
                     className='w-full bg-background border border-border rounded-[12px] h-auto min-h-[40px] px-2 py-2 flex items-center gap-[6px] hover:bg-muted transition-colors justify-start'
                     data-track-category='board_config'
                     data-track-name='edit_condition'
+                    data-track-kind='active'
                   >
                     <GitBranch size={14} className='text-muted-foreground flex-shrink-0' />
                     <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
@@ -373,6 +384,7 @@ const LinearStageCard = ({
               className='flex items-center gap-[6px] text-[14px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] h-auto'
               data-track-category='board_config'
               data-track-name='add_condition'
+              data-track-kind='active'
             >
               <GitBranch size={14} className='text-[#6276be]' />
               <span>Add Condition</span>
@@ -400,6 +412,7 @@ const LinearStageCard = ({
                         className='text-muted-foreground hover:text-foreground flex-shrink-0 h-5 w-5 p-0.5'
                         data-track-category='board_config'
                         data-track-name='edit_stage_form'
+                        data-track-kind='active'
                       >
                         <Pencil size={10} />
                       </Button>
@@ -410,6 +423,7 @@ const LinearStageCard = ({
                         className='text-muted-foreground hover:text-red-500 flex-shrink-0'
                         data-track-category='board_config'
                         data-track-name='remove_stage_form'
+                        data-track-kind='active'
                       >
                         <X size={12} />
                       </Button>
@@ -468,6 +482,7 @@ const LinearStageCard = ({
           onClick={() => handleAddStageAt(index + 1)}
           data-track-category='board_config'
           data-track-name='add_stage_between'
+          data-track-kind='active'
           variant='ghost'
           size='iconSm'
           className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
@@ -2241,6 +2256,7 @@ const BoardStageConfigScreen = ({
             onClick={onClose}
             data-track-category='board_config'
             data-track-name='CLOSE_STAGE_CONFIG'
+            data-track-kind='passive'
           >
             Close
           </Button>
@@ -2263,6 +2279,7 @@ const BoardStageConfigScreen = ({
               className='w-[16px] h-[16px] text-foreground hover:opacity-70'
               data-track-category='board_config'
               data-track-name='NAVIGATE_BACK'
+              data-track-kind='passive'
             >
               <ChevronLeft size={16} />
             </Button>
@@ -2277,6 +2294,7 @@ const BoardStageConfigScreen = ({
               onClick={onClose}
               data-track-category='board_config'
               data-track-name='CANCEL_STAGE_CONFIG'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -2285,6 +2303,7 @@ const BoardStageConfigScreen = ({
               onClick={() => void handleSave()}
               data-track-category='board_config'
               data-track-name='SAVE_STAGE_CONFIG'
+              data-track-kind='active'
             >
               {onNext ? 'Next' : 'Finish'}
             </Button>
@@ -2326,6 +2345,7 @@ const BoardStageConfigScreen = ({
                   setSlaPolicyType(slaPolicyType === 'priority' ? 'stages' : 'priority')
                 }
                 trackName='toggle_priority_sla'
+                trackKind='active'
               />
             </div>
 
@@ -2354,6 +2374,7 @@ const BoardStageConfigScreen = ({
                   checked={showNextStageFormInTicketDetails}
                   onToggle={() => setShowNextStageFormInTicketDetails(value => !value)}
                   trackName='toggle_next_stage_form_ticket_details'
+                  trackKind='passive'
                 />
               </div>
             </div>
@@ -2384,6 +2405,7 @@ const BoardStageConfigScreen = ({
                   disabledReason={PREFILLABLE_NON_LINEAR_UNSUPPORTED_MESSAGE}
                   onDisabledToggle={showNonLinearPrefillableUnsupportedToast}
                   trackName='toggle_non_linear_board'
+                  trackKind='passive'
                 />
               </span>
             </div>
@@ -2518,6 +2540,7 @@ const BoardStageConfigScreen = ({
                       onClick={() => handleAddStageAt(0)}
                       data-track-category='board_config'
                       data-track-name='add_first_stage'
+                      data-track-kind='active'
                       variant='ghost'
                       className='w-[280px] h-[120px] rounded-lg border-2 border-dashed border-muted-foreground flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-muted-foreground/80 hover:border-muted-foreground/60 hover:bg-background/50 transition-colors'
                     >
@@ -2633,6 +2656,7 @@ const BoardStageConfigScreen = ({
                         className='bg-red-600 text-white hover:bg-red-700'
                         data-track-category='board_config'
                         data-track-name='confirm_condition_delete'
+                        data-track-kind='active'
                       >
                         {isCheckingConditionDelete ? 'Checking...' : 'Delete'}
                       </Button>
@@ -2660,6 +2684,7 @@ const BoardStageConfigScreen = ({
               onClick={() => setShowTransitionsLoadingNotice(false)}
               data-track-category='board_config'
               data-track-name='transitions_loading_notice_ok'
+              data-track-kind='passive'
             >
               OK
             </Button>

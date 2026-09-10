@@ -50,6 +50,7 @@ function PickerProjectRow({
         className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors hover:bg-muted group'
         data-track-category='Projects'
         data-track-name='TogglePickerProject'
+        data-track-kind='passive'
       >
         <ChevronRight
           className={cn(
@@ -167,6 +168,7 @@ export function ViewBoardPicker({
       data-slot='view-board-picker-trigger'
       data-track-category='Projects'
       data-track-name='OpenBoardPicker'
+      data-track-kind='passive'
       className={cn('rounded-[10px] border-border hover:bg-muted', className)}
     >
       <Layers className='w-3 h-3 text-muted-foreground' />
@@ -194,6 +196,7 @@ export function ViewBoardPicker({
             className='flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground'
             data-track-category='Projects'
             data-track-name='SearchBoardPicker'
+            data-track-kind='passive'
           />
         </div>
         <div className='max-h-80 overflow-y-auto p-1'>

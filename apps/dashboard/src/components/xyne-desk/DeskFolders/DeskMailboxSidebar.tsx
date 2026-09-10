@@ -43,6 +43,7 @@ export const DeskMailboxSidebar = ({
               )}
               data-track-category='Support'
               data-track-name='SelectMailboxFolder'
+              data-track-kind='passive'
             >
               <span className='size-4 flex items-center justify-center shrink-0'>
                 <Icon size={14} />

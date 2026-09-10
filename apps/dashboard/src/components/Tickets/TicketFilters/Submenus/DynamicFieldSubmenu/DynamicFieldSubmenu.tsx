@@ -143,6 +143,7 @@ export const DynamicFieldSubmenu = ({
                   `}
                   data-track-category='Tickets'
                   data-track-name='ToggleSelectAllDynamicField'
+                  data-track-kind='passive'
                 >
                   <span className='text-sm font-medium text-primary'>
                     {allVisibleSelected ? 'Deselect all' : 'Select all'}
@@ -163,6 +164,7 @@ export const DynamicFieldSubmenu = ({
                     `}
                     data-track-category='Tickets'
                     data-track-name='ToggleDynamicFieldFilter'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ option, selected: !isSelected })}
                   >
                     <span className='text-sm'>{option}</span>
@@ -260,6 +262,7 @@ export const DynamicFieldSubmenu = ({
                 className='w-full'
                 data-track-category='Tickets'
                 data-track-name='ClearDynamicDateRange'
+                data-track-kind='passive'
               >
                 Clear date range
               </Button>
@@ -311,6 +314,7 @@ export const DynamicFieldSubmenu = ({
             className='flex-1'
             data-track-category='Tickets'
             data-track-name='ClearStringFilter'
+            data-track-kind='passive'
           >
             Clear
           </Button>
@@ -321,6 +325,7 @@ export const DynamicFieldSubmenu = ({
             className='flex-1'
             data-track-category='Tickets'
             data-track-name='ApplyStringFilter'
+            data-track-kind='passive'
           >
             Apply
           </Button>
@@ -357,6 +362,7 @@ export const DynamicFieldSubmenu = ({
             `}
             data-track-category='Tickets'
             data-track-name='FilterBooleanTrue'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ fieldName })}
           >
             <span className='text-sm'>True</span>
@@ -370,6 +376,7 @@ export const DynamicFieldSubmenu = ({
             `}
             data-track-category='Tickets'
             data-track-name='FilterBooleanFalse'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ fieldName })}
           >
             <span className='text-sm'>False</span>

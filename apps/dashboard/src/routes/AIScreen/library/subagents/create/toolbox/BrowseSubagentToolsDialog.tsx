@@ -52,6 +52,7 @@ const GroupCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create subagent v2: open tool group detail'
+      data-track-kind='active'
       className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
@@ -87,6 +88,7 @@ const GroupCard = ({
       }
       data-track-category='Claw Agents'
       data-track-name='Create subagent v2: quick toggle tool group'
+      data-track-kind='active'
       className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {enabled ? (

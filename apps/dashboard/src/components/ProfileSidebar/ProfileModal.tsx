@@ -74,6 +74,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
             title='Close'
             data-track-category='PROFILE'
             data-track-name='CloseProfileModal'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ userId })}
           >
             <X className='size-4' />

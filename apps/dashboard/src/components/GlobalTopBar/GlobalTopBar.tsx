@@ -127,6 +127,7 @@ const NavigationAndSearch = (): ReactElement => {
           aria-label='go-back'
           data-track-category='GLOBAL_TOP_BAR'
           data-track-name='GoBack'
+          data-track-kind='passive'
         >
           <ArrowLeft
             style={{ color: canGoBack ? 'var(--nav-active-icon)' : 'var(--nav-disabled-icon)' }}
@@ -144,6 +145,7 @@ const NavigationAndSearch = (): ReactElement => {
           aria-label='go-next'
           data-track-category='GLOBAL_TOP_BAR'
           data-track-name='GoForward'
+          data-track-kind='passive'
         >
           <ArrowRight
             style={{ color: canGoForward ? 'var(--nav-active-icon)' : 'var(--nav-disabled-icon)' }}
@@ -178,6 +180,7 @@ const NavigationAndSearch = (): ReactElement => {
               className='flex sm:w-[220px] md:w-[280px] lg:w-[420px] xl:w-[480px] h-[28px] px-2 items-center gap-3 text-[12px] rounded-lg cursor-pointer'
               data-track-category='GLOBAL_TOP_BAR'
               data-track-name='OpenSearch'
+              data-track-kind='passive'
             >
               <Search size={14} className='shrink-0' />
               {isOnSearchScreen && searchScreenQuery ? (
@@ -254,6 +257,7 @@ const NavigationAndSearch = (): ReactElement => {
           title='User Guide'
           data-track-category='GLOBAL_TOP_BAR'
           data-track-name='OpenUserGuide'
+          data-track-kind='passive'
         >
           <CircleHelp size={16} />
         </button>
@@ -304,6 +308,7 @@ const WorkspaceInviteButton = (): ReactElement | null => {
         aria-label='copy-workspace-invite-link'
         data-track-category='GLOBAL_TOP_BAR'
         data-track-name='CopyCommunityWorkspaceInvite'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ workspaceId })}
       >
         {copied ? <Check className='size-3.5 text-emerald-500' /> : <Share2 className='size-3.5' />}
@@ -372,6 +377,7 @@ const GlobalTopBar = ({
                 aria-label='stop-recording'
                 data-track-category='ERROR_REPORT'
                 data-track-name='StopRecordingTopBar'
+                data-track-kind='active'
               >
                 <Circle className='size-2.5 fill-current animate-pulse' />
                 <span className='font-mono'>{formatElapsedTime(recordingSeconds * 1000)}</span>
@@ -393,6 +399,7 @@ const GlobalTopBar = ({
                 aria-expanded={supportMenuOpen}
                 data-track-category='ERROR_REPORT'
                 data-track-name='OpenSupportMenu'
+                data-track-kind='passive'
               >
                 <Headset size={14} className='text-[var(--metrics-bar-color)]' />
                 <span>Support</span>
@@ -412,6 +419,7 @@ const GlobalTopBar = ({
                     }}
                     data-track-category='ERROR_REPORT'
                     data-track-name='OpenModal'
+                    data-track-kind='passive'
                   >
                     <AlertCircle className='size-4 shrink-0' />
                     <span>Report issue</span>
@@ -427,6 +435,7 @@ const GlobalTopBar = ({
                       }}
                       data-track-category='ERROR_REPORT'
                       data-track-name='ViewMyTickets'
+                      data-track-kind='passive'
                     >
                       <ExternalLink className='size-4 shrink-0' />
                       <span>View my tickets</span>

@@ -90,6 +90,7 @@ const UserRow = ({
           onClick={handleEditClick}
           data-track-category='RESOURCE_ACCESS'
           data-track-name='EDIT_USER_ACCESS'
+          data-track-kind='active'
         >
           Edit
         </Button>
@@ -171,6 +172,7 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
               onClick={handlePrevPage}
               data-track-category='RESOURCE_ACCESS'
               data-track-name='USER_LIST_PREV_PAGE'
+              data-track-kind='passive'
               disabled={currentPage === 1}
               className='h-8 w-8 p-0'
             >
@@ -185,6 +187,7 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
               onClick={handleNextPage}
               data-track-category='RESOURCE_ACCESS'
               data-track-name='USER_LIST_NEXT_PAGE'
+              data-track-kind='passive'
               disabled={currentPage === totalPages}
               className='h-8 w-8 p-0'
             >

@@ -21,6 +21,7 @@ export const ChartTypeSelect = ({
       className='appearance-none bg-transparent outline-none pr-1 cursor-pointer'
       data-track-category='COMPONENT_EDITOR'
       data-track-name='Chart_Type_Change'
+      data-track-kind='passive'
     >
       {ALL_TYPES.map(t => {
         const reason = chartTypeUnsupportedReason(t.value, inScopeColumns);

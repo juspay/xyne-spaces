@@ -42,6 +42,7 @@ const SkillCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open skill detail'
+      data-track-kind='active'
       className={cn(BROWSE_CARD, selected ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
@@ -76,6 +77,7 @@ const SkillCard = ({
       title={`${selected ? 'Remove' : 'Add'} ${entry.label}`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle skill'
+      data-track-kind='active'
       className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {selected ? (

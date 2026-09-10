@@ -38,6 +38,7 @@ export function PaginationControls({
           aria-label={vertical ? 'Previous page (up)' : 'Previous page (left)'}
           data-track-category='CALLS'
           data-track-name='Pagination_Prev'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ currentPage, totalPages: totalPageCount })}
         >
           <PrevIcon className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
@@ -56,6 +57,7 @@ export function PaginationControls({
           aria-label={vertical ? 'Next page (down)' : 'Next page (right)'}
           data-track-category='CALLS'
           data-track-name='Pagination_Next'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ currentPage, totalPages: totalPageCount })}
         >
           <NextIcon className={compact ? 'w-4 h-4' : 'w-5 h-5'} />

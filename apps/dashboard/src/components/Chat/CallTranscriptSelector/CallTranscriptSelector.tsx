@@ -159,6 +159,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                     } group relative`}
                     data-track-category='CALLS'
                     data-track-name='SELECT_CALL_TRANSCRIPT'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ callId: call.id })}
                   >
                     <div className='flex justify-between items-start gap-3'>
@@ -235,6 +236,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                   className='flex items-center gap-2 border border-border bg-card hover:bg-accent text-foreground px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95'
                   data-track-category='CALLS'
                   data-track-name='SEND_CALL_AS_MESSAGE'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ callId: selectedCall?.id })}
                 >
                   <MessageSquare size={14} />
@@ -256,6 +258,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                   className={`flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-all active:scale-95 ${!onAttach ? 'opacity-50 cursor-not-allowed' : ''}`}
                   data-track-category='CALLS'
                   data-track-name='ATTACH_CALL_SUMMARY'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ callId: selectedCall?.id })}
                 >
                   <Paperclip size={14} />

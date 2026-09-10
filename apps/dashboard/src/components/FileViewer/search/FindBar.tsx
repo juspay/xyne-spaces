@@ -106,6 +106,7 @@ export const FindBar: React.FC = () => {
         className='w-44 bg-transparent text-sm text-white placeholder:text-white/40 focus:outline-none'
         data-track-category='FileViewer'
         data-track-name='FindInput'
+        data-track-kind='passive'
       />
 
       <span
@@ -128,6 +129,7 @@ export const FindBar: React.FC = () => {
         aria-pressed={options.caseSensitive}
         data-track-category='FileViewer'
         data-track-name='FindToggleMatchCase'
+        data-track-kind='passive'
       >
         Aa
       </button>
@@ -140,6 +142,7 @@ export const FindBar: React.FC = () => {
         aria-pressed={options.wholeWord}
         data-track-category='FileViewer'
         data-track-name='FindToggleWholeWord'
+        data-track-kind='passive'
       >
         {/* Word-boundary glyph, matching VS Code: "ab" over a bracket whose
             ends tick upward (bottom border + short left/right upticks), so it
@@ -161,6 +164,7 @@ export const FindBar: React.FC = () => {
           aria-label='Previous match'
           data-track-category='FileViewer'
           data-track-name='FindPrevious'
+          data-track-kind='passive'
         >
           <ChevronUp className='h-4 w-4' />
         </button>
@@ -175,6 +179,7 @@ export const FindBar: React.FC = () => {
           aria-label='Next match'
           data-track-category='FileViewer'
           data-track-name='FindNext'
+          data-track-kind='passive'
         >
           <ChevronDown className='h-4 w-4' />
         </button>
@@ -188,6 +193,7 @@ export const FindBar: React.FC = () => {
         aria-label='Close find bar'
         data-track-category='FileViewer'
         data-track-name='FindClose'
+        data-track-kind='passive'
       >
         <X className='h-4 w-4' />
       </button>

@@ -47,6 +47,7 @@ export function SearchableMultiSelect({
   className,
   trackCategory,
   trackName,
+  trackKind,
 }: SearchableMultiSelectProps): ReactElement {
   const [searchValue, setSearchValue] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -212,6 +213,7 @@ export function SearchableMultiSelect({
                 )}
                 data-track-category={trackCategory}
                 data-track-name={trackName}
+                data-track-kind={trackKind}
               >
                 {option.icon}
                 <span className='min-w-0 flex-1 truncate'>{option.label}</span>
@@ -231,6 +233,7 @@ export function SearchableMultiSelect({
           className='mt-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
           data-track-category={trackCategory}
           data-track-name='create_option'
+          data-track-kind='active'
         >
           <PlusDefault className='size-3.5 shrink-0' aria-hidden='true' />
           <span className='min-w-0 flex-1 truncate'>Create “{trimmedQuery}”</span>

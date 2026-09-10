@@ -131,6 +131,7 @@ export function BriefSettingsDialog({
               rows={7}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-instructions'
+              data-track-kind='passive'
               placeholder='e.g. Keep it under six lines. Lead with anything touching payments, and always name who I am waiting on.'
               className={cn(
                 'w-full resize-none rounded-lg border bg-background px-3 py-2',
@@ -184,6 +185,7 @@ export function BriefSettingsDialog({
               disabled={saving}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-cancel'
+              data-track-kind='passive'
               className='rounded-lg'
             >
               Cancel
@@ -195,6 +197,7 @@ export function BriefSettingsDialog({
               disabled={loading || saving || overLimit || busy}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-save-regenerate'
+              data-track-kind='active'
               className='rounded-lg'
             >
               Save & regenerate
@@ -206,6 +209,7 @@ export function BriefSettingsDialog({
               loading={saving}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-save'
+              data-track-kind='active'
               className='rounded-lg'
             >
               Save

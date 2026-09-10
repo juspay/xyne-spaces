@@ -214,6 +214,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
               className='inline-flex h-[32px] shrink-0 items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
               data-track-category='DeskSettings'
               data-track-name='ConnectApp'
+              data-track-kind='active'
             >
               <Plus size={14} />
               <span>{connectMutation.isPending ? 'Connecting…' : 'Connect'}</span>

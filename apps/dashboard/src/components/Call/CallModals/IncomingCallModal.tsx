@@ -378,10 +378,22 @@ export function IncomingCallModal(): React.ReactElement | null {
         if (!callInQueue) return;
 
         if (data.action === 'accept') {
-          globalClickTracker.trackManualEvent('CALLS', 'ACCEPT_INCOMING_CALL_NATIVE');
+          globalClickTracker.trackManualEvent(
+            'CALLS',
+            'ACCEPT_INCOMING_CALL_NATIVE',
+            undefined,
+            undefined,
+            'active',
+          );
           handleAcceptCall(data.callId);
         } else if (data.action === 'reject') {
-          globalClickTracker.trackManualEvent('CALLS', 'REJECT_INCOMING_CALL_NATIVE');
+          globalClickTracker.trackManualEvent(
+            'CALLS',
+            'REJECT_INCOMING_CALL_NATIVE',
+            undefined,
+            undefined,
+            'active',
+          );
           handleRejectCall(data.callId);
         }
       },

@@ -51,6 +51,7 @@ export function BehaviourTextDialog({
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name={`Agent detail v2: cancel ${testId}`}
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -60,6 +61,7 @@ export function BehaviourTextDialog({
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
             data-track-name={`Agent detail v2: save ${testId}`}
+            data-track-kind='active'
           >
             Save
           </Button>

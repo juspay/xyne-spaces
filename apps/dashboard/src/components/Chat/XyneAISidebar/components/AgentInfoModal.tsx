@@ -94,6 +94,7 @@ export const AgentInfoModal = ({
             className='p-2 rounded-lg hover:bg-accent transition-colors'
             data-track-category='XyneAI'
             data-track-name='CloseAgentInfoModal'
+            data-track-kind='passive'
           >
             <X size={16} className='text-current' />
           </button>

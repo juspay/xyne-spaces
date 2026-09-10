@@ -172,6 +172,7 @@ export const SummaryGenerationPanel = ({
                     className='shrink-0 gap-1.5 bg-foreground py-2 px-3 text-sm rounded-xl font-medium text-background transition-opacity duration-150 hover:bg-foreground hover:opacity-90'
                     data-track-category='RecordingDetailV2'
                     data-track-name='retry_summary'
+                    data-track-kind='active'
                   >
                     <XyneAIStar size={12} />
                     Try again
@@ -185,6 +186,7 @@ export const SummaryGenerationPanel = ({
                       className='shrink-0 rounded-xl border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-none transition-[border-color,color] duration-150 hover:bg-background hover:text-foreground'
                       data-track-category='RecordingDetailV2'
                       data-track-name='read_transcript_after_summary_failure'
+                      data-track-kind='passive'
                     >
                       Read the transcript
                     </Button>
@@ -227,6 +229,7 @@ export const SummaryGenerationPanel = ({
                 className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground text-background hover:bg-foreground/80 hover:text-background disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed'
                 data-track-category='RecordingDetailV2'
                 data-track-name='generate_summary'
+                data-track-kind='active'
               >
                 <XyneAIStar size={12} />
                 Generate summary

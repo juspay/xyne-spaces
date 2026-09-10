@@ -174,6 +174,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
         onClick={() => setMode(value)}
         data-track-category='Support'
         data-track-name='SelectDlMemberSyncRangePreset'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ mode: value })}
         className={cn(
           'flex flex-col items-start justify-center gap-0.5 rounded-lg border-2 px-3 py-2 min-h-[58px] transition-all text-left',
@@ -267,6 +268,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                 onClick={() => handleOpenChange(false)}
                 data-track-category='Support'
                 data-track-name='CLOSE_DL_SYNC_DIALOG'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -276,6 +278,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                 onClick={() => setStep('provider')}
                 data-track-category='Support'
                 data-track-name='DL_SYNC_BACK_TO_PROVIDER'
+                data-track-kind='passive'
               >
                 Next
               </Button>
@@ -299,6 +302,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     }}
                     data-track-category='Support'
                     data-track-name='DL_SYNC_SELECT_MICROSOFT'
+                    data-track-kind='passive'
                     trackId='dl_member_sync_microsoft'
                     disabled={isRedirecting}
                   >
@@ -319,6 +323,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     }}
                     data-track-category='Support'
                     data-track-name='DL_SYNC_SELECT_GOOGLE'
+                    data-track-kind='passive'
                     trackId='dl_member_sync_google'
                     disabled={isRedirecting}
                   >
@@ -345,6 +350,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                 onClick={() => setStep('range')}
                 data-track-category='Support'
                 data-track-name='DL_SYNC_BACK_TO_RANGE'
+                data-track-kind='passive'
               >
                 Back
               </Button>

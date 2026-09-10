@@ -230,6 +230,7 @@ export function ComposerCollectionPicker({
           )}
           data-track-category='XyneAI'
           data-track-name='OPEN_COLLECTION_SELECTOR'
+          data-track-kind='passive'
         >
           <BookOpen className='h-4 w-4' aria-hidden />
         </button>
@@ -250,6 +251,7 @@ export function ComposerCollectionPicker({
                   aria-label='Back'
                   data-track-category='XyneAI'
                   data-track-name='KB_FOLDER_BACK'
+                  data-track-kind='passive'
                 >
                   <ArrowLeft className='h-3.5 w-3.5' />
                 </button>
@@ -290,6 +292,7 @@ export function ComposerCollectionPicker({
                         title='Click to select · double-click to open'
                         data-track-category='XyneAI'
                         data-track-name='SELECT_KB_FOLDER'
+                        data-track-kind='passive'
                       >
                         <Folder className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                         <span className='flex-1 truncate'>{folder.name}</span>
@@ -311,6 +314,7 @@ export function ComposerCollectionPicker({
                         )}
                         data-track-category='XyneAI'
                         data-track-name='SELECT_FILE_SCOPE'
+                        data-track-kind='passive'
                       >
                         <FileText className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                         <span className='flex-1 truncate'>{file.name}</span>
@@ -346,6 +350,7 @@ export function ComposerCollectionPicker({
                       title='Click to select · double-click to open'
                       data-track-category='XyneAI'
                       data-track-name='SELECT_COLLECTION'
+                      data-track-kind='passive'
                     >
                       <BookOpen className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                       <span className='flex-1 truncate'>{collection.name}</span>

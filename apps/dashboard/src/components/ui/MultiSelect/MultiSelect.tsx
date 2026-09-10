@@ -158,6 +158,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                         onClick={e => handleRemovePill(option.value, e)}
                         data-track-category='ENTITY_PICKER'
                         data-track-name='REMOVE_SELECTED_PILL'
+                        data-track-kind='active'
                         className={cn(
                           'ml-0.5 rounded-full p-0.5 text-muted-foreground',
                           'hover:bg-accent hover:text-foreground',
@@ -267,6 +268,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                       onClick={() => toggleSelection(option.value)}
                       data-track-category='ENTITY_PICKER'
                       data-track-name='TOGGLE_OPTION'
+                      data-track-kind='passive'
                       onMouseEnter={() => setFocusedIndex(index)}
                       className={cn(
                         'flex w-full cursor-pointer select-none items-center gap-3 rounded-sm px-3 py-2 text-sm outline-none transition-colors',

@@ -126,6 +126,7 @@ export function RecordingWorkspaceHeader({
               className={layoutTabClassName(activeLayout === 'transcript')}
               data-track-category='RecordingsScreen'
               data-track-name='switch_to_transcript'
+              data-track-kind='passive'
               title='Transcript only'
             >
               <AlignLeft className='size-[15px]' />
@@ -137,6 +138,7 @@ export function RecordingWorkspaceHeader({
               className={layoutTabClassName(activeLayout === 'split')}
               data-track-category='RecordingsScreen'
               data-track-name='switch_to_split'
+              data-track-kind='passive'
               title='Split view'
             >
               <Columns2 className='size-[15px]' />
@@ -148,6 +150,7 @@ export function RecordingWorkspaceHeader({
               className={layoutTabClassName(activeLayout === 'notes')}
               data-track-category='RecordingsScreen'
               data-track-name='switch_to_notes'
+              data-track-kind='passive'
               title='Notes only'
             >
               <Layers className='size-[15px]' />
@@ -171,6 +174,7 @@ export function RecordingWorkspaceHeader({
                 className='h-8 gap-1 rounded-lg px-3 text-[12.5px] font-semibold text-muted-foreground hover:bg-action-primary hover:text-action-primary-foreground'
                 data-track-category='RecordingsScreen'
                 data-track-name='create_notes_canvas'
+                data-track-kind='active'
               >
                 {!isCreatingCanvas && <Plus className='size-4' strokeWidth={2.2} />}
                 Create Notes
@@ -190,6 +194,7 @@ export function RecordingWorkspaceHeader({
             className='size-[34px] rounded-[9px] border-border bg-background text-muted-foreground shadow-none hover:bg-muted/40 hover:text-foreground/70'
             data-track-category='RecordingsScreen'
             data-track-name='minimize_transcript'
+            data-track-kind='passive'
           >
             <ChevronDown className='size-[15px]' strokeWidth={2} />
           </Button>

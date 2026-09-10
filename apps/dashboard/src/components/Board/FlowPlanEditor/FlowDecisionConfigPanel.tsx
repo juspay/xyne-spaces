@@ -76,6 +76,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
           onClick={onClose}
           data-track-category='flow_plan_editor'
           data-track-name='close_decision_config'
+          data-track-kind='passive'
           className='rounded-md p-1.5 text-muted-foreground hover:bg-muted'
         >
           <X size={13} />
@@ -97,6 +98,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
               id='flow-decision-field'
               data-track-category='flow_plan_editor'
               data-track-name='select_decision_field'
+              data-track-kind='passive'
               className='w-full bg-background text-[12px] text-foreground'
             >
               <SelectValue placeholder='Choose a field…' />
@@ -128,6 +130,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
               <SelectTrigger
                 data-track-category='flow_plan_editor'
                 data-track-name='select_decision_operator'
+                data-track-kind='passive'
                 className='w-full bg-background text-[12px]'
               >
                 <SelectValue />
@@ -147,6 +150,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
               onChange={event => onUpdate({ comparisonValue: event.target.value })}
               data-track-category='flow_plan_editor'
               data-track-name='input_decision_comparison'
+              data-track-kind='passive'
               placeholder='Comparison text'
               className='rounded-lg border border-border bg-background px-3 py-2 text-[12px] outline-none focus:border-amber-500'
             />
@@ -185,6 +189,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
                         size='sm'
                         data-track-category='flow_plan_editor'
                         data-track-name='select_decision_target'
+                        data-track-kind='passive'
                         className='w-full bg-background text-[11px]'
                       >
                         <SelectValue placeholder='Choose next step…' />
@@ -215,6 +220,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
                           onClick={() => onCreateTarget(route.key, 'confirmation')}
                           data-track-category='flow_plan_editor'
                           data-track-name='create_decision_confirmation_target'
+                          data-track-kind='active'
                           className='rounded-md border border-dashed border-amber-300 px-2 py-1 text-[10px] text-amber-700 hover:bg-amber-50'
                         >
                           + Confirmation step
@@ -224,6 +230,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
                           onClick={() => onCreateTarget(route.key, 'form')}
                           data-track-category='flow_plan_editor'
                           data-track-name='create_decision_form_target'
+                          data-track-kind='active'
                           className='rounded-md border border-dashed border-amber-300 px-2 py-1 text-[10px] text-amber-700 hover:bg-amber-50'
                         >
                           + Form step
@@ -234,6 +241,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
                             onClick={() => onCreateTarget(route.key, 'group')}
                             data-track-category='flow_plan_editor'
                             data-track-name='create_decision_group_target'
+                            data-track-kind='active'
                             className='rounded-md border border-dashed border-amber-300 px-2 py-1 text-[10px] text-amber-700 hover:bg-amber-50'
                           >
                             + Group

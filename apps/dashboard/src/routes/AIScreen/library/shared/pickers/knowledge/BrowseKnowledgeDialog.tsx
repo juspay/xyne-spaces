@@ -124,6 +124,7 @@ export function BrowseKnowledgeDialog({
                       aria-label={`Remove ${entry.root.name}`}
                       data-track-category='Claw Agents'
                       data-track-name='Create agent v2: remove KB collection'
+                      data-track-kind='active'
                       className='flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-solid border-border bg-muted py-1 pl-1 pr-2 transition-colors hover:bg-muted/70'
                     >
                       <KbFolderTile size='sm' />
@@ -145,6 +146,7 @@ export function BrowseKnowledgeDialog({
                   onClick={() => onGrantsChange([])}
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: remove all KB grants'
+                  data-track-kind='active'
                   className='self-end text-xs leading-4 tracking-[-0.24px] text-foreground underline underline-offset-2 transition-opacity hover:opacity-70'
                 >
                   Remove All
@@ -196,6 +198,7 @@ function CollectionCard({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open KB collection'
+      data-track-kind='active'
       className={cn(
         'flex w-full items-center gap-2.5 overflow-hidden rounded-2xl border-[0.8px] border-transparent p-4 text-left transition-colors',
         selected ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE,

@@ -132,6 +132,7 @@ const ChatListItemComponent = ({
             data-ph-capture-attribute-track-id='retry_failed_send'
             data-track-category='PENDING_MESSAGE'
             data-track-name='retry_failed_send'
+            data-track-kind='active'
             className='font-medium underline hover:opacity-80'
             onClick={() => firePendingMutator(zero, pendingEntry)}
           >
@@ -142,6 +143,7 @@ const ChatListItemComponent = ({
             data-ph-capture-attribute-track-id='delete_failed_send'
             data-track-category='PENDING_MESSAGE'
             data-track-name='delete_failed_send'
+            data-track-kind='active'
             className='font-medium underline hover:opacity-80'
             onClick={() => removePending(pendingEntry.messageId)}
           >

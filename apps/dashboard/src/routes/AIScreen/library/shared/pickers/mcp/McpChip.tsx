@@ -27,6 +27,7 @@ export function McpChip({
       aria-pressed={selected}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: toggle MCP chip'
+      data-track-kind='active'
       className={cn(
         'flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-border py-1 pl-1 pr-2 transition-colors',
         selected

@@ -150,6 +150,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
                   }`}
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name={`Create_Visibility_${opt.label}`}
+                  data-track-kind='active'
                 >
                   <div className='text-sm font-medium text-foreground'>{opt.label}</div>
                   <div className='text-[11px] text-muted-foreground mt-0.5'>{opt.hint}</div>
@@ -165,6 +166,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
           onClick={onClose}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CANCEL_CREATE_DASHBOARD'
+          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -173,6 +175,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
           trackId='create_dashboard'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CREATE_DASHBOARD'
+          data-track-kind='active'
           disabled={!name.trim() || isCreating}
         >
           {isCreating ? (

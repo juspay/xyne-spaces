@@ -187,6 +187,7 @@ export const DashboardShareModal = ({
             } ${!isOwner ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             data-track-category='DYNAMIC_DASHBOARD'
             data-track-name='Toggle_Visibility'
+            data-track-kind='passive'
           >
             <span
               aria-hidden='true'
@@ -224,6 +225,7 @@ export const DashboardShareModal = ({
                   trackId='add_dashboard_participant_viewer'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Add_Participant_Viewer'
+                  data-track-kind='active'
                 >
                   <Eye className='w-3 h-3' />
                   Viewer
@@ -238,6 +240,7 @@ export const DashboardShareModal = ({
                   trackId='add_dashboard_participant_editor'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Add_Participant_Editor'
+                  data-track-kind='active'
                 >
                   <Shield className='w-3 h-3' />
                   Editor
@@ -253,6 +256,7 @@ export const DashboardShareModal = ({
                     trackId='add_dashboard_participant_owner'
                     data-track-category='DYNAMIC_DASHBOARD'
                     data-track-name='Add_Participant_Owner'
+                    data-track-kind='active'
                   >
                     <Crown className='w-3 h-3' />
                     Owner
@@ -304,6 +308,7 @@ export const DashboardShareModal = ({
                         className='w-[100px] h-8 text-xs flex items-center justify-between px-2 border border-border rounded bg-background'
                         data-track-category='DYNAMIC_DASHBOARD'
                         data-track-name='Open_Role_Select'
+                        data-track-kind='passive'
                       >
                         <Select.Value />
                         <Select.Icon>
@@ -350,6 +355,7 @@ export const DashboardShareModal = ({
                       title='Remove participant'
                       data-track-category='DYNAMIC_DASHBOARD'
                       data-track-name='Remove_Participant'
+                      data-track-kind='active'
                     >
                       <X className='w-4 h-4' />
                     </button>
@@ -377,6 +383,7 @@ export const DashboardShareModal = ({
                 onClick={() => setConfirmationModal({ isOpen: false, userId: null })}
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Cancel_Remove_Participant'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -388,6 +395,7 @@ export const DashboardShareModal = ({
                 trackId='remove_dashboard_participant'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Confirm_Remove_Participant'
+                data-track-kind='active'
               >
                 Remove
               </Button>

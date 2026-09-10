@@ -53,6 +53,7 @@ export const AliasManager = ({
             onClick={onClose}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CLOSE_ALIAS_MANAGER'
+            data-track-kind='passive'
             className='p-1 hover:bg-accent rounded transition-colors'
             type='button'
           >
@@ -127,6 +128,7 @@ export const AliasManager = ({
                             onClick={() => onEdit(alias)}
                             data-track-category='XYNE_AI_SIDEBAR'
                             data-track-name='EDIT_ACTIVITY_ALIAS'
+                            data-track-kind='active'
                             className='p-1.5 text-muted-foreground hover:text-primary hover:bg-muted rounded transition-colors'
                             title='Edit alias'
                             type='button'
@@ -140,6 +142,7 @@ export const AliasManager = ({
                                 data-ph-capture-attribute-track-id='confirm_delete_alias'
                                 data-track-category='XYNE_AI_SIDEBAR'
                                 data-track-name='CONFIRM_DELETE_ALIAS'
+                                data-track-kind='active'
                                 className='px-2 py-1 text-xs font-medium text-destructive-foreground bg-destructive rounded hover:bg-destructive/90 transition-colors'
                                 type='button'
                               >
@@ -149,6 +152,7 @@ export const AliasManager = ({
                                 onClick={handleCancelDelete}
                                 data-track-category='XYNE_AI_SIDEBAR'
                                 data-track-name='CANCEL_DELETE_ALIAS'
+                                data-track-kind='passive'
                                 className='px-2 py-1 text-xs font-medium text-muted-foreground bg-muted rounded hover:bg-accent transition-colors'
                                 type='button'
                               >
@@ -160,6 +164,7 @@ export const AliasManager = ({
                               onClick={() => handleDeleteClick(alias.id)}
                               data-track-category='XYNE_AI_SIDEBAR'
                               data-track-name='START_DELETE_ALIAS'
+                              data-track-kind='active'
                               className='p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors'
                               title='Delete alias'
                               type='button'
@@ -183,6 +188,7 @@ export const AliasManager = ({
             onClick={onClose}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CLOSE_ALIAS_MANAGER'
+            data-track-kind='passive'
             className='px-4 py-2 text-sm font-medium text-muted-foreground bg-background border border-border rounded-md hover:bg-muted transition-colors'
             type='button'
           >

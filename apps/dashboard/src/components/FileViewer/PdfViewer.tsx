@@ -490,6 +490,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
               title='Previous page'
               data-track-category='FileViewer'
               data-track-name='PREVIOUS_PDF_PAGE'
+              data-track-kind='passive'
             >
               <ChevronUp className='h-4 w-4' />
               {!isMobile && <span>Previous</span>}
@@ -525,6 +526,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
                 disabled={numPages === 0}
                 data-track-category='FileViewer'
                 data-track-name='SELECT_PDF_PAGE_INPUT'
+                data-track-kind='passive'
                 className='w-16 px-2 py-1 text-sm text-center bg-background dark:bg-gray-600 border border-input dark:border-gray-500 rounded text-foreground dark:text-gray-200 focus:outline-none focus:border-muted-foreground dark:focus:border-muted-foreground'
               />
               <span className='text-sm text-muted-foreground dark:text-muted-foreground'>
@@ -542,6 +544,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
               title='Next page'
               data-track-category='FileViewer'
               data-track-name='NEXT_PDF_PAGE'
+              data-track-kind='passive'
             >
               {!isMobile && <span>Next</span>}
               <ChevronDown className='h-4 w-4' />
@@ -559,6 +562,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
                   aria-label='Zoom out PDF'
                   data-track-category='FileViewer'
                   data-track-name='ZOOM_OUT_PDF'
+                  data-track-kind='passive'
                 >
                   <ZoomOut className='h-4 w-4' />
                 </button>
@@ -575,6 +579,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
                   aria-label='Zoom in PDF'
                   data-track-category='FileViewer'
                   data-track-name='ZOOM_IN_PDF'
+                  data-track-kind='passive'
                 >
                   <ZoomIn className='h-4 w-4' />
                 </button>
@@ -586,6 +591,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
                   aria-label='Fit PDF to width'
                   data-track-category='FileViewer'
                   data-track-name='RESET_PDF_ZOOM'
+                  data-track-kind='passive'
                 >
                   <Maximize2 className='h-4 w-4' />
                 </button>

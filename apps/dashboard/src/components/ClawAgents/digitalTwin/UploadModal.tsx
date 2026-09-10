@@ -90,6 +90,7 @@ export const UploadModal = ({
             onClick={close}
             data-track-category='Claw Agents'
             data-track-name='CANCEL_DIGITAL_TWIN_UPLOAD'
+            data-track-kind='passive'
             disabled={uploadMutation.isPending}
           >
             Cancel
@@ -99,6 +100,7 @@ export const UploadModal = ({
             onClick={submit}
             data-track-category='Claw Agents'
             data-track-name='UPLOAD_DIGITAL_TWIN_FILE'
+            data-track-kind='active'
             loading={uploadMutation.isPending}
             disabled={!filename || !content.trim()}
           >
@@ -131,6 +133,7 @@ export const UploadModal = ({
             onChange={e => setContent(e.target.value)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin upload content preview'
+            data-track-kind='active'
             rows={6}
             className='w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground focus:border-ring focus:outline-none'
           />

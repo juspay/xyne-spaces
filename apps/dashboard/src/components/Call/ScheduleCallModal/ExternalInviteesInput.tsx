@@ -88,6 +88,7 @@ export const ExternalInviteesInput: React.FC<ExternalInviteesInputProps> = ({
               aria-label={`Remove ${email}`}
               data-track-category='CALLS'
               data-track-name='remove-external-invitee'
+              data-track-kind='active'
             >
               <X size={12} />
             </button>
@@ -101,6 +102,7 @@ export const ExternalInviteesInput: React.FC<ExternalInviteesInputProps> = ({
           value={draft}
           data-track-category='CALLS'
           data-track-name='external-invitee-input'
+          data-track-kind='passive'
           onChange={e => {
             setDraft(e.target.value);
             setInvalid(false);

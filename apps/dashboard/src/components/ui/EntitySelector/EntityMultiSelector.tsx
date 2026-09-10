@@ -190,6 +190,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
               }}
               data-track-category='ENTITY_PICKER'
               data-track-name='REMOVE_SELECTED_VALUE'
+              data-track-kind='active'
               className='text-muted-foreground hover:text-muted-foreground'
             >
               <X className='size-2.5' strokeWidth={2.5} />
@@ -218,6 +219,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                 }}
                 data-track-category='ENTITY_PICKER'
                 data-track-name='CLEAR_ALL_SELECTED'
+                data-track-kind='passive'
                 className='text-muted-foreground hover:text-muted-foreground'
               >
                 <X className='size-2.5' strokeWidth={2.5} />
@@ -292,6 +294,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                             onClick={() => toggleValue(option.value)}
                             data-track-category='ENTITY_PICKER'
                             data-track-name='TOGGLE_OPTION'
+                            data-track-kind='passive'
                           >
                             <span
                               className={cn(
@@ -355,6 +358,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                         }}
                         data-track-category='ENTITY_PICKER'
                         data-track-name='CREATE_OPTION'
+                        data-track-kind='active'
                       >
                         <Plus className='size-3' strokeWidth={2.5} />
                         <span className='truncate text-xs'>

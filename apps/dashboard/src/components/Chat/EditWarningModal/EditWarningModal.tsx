@@ -7,12 +7,24 @@ export const EditWarningModal = (): React.ReactElement => {
   const { pendingAction, stopEditing, clearPendingAction } = useEditContext();
 
   const handleKeepEditing = (): void => {
-    globalClickTracker.trackManualEvent('MESSAGE', 'EDIT_WARNING_KEEP_EDITING');
+    globalClickTracker.trackManualEvent(
+      'MESSAGE',
+      'EDIT_WARNING_KEEP_EDITING',
+      undefined,
+      undefined,
+      'passive',
+    );
     clearPendingAction(); // just dismiss modal
   };
 
   const handleContinue = (): void => {
-    globalClickTracker.trackManualEvent('MESSAGE', 'EDIT_WARNING_CONTINUE');
+    globalClickTracker.trackManualEvent(
+      'MESSAGE',
+      'EDIT_WARNING_CONTINUE',
+      undefined,
+      undefined,
+      'passive',
+    );
     const next = pendingAction;
     stopEditing(); // clear current editingMessageId ONLY
     next?.(); // run the new action

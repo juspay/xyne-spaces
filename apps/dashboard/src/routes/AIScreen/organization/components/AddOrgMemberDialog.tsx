@@ -100,6 +100,7 @@ export function AddOrgMemberDialog({
           className='px-6 disabled:pointer-events-auto disabled:cursor-not-allowed'
           data-track-category='Claw Organization'
           data-track-name='Organization: add members'
+          data-track-kind='active'
         >
           {selected.length > 1 ? `Add ${selected.length} members` : 'Add member'}
         </Button>
@@ -118,6 +119,7 @@ export function AddOrgMemberDialog({
             aria-label='Search people'
             data-track-category='Claw Organization'
             data-track-name='Organization: search people'
+            data-track-kind='passive'
             variant='flat'
             className='pl-9'
           />
@@ -129,6 +131,7 @@ export function AddOrgMemberDialog({
           disabled={saving}
           label='Role for the people being added'
           trackName='Organization: set new member role'
+          trackKind='active'
           triggerClassName='border-border shadow-none focus-visible:ring-[2px] focus-visible:ring-ring/10'
           onChange={next => {
             if (isAddableOrgRole(next)) setRole(next);

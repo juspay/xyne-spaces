@@ -184,6 +184,7 @@ export const DmListItem = ({
         aria-label={`Open conversation with ${displayName}`}
         data-track-category='DM_LIST'
         data-track-name='OpenDMConversation'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ channelId: channel.id, displayName })}
       >
         <DMItemAvatar
@@ -237,6 +238,7 @@ export const DmListItem = ({
               role='presentation'
               data-track-category='DM_LIST'
               data-track-name='PREVIEW_LINK_CONTAINER'
+              data-track-kind='passive'
               className={cn(
                 'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-normal leading-[1.35] text-muted-foreground',
                 // Make RenderMessageWithHTML output inline and preserve link styles
@@ -288,6 +290,7 @@ export const DmListItem = ({
       aria-label={`Open conversation with ${displayName}`}
       data-track-category='DM'
       data-track-name='OPEN_DM_CONVERSATION'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ channelId: channel.id, channelName: channel.name })}
     >
       <div className='relative flex-shrink-0'>
@@ -346,6 +349,7 @@ export const DmListItem = ({
             role='presentation'
             data-track-category='DM_LIST'
             data-track-name='PREVIEW_LINK_CONTAINER'
+            data-track-kind='passive'
             className={cn(
               'w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm break-normal',
               isUnread

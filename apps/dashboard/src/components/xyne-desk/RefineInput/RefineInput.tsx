@@ -39,6 +39,7 @@ export const RefineInput = forwardRef<HTMLInputElement, RefineInputProps>(
           className='w-full text-sm border border-border rounded-lg bg-muted/30 pl-3 pr-9 py-2 outline-none placeholder:text-muted-foreground/60 disabled:opacity-50'
           data-track-category='AIDraft'
           data-track-name='RefineInput'
+          data-track-kind='passive'
         />
         <button
           type='button'
@@ -48,6 +49,7 @@ export const RefineInput = forwardRef<HTMLInputElement, RefineInputProps>(
           aria-label='Send refinement'
           data-track-category='AIDraft'
           data-track-name='SubmitRefinement'
+          data-track-kind='active'
           data-ph-capture-attribute-track-id='refine_draft'
         >
           <ArrowRight size={14} />

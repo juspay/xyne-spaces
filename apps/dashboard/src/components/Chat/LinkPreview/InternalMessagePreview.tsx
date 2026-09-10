@@ -55,6 +55,7 @@ const PreviewCloseButton: React.FC<{ onClose?: () => void }> = ({ onClose }) => 
       aria-label='Close preview'
       data-track-category='MESSAGE'
       data-track-name='CLOSE_INTERNAL_LINK_PREVIEW'
+      data-track-kind='passive'
     >
       <X size={12} className='text-muted-foreground' />
     </button>
@@ -73,6 +74,7 @@ const PreviewContainer: React.FC<{
       onClick={onNavigate}
       data-track-category='MESSAGE'
       data-track-name='OPEN_INTERNAL_MESSAGE_PREVIEW'
+      data-track-kind='passive'
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -262,6 +264,7 @@ const AttachmentPreview: React.FC<{
       tabIndex={0}
       data-track-category='LINK_PREVIEW'
       data-track-name='ATTACHMENT_LINK_PREVIEW'
+      data-track-kind='passive'
     >
       {attachments.map(att => (
         <div key={att.id}>

@@ -64,6 +64,7 @@ export const FlowTicketNodeCard: React.FC<NodeProps<FlowTicketNodeData>> = ({ da
         onClick={onSelect}
         data-track-category='flow_board'
         data-track-name='select_flow_step'
+        data-track-kind='passive'
         className='block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
       >
         <span className='flex items-center justify-between px-3 py-2 border-b border-border'>

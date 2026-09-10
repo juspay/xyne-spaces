@@ -63,6 +63,7 @@ export function BuiltinDetailPanel({
           }
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle built-in group from detail'
+          data-track-kind='active'
           className={cn(
             'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             enabled
@@ -88,6 +89,7 @@ export function BuiltinDetailPanel({
               }
               data-track-category='Claw Agents'
               data-track-name='Create agent v2: toggle all built-in tools'
+              data-track-kind='active'
               className='shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground'
             >
               {allChosen ? 'Clear all' : `Select all (${chosen.length}/${entry.tools.length})`}

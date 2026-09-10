@@ -161,6 +161,7 @@ function WikiRunControls(props: {
                 aria-label='Debug Wiki run'
                 data-track-category='SdlcWiki'
                 data-track-name='DebuggerOpened'
+                data-track-kind='passive'
                 className='inline-flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground'
               >
                 <Bug size={14} />
@@ -173,6 +174,7 @@ function WikiRunControls(props: {
                 onClick={() => void props.onRetry()}
                 data-track-category='SdlcWiki'
                 data-track-name='RetryClicked'
+                data-track-kind='passive'
                 className='inline-flex h-8 items-center gap-2 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50'
               >
                 <RefreshCw size={13} /> Resume
@@ -185,6 +187,7 @@ function WikiRunControls(props: {
                 onClick={() => void props.onCancel()}
                 data-track-category='SdlcWiki'
                 data-track-name='CancelClicked'
+                data-track-kind='passive'
                 className='h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50'
               >
                 Cancel
@@ -278,6 +281,7 @@ function WikiRunControls(props: {
               onClick={() => void props.onRetryKnowledge()}
               data-track-category='SdlcWiki'
               data-track-name='RepoKnowledgeRetryClicked'
+              data-track-kind='passive'
               className='h-7 shrink-0 rounded-md border px-2 text-[11px] font-medium hover:bg-muted disabled:opacity-50'
             >
               Retry knowledge
@@ -310,6 +314,7 @@ function WikiRunControls(props: {
                     aria-pressed={history === value}
                     data-track-category='SdlcWiki'
                     data-track-name='HistoryRangeSelected'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ value })}
                     className={cn(
                       'flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium',
@@ -336,6 +341,7 @@ function WikiRunControls(props: {
                   onChange={event => setCustomSha(event.target.value)}
                   data-track-category='SdlcWiki'
                   data-track-name='CustomShaChanged'
+                  data-track-kind='active'
                   placeholder='40-character start commit SHA'
                   className='mt-2 h-9 w-full rounded-md border bg-background px-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring'
                 />
@@ -359,6 +365,7 @@ function WikiRunControls(props: {
                   aria-pressed={chunkSize === value}
                   data-track-category='SdlcWiki'
                   data-track-name='ChunkSizeSelected'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ value })}
                   className={cn(
                     'inline-flex min-w-12 items-center justify-center gap-1.5 rounded-md border px-3 py-2 font-mono text-xs',
@@ -400,6 +407,7 @@ function WikiRunControls(props: {
                   aria-pressed={quality === value}
                   data-track-category='SdlcWiki'
                   data-track-name='QualitySelected'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ value })}
                   className={cn(
                     'rounded-md border p-3 text-left',
@@ -457,6 +465,7 @@ function WikiRunControls(props: {
               onClick={() => setOpen(false)}
               data-track-category='SdlcWiki'
               data-track-name='RunPanelClosed'
+              data-track-kind='passive'
               className='h-9 rounded-md border px-4 text-xs font-medium hover:bg-muted'
             >
               Close
@@ -788,6 +797,7 @@ function WikiFolderNode(props: {
         aria-expanded={open}
         data-track-category='SdlcHub'
         data-track-name='WikiFolderToggled'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ path: props.node.path, open: !open })}
       >
         {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -820,6 +830,7 @@ function WikiFolderNode(props: {
               title={page.path}
               data-track-category='SdlcHub'
               data-track-name='WikiCanvasOpened'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ canvasId: page.canvasId, path: page.path })}
             >
               <FileText
@@ -926,6 +937,7 @@ export function SdlcWikiSection(props: {
               aria-label='Search Wiki pages'
               data-track-category='SdlcHub'
               data-track-name='WikiSearched'
+              data-track-kind='passive'
             />
           </div>
           <div className='font-mono text-[11px] text-muted-foreground'>
@@ -946,6 +958,7 @@ export function SdlcWikiSection(props: {
                   className='mt-2 text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                   data-track-category='SdlcHub'
                   data-track-name='WikiReloaded'
+                  data-track-kind='passive'
                 >
                   Try again
                 </button>

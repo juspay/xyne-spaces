@@ -600,8 +600,9 @@ export const canvasSourceBlockShortcutsExtension = Extension.create({
         if (!selected) return false;
         const block = elementAt(editor.view, selected.pos);
         const open =
-          block?.querySelector<HTMLElement>('[data-track-name="OPEN_PREVIEW"]') ??
-          block?.querySelector<HTMLElement>('.mermaid-diagram');
+          block?.querySelector<HTMLElement>(
+            '[data-track-name="OPEN_PREVIEW" data-track-kind="passive"]',
+          ) ?? block?.querySelector<HTMLElement>('.mermaid-diagram');
         open?.click();
         return true;
       },

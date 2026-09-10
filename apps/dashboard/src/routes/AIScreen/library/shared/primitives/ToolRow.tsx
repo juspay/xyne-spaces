@@ -28,6 +28,7 @@ export function ToolRow({ tool, checked, onToggle }: ToolRowProps): ReactElement
       onClick={onToggle}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: toggle tool'
+      data-track-kind='active'
       className='flex w-full flex-col items-start gap-1 text-left'
     >
       <span className='flex w-full items-center gap-2'>

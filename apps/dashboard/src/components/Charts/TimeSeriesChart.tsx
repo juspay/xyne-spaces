@@ -185,6 +185,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             className='text-xs border border-border rounded px-2 py-1 bg-background text-foreground'
             data-track-category='Charts'
             data-track-name='TIME_SERIES_CARDINALITY_CHANGE'
+            data-track-kind='passive'
           >
             <option value='top5'>Top 5</option>
             <option value='top10'>Top 10</option>

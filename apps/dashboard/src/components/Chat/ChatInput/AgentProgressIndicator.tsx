@@ -97,6 +97,7 @@ export function AgentProgressIndicator({
           data-ph-capture-attribute-track-id='stop_agent'
           data-track-category='CHAT_INPUT'
           data-track-name='STOP_AGENT'
+          data-track-kind='active'
         >
           <Square className='h-3 w-3 fill-current' />
         </button>

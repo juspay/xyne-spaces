@@ -483,6 +483,7 @@ const UserPill = forwardRef<
         onClick={handleClick}
         data-track-category='ENTITY_PICKER'
         data-track-name='REMOVE_USER_CHIP'
+        data-track-kind='active'
         className='ml-1 hover:bg-accent rounded p-0.5 size-4'
         aria-label={`Remove ${getUserDisplayName(user)} from list`}
       >

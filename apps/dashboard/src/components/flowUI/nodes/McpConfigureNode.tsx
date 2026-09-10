@@ -131,6 +131,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
                 onChange={event => updateFieldValue(field.name, event.target.value)}
                 data-track-category='MCP_CONFIGURE_ARTIFACT'
                 data-track-name='MCP_CONFIGURE_FIELD_CHANGE'
+                data-track-kind='passive'
                 className={cn(
                   'h-9 rounded-lg border bg-background px-3 text-sm text-foreground outline-none',
                   'placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/25',
@@ -158,6 +159,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
           )}
           data-track-category='MCP_CONFIGURE_ARTIFACT'
           data-track-name='MCP_CONFIGURE_SUBMIT'
+          data-track-kind='passive'
           data-ph-capture-attribute-track-id='mcp_configure_submit'
         >
           <KeyRound size={14} strokeWidth={2} />

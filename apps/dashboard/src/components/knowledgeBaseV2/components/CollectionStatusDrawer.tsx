@@ -174,6 +174,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
                 onClick={onClose}
                 data-track-category='knowledge-base'
                 data-track-name='close-collection-status'
+                data-track-kind='passive'
                 className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
               >
                 <X className='h-4 w-4' strokeWidth={1.75} />

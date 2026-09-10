@@ -457,6 +457,7 @@ export function CanvasInlineCommentThread({
           onClick={() => setThreadStatus(CanvasCommentThreadStatus.RESOLVED)}
           data-track-category='CANVAS'
           data-track-name='RESOLVE_INLINE_COMMENT_THREAD'
+          data-track-kind='active'
           aria-label='Resolve comment'
           title='Resolve comment'
         >
@@ -471,6 +472,7 @@ export function CanvasInlineCommentThread({
           onClick={() => setThreadStatus(CanvasCommentThreadStatus.OPEN)}
           data-track-category='CANVAS'
           data-track-name='REOPEN_INLINE_COMMENT_THREAD'
+          data-track-kind='active'
           aria-label='Reopen comment'
           title='Reopen comment'
         >
@@ -484,6 +486,7 @@ export function CanvasInlineCommentThread({
         onClick={onClose}
         data-track-category='CANVAS'
         data-track-name='CLOSE_INLINE_COMMENT_THREAD'
+        data-track-kind='passive'
         aria-label='Close comment'
       >
         <X className='size-[15px]' />

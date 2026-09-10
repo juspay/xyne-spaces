@@ -38,6 +38,7 @@ export function IncomingCallDevHarness(): ReactElement | null {
               title={f.label}
               data-track-category='DEV'
               data-track-name='INCOMING_CALL_FIXTURE_SELECT'
+              data-track-kind='passive'
               className={`h-7 w-7 rounded-md text-xs font-medium ${
                 f.n === selected
                   ? 'bg-foreground text-background'

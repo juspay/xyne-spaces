@@ -309,6 +309,7 @@ export const DraftCard = ({
             className='inline-flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur hover:bg-muted transition-colors'
             data-track-category='AIDraft'
             data-track-name='RefineSelection'
+            data-track-kind='active'
           >
             <Quote size={12} className='text-red-500 dark:text-red-400' />
             <span>Refine selection</span>
@@ -337,6 +338,7 @@ export const DraftCard = ({
                 title='Collapse (keeps the draft)'
                 data-track-category='AIDraft'
                 data-track-name='CollapseAIDraft'
+                data-track-kind='passive'
               >
                 <ChevronUp size={14} />
               </button>
@@ -350,6 +352,7 @@ export const DraftCard = ({
                 title='Stop generating'
                 data-track-category='AIDraft'
                 data-track-name='StopDraft'
+                data-track-kind='active'
               >
                 <Square size={11} className='fill-current' />
                 <span>Stop</span>
@@ -363,6 +366,7 @@ export const DraftCard = ({
                 title='Discard draft'
                 data-track-category='AIDraft'
                 data-track-name='RejectDraft'
+                data-track-kind='active'
               >
                 <X size={14} />
               </button>
@@ -425,6 +429,7 @@ export const DraftCard = ({
                     title='Clear selected text'
                     data-track-category='AIDraft'
                     data-track-name='ClearSelectedText'
+                    data-track-kind='passive'
                   >
                     <X size={14} />
                   </button>
@@ -453,6 +458,7 @@ export const DraftCard = ({
               aria-expanded={refineMenuOpen}
               data-track-category='AIDraft'
               data-track-name='ToggleRefineMenu'
+              data-track-kind='passive'
             >
               <Wand2 size={14} />
               <span>Refine</span>
@@ -476,6 +482,7 @@ export const DraftCard = ({
                     className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                     data-track-category='AIDraft'
                     data-track-name='QuickRefine'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ action: preset.id })}
                   >
                     <span className='text-muted-foreground'>{preset.icon}</span>
@@ -493,6 +500,7 @@ export const DraftCard = ({
               title='View sources in the AI sidebar'
               data-track-category='AIDraft'
               data-track-name='SeeSources'
+              data-track-kind='passive'
             >
               <ExternalLink size={13} />
               See sources
@@ -509,6 +517,7 @@ export const DraftCard = ({
               title='Insert draft'
               data-track-category='AIDraft'
               data-track-name='AcceptDraft'
+              data-track-kind='active'
             >
               Insert
             </button>

@@ -97,6 +97,7 @@ export function AskAiRatingButtons({
         )}
         data-track-category='XyneAI'
         data-track-name='LIKE_MESSAGE'
+        data-track-kind='active'
       >
         <ThumbsUp
           className='size-3.5'
@@ -121,6 +122,7 @@ export function AskAiRatingButtons({
         )}
         data-track-category='XyneAI'
         data-track-name='DISLIKE_MESSAGE'
+        data-track-kind='active'
       >
         <ThumbsDown
           className='size-3.5'
@@ -140,6 +142,7 @@ export function AskAiRatingButtons({
             autoFocus
             data-track-category='XyneAI'
             data-track-name='RATING_COMMENT_INPUT'
+            data-track-kind='passive'
             className='h-6 w-44 rounded-md border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none'
             onKeyDown={(e): void => {
               if (e.key === 'Enter') {
@@ -159,6 +162,7 @@ export function AskAiRatingButtons({
             disabled={saving}
             data-track-category='XyneAI'
             data-track-name='RATING_COMMENT_SAVE'
+            data-track-kind='active'
             className='rounded-md bg-secondary px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted'
           >
             Save

@@ -259,6 +259,7 @@ const AboutChannel = ({
                     data-track-event='blur'
                     data-track-category='ABOUT_CHANNEL_FORM'
                     data-track-name='Edit_Name_Input'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                   />
                   {nameError && <p className='text-xs text-destructive mt-1'>{nameError}</p>}
@@ -269,6 +270,7 @@ const AboutChannel = ({
                       onClick={handleCancelNameEdit}
                       data-track-category='ABOUT_CHANNEL_FORM'
                       data-track-name='Cancel_Edit_Name'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                     >
                       Cancel
@@ -280,6 +282,7 @@ const AboutChannel = ({
                       disabled={!!nameError || isSavingName}
                       data-track-category='ABOUT_CHANNEL_FORM'
                       data-track-name='Save_Name'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                     >
                       {isSavingName ? 'Saving…' : 'Save'}
@@ -299,6 +302,7 @@ const AboutChannel = ({
                 onClick={handleEditName}
                 data-track-category='ABOUT_CHANNEL_FORM'
                 data-track-name='Edit_Name'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ channelId: channel?.id })}
               >
                 <LucideSquarePen size={12} className='text-muted-foreground' />
@@ -327,6 +331,7 @@ const AboutChannel = ({
                   data-track-event='blur'
                   data-track-category='ABOUT_CHANNEL_FORM'
                   data-track-name='Edit_Description_Input'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                 />
                 <div className='flex gap-1 mt-2 justify-end'>
@@ -336,6 +341,7 @@ const AboutChannel = ({
                     onClick={handleCancelEdit}
                     data-track-category='ABOUT_CHANNEL_FORM'
                     data-track-name='Cancel_Edit_Description'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                   >
                     Cancel
@@ -346,6 +352,7 @@ const AboutChannel = ({
                     onClick={() => void handleSaveDescription()}
                     data-track-category='ABOUT_CHANNEL_FORM'
                     data-track-name='Save_Description'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                   >
                     {isSavingDescription ? 'Saving…' : 'Save'}
@@ -369,6 +376,7 @@ const AboutChannel = ({
               onClick={handleEditDescription}
               data-track-category='ABOUT_CHANNEL_FORM'
               data-track-name='Edit_Description'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ channelId: channel?.id })}
             >
               <LucideSquarePen size={12} className='text-muted-foreground' />
@@ -390,6 +398,7 @@ const AboutChannel = ({
               className='px-[12px] pb-[10px] text-xs font-sans font-semibold text-muted-foreground underline text-left hover:text-foreground transition-colors'
               data-track-category='ABOUT_CHANNEL_FORM'
               data-track-name='View_Full_Profile'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ channelId: channel?.id, userId: dmUserId })}
             >
               View full profile

@@ -87,6 +87,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             title='Clear selection'
             data-track-category='Tickets'
             data-track-name='ClearTicketSelection'
+            data-track-kind='passive'
           >
             <X className='w-4 h-4' />
           </button>
@@ -161,6 +162,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               )}
               data-track-category='Tickets'
               data-track-name='ToggleDueDateMenu'
+              data-track-kind='passive'
             >
               <Calendar className='size-4 text-foreground flex-shrink-0' />
               <span className='text-xs sm:text-sm font-semibold text-foreground'>Due Date</span>
@@ -214,6 +216,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               )}
               data-track-category='Tickets'
               data-track-name='ToggleTagsMenu'
+              data-track-kind='passive'
             >
               <Tag className='size-4 text-foreground flex-shrink-0' />
               <span className='text-xs sm:text-sm font-semibold text-foreground'>Labels</span>

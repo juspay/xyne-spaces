@@ -254,6 +254,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
               aria-label='Close'
               data-track-category='Tickets'
               data-track-name='CloseStageFormModal'
+              data-track-kind='passive'
             >
               <X className='h-4 w-4 text-muted-foreground' />
             </button>
@@ -329,6 +330,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 disabled={isSubmitting}
                 data-track-category='Tickets'
                 data-track-name='StageFormReviewerCommentInput'
+                data-track-kind='passive'
               />
             </div>
           )}
@@ -344,6 +346,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                   disabled={isSubmitting}
                   data-track-category='Tickets'
                   data-track-name='RejectStageForm'
+                  data-track-kind='active'
                 >
                   {isSubmitting ? 'Rejecting...' : 'Reject'}
                 </Button>
@@ -354,6 +357,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                   disabled={isSubmitting}
                   data-track-category='Tickets'
                   data-track-name='ApproveStageForm'
+                  data-track-kind='active'
                 >
                   {isSubmitting ? 'Approving...' : 'Approve'}
                 </Button>

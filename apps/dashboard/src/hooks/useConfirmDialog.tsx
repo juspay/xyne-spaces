@@ -64,6 +64,7 @@ export const useConfirmDialog = (): UseConfirmDialogResult => {
               onClick={() => close(false)}
               data-track-category='confirm_dialog'
               data-track-name='cancel'
+              data-track-kind='passive'
             >
               {state.cancelLabel}
             </Button>
@@ -73,6 +74,7 @@ export const useConfirmDialog = (): UseConfirmDialogResult => {
               onClick={() => close(true)}
               data-track-category='confirm_dialog'
               data-track-name='confirm'
+              data-track-kind='active'
             >
               {state.confirmLabel}
             </Button>

@@ -188,6 +188,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
           title='Copy link'
           data-track-category='MESSAGE'
           data-track-name='COPY_LINK_PREVIEW'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ url })}
         >
           <Copy size={12} className='text-muted-foreground' />
@@ -200,6 +201,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
             aria-label='Close link preview'
             data-track-category='MESSAGE'
             data-track-name='CLOSE_LINK_PREVIEW'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ url })}
           >
             <X size={12} className='text-muted-foreground' />

@@ -154,6 +154,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
               }}
               data-track-category='ADD_DM_FORM'
               data-track-name='Cancel_Create_DM'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}
             >
               Cancel
@@ -171,6 +172,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 data-testid='start-dm-btn'
                 data-track-category='ADD_DM_FORM'
                 data-track-name='Start_DM'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}
               >
                 Start DM

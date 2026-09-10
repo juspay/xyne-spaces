@@ -894,6 +894,7 @@ export const TicketListView = function TicketListView({
                   aria-label='Selection options'
                   data-track-category='Support'
                   data-track-name='SelectAllMenu'
+                  data-track-kind='passive'
                   className='p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted'
                 >
                   <ChevronDown size={14} />
@@ -912,6 +913,7 @@ export const TicketListView = function TicketListView({
                     className='text-left px-3 py-1.5 text-xs text-foreground rounded hover:bg-muted'
                     data-track-category='Support'
                     data-track-name={`SelectAll${opt.label}`}
+                    data-track-kind='passive'
                   >
                     {opt.label}
                   </button>
@@ -934,6 +936,7 @@ export const TicketListView = function TicketListView({
             aria-label='Previous page'
             data-track-category='Support'
             data-track-name='PaginationPrev'
+            data-track-kind='passive'
             className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
           >
             <ChevronLeft size={14} />
@@ -945,6 +948,7 @@ export const TicketListView = function TicketListView({
             aria-label='Next page'
             data-track-category='Support'
             data-track-name='PaginationNext'
+            data-track-kind='passive'
             className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
           >
             <ChevronRight size={14} />
@@ -1011,6 +1015,7 @@ export const TicketListView = function TicketListView({
                   onKeyDown={event => handleColumnResizeKeyDown(column.key, event)}
                   data-track-category='Support'
                   data-track-name='ResizeTicketListColumn'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ column: column.key })}
                   className='group pointer-events-auto absolute -right-3 inset-y-0 w-3 cursor-col-resize touch-none select-none border-0 bg-transparent p-0 outline-none'
                 >

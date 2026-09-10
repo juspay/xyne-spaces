@@ -255,6 +255,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                     )}
                     data-track-category='BOARD_SLA_SETTINGS'
                     data-track-name='TOGGLE_SLA_PRIORITY'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ priority })}
                     data-ph-capture-attribute-track-id='toggle_sla_priority'
                   >
@@ -297,6 +298,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                     className='p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors'
                     data-track-category='BOARD_SLA_SETTINGS'
                     data-track-name='CONFIGURE_SLA_PRIORITY'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ priority })}
                   >
                     <Settings size={15} />
@@ -327,6 +329,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESPONSE_HOURS'
+                          data-track-kind='active'
                           className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <span className='text-xs text-muted-foreground'>:</span>
@@ -345,6 +348,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESPONSE_MINUTES'
+                          data-track-kind='active'
                           className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <select
@@ -360,6 +364,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESPONSE_PERIOD'
+                          data-track-kind='active'
                           className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
                         >
                           <option value='AM'>AM</option>
@@ -387,6 +392,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESOLUTION_HOURS'
+                          data-track-kind='active'
                           className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <span className='text-xs text-muted-foreground'>:</span>
@@ -405,6 +411,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESOLUTION_MINUTES'
+                          data-track-kind='active'
                           className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <select
@@ -420,6 +427,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESOLUTION_PERIOD'
+                          data-track-kind='active'
                           className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
                         >
                           <option value='AM'>AM</option>
@@ -439,6 +447,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                         disabled={disabled}
                         data-track-category='BOARD_SLA_SETTINGS'
                         data-track-name='TOGGLE_BUSINESS_HOURS'
+                        data-track-kind='passive'
                         className={cn(
                           'flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium transition-colors',
                           draft.businessHoursOnly
@@ -506,6 +515,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                             disabled={disabled}
                             data-track-category='BOARD_SLA_SETTINGS'
                             data-track-name='EDIT_WORKDAY_START'
+                            data-track-kind='active'
                             className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                           />
                           <span className='text-xs text-muted-foreground'>to</span>
@@ -522,6 +532,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                             disabled={disabled}
                             data-track-category='BOARD_SLA_SETTINGS'
                             data-track-name='EDIT_WORKDAY_END'
+                            data-track-kind='active'
                             className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                           />
                         </div>
@@ -538,6 +549,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                       className='px-3 py-1.5 text-sm font-medium text-white bg-[#6276be] rounded-lg hover:bg-[#4f62a8] dark:hover:bg-[#7986d0] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
                       data-track-category='BOARD_SLA_SETTINGS'
                       data-track-name='SAVE_SLA_POLICY'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ priority })}
                       data-ph-capture-attribute-track-id='save_sla_policy'
                     >

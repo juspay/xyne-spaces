@@ -176,6 +176,7 @@ export function CanvasWidthHandles({
       title='Drag to resize · double-click to reset'
       data-track-category='CANVAS'
       data-track-name='Resize_Canvas_Width'
+      data-track-kind='passive'
     />
   );
 

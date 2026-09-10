@@ -42,6 +42,7 @@ export const DigitalTwinRangeSelector = ({
                 onClick={() => r.selectPreset(i)}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin backfill preset'
+                data-track-kind='passive'
                 className={cn(
                   'flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition',
                   isSelected
@@ -77,6 +78,7 @@ export const DigitalTwinRangeSelector = ({
               onClick={r.selectCustom}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin backfill custom range'
+              data-track-kind='passive'
               className='flex w-full items-center gap-3 px-3.5 py-3 text-left'
             >
               <span
@@ -100,7 +102,12 @@ export const DigitalTwinRangeSelector = ({
 
             {r.selection === 'custom' && (
               <div className='border-t border-primary/20 px-3.5 pb-3 pt-2.5'>
-                <DateRangeInputs range={r} trackName='Digital Twin backfill' showDayCount />
+                <DateRangeInputs
+                  range={r}
+                  trackName='Digital Twin backfill'
+                  trackKind='active'
+                  showDayCount
+                />
                 <div className='mt-2 flex flex-wrap gap-1.5'>
                   {QUICK_DAYS.map(n => (
                     <button
@@ -109,6 +116,7 @@ export const DigitalTwinRangeSelector = ({
                       onClick={() => r.applyQuickDays(n)}
                       data-track-category='Claw Agents'
                       data-track-name='Digital Twin backfill quick days'
+                      data-track-kind='active'
                       className='rounded-lg border border-border bg-card px-2.5 py-0.5 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground'
                     >
                       last {n}d

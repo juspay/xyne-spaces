@@ -300,6 +300,7 @@ const RCADetailScreen = () => {
             onClick={() => void navigate('/rca')}
             data-track-category='RCA'
             data-track-name='BackToRCAListFromNotFound'
+            data-track-kind='passive'
           >
             Back to list
           </button>
@@ -417,6 +418,7 @@ const RCADetailScreen = () => {
               onClick={() => closeConfirmDialog(false)}
               data-track-category='RCA'
               data-track-name='CANCEL_RCA_CONFIRM'
+              data-track-kind='passive'
             >
               Skip Save
             </Button>
@@ -425,6 +427,7 @@ const RCADetailScreen = () => {
               onClick={() => closeConfirmDialog(true)}
               data-track-category='RCA'
               data-track-name='CONFIRM_RCA_ACTION'
+              data-track-kind='active'
             >
               Save and Continue
             </Button>
@@ -447,6 +450,7 @@ const RCADetailScreen = () => {
                 onClick={() => void navigate('/rca')}
                 data-track-category='RCA'
                 data-track-name='BackToRCAListFromWorkspace'
+                data-track-kind='passive'
               >
                 Back to list
               </button>

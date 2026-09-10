@@ -73,6 +73,7 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
               className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
               data-track-category='AGENT_ARTIFACT'
               data-track-name='EXPAND_ARTIFACT'
+              data-track-kind='passive'
             >
               <MaximizeTwoArrow size={16} className='shrink-0' />
             </button>

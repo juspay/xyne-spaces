@@ -329,6 +329,7 @@ const SortableTemplateSection = ({
           )}
           data-track-category='SummaryTemplates'
           data-track-name='EditSectionTitle'
+          data-track-kind='active'
         />
       </div>
       {hasReservedTitle && (
@@ -347,6 +348,7 @@ const SortableTemplateSection = ({
           className='thin-scrollbar w-full min-h-[1lh] max-h-[3lh] resize-none overflow-y-auto bg-transparent text-sm leading-normal text-muted-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground/60'
           data-track-category='SummaryTemplates'
           data-track-name='EditSectionDescription'
+          data-track-kind='active'
         />
       </div>
       {isEditable && canRemove && (
@@ -359,6 +361,7 @@ const SortableTemplateSection = ({
           aria-label='Remove section'
           data-track-category='SummaryTemplates'
           data-track-name='RemoveSection'
+          data-track-kind='active'
         >
           <MultipleCrossCancelDefault className='size-3.5' strokeWidth={2.5} />
         </Button>
@@ -903,6 +906,7 @@ export function SummaryTemplatesModal({
           aria-label='Close templates'
           data-track-category='SummaryTemplates'
           data-track-name='Close'
+          data-track-kind='passive'
         >
           <MultipleCrossCancelDefault className='size-4' />
         </Button>
@@ -923,6 +927,7 @@ export function SummaryTemplatesModal({
               className='h-9 w-full gap-2.5 rounded-lg border-border px-3 shadow-none hover:bg-muted'
               data-track-category='SummaryTemplates'
               data-track-name='NewTemplate'
+              data-track-kind='passive'
             >
               <PlusDefault className='size-4' />
               New template
@@ -937,6 +942,7 @@ export function SummaryTemplatesModal({
                 className='min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground'
                 data-track-category='SummaryTemplates'
                 data-track-name='Search'
+                data-track-kind='passive'
               />
             </label>
           </div>
@@ -965,6 +971,7 @@ export function SummaryTemplatesModal({
                           )}
                           data-track-category='SummaryTemplates'
                           data-track-name='SelectTemplate'
+                          data-track-kind='active'
                         >
                           <span className='flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-sm font-semibold shadow-sm'>
                             {getTemplateIcon(template.name)}
@@ -1022,6 +1029,7 @@ export function SummaryTemplatesModal({
                       className='h-8 rounded-lg px-3 text-xs font-medium text-muted-foreground'
                       data-track-category='SummaryTemplates'
                       data-track-name='DeclineTemplatePublication'
+                      data-track-kind='active'
                     >
                       Decline
                     </Button>
@@ -1033,6 +1041,7 @@ export function SummaryTemplatesModal({
                       className='h-8 rounded-lg bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90'
                       data-track-category='SummaryTemplates'
                       data-track-name='MakeTemplatePublic'
+                      data-track-kind='active'
                     >
                       Make public
                     </Button>
@@ -1055,6 +1064,7 @@ export function SummaryTemplatesModal({
                     className='w-full bg-transparent py-0.5 text-2xl font-bold tracking-tight outline-none read-only:cursor-default placeholder:text-muted-foreground/40 placeholder:text-medium'
                     data-track-category='SummaryTemplates'
                     data-track-name='EditName'
+                    data-track-kind='active'
                   />
                   <div className='mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-muted-foreground'>
                     <span className='inline-flex items-center gap-1.5'>
@@ -1115,6 +1125,7 @@ export function SummaryTemplatesModal({
                             aria-label={`Sharing: ${shareTrigger.label}`}
                             data-track-category='SummaryTemplates'
                             data-track-name='OpenShareTemplate'
+                            data-track-kind='passive'
                           >
                             {shareTrigger.icon}
                             {shareTrigger.label}
@@ -1145,6 +1156,7 @@ export function SummaryTemplatesModal({
                         aria-label='Template actions'
                         data-track-category='SummaryTemplates'
                         data-track-name='OpenActions'
+                        data-track-kind='passive'
                       >
                         <ThreeDotsMenuHorizontal className='size-4' />
                       </Button>
@@ -1178,6 +1190,7 @@ export function SummaryTemplatesModal({
                     className={AI_ACTION_BUTTON_CLASS}
                     data-track-category='SummaryTemplates'
                     data-track-name='DraftContextWithAI'
+                    data-track-kind='active'
                   >
                     {aiAction === 'context' ? (
                       <Spinner className='size-3.5 animate-spin' />
@@ -1196,6 +1209,7 @@ export function SummaryTemplatesModal({
                   className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditContext'
+                  data-track-kind='active'
                 />
               </section>
 
@@ -1221,6 +1235,7 @@ export function SummaryTemplatesModal({
                     className={AI_ACTION_BUTTON_CLASS}
                     data-track-category='SummaryTemplates'
                     data-track-name='SuggestSectionsWithAI'
+                    data-track-kind='active'
                   >
                     {aiAction === 'sections' ? (
                       <Spinner className='size-3.5 animate-spin' />
@@ -1269,6 +1284,7 @@ export function SummaryTemplatesModal({
                     disabled={editableSections.length >= MAX_EDITABLE_SECTIONS}
                     data-track-category='SummaryTemplates'
                     data-track-name='AddSection'
+                    data-track-kind='active'
                   >
                     <PlusDefault className='size-4' /> Add section
                   </Button>
@@ -1327,6 +1343,7 @@ export function SummaryTemplatesModal({
                               className='ml-auto'
                               data-track-category='SummaryTemplates'
                               data-track-name='ToggleMandatorySection'
+                              data-track-kind='passive'
                             />
                           )}
                         </div>
@@ -1367,6 +1384,7 @@ export function SummaryTemplatesModal({
                     className={AI_ACTION_BUTTON_CLASS}
                     data-track-category='SummaryTemplates'
                     data-track-name='GenerateSystemPromptWithAI'
+                    data-track-kind='active'
                   >
                     {aiAction === 'systemPrompt' ? (
                       <Spinner className='size-3.5 animate-spin' />
@@ -1386,6 +1404,7 @@ export function SummaryTemplatesModal({
                   className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditSystemPrompt'
+                  data-track-kind='active'
                 />
               </section>
 
@@ -1443,6 +1462,7 @@ export function SummaryTemplatesModal({
                         )}
                         data-track-category='SummaryTemplates'
                         data-track-name={`SelectOutput_${option.value}`}
+                        data-track-kind='passive'
                       >
                         <span
                           className={cn(

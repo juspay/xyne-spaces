@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '../../ui/dropdown-menu';
+import type { InteractionKind } from '@xyne/shared';
 
 interface ThreadCallButtonProps {
   onStartCall: () => void;
@@ -16,6 +17,7 @@ interface ThreadCallButtonProps {
   testId?: string;
   trackCategory?: string;
   trackName?: string;
+  trackKind?: InteractionKind;
   trackMetadata?: Record<string, unknown>;
 }
 

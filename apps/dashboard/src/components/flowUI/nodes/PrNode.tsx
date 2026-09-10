@@ -152,6 +152,7 @@ export const PrNode: React.FC<PrNodeProps> = ({ node }) => {
             className='rounded-lg border border-border bg-background px-2 py-1.5 text-sm font-medium leading-[1.2] text-foreground'
             data-track-category='PR_ARTIFACT'
             data-track-name='OPEN_DETAILS_PREVIEW'
+            data-track-kind='passive'
           >
             View Details
           </button>
@@ -237,6 +238,7 @@ const FooterLink: React.FC<{
     className='rounded-lg px-2 py-1.5 text-sm font-medium leading-[1.2] !text-foreground !no-underline hover:!text-foreground'
     data-track-category='PR_ARTIFACT'
     data-track-name='CLICK_OPEN_PR'
+    data-track-kind='passive'
   >
     {children}
   </a>

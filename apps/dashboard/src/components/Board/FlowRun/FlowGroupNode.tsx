@@ -166,6 +166,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
           aria-label={`Actions for ${name || 'group'}`}
           data-track-category='flow_board'
           data-track-name='open_group_actions'
+          data-track-kind='passive'
           className='nodrag shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground'
           onClick={event => event.stopPropagation()}
           onPointerDown={event => event.stopPropagation()}
@@ -185,6 +186,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
             title={backlogDisabledReason}
             data-track-category='flow_board'
             data-track-name='backlog_group'
+            data-track-kind='passive'
             className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60'
           >
             <Archive size={13} className='mt-0.5 shrink-0 text-amber-600' />
@@ -220,6 +222,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
           onClick={onToggleCollapse}
           data-track-category='flow_board'
           data-track-name='toggle_group_collapse'
+          data-track-kind='passive'
           className='block h-full w-full rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
         >
           <span
@@ -297,6 +300,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
         onKeyDown={handleHeaderKeyDown}
         data-track-category='flow_board'
         data-track-name='toggle_group_collapse_header'
+        data-track-kind='passive'
       >
         <Boxes size={13} className='shrink-0' style={{ color: displayColor }} />
         {onRename ? (
@@ -307,6 +311,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
             placeholder='Group name'
             data-track-category='flow_plan_editor'
             data-track-name='input_group_name'
+            data-track-kind='passive'
             className='nodrag min-w-0 flex-1 bg-transparent text-[12px] font-semibold placeholder:opacity-50 focus:outline-none'
             style={{ color: displayColor }}
             onPointerDown={e => e.stopPropagation()}
@@ -343,6 +348,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
             title='Collapse group'
             data-track-category='flow_board'
             data-track-name='toggle_group_collapse'
+            data-track-kind='passive'
             className='nodrag shrink-0 rounded p-0.5 transition-colors hover:bg-black/5'
             style={{ color: displayColor }}
             onPointerDown={e => e.stopPropagation()}
@@ -357,6 +363,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
             title='Ungroup steps'
             data-track-category='flow_plan_editor'
             data-track-name='ungroup'
+            data-track-kind='active'
             className='nodrag shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100'
             style={{ color: displayColor }}
             onPointerDown={e => e.stopPropagation()}

@@ -144,6 +144,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 }
                 data-track-category='NOTIFICATIONS'
                 data-track-name='toggle_desktop_notifications'
+                data-track-kind='active'
                 className={cn(switchClass, !settingsReady && 'opacity-40 cursor-not-allowed')}
               >
                 <Switch.Thumb className={thumbClass} />
@@ -161,6 +162,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                     data-track-category='NOTIFICATIONS'
                     data-ph-capture-attribute-track-id={`set_desktop_notification_level_${opt.value.toLowerCase()}`}
                     data-track-name={`set_desktop_level_${opt.value.toLowerCase()}`}
+                    data-track-kind='active'
                     className={cn(
                       'px-2 py-1.5 text-xs rounded-md border transition-colors',
                       !settingsReady && 'opacity-40 cursor-not-allowed',
@@ -197,6 +199,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 }
                 data-track-category='NOTIFICATIONS'
                 data-track-name='toggle_mobile_notifications'
+                data-track-kind='active'
                 className={cn(switchClass, !settingsReady && 'opacity-40 cursor-not-allowed')}
               >
                 <Switch.Thumb className={thumbClass} />
@@ -214,6 +217,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                     data-track-category='NOTIFICATIONS'
                     data-ph-capture-attribute-track-id={`set_mobile_notification_level_${opt.value.toLowerCase()}`}
                     data-track-name={`set_mobile_level_${opt.value.toLowerCase()}`}
+                    data-track-kind='active'
                     className={cn(
                       'px-2 py-1.5 text-xs rounded-md border transition-colors',
                       !settingsReady && 'opacity-40 cursor-not-allowed',
@@ -260,6 +264,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                   }}
                   data-track-category='NOTIFICATIONS'
                   data-track-name='toggle_channel_thread_reply'
+                  data-track-kind='passive'
                   className={cn(
                     switchClass,
                     (!settingsReady || !hasAnyDeliveryEnabled) && 'opacity-40 cursor-not-allowed',
@@ -299,6 +304,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                   }}
                   data-track-category='NOTIFICATIONS'
                   data-track-name='toggle_channel_wide_mentions'
+                  data-track-kind='passive'
                   className={cn(
                     switchClass,
                     (!settingsReady || !hasAnyDeliveryEnabled) && 'opacity-40 cursor-not-allowed',

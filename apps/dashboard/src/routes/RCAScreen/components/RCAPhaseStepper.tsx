@@ -22,6 +22,7 @@ export const RCAPhaseStepper = ({ phases, activePhase, onPhaseClick }: RCAPhaseS
                     onClick={() => void onPhaseClick(phase.id)}
                     data-track-category='RCA'
                     data-track-name='SelectRCAPhase'
+                    data-track-kind='passive'
                     className={cn(
                       'flex items-center gap-1.5 px-1 py-1.5 sm:px-3 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all whitespace-nowrap',
                       isActive

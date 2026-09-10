@@ -100,6 +100,7 @@ const RoleTag = ({ name, onRemove }: RoleTagProps) => (
       aria-label={`Remove ${name}`}
       data-track-category='BOARD_ROLE_CONFIG'
       data-track-name='REMOVE_TICKET_CONTROL_ROLE'
+      data-track-kind='active'
       className='w-5 h-5 flex items-center justify-center text-muted-foreground hover:bg-red-50 hover:text-red-500 rounded transition-colors'
     >
       <X size={14} />
@@ -132,6 +133,7 @@ const PrimaryRow = ({ name, isPrimary, onSetPrimary, onRemove }: PrimaryRowProps
         onChange={onSetPrimary}
         data-track-category='BOARD_ROLE_CONFIG'
         data-track-name='SET_AUTO_ASSIGN_PRIMARY'
+        data-track-kind='active'
         className='accent-[#185FA5] cursor-pointer'
       />
       Primary
@@ -142,6 +144,7 @@ const PrimaryRow = ({ name, isPrimary, onSetPrimary, onRemove }: PrimaryRowProps
       aria-label={`Remove ${name}`}
       data-track-category='BOARD_ROLE_CONFIG'
       data-track-name='REMOVE_AUTO_ASSIGN_ROLE'
+      data-track-kind='active'
       className='w-5 h-5 flex items-center justify-center text-muted-foreground hover:bg-red-50 hover:text-red-500 rounded transition-colors'
     >
       <X size={14} />
@@ -473,6 +476,7 @@ const BoardRolesConfigScreen = ({
             onClick={onClose}
             data-track-category='BOARD_ROLE_CONFIG'
             data-track-name='CLOSE_BOARD_ROLES'
+            data-track-kind='passive'
           >
             Close
           </Button>
@@ -493,6 +497,7 @@ const BoardRolesConfigScreen = ({
               onClick={() => (onBack ? onBack() : onClose())}
               data-track-category='BOARD_ROLE_CONFIG'
               data-track-name='BOARD_ROLES_BACK'
+              data-track-kind='passive'
             >
               <ArrowLeft size={15} /> Back
             </Button>
@@ -505,6 +510,7 @@ const BoardRolesConfigScreen = ({
               onClick={onClose}
               data-track-category='BOARD_ROLE_CONFIG'
               data-track-name='CANCEL_BOARD_ROLES'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -513,6 +519,7 @@ const BoardRolesConfigScreen = ({
               onClick={() => void handleSave()}
               data-track-category='BOARD_ROLE_CONFIG'
               data-track-name='SAVE_BOARD_ROLES'
+              data-track-kind='active'
             >
               Finish
             </Button>
@@ -586,6 +593,7 @@ const BoardRolesConfigScreen = ({
                       className='w-5 h-5 flex items-center justify-center text-muted-foreground hover:bg-muted rounded disabled:opacity-30'
                       data-track-category='BOARD_ROLE_CONFIG'
                       data-track-name='MOVE_STANDARD_PATH_STAGE_UP'
+                      data-track-kind='active'
                     >
                       ↑
                     </button>
@@ -597,6 +605,7 @@ const BoardRolesConfigScreen = ({
                       className='w-5 h-5 flex items-center justify-center text-muted-foreground hover:bg-muted rounded disabled:opacity-30'
                       data-track-category='BOARD_ROLE_CONFIG'
                       data-track-name='MOVE_STANDARD_PATH_STAGE_DOWN'
+                      data-track-kind='active'
                     >
                       ↓
                     </button>
@@ -607,6 +616,7 @@ const BoardRolesConfigScreen = ({
                       className='w-5 h-5 flex items-center justify-center text-muted-foreground hover:bg-red-50 hover:text-red-500 rounded'
                       data-track-category='BOARD_ROLE_CONFIG'
                       data-track-name='REMOVE_STANDARD_PATH_STAGE'
+                      data-track-kind='active'
                     >
                       <X size={14} />
                     </button>

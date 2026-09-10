@@ -128,6 +128,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
             data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
             data-track-name='Close_Assignment_Modal'
+            data-track-kind='passive'
           >
             <X className='size-4' />
           </Button>
@@ -226,6 +227,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             className='text-foreground hover:bg-muted'
             data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
             data-track-name='Cancel_Assignment_Availability'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -236,6 +238,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             style={{ backgroundColor: '#6276BE' }}
             data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
             data-track-name='Save_Assignment_Availability'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ expiryOption, reassignExistingTickets })}
           >
             {isLoading ? 'Saving...' : 'Save'}

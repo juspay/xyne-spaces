@@ -122,6 +122,7 @@ export function SchemaJsonEditor({
             onClick={insertExample}
             data-track-category='automation-builder'
             data-track-name='INSERT_SCHEMA_EXAMPLE'
+            data-track-kind='active'
           >
             Insert example
           </Button>

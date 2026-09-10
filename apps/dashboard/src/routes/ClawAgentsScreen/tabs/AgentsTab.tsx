@@ -97,6 +97,7 @@ const FilterButton = ({
     onClick={onClick}
     data-track-category='Claw Agents'
     data-track-name={`Filter agents by category: ${label}`}
+    data-track-kind='passive'
     className={cn(
       'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
       active
@@ -226,6 +227,7 @@ const AgentsTab = (): ReactElement => {
                   onChange={e => setQuery(e.target.value)}
                   data-track-category='Claw Agents'
                   data-track-name='Search agents'
+                  data-track-kind='passive'
                   placeholder='Search agents'
                   className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
                 />
@@ -236,6 +238,7 @@ const AgentsTab = (): ReactElement => {
                 onClick={() => void navigate('/claw-agents/create')}
                 data-track-category='Claw Agents'
                 data-track-name='GO_TO_CREATE_AGENT'
+                data-track-kind='passive'
               >
                 <Plus className='size-4' />
                 Create agent
@@ -258,6 +261,7 @@ const AgentsTab = (): ReactElement => {
                   onClick={() => void refetch()}
                   data-track-category='Claw Agents'
                   data-track-name='Retry agents load'
+                  data-track-kind='passive'
                   className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
                 >
                   Retry

@@ -314,6 +314,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
             }`}
             data-track-category='FileViewer'
             data-track-name='SWITCH_SHEET'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ sheetName: sheet.name, sheetIndex: idx })}
           >
             {sheet.name}

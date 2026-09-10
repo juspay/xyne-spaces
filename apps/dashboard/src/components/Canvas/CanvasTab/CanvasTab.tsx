@@ -811,6 +811,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   onClick={() => setShowStarredOnly(prev => !prev)}
                   data-track-category='CANVAS'
                   data-track-name='TOGGLE_CHANNEL_STARRED_CANVAS_FILTER'
+                  data-track-kind='passive'
                 >
                   <Star
                     size={16}
@@ -853,6 +854,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 disabled={isCreatingFolder || isChannelArchived}
                 data-track-category='CANVAS'
                 data-track-name='Create_Channel_Folder'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ channelId })}
               >
                 {isCreatingFolder ? (
@@ -869,6 +871,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 disabled={isCreatingCanvas || isChannelArchived}
                 data-track-category='CANVAS'
                 data-track-name='Create_Canvas'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ channelId })}
               >
                 {isCreatingCanvas ? (
@@ -978,6 +981,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 }}
                 data-track-category='CANVAS'
                 data-track-name='Cancel_Create_Channel_Folder'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -987,6 +991,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 loading={isCreatingFolder}
                 data-track-category='CANVAS'
                 data-track-name='Confirm_Create_Channel_Folder'
+                data-track-kind='active'
               >
                 {isCreatingFolder ? 'Creating...' : 'Create Folder'}
               </Button>
@@ -1035,6 +1040,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
             aria-label='Go back'
             data-track-category='CANVAS'
             data-track-name='GoBackFromCanvasEditor'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ canvasId: canvas?.id, channelId })}
           >
             <ArrowLeft size={16} />
@@ -1056,6 +1062,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
             data-testid='canvas-title-input'
             data-track-category='CANVAS'
             data-track-name='EDIT_CANVAS_TITLE'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ canvasId: canvas?.id, channelId })}
           />
 
@@ -1097,6 +1104,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   aria-label='Open recording notes'
                   data-track-category='CANVAS'
                   data-track-name='Open_Recording_Notes_From_Channel_Canvas'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     canvasId: canvas.id,
                     recordingId: recordingCallId,
@@ -1113,6 +1121,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 title='Version history'
                 data-track-category='CANVAS'
                 data-track-name='Open_Channel_Canvas_Version_History'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
               >
                 <History size={16} />
@@ -1127,6 +1136,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 data-testid='canvas-comments-button'
                 data-track-category='CANVAS'
                 data-track-name='TOGGLE_CANVAS_COMMENT_ACTIVITY'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
               >
                 <span className='relative inline-flex'>
@@ -1145,6 +1155,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 data-testid='canvas-share-button'
                 data-track-category='CANVAS'
                 data-track-name='OPEN_CANVAS_SHARE_MODAL'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
               >
                 Share
@@ -1166,6 +1177,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onClick={handleBackToCurrentVersion}
                 data-track-category='CANVAS'
                 data-track-name='BACK_TO_CURRENT_VERSION'
+                data-track-kind='passive'
               >
                 Back to current
               </Button>
@@ -1176,6 +1188,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   onClick={() => setShowVersionDiff(prev => !prev)}
                   data-track-category='CANVAS'
                   data-track-name='TOGGLE_VERSION_DIFF'
+                  data-track-kind='passive'
                   aria-pressed={showVersionDiff}
                 >
                   <GitCompare size={14} />
@@ -1189,6 +1202,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   onClick={() => void handleRestoreVersion(previewVersion)}
                   data-track-category='CANVAS'
                   data-track-name='RESTORE_CANVAS_VERSION'
+                  data-track-kind='active'
                   loading={restoringVersionId === previewVersion.id}
                 >
                   <RotateCcw size={14} />
@@ -1215,6 +1229,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onClick={handleUnarchiveCurrentCanvas}
                 data-track-category='CANVAS'
                 data-track-name='UNARCHIVE_CHANNEL_CANVAS_FROM_BANNER'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
               >
                 Unarchive

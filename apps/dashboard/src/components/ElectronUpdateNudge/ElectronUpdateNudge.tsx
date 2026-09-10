@@ -460,6 +460,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         data-ph-capture-attribute-track-id='electron_apply_update'
         data-track-category='ElectronUpdate'
         data-track-name='UpdateNow'
+        data-track-kind='active'
       >
         Update now
       </button>
@@ -471,6 +472,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
           aria-label='Dismiss update'
           data-track-category='ElectronUpdate'
           data-track-name='DismissUpdate'
+          data-track-kind='passive'
         >
           <X className='h-3.5 w-3.5' />
         </button>

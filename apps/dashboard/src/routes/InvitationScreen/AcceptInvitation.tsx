@@ -250,6 +250,7 @@ export const AcceptInvitation = (): ReactElement => {
             onClick={handleGoHome}
             data-track-category='Invitations'
             data-track-name='GO_HOME_FROM_INVITE'
+            data-track-kind='passive'
             className='w-full'
           >
             Go to Home
@@ -272,6 +273,7 @@ export const AcceptInvitation = (): ReactElement => {
             onClick={handleGoHome}
             data-track-category='Invitations'
             data-track-name='GO_HOME_FROM_INVITE'
+            data-track-kind='passive'
             className='w-full'
           >
             Go to Home
@@ -294,6 +296,7 @@ export const AcceptInvitation = (): ReactElement => {
             onClick={handleGoHome}
             data-track-category='Invitations'
             data-track-name='GO_HOME_FROM_INVITE'
+            data-track-kind='passive'
             className='w-full'
           >
             Go to Home
@@ -416,6 +419,7 @@ export const AcceptInvitation = (): ReactElement => {
           onClick={() => void handleAccept()}
           data-track-category='Invitations'
           data-track-name='ACCEPT_INVITATION'
+          data-track-kind='active'
           className='w-full'
         >
           Accept Invitation

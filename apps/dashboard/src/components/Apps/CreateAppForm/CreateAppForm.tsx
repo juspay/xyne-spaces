@@ -122,6 +122,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
           onClick={onCancel}
           data-track-category='Apps'
           data-track-name='CANCEL_CREATE_APP'
+          data-track-kind='passive'
           disabled={createAppMutation.isPending}
           type='button'
         >
@@ -132,6 +133,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
           disabled={createAppMutation.isPending}
           data-track-category='Apps'
           data-track-name='CreateApp'
+          data-track-kind='active'
         >
           {createAppMutation.isPending ? 'Creating...' : 'Create App'}
         </Button>

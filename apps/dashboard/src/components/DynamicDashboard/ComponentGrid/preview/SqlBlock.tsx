@@ -151,6 +151,7 @@ const SqlBlock = ({ sql, params, subtitle }: SqlBlockProps): ReactElement => {
           className='inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-xyne-gray-200 bg-white text-[12px] font-medium text-xyne-gray-600 hover:bg-xyne-gray-50 transition-colors'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Copy_Component_Query'
+          data-track-kind='passive'
         >
           {copied ? (
             <>

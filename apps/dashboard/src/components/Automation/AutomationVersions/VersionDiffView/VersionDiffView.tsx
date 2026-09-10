@@ -98,6 +98,7 @@ export function VersionDiffView({
             aria-label='Back to version history'
             data-track-category='automation-versions'
             data-track-name='version-diff-back'
+            data-track-kind='passive'
             className='flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/40'
           >
             <ArrowLeft className='size-4' />

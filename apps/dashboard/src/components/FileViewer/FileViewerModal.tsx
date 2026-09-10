@@ -206,6 +206,7 @@ export const SlideContent: React.FC<{
           }}
           data-track-category='FileViewer'
           data-track-name='DownloadVideo'
+          data-track-kind='passive'
           className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
         >
           <Download className='h-4 w-4' />
@@ -254,6 +255,7 @@ const ErrorState: React.FC<{
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 transition-colors text-sm backdrop-blur-sm'
         data-track-category='FileViewer'
         data-track-name='RETRY_LOAD_FILE'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ error })}
         data-ph-capture-attribute-track-id='retry_load_file'
       >
@@ -264,6 +266,7 @@ const ErrorState: React.FC<{
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'
         data-track-category='FileViewer'
         data-track-name='DOWNLOAD_FILE'
+        data-track-kind='passive'
       >
         <Download className='h-4 w-4' />
         Download
@@ -289,6 +292,7 @@ const UnsupportedFileState: React.FC<{
       className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors backdrop-blur-sm'
       data-track-category='FileViewer'
       data-track-name='DOWNLOAD_UNSUPPORTED_FILE'
+      data-track-kind='passive'
     >
       <Download className='h-4 w-4' />
       Download File
@@ -524,6 +528,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
             data-track-category='FileViewer'
             data-track-name='DOWNLOAD_VIDEO'
+            data-track-kind='passive'
           >
             <Download className='h-4 w-4' />
             Download Video
@@ -706,6 +711,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               data-track-category='FileViewer'
               data-track-name='COPY_IMAGE_FROM_MODAL'
+              data-track-kind='passive'
               title='Copy Image'
             >
               {copied ? <CopyCopied className='h-4 w-4' /> : <CopyDefault className='h-4 w-4' />}
@@ -716,6 +722,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
             data-track-category='FileViewer'
             data-track-name='DOWNLOAD_FILE_FROM_MODAL'
+            data-track-kind='passive'
           >
             <Download className='h-4 w-4' />
           </button>
@@ -725,6 +732,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               onClick={onClose}
               data-track-category='FileViewer'
               data-track-name='CloseFilePreview'
+              data-track-kind='passive'
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
               aria-label='Close'
             >
@@ -758,6 +766,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             type='button'
             data-track-category='FileViewer'
             data-track-name='PreviousFile'
+            data-track-kind='passive'
           >
             <ChevronLeft className='h-6 w-6' />
           </button>
@@ -776,6 +785,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             type='button'
             data-track-category='FileViewer'
             data-track-name='NextFile'
+            data-track-kind='passive'
           >
             <ChevronRight className='h-6 w-6' />
           </button>
@@ -1214,6 +1224,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             onClick={() => void handleDownload()}
             data-track-category='FileViewer'
             data-track-name='DownloadVideo'
+            data-track-kind='passive'
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
           >
             <Download className='h-4 w-4' />
@@ -1436,6 +1447,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
               onClick={() => void handleCopyImageGallery()}
               data-track-category='FileViewer'
               data-track-name='CopyImageGallery'
+              data-track-kind='passive'
               title='Copy Image'
               className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
             >
@@ -1450,6 +1462,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             onClick={() => void handleDownload()}
             data-track-category='FileViewer'
             data-track-name='DownloadFile'
+            data-track-kind='passive'
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
             <Download className='h-4 w-4' />
@@ -1460,6 +1473,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
                 onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
                 data-track-category='FileViewer'
                 data-track-name='Close'
+                data-track-kind='passive'
                 className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
                 aria-label='Close'
               >
@@ -1485,6 +1499,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             onClick={handlePrevious}
             data-track-category='FileViewer'
             data-track-name='NavigatePrevious'
+            data-track-kind='passive'
             className={cn(
               'absolute left-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
               isMobile ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0',
@@ -1501,6 +1516,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             onClick={handleNext}
             data-track-category='FileViewer'
             data-track-name='NavigateNext'
+            data-track-kind='passive'
             className={cn(
               'absolute right-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
               isMobile ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0',

@@ -97,6 +97,7 @@ const CopyButton = ({ value }: { value: string }): ReactElement => {
       onClick={() => void onCopy()}
       data-track-category='Claw Agents'
       data-track-name='Copy MCP URL'
+      data-track-kind='passive'
       aria-label='Copy URL'
       title='Copy URL'
       className='shrink-0 text-muted-foreground transition-colors hover:text-foreground'

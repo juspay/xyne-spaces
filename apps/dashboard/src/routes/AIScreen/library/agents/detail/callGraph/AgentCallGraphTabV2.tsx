@@ -160,6 +160,7 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
                         className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
                         data-track-category='Claw Agents'
                         data-track-name='ApproveDelegation'
+                        data-track-kind='active'
                       >
                         <CheckTickCircle className='size-4' />
                       </Button>
@@ -176,6 +177,7 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
                         className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
                         data-track-category='Claw Agents'
                         data-track-name='DeclineDelegation'
+                        data-track-kind='active'
                       >
                         <MultipleCrossCancelCircle className='size-4' />
                       </Button>
@@ -220,6 +222,7 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
                       className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
                       data-track-category='Claw Agents'
                       data-track-name='RevokeDelegation'
+                      data-track-kind='active'
                     >
                       <MultipleCrossCancelCircle className='size-4' />
                     </Button>

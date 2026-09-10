@@ -134,6 +134,7 @@ export const ComposeEmailModal = ({
           title='Drag to resize'
           data-track-category='Support'
           data-track-name='ResizeComposeModal'
+          data-track-kind='passive'
         >
           <span className='block h-1 w-12 rounded-full bg-muted-foreground/30 group-hover:bg-muted-foreground/60 transition-colors' />
         </button>
@@ -155,6 +156,7 @@ export const ComposeEmailModal = ({
         }}
         data-track-category='Support'
         data-track-name='ExpandComposeFromHeader'
+        data-track-kind='passive'
       >
         <span className='text-sm font-medium truncate'>New message — {channelName}</span>
         <div className='flex items-center gap-1'>
@@ -169,6 +171,7 @@ export const ComposeEmailModal = ({
             title={minimized ? 'Expand' : 'Minimize'}
             data-track-category='Support'
             data-track-name='ToggleComposeMinimizeButton'
+            data-track-kind='passive'
           >
             {minimized ? <ChevronUp size={14} /> : <ChevronsDownUp size={14} />}
           </button>
@@ -183,6 +186,7 @@ export const ComposeEmailModal = ({
             title='Close'
             data-track-category='Support'
             data-track-name='CloseComposeModal'
+            data-track-kind='passive'
           >
             <X size={14} />
           </button>

@@ -299,6 +299,7 @@ export const ActivityItemCard = ({
       data-activity-id={activity.id}
       data-track-category='ACTIVITY'
       data-track-name='OPEN_ACTIVITY_ITEM'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({
         activityId: activity.id,
         actorAction: activity.actorAction,
@@ -312,6 +313,7 @@ export const ActivityItemCard = ({
             tabIndex={0}
             data-track-category='ACTIVITY'
             data-track-name='VIEW_USER_AVATAR'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
           >
             <UserAvatar userId={actorId} size={AvatarSize.REGULAR} showActiveStatus={false} />
@@ -352,6 +354,7 @@ export const ActivityItemCard = ({
                   onClick={e => e.stopPropagation()}
                   data-track-category='ACTIVITY'
                   data-track-name='VIEW_USER_PROFILE'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
                 >
                   {actorName}
@@ -375,6 +378,7 @@ export const ActivityItemCard = ({
                     aria-label='Mark as unread'
                     data-track-category='ACTIVITY'
                     data-track-name='MARK_AS_UNREAD'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({
                       activityId: activity.id,
                       actorAction: activity.actorAction,
@@ -394,6 +398,7 @@ export const ActivityItemCard = ({
                     aria-label='Mark as read'
                     data-track-category='ACTIVITY'
                     data-track-name='MARK_AS_READ'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({
                       activityId: activity.id,
                       actorAction: activity.actorAction,
@@ -437,6 +442,7 @@ export const ActivityItemCard = ({
                   onKeyDown={handleChannelKeyDown}
                   data-track-category='ACTIVITY'
                   data-track-name='VIEW_CHANNEL'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     activityId: activity.id,
                     channelId: activity.channelId,

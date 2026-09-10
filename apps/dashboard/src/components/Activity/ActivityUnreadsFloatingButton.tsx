@@ -24,6 +24,7 @@ export const ActivityUnreadsFloatingButton = ({
           data-testid='activity-unread-toggle'
           data-track-category='ACTIVITY'
           data-track-name='UNREAD_FILTER_ACTIVE'
+          data-track-kind='passive'
         >
           Unreads
         </button>
@@ -35,6 +36,7 @@ export const ActivityUnreadsFloatingButton = ({
           data-testid='activity-unread-clear'
           data-track-category='ACTIVITY'
           data-track-name='UNREAD_FILTER_CLEAR'
+          data-track-kind='passive'
         >
           <X className='size-[18px] min-[700px]:size-4' strokeWidth={2.25} aria-hidden='true' />
         </button>
@@ -49,6 +51,7 @@ export const ActivityUnreadsFloatingButton = ({
         data-testid='activity-unread-toggle'
         data-track-category='ACTIVITY'
         data-track-name='UNREAD_FILTER_TOGGLE'
+        data-track-kind='passive'
       >
         Unreads
       </button>

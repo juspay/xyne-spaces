@@ -116,6 +116,7 @@ export const UserGroupListItem = ({
             onClick={handleCopyId}
             data-track-category='UserGroups'
             data-track-name='COPY_USER_GROUP_ID'
+            data-track-kind='passive'
             title='Copy user group ID'
             aria-label='Copy user group ID'
           >
@@ -133,6 +134,7 @@ export const UserGroupListItem = ({
               onClick={() => void navigate(`/user-groups/${userGroup.id}/assignment-config`)}
               data-track-category='UserGroups'
               data-track-name='OpenAssignmentConfig'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 groupId: userGroup.id,
                 groupName: userGroup.name,
@@ -149,6 +151,7 @@ export const UserGroupListItem = ({
                 aria-label='Edit user group'
                 data-track-category='UserGroups'
                 data-track-name='EditUserGroup'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   groupId: userGroup.id,
                   groupName: userGroup.name,
@@ -166,6 +169,7 @@ export const UserGroupListItem = ({
                 aria-label='Deactivate user group'
                 data-track-category='UserGroups'
                 data-track-name='DeactivateUserGroup'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   groupId: userGroup.id,
                   groupName: userGroup.name,
@@ -182,6 +186,7 @@ export const UserGroupListItem = ({
             onClick={() => void onReactivate(userGroup.id)}
             data-track-category='UserGroups'
             data-track-name='ReactivateUserGroup'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({
               groupId: userGroup.id,
               groupName: userGroup.name,

@@ -499,6 +499,7 @@ export const QueryDashboardScreen: React.FC = () => {
               className='flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 px-3 py-1.5 rounded-md transition-all duration-200 group'
               data-track-category='ANALYTICS'
               data-track-name='Navigate_Back_To_Dashboards'
+              data-track-kind='passive'
             >
               <ArrowLeft className='w-4 h-4 group-hover:-translate-x-0.5 transition-transform' />
               <span>Dashboards</span>
@@ -522,6 +523,7 @@ export const QueryDashboardScreen: React.FC = () => {
             className='bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white gap-1.5 shadow-lg hover:shadow-xl transition-all duration-200 font-medium'
             data-track-category='ANALYTICS'
             data-track-name='Open_Create_Query_Modal'
+            data-track-kind='passive'
           >
             <Plus size={16} />
             Create Query
@@ -550,6 +552,7 @@ export const QueryDashboardScreen: React.FC = () => {
                   onClick={handleCloseModal}
                   data-track-category='ANALYTICS'
                   data-track-name='CLOSE_QUERY_MODAL'
+                  data-track-kind='passive'
                   variant='ghost'
                   size='iconSm'
                   className='text-foreground hover:bg-muted/60 rounded-lg transition-colors'
@@ -566,6 +569,7 @@ export const QueryDashboardScreen: React.FC = () => {
                   onClick={handleCloseModal}
                   data-track-category='ANALYTICS'
                   data-track-name='CLOSE_QUERY_MODAL'
+                  data-track-kind='passive'
                   className='hover:bg-muted/70 border-border/50 transition-all'
                 >
                   Cancel
@@ -575,6 +579,7 @@ export const QueryDashboardScreen: React.FC = () => {
                   onClick={() => void handleSaveQuery()}
                   data-track-category='ANALYTICS'
                   data-track-name='Save_Query'
+                  data-track-kind='active'
                 >
                   <Save size={16} />
                   Save Query
@@ -612,6 +617,7 @@ export const QueryDashboardScreen: React.FC = () => {
                     className='w-full px-4 py-2.5 border border-border/50 rounded-lg bg-background/80 text-foreground hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all shadow-sm font-medium'
                     data-track-category='ANALYTICS'
                     data-track-name='Select_Entity_Type'
+                    data-track-kind='passive'
                   >
                     <option value='TICKET'>Ticket</option>
                     <option value='USER_WORKLOAD_MAPPING'>User Workload Mapping</option>
@@ -687,6 +693,7 @@ export const QueryDashboardScreen: React.FC = () => {
                             }
                             data-track-category='ANALYTICS'
                             data-track-name='Add_Aggregation'
+                            data-track-kind='active'
                           >
                             <Plus className='w-3 h-3' /> Add
                           </Button>
@@ -776,6 +783,7 @@ export const QueryDashboardScreen: React.FC = () => {
                               }
                               data-track-category='ANALYTICS'
                               data-track-name='Remove_Aggregation'
+                              data-track-kind='active'
                             >
                               <X className='w-3 h-3' />
                             </Button>
@@ -809,6 +817,7 @@ export const QueryDashboardScreen: React.FC = () => {
                           }
                           data-track-category='ANALYTICS'
                           data-track-name='Add_Group_By'
+                          data-track-kind='active'
                         >
                           <Plus className='w-3 h-3' /> Add
                         </Button>
@@ -859,6 +868,7 @@ export const QueryDashboardScreen: React.FC = () => {
                                 onClick={() => setGroupBy(prev => prev.filter((_, x) => x !== i))}
                                 data-track-category='ANALYTICS'
                                 data-track-name='Remove_Group_By'
+                                data-track-kind='active'
                               >
                                 <X className='w-3 h-3' />
                               </Button>
@@ -880,6 +890,7 @@ export const QueryDashboardScreen: React.FC = () => {
                                     }`}
                                     data-track-category='ANALYTICS'
                                     data-track-name='Set_Date_Granularity'
+                                    data-track-kind='passive'
                                   >
                                     {g}
                                   </button>
@@ -910,6 +921,7 @@ export const QueryDashboardScreen: React.FC = () => {
                           disabled={!fields || fields.filter(x => !x.isCustom).length === 0}
                           data-track-category='ANALYTICS'
                           data-track-name='Add_Order_By'
+                          data-track-kind='active'
                         >
                           <Plus className='w-3 h-3' /> Add
                         </Button>
@@ -970,6 +982,7 @@ export const QueryDashboardScreen: React.FC = () => {
                             onClick={() => setOrderBy(prev => prev.filter((_, x) => x !== i))}
                             data-track-category='ANALYTICS'
                             data-track-name='Remove_Order_By'
+                            data-track-kind='active'
                           >
                             <X className='w-3 h-3' />
                           </Button>

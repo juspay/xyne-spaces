@@ -103,6 +103,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                     onClick={() => r.selectPreset(i)}
                     data-track-category='Claw Agents'
                     data-track-name='Digital Twin enable range preset'
+                    data-track-kind='passive'
                     className={cn(
                       'rounded-full px-3 py-1 text-xs font-medium transition-colors',
                       active
@@ -119,6 +120,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                 onClick={r.selectCustom}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin enable range custom'
+                data-track-kind='passive'
                 className={cn(
                   'rounded-full px-3 py-1 text-xs font-medium transition-colors',
                   r.selection === 'custom'
@@ -145,6 +147,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                   onChange={e => r.setCustomFrom(e.target.value)}
                   data-track-category='Claw Agents'
                   data-track-name='Digital Twin enable from date'
+                  data-track-kind='passive'
                   className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
                 />
                 <span className='shrink-0 text-[11px] text-muted-foreground'>→</span>
@@ -156,6 +159,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                   onChange={e => r.setCustomTo(e.target.value)}
                   data-track-category='Claw Agents'
                   data-track-name='Digital Twin enable to date'
+                  data-track-kind='passive'
                   className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
                 />
               </div>
@@ -167,6 +171,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                     onClick={() => r.applyQuickDays(n)}
                     data-track-category='Claw Agents'
                     data-track-name='Digital Twin enable quick days'
+                    data-track-kind='active'
                     className='rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                   >
                     last {n}d
@@ -214,6 +219,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
               trackId='digital_twin_enable_and_start'
               data-track-category='Claw Agents'
               data-track-name='ENABLE_DIGITAL_TWIN'
+              data-track-kind='active'
               loading={enableMutation.isPending}
             >
               {enableMutation.isPending ? 'Enabling…' : 'Enable & start'}

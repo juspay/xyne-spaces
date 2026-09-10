@@ -419,6 +419,7 @@ const RecordingsV2Screen = (): ReactElement => {
                     )}
                     data-track-category='RecordingsV2'
                     data-track-name='show_all_recordings'
+                    data-track-kind='passive'
                   >
                     All
                   </button>
@@ -434,6 +435,7 @@ const RecordingsV2Screen = (): ReactElement => {
                     )}
                     data-track-category='RecordingsV2'
                     data-track-name='show_created_by_me'
+                    data-track-kind='passive'
                   >
                     Created by me
                   </button>
@@ -470,6 +472,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
                   data-track-category='RecordingsV2'
                   data-track-name='open_summary_templates'
+                  data-track-kind='passive'
                 >
                   <LayersTo className='size-4' strokeWidth={2} />
                   Templates
@@ -481,6 +484,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
                   data-track-category='RecordingsV2'
                   data-track-name='open_ask_ai'
+                  data-track-kind='passive'
                 >
                   <XyneAIStar size={15} />
                   Ask AI
@@ -556,6 +560,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   className='mt-5 rounded-3xl px-4 font-semibold shadow-sm'
                   data-track-category='RecordingsV2'
                   data-track-name='retry_load_recordings'
+                  data-track-kind='passive'
                 >
                   Try again
                 </Button>

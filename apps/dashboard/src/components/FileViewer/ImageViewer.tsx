@@ -346,6 +346,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
                 aria-label='Rotate'
                 data-track-category='FileViewer'
                 data-track-name='ROTATE_IMAGE'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ source, fileName })}
               >
                 <RotateCw className='h-5 w-5' />
@@ -363,6 +364,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
                 aria-label='Zoom out'
                 data-track-category='FileViewer'
                 data-track-name='ZOOM_OUR_IMAGE'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ source, fileName })}
               >
                 <ZoomOut className='h-5 w-5' />
@@ -381,6 +383,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
                 aria-label='Zoom in'
                 data-track-category='FileViewer'
                 data-track-name='ZOOM_IN_IMAGE'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ source, fileName })}
               >
                 <ZoomIn className='h-5 w-5' />
@@ -417,6 +420,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
               title='Open in New Window'
               data-track-category='FileViewer'
               data-track-name='OPEN_IMAGE_IN_NEW_WINDOW'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ source, fileName })}
             >
               <ExternalLink className='h-5 w-5' />

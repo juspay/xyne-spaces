@@ -138,6 +138,7 @@ const TagsInCategorySubmenu = ({
                   onClick={() => toggle(tagKey)}
                   data-track-category='DeskMetrics'
                   data-track-name='ToggleTagValue'
+                  data-track-kind='active'
                   className={cn(
                     'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
                     isSelected
@@ -509,6 +510,7 @@ const MetricsAgentTable = ({
             className='flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border'
             data-track-category='DeskMetrics'
             data-track-name='DownloadAgentCsv'
+            data-track-kind='passive'
           >
             <Download size={12} />
             CSV
@@ -522,6 +524,7 @@ const MetricsAgentTable = ({
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
                 data-track-category='DeskMetrics'
                 data-track-name='AgentTablePrev'
+                data-track-kind='passive'
               >
                 <ChevronLeft size={14} />
               </button>
@@ -535,6 +538,7 @@ const MetricsAgentTable = ({
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
                 data-track-category='DeskMetrics'
                 data-track-name='AgentTableNext'
+                data-track-kind='passive'
               >
                 <ChevronRight size={14} />
               </button>
@@ -564,6 +568,7 @@ const MetricsAgentTable = ({
                     )}
                     data-track-category='DeskMetrics'
                     data-track-name='SortAgentTable'
+                    data-track-kind='passive'
                   >
                     {col.label}
                     {sortKey === col.key ? (
@@ -602,6 +607,7 @@ const MetricsAgentTable = ({
                           onClick={() => onAgentClick(row.assigneeId)}
                           data-track-category='DeskMetrics'
                           data-track-name='OpenAgentOverview'
+                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ assigneeId: row.assigneeId })}
                           className='max-w-[180px] truncate text-left hover:text-desk-accent hover:underline'
                           title={agentDisplayName(row)}
@@ -714,6 +720,7 @@ const MetricsTicketTable = ({
             className='flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border'
             data-track-category='DeskMetrics'
             data-track-name='DownloadCsv'
+            data-track-kind='passive'
           >
             <Download size={12} />
             CSV
@@ -727,6 +734,7 @@ const MetricsTicketTable = ({
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
                 data-track-category='DeskMetrics'
                 data-track-name='TicketTablePrev'
+                data-track-kind='passive'
               >
                 <ChevronLeft size={14} />
               </button>
@@ -740,6 +748,7 @@ const MetricsTicketTable = ({
                 className='flex h-6 w-6 items-center justify-center rounded hover:bg-accent disabled:opacity-40'
                 data-track-category='DeskMetrics'
                 data-track-name='TicketTableNext'
+                data-track-kind='passive'
               >
                 <ChevronRight size={14} />
               </button>
@@ -810,6 +819,7 @@ const MetricsTicketTable = ({
                       onClick={() => onTicketClick(row)}
                       data-track-category='DeskMetrics'
                       data-track-name='OpenMetricsTicket'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         ticketId: row.ticketId,
                         channelId: row.channelId,
@@ -830,6 +840,7 @@ const MetricsTicketTable = ({
                       onClick={() => onTicketClick(row)}
                       data-track-category='DeskMetrics'
                       data-track-name='OpenMetricsTicket'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         ticketId: row.ticketId,
                         channelId: row.channelId,
@@ -850,6 +861,7 @@ const MetricsTicketTable = ({
                       onClick={() => onAssigneeClick(row.assigneeId!)}
                       data-track-category='DeskMetrics'
                       data-track-name='FilterByTicketAssignee'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ assigneeId: row.assigneeId })}
                       className='max-w-[140px] truncate text-left hover:text-desk-accent hover:underline'
                     >
@@ -1384,6 +1396,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
           aria-label='Close desk metrics'
           data-track-category='DeskMetrics'
           data-track-name='CloseButton'
+          data-track-kind='passive'
         >
           <X size={16} />
         </button>
@@ -1464,6 +1477,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         className='flex h-[32px] w-[150px] max-w-[150px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
                         data-track-category='DeskMetrics'
                         data-track-name='DeskSelector'
+                        data-track-kind='passive'
                       >
                         <Layers size={14} className='shrink-0 text-muted-foreground' />
                         <span className='flex-1 truncate text-left text-sm'>
@@ -1497,6 +1511,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
                           data-track-category='DeskMetrics'
                           data-track-name='SearchDesks'
+                          data-track-kind='passive'
                         />
                       </div>
                       <div
@@ -1546,6 +1561,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   className='h-3.5 w-3.5 accent-desk-accent'
                                   data-track-category='DeskMetrics'
                                   data-track-name='ToggleDesk'
+                                  data-track-kind='passive'
                                 />
                                 <span className='flex-1 truncate'>{desk.name}</span>
                                 {isPrimary && (
@@ -1586,6 +1602,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       className='flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
                       data-track-category='DeskMetrics'
                       data-track-name='AssigneeFilter'
+                      data-track-kind='passive'
                     >
                       <UserCircle2 size={14} className='shrink-0 text-muted-foreground' />
                       <span className='font-medium'>Assignee</span>
@@ -1643,6 +1660,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
                         data-track-category='DeskMetrics'
                         data-track-name='OpenCustomFieldFilters'
+                        data-track-kind='passive'
                       >
                         <ListFilter size={13} className='shrink-0' />
                         <span className='font-medium'>More Filters</span>
@@ -1664,6 +1682,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
                           data-track-category='DeskMetrics'
                           data-track-name='SearchFilters'
+                          data-track-kind='passive'
                         />
                       </div>
                       <div
@@ -1687,6 +1706,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenPriorityFilterSubmenu'
+                                data-track-kind='passive'
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <BarChart4 size={16} className='shrink-0' />
@@ -1735,6 +1755,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenUserGroupFilterSubmenu'
+                                data-track-kind='passive'
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Users size={16} className='shrink-0' />
@@ -1784,6 +1805,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenTagCategorySubmenu'
+                                data-track-kind='passive'
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Tag size={16} className='shrink-0' />
@@ -1837,6 +1859,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                             }}
                                             data-track-category='DeskMetrics'
                                             data-track-name='SelectTagCategory'
+                                            data-track-kind='passive'
                                             className={cn(
                                               'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
                                               selectedTagCategory === tc.tagCategory
@@ -1876,6 +1899,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenTagsSubmenu'
+                                  data-track-kind='passive'
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Tag size={16} className='shrink-0' />
@@ -1929,6 +1953,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenStageFilterSubmenu'
+                                  data-track-kind='passive'
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Circle size={16} className='shrink-0' />
@@ -1979,6 +2004,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenAICategoryFilterSubmenu'
+                                  data-track-kind='passive'
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Sparkles size={16} className='shrink-0' />
@@ -2045,6 +2071,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                       )}
                                       data-track-category='DeskMetrics'
                                       data-track-name='OpenCustomFieldFilterSubmenu'
+                                      data-track-kind='passive'
                                       data-track-metadata={JSON.stringify({ fieldName: key })}
                                     >
                                       <div className='flex min-w-0 items-center gap-3'>
@@ -2109,6 +2136,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
                       data-track-category='DeskMetrics'
                       data-track-name='ClearDeskMetricsFilters'
+                      data-track-kind='passive'
                     >
                       <X size={14} />
                       <span>Clear Filters</span>
@@ -2136,6 +2164,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   title='Refresh metrics'
                   data-track-category='DeskMetrics'
                   data-track-name='Refresh'
+                  data-track-kind='passive'
                 >
                   <RefreshCw size={16} className={cn(isFetching && 'animate-spin')} />
                 </button>
@@ -2197,6 +2226,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   className='mt-2 rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90'
                   data-track-category='DeskMetrics'
                   data-track-name='Retry'
+                  data-track-kind='passive'
                 >
                   Retry
                 </button>
@@ -2462,6 +2492,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               onClick={() => setChartView('priority')}
                               data-track-category='DeskMetrics'
                               data-track-name='ChartViewPriority'
+                              data-track-kind='passive'
                               className={cn(
                                 'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
                                 chartView === 'priority'
@@ -2476,6 +2507,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               onClick={() => setChartView('trend')}
                               data-track-category='DeskMetrics'
                               data-track-name='ChartViewTrend'
+                              data-track-kind='passive'
                               className={cn(
                                 'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
                                 chartView === 'trend'
@@ -2490,6 +2522,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               onClick={() => setChartView('assignee')}
                               data-track-category='DeskMetrics'
                               data-track-name='ChartViewAssignee'
+                              data-track-kind='passive'
                               className={cn(
                                 'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
                                 chartView === 'assignee'
@@ -2504,6 +2537,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               onClick={() => setChartView('tags')}
                               data-track-category='DeskMetrics'
                               data-track-name='ChartViewTags'
+                              data-track-kind='passive'
                               className={cn(
                                 'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
                                 chartView === 'tags'
@@ -2520,6 +2554,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             title='Expand'
                             data-track-category='DeskMetrics'
                             data-track-name='ExpandChart'
+                            data-track-kind='passive'
                             className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
                           >
                             <Maximize2 size={13} />
@@ -2718,6 +2753,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
           }}
           data-track-category='DeskMetrics'
           data-track-name='ExpandedChartBackdrop'
+          data-track-kind='passive'
         >
           <div className='relative flex h-[80vh] w-[90vw] max-w-[1000px] flex-col rounded-[16px] bg-background p-6 shadow-2xl'>
             <div className='mb-4 flex items-center justify-between'>
@@ -2736,6 +2772,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 onClick={() => setExpandedChart(null)}
                 data-track-category='DeskMetrics'
                 data-track-name='CloseExpandedChart'
+                data-track-kind='passive'
                 className='flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground hover:bg-accent hover:text-foreground'
               >
                 <X size={16} />

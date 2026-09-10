@@ -94,6 +94,7 @@ function ViewRow({
       )}
       data-track-category='Projects'
       data-track-name='OpenView'
+      data-track-kind='passive'
     >
       <span
         className={cn(
@@ -314,6 +315,7 @@ const ViewsSidebarSection = (): ReactElement => {
                 className='w-full flex items-center gap-2 px-3 py-1.5 rounded-[10px] transition-colors hover:bg-sidebar-accent group'
                 data-track-category='Projects'
                 data-track-name='ShowMoreViews'
+                data-track-kind='passive'
               >
                 <ChevronDown className='size-2 text-muted-foreground' />
                 <span className='text-[10px] tabular-nums text-muted-foreground'>
@@ -333,6 +335,7 @@ const ViewsSidebarSection = (): ReactElement => {
               )}
               data-track-category='Projects'
               data-track-name='CreateNewView'
+              data-track-kind='active'
             >
               <Plus className='size-4 shrink-0' />
               <span>Create new view</span>
@@ -407,6 +410,7 @@ const ViewsSidebarSection = (): ReactElement => {
             aria-label='View name'
             data-track-category='Projects'
             data-track-name='RenameViewInput'
+            data-track-kind='passive'
             className={cn(
               'h-10 px-3 rounded-lg border border-input bg-background text-sm text-foreground',
               'outline-none transition-[box-shadow,border-color] placeholder:text-muted-foreground',
@@ -420,6 +424,7 @@ const ViewsSidebarSection = (): ReactElement => {
               onClick={() => setRenameTarget(null)}
               data-track-category='Projects'
               data-track-name='CANCEL_RENAME_VIEW'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -428,6 +433,7 @@ const ViewsSidebarSection = (): ReactElement => {
               onClick={() => void submitRename()}
               data-track-category='Projects'
               data-track-name='CONFIRM_RENAME_VIEW'
+              data-track-kind='active'
               disabled={!renameDraft.trim()}
             >
               Save
@@ -464,6 +470,7 @@ const ViewsSidebarSection = (): ReactElement => {
               onClick={() => setDeleteTarget(null)}
               data-track-category='Projects'
               data-track-name='CANCEL_DELETE_VIEW'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -473,6 +480,7 @@ const ViewsSidebarSection = (): ReactElement => {
               onClick={() => void confirmDelete()}
               data-track-category='Projects'
               data-track-name='CONFIRM_DELETE_VIEW'
+              data-track-kind='active'
             >
               Delete
             </Button>

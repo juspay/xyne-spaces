@@ -159,6 +159,7 @@ export function CredentialOauthFlow({
             className='h-8 w-fit rounded-lg text-sm'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: cancel copilot oauth'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -172,6 +173,7 @@ export function CredentialOauthFlow({
           className='h-8 w-fit rounded-lg text-sm'
           data-track-category='Claw Agents'
           data-track-name={`Agent detail v2: start ${provider} oauth`}
+          data-track-kind='active'
         >
           {busy ? 'Opening…' : copy.button}
         </Button>
@@ -203,6 +205,7 @@ export function CredentialOauthFlow({
               className='h-8 rounded-lg text-sm'
               data-track-category='Claw Agents'
               data-track-name={`Agent detail v2: complete ${provider} oauth`}
+              data-track-kind='active'
             >
               {busy ? 'Verifying…' : 'Complete sign-in'}
             </Button>
@@ -217,6 +220,7 @@ export function CredentialOauthFlow({
               className='h-8 rounded-lg text-sm'
               data-track-category='Claw Agents'
               data-track-name={`Agent detail v2: cancel ${provider} oauth`}
+              data-track-kind='passive'
             >
               Cancel
             </Button>

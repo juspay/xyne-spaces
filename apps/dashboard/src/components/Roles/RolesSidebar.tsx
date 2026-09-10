@@ -48,6 +48,7 @@ const RolesSidebar = ({
             className='size-7 flex items-center justify-center rounded-[10px] border border-transparent text-sidebar-foreground transition-colors hover:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:border-sidebar-border'
             data-track-category='ROLES'
             data-track-name='OpenCreateRole'
+            data-track-kind='passive'
           >
             <PlusDefault size={16} />
           </button>
@@ -84,6 +85,7 @@ const RolesSidebar = ({
                 className='w-full'
                 data-track-category='ROLES'
                 data-track-name='SelectRole'
+                data-track-kind='active'
               >
                 <div
                   className={cn(
@@ -108,6 +110,7 @@ const RolesSidebar = ({
               onClick={onLoadMore}
               data-track-category='ROLES'
               data-track-name='LoadMoreRoles'
+              data-track-kind='passive'
               className='flex items-center justify-center gap-2 h-9 w-full rounded-[10px] px-3 text-xs font-medium border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
             >
               <ChevronDown size={12} /> Load more

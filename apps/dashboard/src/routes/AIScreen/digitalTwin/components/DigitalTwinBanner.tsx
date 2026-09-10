@@ -66,6 +66,7 @@ export const DigitalTwinBanner = ({
             onClick={onEnable}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin enable'
+            data-track-kind='active'
             className='mt-3.5 flex w-full items-center justify-center gap-2 rounded-lg bg-status-success px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-status-success/90'
           >
             <Brain className='size-4' />
@@ -114,6 +115,7 @@ export const DigitalTwinBanner = ({
               onClick={onDisable}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin disable and retry backfill'
+              data-track-kind='passive'
               className='rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground transition hover:bg-muted'
             >
               Disable &amp; retry

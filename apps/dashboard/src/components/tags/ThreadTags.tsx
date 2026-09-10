@@ -220,6 +220,7 @@ export const ThreadTags = ({
                   className='opacity-0 group-hover/chip:opacity-100 focus-visible:opacity-100 transition-opacity rounded-full'
                   data-track-category='Tags'
                   data-track-name='RemoveThreadTag'
+                  data-track-kind='active'
                 >
                   <X className='size-2.5' />
                 </button>

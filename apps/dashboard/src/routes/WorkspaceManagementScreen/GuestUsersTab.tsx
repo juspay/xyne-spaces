@@ -182,6 +182,7 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
           onClick={() => void loadGuests()}
           data-track-category='workspace-management'
           data-track-name='RELOAD_GUEST_USERS'
+          data-track-kind='passive'
           disabled={isLoading}
           className='gap-2'
         >
@@ -289,6 +290,7 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
                         onClick={() => setRevokeTarget({ guest, access })}
                         data-track-category='workspace-management'
                         data-track-name='OPEN_REVOKE_GUEST_CONFIRM'
+                        data-track-kind='passive'
                         className='text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0'
                       >
                         <Trash2 className='w-4 h-4' />
@@ -330,6 +332,7 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
               onClick={() => setRevokeTarget(null)}
               data-track-category='workspace-management'
               data-track-name='CANCEL_REVOKE_GUEST'
+              data-track-kind='passive'
               disabled={isRevoking}
             >
               Cancel
@@ -339,6 +342,7 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
               onClick={() => void confirmRevoke()}
               data-track-category='workspace-management'
               data-track-name='CONFIRM_REVOKE_GUEST'
+              data-track-kind='active'
               disabled={isRevoking}
               className='gap-2'
             >

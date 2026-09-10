@@ -78,6 +78,7 @@ export function RecordingParticipants({
       aria-label={`Participants, ${total} added`}
       data-track-category='RecordingDetailV2'
       data-track-name='open_recording_participants'
+      data-track-kind='passive'
     >
       <AvatarGroup userIds={participantIds.slice(0, 3)} size='xs' />
       <span className='tabular-nums'>{total}</span>
@@ -138,6 +139,7 @@ export function RecordingParticipants({
             className='h-9 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground'
             data-track-category='RecordingDetailV2'
             data-track-name='search_recording_participants'
+            data-track-kind='passive'
           />
         </div>
       )}
@@ -170,6 +172,7 @@ export function RecordingParticipants({
               )}
               data-track-category='RecordingDetailV2'
               data-track-name='add_recording_participant'
+              data-track-kind='active'
             >
               <Avatar userId={user.id} size='rg' showActiveStatus={false} />
               <span className='min-w-0 flex-1'>
@@ -222,6 +225,7 @@ export function RecordingParticipants({
                           className='h-7 gap-1 px-2 text-[11px] font-normal text-muted-foreground hover:text-foreground active:scale-[0.96]'
                           data-track-category='RecordingDetailV2'
                           data-track-name='share_with_recording_participant'
+                          data-track-kind='active'
                         >
                           <Share2 className='size-3' aria-hidden='true' />
                           Share
@@ -237,6 +241,7 @@ export function RecordingParticipants({
                         className='text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 active:scale-[0.96] group-hover:opacity-100'
                         data-track-category='RecordingDetailV2'
                         data-track-name='remove_recording_participant'
+                        data-track-kind='active'
                       >
                         <X className='size-3.5' aria-hidden='true' />
                       </Button>

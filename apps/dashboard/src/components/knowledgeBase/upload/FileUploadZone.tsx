@@ -132,6 +132,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
         aria-label='Upload files by clicking or dragging and dropping'
         data-track-category='knowledge-base'
         data-track-name='upload-zone'
+        data-track-kind='active'
         className={cn(
           'border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors',
           disabled
@@ -199,6 +200,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
             }}
             data-track-category='knowledge-base'
             data-track-name='OPEN_FILE_PICKER'
+            data-track-kind='passive'
             disabled={disabled}
           >
             <FolderOpen size={16} />
@@ -239,6 +241,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                   disabled={disabled}
                   data-track-category='knowledge-base'
                   data-track-name='remove-file'
+                  data-track-kind='active'
                   className='p-1 hover:bg-red-50 rounded transition-colors flex-shrink-0 disabled:opacity-50'
                 >
                   <X size={14} className='text-gray-400 hover:text-red-500' />

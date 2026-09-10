@@ -117,6 +117,7 @@ const ClawOrganizationScreen = (): ReactElement => {
           onClick={() => void refetch()}
           data-track-category='Claw Agents'
           data-track-name='RELOAD_ORGANIZATION'
+          data-track-kind='passive'
         >
           Try again
         </Button>
@@ -217,6 +218,7 @@ const ClawOrganizationScreen = (): ReactElement => {
               onClick={() => void submitMember()}
               data-track-category='Claw Agents'
               data-track-name='ADD_ORGANIZATION_MEMBER'
+              data-track-kind='active'
             >
               Add member
             </Button>
@@ -298,6 +300,7 @@ const ClawOrganizationScreen = (): ReactElement => {
                             onClick={() => setRemoveTarget(member)}
                             data-track-category='Claw Agents'
                             data-track-name='OPEN_REMOVE_MEMBER_CONFIRM'
+                            data-track-kind='passive'
                           >
                             <Trash2 className='size-4 text-muted-foreground' />
                           </Button>

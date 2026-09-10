@@ -183,6 +183,7 @@ const DelayedMessageRow = ({
         onClick={() => onEdit(delayedMessage)}
         trackCategory='delayed-messages'
         trackName='scheduled-message-row-open'
+        trackKind='passive'
         attachments={panelAttachments}
       />
       <ScheduleMessageDialog
@@ -217,6 +218,7 @@ const DelayedMessageRow = ({
                 aria-label='Close'
                 data-track-category='delayed-messages'
                 data-track-name='close-send-now-dialog'
+                data-track-kind='passive'
               >
                 <X className='size-4' />
               </button>
@@ -232,6 +234,7 @@ const DelayedMessageRow = ({
                 className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
                 data-track-category='delayed-messages'
                 data-track-name='cancel-send-now'
+                data-track-kind='passive'
               >
                 Cancel
               </button>
@@ -243,6 +246,7 @@ const DelayedMessageRow = ({
                 className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2'
                 data-track-category='delayed-messages'
                 data-track-name='confirm-send-now'
+                data-track-kind='active'
               >
                 {isSendNowLoading ? <Loader2 size={14} className='animate-spin' /> : null}
                 Send now
@@ -275,6 +279,7 @@ const DelayedMessageRow = ({
                 aria-label='Close'
                 data-track-category='delayed-messages'
                 data-track-name='close-delete-scheduled-dialog'
+                data-track-kind='passive'
               >
                 <X className='size-4' />
               </button>
@@ -290,6 +295,7 @@ const DelayedMessageRow = ({
                 className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
                 data-track-category='delayed-messages'
                 data-track-name='cancel-delete-scheduled'
+                data-track-kind='passive'
               >
                 Cancel
               </button>
@@ -300,6 +306,7 @@ const DelayedMessageRow = ({
                 className='text-sm font-bold px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
                 data-track-category='delayed-messages'
                 data-track-name='confirm-delete-scheduled'
+                data-track-kind='active'
               >
                 Delete message
               </button>

@@ -36,6 +36,7 @@ const DirectorySectionHeader = ({
         aria-controls={`${title.toLowerCase().replace(' ', '-')}-section`}
         data-track-category='CHAT_DIRECTORY'
         data-track-name='Toggle_Section'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ section: title, isExpanded })}
       >
         <span className='size-4 flex items-center justify-center shrink-0'>
@@ -56,6 +57,7 @@ const DirectorySectionHeader = ({
           className='text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent p-1 rounded transition-colors'
           data-track-category='CHAT_DIRECTORY'
           data-track-name='Add_Section'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ section: title })}
         >
           <Plus size={14} />

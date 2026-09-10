@@ -50,6 +50,7 @@ const ClawSkillDetailV2 = (): ReactElement => {
               onClick={() => void navigate(`${actions.libraryPath}?tab=skills`)}
               data-track-category='Claw Agents'
               data-track-name='Skill detail v2: back'
+              data-track-kind='passive'
               className='flex h-7 shrink-0 items-center rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
             >
               <span className='flex h-7 w-[22px] shrink-0 items-center justify-center'>
@@ -70,6 +71,7 @@ const ClawSkillDetailV2 = (): ReactElement => {
                 onClick={() => void actions.toggleEnabled(!skill.enabled)}
                 data-track-category='Claw Agents'
                 data-track-name='Skill detail v2: toggle enabled'
+                data-track-kind='passive'
                 className={cn(
                   'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
                   skill.enabled ? 'bg-foreground' : 'bg-border',
@@ -94,6 +96,7 @@ const ClawSkillDetailV2 = (): ReactElement => {
                 aria-current={entryTab.id === tab ? 'page' : undefined}
                 data-track-category='Claw Agents'
                 data-track-name={`Skill detail v2 tab: ${entryTab.label}`}
+                data-track-kind='passive'
                 className={cn(
                   'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
                   entryTab.id === tab

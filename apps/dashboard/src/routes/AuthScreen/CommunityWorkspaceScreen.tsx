@@ -252,6 +252,7 @@ const LeftPanel = ({
             style={{ background: REF_RED }}
             data-track-category='Auth'
             data-track-name='ContinueWithWorkEmail'
+            data-track-kind='passive'
           >
             Continue with work email
           </button>
@@ -421,6 +422,7 @@ const LeftPanel = ({
           style={{ color: REF_TEXT_60 }}
           data-track-category='Auth'
           data-track-name='ViewAllCommunities'
+          data-track-kind='passive'
         >
           View all
         </button>

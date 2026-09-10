@@ -27,6 +27,7 @@ import {
   truncateTemplateName,
 } from '../../../components/SummaryTemplateMenu/SummaryTemplateMenu.utils';
 import { Tooltip } from '../../../components/ui/Tooltip';
+import type { InteractionKind } from '@xyne/shared';
 
 export type RecordingContentTab = 'notes' | 'transcript' | 'summary';
 
@@ -83,6 +84,7 @@ export const RecordingContentTabs = ({
     label: string,
     icon: ReactElement,
     trackName: string,
+    trackKind?: InteractionKind,
     options?: { trailing?: ReactElement; disabled?: boolean },
   ): ReactElement => {
     const isActive = visibleTab === tab;
@@ -96,6 +98,7 @@ export const RecordingContentTabs = ({
         disabled={options?.disabled ?? false}
         data-track-category='RecordingDetailV2'
         data-track-name={trackName}
+        data-track-kind={trackKind}
         className={cn(
           'relative inline-flex h-8 items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
           isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
@@ -168,6 +171,7 @@ export const RecordingContentTabs = ({
         title={isRegenerating ? regeneratingTooltipContent : fullLabel}
         data-track-category='RecordingDetailV2'
         data-track-name='open_summary_templates'
+        data-track-kind='passive'
         className={cn(
           'relative inline-flex h-8 items-center gap-2 rounded-full pl-5 pr-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',

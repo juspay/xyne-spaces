@@ -25,6 +25,7 @@ function ResizeCornerHandle(_axis: ResizeHandleAxis, ref: React.Ref<HTMLElement>
       className='react-resizable-handle react-resizable-handle-se !w-5 !h-5 !right-0 !bottom-0 !bg-none !p-0 !m-0 opacity-50 hover:opacity-100 transition-opacity'
       data-track-category='DYNAMIC_DASHBOARD'
       data-track-name='Resize_Tile'
+      data-track-kind='passive'
       aria-label='Resize'
     >
       <svg
@@ -161,6 +162,7 @@ const ComponentGrid = ({
             className='inline-flex items-center gap-2 h-9 px-4 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-600 transition-colors hover:bg-xyne-gray-50'
             data-track-category='DYNAMIC_DASHBOARD'
             data-track-name='Open_Add_Component_Modal'
+            data-track-kind='passive'
           >
             <Plus size={16} className='text-xyne-gray-500' />
             Add Component

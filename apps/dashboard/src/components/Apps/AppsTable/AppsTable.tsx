@@ -254,6 +254,7 @@ export const AppsTable = ({
                 }}
                 data-track-category='Apps'
                 data-track-name='COPY_BOT_USER_ID'
+                data-track-kind='passive'
                 title='Copy bot user ID'
                 className='h-6 w-6 p-0'
               >
@@ -330,6 +331,7 @@ export const AppsTable = ({
               onClick={() => void handleCopyToken(app.id)}
               data-track-category='Apps'
               data-track-name='COPY_APP_TOKEN'
+              data-track-kind='passive'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
@@ -360,6 +362,7 @@ export const AppsTable = ({
               onClick={() => void handleCopySigningSecret(app.id)}
               data-track-category='Apps'
               data-track-name='COPY_APP_SIGNING_SECRET'
+              data-track-kind='passive'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
@@ -397,6 +400,7 @@ export const AppsTable = ({
             title={isDisabledEdit ? 'Only creator or admin can edit' : 'Edit app'}
             data-track-category='Apps'
             data-track-name='OpenEditAppModal'
+            data-track-kind='passive'
           >
             <Pencil size={14} />
             Edit
@@ -410,6 +414,7 @@ export const AppsTable = ({
               className='gap-1 h-8'
               data-track-category='Apps'
               data-track-name='InstallApp'
+              data-track-kind='active'
             >
               <Download size={14} />
               {isInstalling ? 'Installing...' : 'Install'}
@@ -425,6 +430,7 @@ export const AppsTable = ({
               title='Update to the latest app version (the creator changed commands or permissions)'
               data-track-category='Apps'
               data-track-name='UpdateApp'
+              data-track-kind='active'
             >
               <RefreshCw size={14} />
               {isInstalling ? 'Updating...' : 'Update'}
@@ -440,6 +446,7 @@ export const AppsTable = ({
               title='Promote to the cross-org marketplace (make this app global)'
               data-track-category='Apps'
               data-track-name='PromoteApp'
+              data-track-kind='active'
             >
               <Globe size={14} />
               {isPromoting ? 'Promoting...' : 'Promote'}

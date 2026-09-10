@@ -116,6 +116,7 @@ function SectionHeader({
       className='flex items-center justify-between w-full px-3 py-2.5 hover:bg-muted transition-colors'
       data-track-category='CALLS'
       data-track-name='Toggle_Participants_Section'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ section: title, isExpanded: !isExpanded })}
     >
       <span className='text-sm font-medium text-foreground'>{title}</span>
@@ -287,6 +288,7 @@ function ParticipantItem({
           data-ph-capture-attribute-track-id='mute_participant'
           data-track-category='CALLS'
           data-track-name='MUTE_PARTICIPANT'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
           title={!isMicrophoneEnabled ? `${participantName} is muted` : `Mute ${participantName}`}
         >
@@ -307,6 +309,7 @@ function ParticipantItem({
           data-ph-capture-attribute-track-id='remove_participant'
           data-track-category='CALLS'
           data-track-name='REMOVE_PARTICIPANT'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
           title={`Remove ${participantName} from the call`}
         >
@@ -372,6 +375,7 @@ function RequestedParticipantItem({
             data-ph-capture-attribute-track-id='approve_lobby_request'
             data-track-category='CALLS'
             data-track-name='APPROVE_LOBBY_REQUEST'
+            data-track-kind='active'
           >
             {approvingId === participant.id ? (
               <div className='w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin' />
@@ -387,6 +391,7 @@ function RequestedParticipantItem({
             data-ph-capture-attribute-track-id='reject_lobby_request'
             data-track-category='CALLS'
             data-track-name='REJECT_LOBBY_REQUEST'
+            data-track-kind='active'
           >
             {rejectingId === participant.id ? (
               <div className='w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
@@ -637,6 +642,7 @@ export function ParticipantsSidebar({
                 data-ph-capture-attribute-track-id='mute_all_participants'
                 data-track-category='CALLS'
                 data-track-name='MUTE_ALL_PARTICIPANTS'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ callId })}
               >
                 <MicOff size={16} />
@@ -651,6 +657,7 @@ export function ParticipantsSidebar({
                 data-testid='add-people-button'
                 data-track-category='CALLS'
                 data-track-name='ADD_PEOPLE_TO_CALL'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ callId })}
               >
                 <UserPlus size={16} />
@@ -663,6 +670,7 @@ export function ParticipantsSidebar({
               title='Close'
               data-track-category='CALLS'
               data-track-name='Close_Participants_Sidebar'
+              data-track-kind='passive'
             >
               <X size={20} className='text-muted-foreground' />
             </button>

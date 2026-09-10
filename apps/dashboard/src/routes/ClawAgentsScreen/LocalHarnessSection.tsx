@@ -275,6 +275,7 @@ const LocalHarnessSection = (): ReactElement | null => {
           disabled={busy !== null}
           data-track-category='Claw Settings'
           data-track-name='Rescan local harnesses'
+          data-track-kind='active'
           aria-label='Rescan this machine for coding CLIs'
           className='flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40'
         >

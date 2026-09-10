@@ -215,6 +215,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
               data-ph-capture-attribute-track-id='toggle_canvas_star'
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_STAR'
+              data-track-kind='active'
             >
               <Star
                 size={14}
@@ -245,6 +246,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                   onClick={() => onDuplicate(canvas)}
                   data-track-category='CANVAS'
                   data-track-name='DUPLICATE_CANVAS'
+                  data-track-kind='active'
                 >
                   <CopyDefault size={14} className='shrink-0' />
                   <span className='flex-1'>Duplicate</span>
@@ -255,6 +257,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 onClick={() => setShareOpen(true)}
                 data-track-category='CANVAS'
                 data-track-name='OPEN_SHARE_CANVAS'
+                data-track-kind='passive'
               >
                 <Share01 size={14} className='shrink-0' />
                 <span className='flex-1'>Share</span>
@@ -282,6 +285,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                       onClick={() => onDelete(canvas.id)}
                       data-track-category='CANVAS'
                       data-track-name='DELETE_CANVAS'
+                      data-track-kind='active'
                       className='gap-2 text-destructive focus:text-destructive'
                     >
                       <DeleteDustbin01 size={14} className='shrink-0' />

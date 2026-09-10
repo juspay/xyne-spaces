@@ -120,6 +120,7 @@ export function TwinReasoningPopover({
             aria-label='Close'
             data-track-category='twin-reasoning'
             data-track-name='close'
+            data-track-kind='passive'
             className='flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           >
             <MultipleCrossCancelDefault size={16} />
@@ -181,6 +182,7 @@ function TabButton({
       onClick={onClick}
       data-track-category='twin-reasoning'
       data-track-name={`tab-${label.toLowerCase()}`}
+      data-track-kind='passive'
       className={cn(
         'flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-semibold transition-colors',
         active

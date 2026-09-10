@@ -73,6 +73,7 @@ const EditableJob = ({
               onClick={onDelete}
               data-track-category='Claw Agents'
               data-track-name='DELETE_SCHEDULED_JOB'
+              data-track-kind='active'
               aria-label='Delete scheduled job'
               className='text-muted-foreground hover:text-destructive'
             >
@@ -101,6 +102,7 @@ const EditableJob = ({
                 disabled={busy}
                 data-track-category='Claw Agents'
                 data-track-name='Update scheduled job reply mode'
+                data-track-kind='active'
                 onChange={event =>
                   onUpdate({ replyMode: event.target.value as 'thread' | 'channel' })
                 }

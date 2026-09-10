@@ -94,6 +94,7 @@ const CopyEndpointButton = ({ value }: { value: string }): ReactElement => {
       title='Copy endpoint'
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: copy MCP endpoint'
+      data-track-kind='active'
       className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
     >
       {copied ? (
@@ -159,6 +160,7 @@ export function McpDetailPanel({
           title={entry.selectable ? undefined : 'No tools have synced for this integration yet'}
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle MCP from detail'
+          data-track-kind='active'
           className={cn(
             'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:cursor-not-allowed disabled:opacity-50',
             enabled
@@ -198,6 +200,7 @@ export function McpDetailPanel({
                     }}
                     data-track-category='Claw Agents'
                     data-track-name='Create agent v2: authenticate MCP'
+                    data-track-kind='active'
                     className={cn(
                       'flex items-center rounded-md px-[5px] py-[3px] text-sm font-medium leading-5 text-[color:var(--mention-color)] transition-opacity',
                       authOpen ? 'opacity-50' : 'hover:underline',
@@ -227,6 +230,7 @@ export function McpDetailPanel({
                           onClick={() => setAuthOpen(false)}
                           data-track-category='Claw Agents'
                           data-track-name='Create agent v2: cancel MCP oauth'
+                          data-track-kind='passive'
                           className='flex h-7 items-center justify-center rounded-lg bg-card px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-muted'
                         >
                           Cancel
@@ -237,6 +241,7 @@ export function McpDetailPanel({
                           onClick={() => connect.connect({})}
                           data-track-category='Claw Agents'
                           data-track-name='Create agent v2: start MCP oauth'
+                          data-track-kind='active'
                           className='flex h-7 items-center justify-center rounded-lg bg-foreground/[0.06] px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-foreground/[0.09] disabled:cursor-not-allowed disabled:opacity-50'
                         >
                           {connect.isPending ? 'Redirecting…' : 'Continue'}
@@ -299,6 +304,7 @@ export function McpDetailPanel({
                   }
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: toggle all MCP tools'
+                  data-track-kind='active'
                   className='shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground'
                 >
                   {allChosen ? 'Clear all' : `Select all (${chosen.length}/${entry.tools.length})`}

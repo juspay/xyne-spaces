@@ -369,6 +369,7 @@ const BoardConfigCopyScreen = ({
                 onClick={() => setStep('select')}
                 data-track-category='BOARD_CONFIG_COPY'
                 data-track-name='BACK_TO_SELECT_STEP'
+                data-track-kind='passive'
               >
                 <ArrowLeft size={15} /> Back
               </Button>
@@ -384,6 +385,7 @@ const BoardConfigCopyScreen = ({
             onClick={handleClose}
             data-track-category='BOARD_CONFIG_COPY'
             data-track-name='CLOSE_MODAL'
+            data-track-kind='passive'
             aria-label='Close'
           >
             <X size={16} />
@@ -430,6 +432,7 @@ const BoardConfigCopyScreen = ({
                       }
                       data-track-category='BOARD_CONFIG_COPY'
                       data-track-name='TOGGLE_CATEGORY'
+                      data-track-kind='passive'
                     />
                     <span className='text-sm text-foreground'>{item.label}</span>
                   </label>
@@ -517,6 +520,7 @@ const BoardConfigCopyScreen = ({
               }}
               data-track-category='BOARD_CONFIG_COPY'
               data-track-name='CLOSE_AFTER_COPY'
+              data-track-kind='passive'
             >
               Close
             </Button>
@@ -527,6 +531,7 @@ const BoardConfigCopyScreen = ({
                 onClick={handleClose}
                 data-track-category='BOARD_CONFIG_COPY'
                 data-track-name='CANCEL_COPY'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -536,6 +541,7 @@ const BoardConfigCopyScreen = ({
                   onClick={() => void handleContinueFromSelect()}
                   data-track-category='BOARD_CONFIG_COPY'
                   data-track-name='CONTINUE_FROM_SELECT'
+                  data-track-kind='passive'
                   disabled={planLoading || executing}
                 >
                   {planLoading || executing ? 'Working…' : 'Continue'}
@@ -547,6 +553,7 @@ const BoardConfigCopyScreen = ({
                   onClick={() => void handleContinueFromRemap()}
                   data-track-category='BOARD_CONFIG_COPY'
                   data-track-name='CONFIRM_COPY_CONFIG'
+                  data-track-kind='active'
                   disabled={!remapComplete || executing}
                 >
                   {executing ? 'Working…' : 'Copy configuration'}

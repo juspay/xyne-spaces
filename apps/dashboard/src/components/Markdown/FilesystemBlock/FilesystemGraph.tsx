@@ -90,6 +90,7 @@ function ContainerCard({ node, colorIndex, onDrillIn }: ContainerCardProps): Rea
       aria-label={`Open ${node.name}`}
       data-track-category='filesystem_graph'
       data-track-name='drill_in_container'
+      data-track-kind='passive'
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();

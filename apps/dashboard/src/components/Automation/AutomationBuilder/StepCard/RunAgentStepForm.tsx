@@ -130,6 +130,7 @@ export function RunAgentStepForm({
               aria-label='Change agent'
               data-track-category='automation-builder'
               data-track-name='run-agent-step-clear-agent'
+              data-track-kind='active'
               onClick={() => setField('agentSlug', '')}
               className='ml-1 flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground'
             >
@@ -146,6 +147,7 @@ export function RunAgentStepForm({
               data-ph-capture-attribute-track-id='run_agent_step_agents_retry'
               data-track-category='automation-builder'
               data-track-name='run-agent-step-agents-retry'
+              data-track-kind='active'
               onClick={() => {
                 void refetch();
               }}

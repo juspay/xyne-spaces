@@ -74,6 +74,7 @@ const DateFieldEditor = ({
         className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
         data-track-category='Tickets'
         data-track-name='EditDynamicField'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({
           fieldName: field.fieldName,
           fieldType: field.fieldType,

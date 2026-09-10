@@ -156,6 +156,7 @@ export const ArtifactErrorOverlay = ({
             title='Dismiss and show the app anyway'
             data-track-category='AskAI'
             data-track-name='ReactArtifactDismissError'
+            data-track-kind='passive'
           >
             <X className='h-4 w-4' aria-hidden='true' />
           </button>
@@ -174,6 +175,7 @@ export const ArtifactErrorOverlay = ({
               className='flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-60'
               data-track-category='AskAI'
               data-track-name='ReactArtifactFixWithAI'
+              data-track-kind='active'
             >
               {requested ? (
                 <>
@@ -196,6 +198,7 @@ export const ArtifactErrorOverlay = ({
             className='flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent'
             data-track-category='AskAI'
             data-track-name='ReactArtifactCopyError'
+            data-track-kind='passive'
           >
             {copied ? (
               <Check className='h-3.5 w-3.5 text-emerald-500' aria-hidden='true' />

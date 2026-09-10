@@ -364,6 +364,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               data-ph-capture-attribute-track-id='dismiss_schedule_call_nudge'
               data-track-category='NUDGES'
               data-track-name='dismiss_schedule_call_nudge'
+              data-track-kind='passive'
               className='p-0.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/50 disabled:opacity-50'
             >
               <X className='h-3.5 w-3.5' />
@@ -397,6 +398,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               onClick={handleReview}
               data-track-category='NUDGES'
               data-track-name='REVIEW_NUDGE'
+              data-track-kind='passive'
               className='h-8 rounded-[8px] border-border px-[10px] text-sm text-muted-foreground hover:bg-muted/50'
             >
               <Eye className='h-4 w-4' />
@@ -419,6 +421,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               onClick={handleOpenRelatedTicket}
               data-track-category='NUDGES'
               data-track-name='OPEN_NUDGE_TICKET'
+              data-track-kind='passive'
               className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               Open ticket
@@ -438,6 +441,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               onClick={handleOpenRelatedMessage}
               data-track-category='NUDGES'
               data-track-name='OPEN_NUDGE_MESSAGE'
+              data-track-kind='passive'
               className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               View message
@@ -457,6 +461,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               onClick={() => setIsScheduleCallModalOpen(true)}
               data-track-category='NUDGES'
               data-track-name='OPEN_NUDGE_SCHEDULE_CALL'
+              data-track-kind='passive'
               className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               <Phone className='mr-1 h-3.5 w-3.5' />
@@ -481,6 +486,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
             onClick={handleDismiss}
             data-track-category='NUDGES'
             data-track-name='DISMISS_NUDGE'
+            data-track-kind='passive'
             className='text-muted-foreground'
           >
             Dismiss

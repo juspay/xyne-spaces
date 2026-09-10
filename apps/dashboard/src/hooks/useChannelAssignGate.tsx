@@ -45,6 +45,7 @@ function GateToast({
         className='absolute right-0 top-0 rounded p-0.5 text-zinc-400 hover:text-white'
         data-track-category='Tickets'
         data-track-name='CloseAssignGateToast'
+        data-track-kind='passive'
       >
         <X className='h-3.5 w-3.5' />
       </button>
@@ -63,6 +64,7 @@ function GateToast({
           className='rounded-md px-2.5 py-1 text-xs font-medium text-zinc-300 hover:text-white'
           data-track-category='Tickets'
           data-track-name='DismissAssignGate'
+          data-track-kind='passive'
         >
           Dismiss
         </button>
@@ -73,6 +75,7 @@ function GateToast({
             className='rounded-md bg-white px-2.5 py-1 text-xs font-medium text-black hover:bg-zinc-200'
             data-track-category='Tickets'
             data-track-name='AddToChannelAndAssign'
+            data-track-kind='active'
           >
             Add &amp; assign
           </button>

@@ -82,6 +82,7 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
                 className='w-full text-left block rounded-xl hover:bg-muted transition'
                 data-track-category='CHAT_PINNED'
                 data-track-name='Open_Pinned_Message'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ conversationId: conv.conversationId })}
               >
                 <ChatBubble

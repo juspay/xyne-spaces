@@ -346,6 +346,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
               onClick={() => setActiveTab('import')}
               data-track-category='whatsapp-migration'
               data-track-name='open-import-tab'
+              data-track-kind='passive'
               className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                 activeTab === 'import'
                   ? 'bg-emerald-600 text-white shadow-sm'
@@ -359,6 +360,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
               onClick={() => setActiveTab('delete')}
               data-track-category='whatsapp-migration'
               data-track-name='open-delete-tab'
+              data-track-kind='passive'
               className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                 activeTab === 'delete'
                   ? 'bg-rose-600 text-white shadow-sm'
@@ -489,6 +491,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                   onClick={() => void handlePreview()}
                   data-track-category='whatsapp-migration'
                   data-track-name='PREVIEW_MIGRATION'
+                  data-track-kind='passive'
                   disabled={isPreviewLoading}
                 >
                   {isPreviewLoading ? 'Previewing…' : 'Preview Import'}
@@ -497,6 +500,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                   onClick={() => void handleExecute()}
                   data-track-category='whatsapp-migration'
                   data-track-name='EXECUTE_MIGRATION'
+                  data-track-kind='active'
                   disabled={isExecuteLoading}
                 >
                   {isExecuteLoading ? 'Starting…' : 'Start Import'}
@@ -573,6 +577,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                             }}
                             data-track-category='whatsapp-migration'
                             data-track-name='select-delete-source'
+                            data-track-kind='passive'
                             className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
                               isSelected
                                 ? 'border-rose-300 bg-rose-50/80'
@@ -619,6 +624,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                     onClick={() => void handlePurgePreview()}
                     data-track-category='whatsapp-migration'
                     data-track-name='PREVIEW_PURGE'
+                    data-track-kind='passive'
                     disabled={isPurgeLoading || !selectedPurgeSourceId}
                   >
                     {isPurgeLoading ? 'Checking…' : 'Preview Delete'}
@@ -628,6 +634,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                     onClick={() => void handlePurgeExecute()}
                     data-track-category='whatsapp-migration'
                     data-track-name='EXECUTE_PURGE'
+                    data-track-kind='active'
                     disabled={isPurgeLoading || !selectedPurgeSourceId}
                   >
                     {isPurgeLoading ? 'Deleting…' : 'Delete Imported Messages'}

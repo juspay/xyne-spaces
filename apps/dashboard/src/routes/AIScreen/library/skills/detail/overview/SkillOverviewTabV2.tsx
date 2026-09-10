@@ -62,6 +62,7 @@ export function SkillOverviewTabV2({
                 disabled={actions.busy.deleting}
                 data-track-category='Claw Agents'
                 data-track-name='Skill detail v2: delete skill'
+                data-track-kind='active'
                 className='flex h-7 shrink-0 items-center rounded-md bg-destructive/15 px-2 text-sm leading-5 text-destructive transition-colors hover:bg-destructive/25 disabled:pointer-events-none disabled:opacity-50'
               >
                 Delete this skill

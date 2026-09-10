@@ -30,6 +30,7 @@ export const SubsystemMemoriesPanel = ({
           onClick={onClose}
           data-track-category='Claw Agents'
           data-track-name='Digital Twin close subsystem panel'
+          data-track-kind='passive'
           aria-label='Close subsystem panel'
           className='ml-auto rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >

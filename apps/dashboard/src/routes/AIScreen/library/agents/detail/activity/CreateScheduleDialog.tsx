@@ -85,6 +85,7 @@ export function CreateScheduleDialog({
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: cancel create schedule'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -94,6 +95,7 @@ export function CreateScheduleDialog({
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: confirm create schedule'
+            data-track-kind='active'
           >
             Create
           </Button>
@@ -114,6 +116,7 @@ export function CreateScheduleDialog({
           placeholder='eg. Summarise yesterday’s error buckets and post the top three'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: schedule task'
+          data-track-kind='passive'
           className={`${FIELD} h-[86px] resize-y`}
         />
       </section>
@@ -129,6 +132,7 @@ export function CreateScheduleDialog({
           placeholder='Optional — shown in the schedules list'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: schedule label'
+          data-track-kind='passive'
           className={`${FIELD} h-11 py-0`}
         />
       </section>
@@ -142,6 +146,7 @@ export function CreateScheduleDialog({
           disabled={saving}
           label='How often it runs'
           trackName='Agent detail v2: schedule type'
+          trackKind='passive'
           onChange={next => {
             setType(next === 'once' ? 'once' : 'cron');
             setError(null);
@@ -161,6 +166,7 @@ export function CreateScheduleDialog({
               placeholder='0 9 * * 1-5'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: schedule cron'
+              data-track-kind='passive'
               className={`${FIELD} h-11 py-0 font-mono text-xs`}
             />
             <span className='text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
@@ -181,6 +187,7 @@ export function CreateScheduleDialog({
               placeholder='60'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: schedule delay'
+              data-track-kind='passive'
               className={`${FIELD} h-11 py-0`}
             />
             <span className='text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>

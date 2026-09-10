@@ -98,6 +98,7 @@ export const GlobalFieldNameAutocomplete = ({
         className={className}
         data-track-category='form'
         data-track-name='global-field-name-autocomplete-input'
+        data-track-kind='passive'
       />
 
       {selectedField && (
@@ -119,6 +120,7 @@ export const GlobalFieldNameAutocomplete = ({
               }}
               data-track-category='form'
               data-track-name='create-as-new-global-field'
+              data-track-kind='passive'
             >
               Create as new field
             </button>
@@ -147,6 +149,7 @@ export const GlobalFieldNameAutocomplete = ({
                 }}
                 data-track-category='form'
                 data-track-name='select-global-field-suggestion'
+                data-track-kind='passive'
               >
                 <span className='text-foreground'>{field.fieldName}</span>
                 <span className='text-[11px] text-muted-foreground shrink-0'>

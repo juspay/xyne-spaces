@@ -113,6 +113,7 @@ const OutlineRow: React.FC<OutlineRowProps> = ({
     }}
     data-track-category='knowledge-base'
     data-track-name='kb-contents-navigate'
+    data-track-kind='passive'
     className={cn(ROW_CLASS, isActive && ROW_ACTIVE_CLASS)}
   >
     {hasChildren ? (
@@ -125,6 +126,7 @@ const OutlineRow: React.FC<OutlineRowProps> = ({
         aria-label={isExpanded ? 'Collapse section' : 'Expand section'}
         data-track-category='knowledge-base'
         data-track-name='kb-contents-toggle-section'
+        data-track-kind='passive'
         className='flex shrink-0 items-center gap-2'
       >
         {isExpanded ? (
@@ -156,6 +158,7 @@ const FileLeafRow: React.FC<{
     onClick={onClick}
     data-track-category='knowledge-base'
     data-track-name='kb-contents-open-file'
+    data-track-kind='passive'
     className={cn(ROW_CLASS, 'w-full text-left', isActive && ROW_ACTIVE_CLASS)}
   >
     {/* Mirrors a folder row's chevron slot exactly — same wrapper
@@ -444,6 +447,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
             aria-label='Show contents panel'
             data-track-category='knowledge-base'
             data-track-name='kb-show-contents'
+            data-track-kind='passive'
             className='grid size-7 shrink-0 place-items-center rounded-lg border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
           >
             <PanelLeftOpenIcon className='size-4' strokeWidth={2.1} />
@@ -470,6 +474,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
               aria-label='Hide contents panel'
               data-track-category='knowledge-base'
               data-track-name='kb-hide-contents'
+              data-track-kind='passive'
               className='size-7 flex items-center justify-center rounded-lg border border-transparent text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
             >
               <PanelLeftCloseIcon className='size-4' strokeWidth={2.1} />
@@ -490,6 +495,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
             aria-label='Search files and folders by name'
             data-track-category='knowledge-base'
             data-track-name='kb-contents-search'
+            data-track-kind='passive'
           />
         </div>
       </div>

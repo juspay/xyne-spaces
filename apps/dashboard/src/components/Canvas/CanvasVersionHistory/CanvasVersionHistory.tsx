@@ -102,6 +102,7 @@ export const CanvasVersionHistory = ({
             onClick={onClose}
             data-track-category='CANVAS'
             data-track-name='CLOSE_VERSION_HISTORY'
+            data-track-kind='passive'
             aria-label='Close version history'
           >
             <X size={16} />
@@ -148,6 +149,7 @@ export const CanvasVersionHistory = ({
                         }}
                         data-track-category='CANVAS'
                         data-track-name='Preview_Canvas_Version'
+                        data-track-kind='passive'
                       >
                         <div
                           className={cn(
@@ -189,6 +191,7 @@ export const CanvasVersionHistory = ({
                               }}
                               data-track-category='CANVAS'
                               data-track-name='COPY_CANVAS_VERSION'
+                              data-track-kind='passive'
                               disabled={isRestoring || isRenaming || isCopying}
                             >
                               <Copy size={14} />
@@ -198,6 +201,7 @@ export const CanvasVersionHistory = ({
                               onClick={() => onRestore(version)}
                               data-track-category='CANVAS'
                               data-track-name='RESTORE_CANVAS_VERSION'
+                              data-track-kind='active'
                               disabled={isRestoring || isRenaming || isCopying}
                             >
                               <RotateCcw size={14} />
@@ -207,6 +211,7 @@ export const CanvasVersionHistory = ({
                               onClick={() => openRenameDialog(version)}
                               data-track-category='CANVAS'
                               data-track-name='OPEN_RENAME_VERSION'
+                              data-track-kind='passive'
                               disabled={isRestoring || isRenaming || isCopying}
                             >
                               <Pencil size={14} />
@@ -259,6 +264,7 @@ export const CanvasVersionHistory = ({
               onClick={closeRenameDialog}
               data-track-category='CANVAS'
               data-track-name='CANCEL_RENAME_VERSION'
+              data-track-kind='passive'
             >
               Cancel
             </Button>

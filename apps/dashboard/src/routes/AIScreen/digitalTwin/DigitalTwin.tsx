@@ -96,6 +96,7 @@ const DigitalTwin = (): ReactElement => {
                     aria-label='Backfill history'
                     data-track-category={TRACK_CATEGORY}
                     data-track-name='Digital Twin: open backfill'
+                    data-track-kind='passive'
                     className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
                   >
                     <Refresh className='size-4' aria-hidden />
@@ -110,6 +111,7 @@ const DigitalTwin = (): ReactElement => {
                     aria-label='Upload markdown'
                     data-track-category={TRACK_CATEGORY}
                     data-track-name='Digital Twin: open upload'
+                    data-track-kind='passive'
                     className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
                   >
                     <UploadUp className='size-4' aria-hidden />
@@ -124,6 +126,7 @@ const DigitalTwin = (): ReactElement => {
                     aria-label='Disable Twin'
                     data-track-category={TRACK_CATEGORY}
                     data-track-name='Digital Twin: open disable'
+                    data-track-kind='passive'
                     className='text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:bg-muted focus-visible:ring-0'
                   >
                     <StopCircle className='size-4' aria-hidden />

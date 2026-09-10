@@ -188,6 +188,7 @@ export function CallChatPanel({
           className='p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
           data-track-category='CALLS'
           data-track-name='CLOSE_CALL_CHAT'
+          data-track-kind='passive'
         >
           <X size={18} />
         </button>
@@ -226,6 +227,7 @@ export function CallChatPanel({
           <textarea
             data-track-category='CALLS'
             data-track-name='CALL_CHAT_INPUT'
+            data-track-kind='passive'
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -247,6 +249,7 @@ export function CallChatPanel({
             data-ph-capture-attribute-track-id='send_call_chat_message'
             data-track-category='CALLS'
             data-track-name='SEND_CALL_CHAT_MESSAGE'
+            data-track-kind='active'
             className={cn(
               'p-2 rounded-lg transition-colors flex-shrink-0',
               input.trim() && !isSending

@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/Select/index';
 import { DetailValue } from '../../../shared/primitives/DetailPrimitives';
+import type { InteractionKind } from '@xyne/shared';
 
 export function BehaviourRow({
   title,
@@ -46,6 +47,7 @@ export function BehaviourToggle({
   disabled = false,
   label,
   trackName,
+  trackKind,
   onChange,
 }: {
   checked: boolean;
@@ -53,6 +55,7 @@ export function BehaviourToggle({
   disabled?: boolean;
   label: string;
   trackName: string;
+  trackKind?: InteractionKind;
   onChange: (next: boolean) => void;
 }): ReactElement {
   if (!editable) return <DetailValue>{checked ? 'On' : 'Off'}</DetailValue>;
@@ -67,6 +70,7 @@ export function BehaviourToggle({
       onClick={() => onChange(!checked)}
       data-track-category='Claw Agents'
       data-track-name={trackName}
+      data-track-kind={trackKind}
       className={cn(
         'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
         checked ? 'bg-foreground' : 'bg-border',
@@ -89,6 +93,7 @@ export function BehaviourSelect({
   disabled = false,
   label,
   trackName,
+  trackKind,
   triggerClassName,
   onChange,
 }: {
@@ -98,6 +103,7 @@ export function BehaviourSelect({
   disabled?: boolean;
   label: string;
   trackName: string;
+  trackKind?: InteractionKind;
   triggerClassName?: string;
   onChange: (next: string) => void;
 }): ReactElement {
@@ -111,6 +117,7 @@ export function BehaviourSelect({
         aria-label={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
+        data-track-kind={trackKind}
         className={cn('h-9 w-auto min-w-0 max-w-[240px] gap-2 rounded-[10px]', triggerClassName)}
       >
         <SelectValue>
@@ -138,11 +145,13 @@ export function BehaviourSelect({
 export function BehaviourEditButton({
   label,
   trackName,
+  trackKind,
   disabled = false,
   onClick,
 }: {
   label: string;
   trackName: string;
+  trackKind?: InteractionKind;
   disabled?: boolean;
   onClick: () => void;
 }): ReactElement {
@@ -154,6 +163,7 @@ export function BehaviourEditButton({
       aria-label={label}
       data-track-category='Claw Agents'
       data-track-name={trackName}
+      data-track-kind={trackKind}
       className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40'
     >
       <PencilEditLine className='size-4' aria-hidden />

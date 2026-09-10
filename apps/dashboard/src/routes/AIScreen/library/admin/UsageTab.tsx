@@ -73,6 +73,7 @@ export function UsageTab({
           placeholder='Search agents'
           ariaLabel='Search agent usage'
           trackName='Admin: search usage'
+          trackKind='passive'
           className='w-full'
         />
         <div className='flex flex-wrap items-center justify-end gap-2'>

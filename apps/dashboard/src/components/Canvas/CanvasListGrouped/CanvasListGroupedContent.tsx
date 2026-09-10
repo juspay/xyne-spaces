@@ -238,6 +238,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_FOLDER_ICON'
+            data-track-kind='passive'
           >
             {isCollapsed ? (
               <ChevronBigRight size={12} className='shrink-0' />
@@ -272,6 +273,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
               title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_FOLDER'
+              data-track-kind='passive'
             >
               <span className='block truncate text-sm font-medium tracking-[-0.14px]'>
                 <HighlightedText text={folderGroup.folder.name} query={searchQuery} />
@@ -286,6 +288,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             data-ph-capture-attribute-track-id='create_canvas_in_folder'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_FOLDER'
+            data-track-kind='active'
           >
             <PlusDefault size={14} />
           </button>
@@ -298,6 +301,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
                   title='Folder actions'
                   data-track-category='CANVAS'
                   data-track-name='CANVAS_FOLDER_ACTIONS_MENU'
+                  data-track-kind='passive'
                 >
                   <ThreeDotsMenuHorizontal size={14} />
                 </button>
@@ -308,6 +312,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
                   onClick={() => onStartRenameFolder(folderGroup.folder)}
                   data-track-category='CANVAS'
                   data-track-name='RENAME_CANVAS_FOLDER'
+                  data-track-kind='active'
                 >
                   <PencilEdit size={14} className='shrink-0' />
                   <span className='flex-1'>Rename</span>
@@ -320,6 +325,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
                       className='gap-2 text-destructive focus:text-destructive'
                       data-track-category='CANVAS'
                       data-track-name='DELETE_CANVAS_FOLDER'
+                      data-track-kind='active'
                     >
                       <DeleteDustbin01 size={14} className='shrink-0' />
                       <span className='flex-1'>Delete</span>
@@ -517,6 +523,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
             onClick={() => onToggleChannel(channelGroup.channel.id)}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_CHANNEL'
+            data-track-kind='passive'
           >
             {isCollapsed ? (
               <ChevronBigRight size={12} className='shrink-0' />
@@ -539,6 +546,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
             }
             data-track-category='CANVAS'
             data-track-name='OPEN_CHANNEL_CANVAS_CREATE'
+            data-track-kind='passive'
           >
             <PlusDefault size={14} />
           </button>
@@ -733,6 +741,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
             onClick={() => onToggleProject(group.project.id)}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_CANVAS_PROJECT'
+            data-track-kind='passive'
           >
             {isProjectCollapsed ? (
               <ChevronBigRight size={12} className='shrink-0' />
@@ -753,6 +762,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
                 disabled={isCreatingCanvas}
                 data-track-category='CANVAS'
                 data-track-name='OPEN_PROJECT_CANVAS_CREATE'
+                data-track-kind='passive'
               >
                 <PlusDefault size={14} />
               </button>
@@ -763,6 +773,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
                 onClick={() => void onCreateCanvasInProject(group.project, projectFolders)}
                 data-track-category='CANVAS'
                 data-track-name='CREATE_PROJECT_CANVAS'
+                data-track-kind='active'
               >
                 <FileText size={14} className='shrink-0' />
                 <span className='flex-1'>Create canvas</span>
@@ -772,6 +783,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
                 onClick={() => onCreateFolder(group.project.id, projectFolders)}
                 data-track-category='CANVAS'
                 data-track-name='CREATE_CANVAS_FOLDER'
+                data-track-kind='active'
               >
                 <FolderDefault size={14} className='shrink-0' />
                 <span className='flex-1'>Create folder</span>
@@ -930,6 +942,7 @@ const SharedPersonalSection: React.FC<SharedPersonalSectionProps> = ({
             title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_SHARED_CANVAS_FOLDER_ICON'
+            data-track-kind='passive'
           >
             {isCollapsed ? (
               <ChevronBigRight size={12} className='shrink-0' />
@@ -945,6 +958,7 @@ const SharedPersonalSection: React.FC<SharedPersonalSectionProps> = ({
             title={isCollapsed ? 'Expand folder' : 'Collapse folder'}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_SHARED_CANVAS_FOLDER'
+            data-track-kind='passive'
           >
             <span className='block truncate text-sm font-medium tracking-[-0.14px]'>
               <HighlightedText text='Shared' query={searchQuery} />
@@ -1163,6 +1177,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
             onClick={() => onSetPersonalSectionCollapsed(!isPersonalSectionCollapsed)}
             data-track-category='CANVAS'
             data-track-name='TOGGLE_PERSONAL_CANVAS_SECTION'
+            data-track-kind='passive'
           >
             {isPersonalSectionCollapsed ? (
               <ChevronBigRight size={12} className='shrink-0' />
@@ -1181,6 +1196,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 disabled={isCreatingCanvas}
                 data-track-category='CANVAS'
                 data-track-name='OPEN_PERSONAL_CANVAS_CREATE'
+                data-track-kind='passive'
               >
                 <PlusDefault size={14} />
               </button>
@@ -1191,6 +1207,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 onClick={() => void onCreatePersonalCanvas()}
                 data-track-category='CANVAS'
                 data-track-name='CREATE_PERSONAL_CANVAS'
+                data-track-kind='active'
               >
                 <FileText size={14} className='shrink-0' />
                 <span className='flex-1'>Create canvas</span>
@@ -1205,6 +1222,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 }
                 data-track-category='CANVAS'
                 data-track-name='CREATE_PERSONAL_CANVAS_FOLDER'
+                data-track-kind='active'
               >
                 <FolderDefault size={14} className='shrink-0' />
                 <span className='flex-1'>Create folder</span>

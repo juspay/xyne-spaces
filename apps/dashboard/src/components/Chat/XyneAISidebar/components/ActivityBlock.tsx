@@ -248,6 +248,7 @@ export function ActivityBlock({
             }`}
             data-track-category='XyneAI'
             data-track-name='toggle-activity-block'
+            data-track-kind='passive'
             aria-expanded={expanded}
             disabled={!canExpand}
           >

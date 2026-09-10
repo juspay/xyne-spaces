@@ -114,6 +114,7 @@ export function DateModeDialog({
         className={cn(FIELD_BOX, 'focus:border-primary')}
         data-track-category='SEARCH_FILTERS'
         data-track-name='DATE_MODE_INPUT'
+        data-track-kind='passive'
       />
     </div>
   );
@@ -137,6 +138,7 @@ export function DateModeDialog({
           aria-label='Close date picker'
           data-track-category='SEARCH_FILTERS'
           data-track-name='CLOSE_DATE_MODE'
+          data-track-kind='passive'
         >
           <X className='size-4' />
         </button>
@@ -183,6 +185,7 @@ export function DateModeDialog({
           onClick={onCancel}
           data-track-category='SEARCH_FILTERS'
           data-track-name='CANCEL_DATE_MODE'
+          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -192,6 +195,7 @@ export function DateModeDialog({
           disabled={!canSave}
           data-track-category='SEARCH_FILTERS'
           data-track-name='SAVE_DATE_MODE'
+          data-track-kind='active'
         >
           Save
         </Button>

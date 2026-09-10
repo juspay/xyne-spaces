@@ -73,6 +73,7 @@ export const CollectionStatusBadgeV2: React.FC<CollectionStatusBadgeV2Props> = (
           }}
           data-track-category='knowledge-base'
           data-track-name='open-collection-status'
+          data-track-kind='passive'
           className={cn(baseClass, 'transition hover:ring-ring/50')}
         >
           {icon}

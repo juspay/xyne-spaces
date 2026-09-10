@@ -36,6 +36,7 @@ export function CompareSelectRow({
       onClick={hasDebug ? onToggle : undefined}
       data-track-category='SEARCH_COMPARE'
       data-track-name='TOGGLE_COMPARE_ROW'
+      data-track-kind='passive'
       onKeyDown={e => {
         if (hasDebug && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault();

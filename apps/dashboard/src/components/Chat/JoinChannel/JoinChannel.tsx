@@ -35,6 +35,7 @@ const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElemen
       data-testid='join-channel'
       data-track-category='CHAT_INFO'
       data-track-name='JOIN_CHANNEL_VIEW'
+      data-track-kind='active'
       data-track-metadata={JSON.stringify({ channelId, channelTitle })}
       className='flex flex-col items-center justify-center p-8 bg-muted rounded-lg border border-border mx-4 mb-4'
     >
@@ -58,6 +59,7 @@ const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElemen
         text='Join Channel'
         data-track-category='CHAT_INFO'
         data-track-name='JOIN_CHANNEL_BUTTON_CLICK'
+        data-track-kind='active'
         data-track-metadata={JSON.stringify({ channelId })}
       />
     </div>

@@ -183,6 +183,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
       }}
       data-track-category='ENTITY_PICKER'
       data-track-name='CLEAR_SELECTION'
+      data-track-kind='passive'
     >
       <span className='flex h-5 w-5 flex-none items-center justify-center'>
         <div className='w-5 h-5 rounded-full bg-border flex items-center justify-center'>
@@ -213,6 +214,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         onClick={() => !option.disabled && handleSelect(option.value)}
         data-track-category='ENTITY_PICKER'
         data-track-name='SELECT_OPTION'
+        data-track-kind='passive'
         onKeyDown={(e): void => {
           if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
             e.preventDefault();
@@ -286,6 +288,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             onClick={handleClear}
             data-track-category='ENTITY_PICKER'
             data-track-name='CLEAR_SELECTION'
+            data-track-kind='passive'
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
@@ -385,6 +388,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             onClick={handleClear}
             data-track-category='ENTITY_PICKER'
             data-track-name='CLEAR_SELECTION'
+            data-track-kind='passive'
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
@@ -485,6 +489,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                 className='flex w-full items-center gap-2 px-2 py-1.5 text-sm text-[#6276be] font-medium rounded hover:bg-accent'
                 data-track-category={headerAction.trackCategory}
                 data-track-name={headerAction.trackName}
+                data-track-kind={headerAction.trackKind}
               >
                 {headerAction.icon}
                 {headerAction.label}

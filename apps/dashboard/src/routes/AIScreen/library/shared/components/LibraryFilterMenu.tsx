@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react';
 import { FilterLines } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Popover } from '@/components/ui/Popover/index';
+import type { InteractionKind } from '@xyne/shared';
 
 export interface LibraryFilterOption {
   id: string;
@@ -15,12 +16,14 @@ export function LibraryFilterMenu({
   activeId,
   onSelect,
   trackName,
+  trackKind,
 }: {
   title: string;
   options: LibraryFilterOption[];
   activeId: string | null;
   onSelect: (id: string | null) => void;
   trackName: string;
+  trackKind?: InteractionKind;
 }): ReactElement {
   const [open, setOpen] = useState(false);
 
@@ -40,6 +43,7 @@ export function LibraryFilterMenu({
           )}
           data-track-category='Claw Agents'
           data-track-name={trackName}
+          data-track-kind={trackKind}
         >
           <FilterLines className='size-4' />
         </button>

@@ -188,6 +188,7 @@ export function AutomationApprovalsList(): React.ReactElement {
             rows={4}
             data-track-category='automation-approvals'
             data-track-name='reject-note'
+            data-track-kind='active'
           />
           <div className='flex justify-end gap-2'>
             <Button
@@ -198,6 +199,7 @@ export function AutomationApprovalsList(): React.ReactElement {
               }}
               data-track-category='automation-approvals'
               data-track-name='reject-cancel'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -215,6 +217,7 @@ export function AutomationApprovalsList(): React.ReactElement {
               }}
               data-track-category='automation-approvals'
               data-track-name='reject-confirm'
+              data-track-kind='active'
             >
               Reject
             </Button>
@@ -277,6 +280,7 @@ function PendingRow({
         )}
         data-track-category='automation-approvals'
         data-track-name='open-proposal'
+        data-track-kind='passive'
       >
         <div className='flex flex-1 items-start gap-3 min-w-0'>
           <Avatar userId={proposal.createdById || null} size='md' />
@@ -305,6 +309,7 @@ function PendingRow({
               onClick={onReject}
               data-track-category='automation-approvals'
               data-track-name='reject-open'
+              data-track-kind='active'
             >
               <MultipleCrossCancelDefault className='size-4' />
               Reject
@@ -317,6 +322,7 @@ function PendingRow({
               onClick={onApprove}
               data-track-category='automation-approvals'
               data-track-name='approve'
+              data-track-kind='active'
             >
               <CheckTickSingle className='size-4' />
               Approve

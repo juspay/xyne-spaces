@@ -90,6 +90,7 @@ function ChannelFilterItem({
       className={cn(MENU_ITEM, highlighted && 'bg-muted')}
       data-track-category='SEARCH_FILTERS'
       data-track-name='TOGGLE_CHANNEL'
+      data-track-kind='passive'
     >
       <Check className={cn('size-3.5 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
       {isChannelDM ? (
@@ -475,6 +476,7 @@ export function SearchFilterBar({
                   className={cn(MENU_ITEM, typeNav.activeIndex === i && 'bg-muted')}
                   data-track-category='SEARCH_FILTERS'
                   data-track-name={`SET_TYPE_${opt.value.toUpperCase()}`}
+                  data-track-kind='passive'
                 >
                   <Check
                     className={cn(
@@ -539,6 +541,7 @@ export function SearchFilterBar({
                   className='w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground'
                   data-track-category='SEARCH_FILTERS'
                   data-track-name='FROM_SEARCH_INPUT'
+                  data-track-kind='passive'
                 />
               </div>
               <div className='max-h-52 overflow-y-auto py-1' ref={fromNav.listRef}>
@@ -559,6 +562,7 @@ export function SearchFilterBar({
                           className={cn(MENU_ITEM, fromNav.activeIndex === i && 'bg-muted')}
                           data-track-category='SEARCH_FILTERS'
                           data-track-name='TOGGLE_FROM_USER'
+                          data-track-kind='passive'
                         >
                           <Check
                             className={cn(
@@ -581,6 +585,7 @@ export function SearchFilterBar({
                     className='flex w-full items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded'
                     data-track-category='SEARCH_FILTERS'
                     data-track-name='CLEAR_FROM'
+                    data-track-kind='passive'
                   >
                     <X className='size-3' /> Clear
                   </button>
@@ -634,6 +639,7 @@ export function SearchFilterBar({
                   className='w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground'
                   data-track-category='SEARCH_FILTERS'
                   data-track-name='IN_SEARCH_INPUT'
+                  data-track-kind='passive'
                 />
               </div>
               <div className='max-h-52 overflow-y-auto py-1' ref={inNav.listRef}>
@@ -664,6 +670,7 @@ export function SearchFilterBar({
                     className='flex w-full items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded'
                     data-track-category='SEARCH_FILTERS'
                     data-track-name='CLEAR_IN'
+                    data-track-kind='passive'
                   >
                     <X className='size-3' /> Clear
                   </button>
@@ -700,6 +707,7 @@ export function SearchFilterBar({
               className={cn(CHIP_BASE, isOn && CHIP_ACTIVE)}
               data-track-category='SEARCH_FILTERS'
               data-track-name={`TOGGLE_${entry.id.toUpperCase()}`}
+              data-track-kind='passive'
             >
               {entry.control?.kind === 'toggle' ? entry.control.barLabel : entry.label}
             </Button>
@@ -823,6 +831,7 @@ export function SearchFilterBar({
                 className={cn(MENU_ITEM, sortNav.activeIndex === i && 'bg-muted')}
                 data-track-category='SEARCH_FILTERS'
                 data-track-name={`SET_SORT_${opt.value.toUpperCase()}`}
+                data-track-kind='passive'
               >
                 <Check
                   className={cn(

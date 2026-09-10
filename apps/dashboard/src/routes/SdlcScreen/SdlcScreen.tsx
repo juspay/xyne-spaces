@@ -1107,6 +1107,7 @@ export default function SdlcScreen(): ReactElement {
             aria-label='Debug generation'
             data-track-category='SdlcHub'
             data-track-name='RepoKnowledgeDebuggerOpened'
+            data-track-kind='passive'
             onClick={() => {
               openSdlcDebugger({
                 source: 'sdlc',
@@ -1318,6 +1319,7 @@ export default function SdlcScreen(): ReactElement {
             onClick={() => setHubDialog('create')}
             data-track-category='SdlcHub'
             data-track-name='FirstHubOpened'
+            data-track-kind='passive'
           >
             <Plus />
             New hub
@@ -1455,6 +1457,7 @@ export default function SdlcScreen(): ReactElement {
                       onClick={event => openArtifactCanvas(canvas.id, event)}
                       data-track-category='SdlcHub'
                       data-track-name='TrackArtifactOpened'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         canvasId: canvas.id,
                         folderId: section.folder.id,
@@ -1501,6 +1504,7 @@ export default function SdlcScreen(): ReactElement {
                     onClick={() => void navigate(`/sdlc/${channelId}/tickets/${ticket.id}`)}
                     data-track-category='SdlcHub'
                     data-track-name='TrackTicketOpened'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                   >
                     <span className='grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary'>
@@ -1534,6 +1538,7 @@ export default function SdlcScreen(): ReactElement {
               onClick={() => setTrackDialog(true)}
               data-track-category='SdlcHub'
               data-track-name='NewTrackOpened'
+              data-track-kind='passive'
             >
               <Plus />
               New Track
@@ -1565,6 +1570,7 @@ export default function SdlcScreen(): ReactElement {
                 className='group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                 data-track-category='SdlcHub'
                 data-track-name='TrackOpened'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ trackId: track.id })}
               >
                 <div className='flex items-start justify-between'>
@@ -1591,6 +1597,7 @@ export default function SdlcScreen(): ReactElement {
                         onKeyDown={event => event.stopPropagation()}
                         data-track-category='SdlcHub'
                         data-track-name='TrackStatusChanged'
+                        data-track-kind='active'
                       >
                         <SelectValue />
                       </SelectTrigger>
@@ -1732,6 +1739,7 @@ export default function SdlcScreen(): ReactElement {
                 className='rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
                 data-track-category='SdlcHub'
                 data-track-name='FrameReset'
+                data-track-kind='active'
               >
                 <RefreshCw className='h-3.5 w-3.5' aria-hidden='true' />
               </button>
@@ -1753,6 +1761,7 @@ export default function SdlcScreen(): ReactElement {
               aria-label='New hub'
               data-track-category='SdlcHub'
               data-track-name='NewHubOpened'
+              data-track-kind='passive'
             >
               <Plus className='size-3.5' />
             </button>
@@ -1773,6 +1782,7 @@ export default function SdlcScreen(): ReactElement {
                   )}
                   data-track-category='SdlcHub'
                   data-track-name='SectionChanged'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ section: item.id, repoId: repo.id })}
                 >
                   <Icon size={16} className='shrink-0 text-sidebar-foreground/70' />
@@ -1813,6 +1823,7 @@ export default function SdlcScreen(): ReactElement {
               className='-mr-[7px] flex size-[22px] items-center justify-center rounded-[5px] text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='NewArtifactTypeClicked'
+              data-track-kind='passive'
             >
               <Plus size={14} />
             </button>
@@ -1851,6 +1862,7 @@ export default function SdlcScreen(): ReactElement {
                       className='h-6 min-w-0 flex-1 rounded-[6px] border border-sidebar-accent-ring bg-background px-1.5 text-[13.5px] outline-none'
                       data-track-category='SdlcHub'
                       data-track-name='ArtifactTypeRenamed'
+                      data-track-kind='active'
                     />
                   </div>
                 ) : (
@@ -1870,6 +1882,7 @@ export default function SdlcScreen(): ReactElement {
                       )}
                       data-track-category='SdlcHub'
                       data-track-name='SectionChanged'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ type: folder.id, repoId: repo.id })}
                     >
                       <Folder size={16} className='shrink-0 text-sidebar-foreground/70' />
@@ -1890,6 +1903,7 @@ export default function SdlcScreen(): ReactElement {
                       className='absolute right-1.5 top-1/2 hidden size-[22px] -translate-y-1/2 items-center justify-center rounded-[5px] text-sidebar-foreground/70 hover:bg-foreground/10 hover:text-sidebar-foreground group-hover:flex'
                       data-track-category='SdlcHub'
                       data-track-name='ArtifactTypeRenameStarted'
+                      data-track-kind='active'
                     >
                       <Pencil size={13} />
                     </button>
@@ -1943,6 +1957,7 @@ export default function SdlcScreen(): ReactElement {
                   )}
                   data-track-category='SdlcHub'
                   data-track-name='SidebarTrackOpened'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ trackId: track.id })}
                 >
                   <Layers className='size-3.5 shrink-0 text-sidebar-foreground/60' />
@@ -2041,6 +2056,7 @@ export default function SdlcScreen(): ReactElement {
                 aria-label={`Open project ${repo.project.name}`}
                 data-track-category='SdlcHub'
                 data-track-name='ProjectOpened'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ projectId: repo.project.id })}
               >
                 <Boxes className='size-4 shrink-0 text-sidebar-foreground/65' />
@@ -2072,6 +2088,7 @@ export default function SdlcScreen(): ReactElement {
                   className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
                   data-track-category='SdlcHub'
                   data-track-name='CanvasClosedInline'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ canvasId: selectedCanvasId })}
                 >
                   {selectedCanvasTypeFolder?.name ??
@@ -2092,6 +2109,7 @@ export default function SdlcScreen(): ReactElement {
                   className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
                   data-track-category='SdlcHub'
                   data-track-name='TrackDetailBack'
+                  data-track-kind='passive'
                 >
                   Tracks
                 </button>
@@ -2117,6 +2135,7 @@ export default function SdlcScreen(): ReactElement {
                 onClick={() => openCanvasInWindow(selectedCanvasId, true)}
                 data-track-category='SdlcHub'
                 data-track-name='ArtifactOpenedInWindow'
+                data-track-kind='passive'
               >
                 <SquareArrowOutUpRight className='size-4' />
               </Button>
@@ -2131,6 +2150,7 @@ export default function SdlcScreen(): ReactElement {
                 onClick={() => openConversations()}
                 data-track-category='SdlcHub'
                 data-track-name='OpenSdlcChat'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   ownerKind: discussionOwner?.kind ?? null,
                 })}
@@ -2197,6 +2217,7 @@ export default function SdlcScreen(): ReactElement {
                     onClick={() => setCreateTicketOpen(true)}
                     data-track-category='SdlcHub'
                     data-track-name='HeaderCreateTicketClicked'
+                    data-track-kind='active'
                   >
                     <TicketToken size={16} />
                   </Button>
@@ -2209,6 +2230,7 @@ export default function SdlcScreen(): ReactElement {
                   onClick={() => openSdlcAssistant()}
                   data-track-category='SdlcHub'
                   data-track-name='HeaderAskAiClicked'
+                  data-track-kind='passive'
                 >
                   <XyneAIStar />
                 </Button>
@@ -2360,6 +2382,7 @@ export default function SdlcScreen(): ReactElement {
                               onClick={() => openCanvas(canvas.id)}
                               data-track-category='SdlcHub'
                               data-track-name='BaselineCanvasOpened'
+                              data-track-kind='passive'
                               data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                               onKeyDown={event => {
                                 if (event.key === 'Enter' || event.key === ' ') {
@@ -2560,6 +2583,7 @@ export default function SdlcScreen(): ReactElement {
             placeholder='e.g. Payments revamp'
             data-track-category='SdlcHub'
             data-track-name='TrackNameChanged'
+            data-track-kind='passive'
           />
           <label htmlFor='sdlc-track-description' className='mt-4 block text-sm font-medium'>
             Description <span className='font-normal text-muted-foreground'>(optional)</span>
@@ -2573,6 +2597,7 @@ export default function SdlcScreen(): ReactElement {
             placeholder='What is this workstream about?'
             data-track-category='SdlcHub'
             data-track-name='TrackDescriptionChanged'
+            data-track-kind='passive'
           />
           <div className='mt-6 flex justify-end gap-2'>
             <Button type='button' variant='outline' onClick={() => setTrackDialog(false)}>
@@ -2584,6 +2609,7 @@ export default function SdlcScreen(): ReactElement {
               disabled={!trackName.trim()}
               data-track-category='SdlcHub'
               data-track-name='TrackCreated'
+              data-track-kind='active'
             >
               Create Track
             </Button>
@@ -2623,6 +2649,7 @@ export default function SdlcScreen(): ReactElement {
               className='flex size-7 items-center justify-center rounded-[7px] text-muted-foreground hover:bg-muted hover:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='DeriveTypePickerClosed'
+              data-track-kind='passive'
             >
               <X size={15} />
             </button>
@@ -2642,6 +2669,7 @@ export default function SdlcScreen(): ReactElement {
                     )}
                     data-track-category='SdlcHub'
                     data-track-name='DeriveTypeChosen'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ folderId: folder.id })}
                   >
                     <span className='min-w-0 flex-1 truncate text-[13.5px] font-medium'>
@@ -2678,6 +2706,7 @@ export default function SdlcScreen(): ReactElement {
                 }}
                 data-track-category='SdlcHub'
                 data-track-name='DeriveTypePickerCancelled'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -2695,6 +2724,7 @@ export default function SdlcScreen(): ReactElement {
                 }}
                 data-track-category='SdlcHub'
                 data-track-name='DeriveTypeContinue'
+                data-track-kind='passive'
               >
                 Continue
                 <ArrowRight />
@@ -2740,6 +2770,7 @@ export default function SdlcScreen(): ReactElement {
               className='flex size-7 items-center justify-center rounded-[7px] text-muted-foreground hover:bg-muted hover:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='ArtifactDialogClosed'
+              data-track-kind='passive'
             >
               <X size={15} />
             </button>
@@ -2759,6 +2790,7 @@ export default function SdlcScreen(): ReactElement {
                 placeholder='Clear, outcome-focused title'
                 data-track-category='SdlcHub'
                 data-track-name='ArtifactTitleChanged'
+                data-track-kind='passive'
               />
             </div>
 
@@ -2809,6 +2841,7 @@ export default function SdlcScreen(): ReactElement {
                     className='text-xs text-muted-foreground hover:text-foreground'
                     data-track-category='SdlcHub'
                     data-track-name='RelatedArtifactsCleared'
+                    data-track-kind='passive'
                   >
                     Clear
                   </button>
@@ -2832,6 +2865,7 @@ export default function SdlcScreen(): ReactElement {
                         className='h-6 min-w-0 flex-1 border-none bg-transparent text-[13.5px] outline-none'
                         data-track-category='SdlcHub'
                         data-track-name='RelatedArtifactSearch'
+                        data-track-kind='passive'
                       />
                     </div>
                     {relatedListOpen && relatedSearchQuery.trim().length >= 2 && (
@@ -2866,6 +2900,7 @@ export default function SdlcScreen(): ReactElement {
                               className='flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-muted'
                               data-track-category='SdlcHub'
                               data-track-name='RelatedArtifactAdded'
+                              data-track-kind='active'
                             >
                               <FileText size={15} className='shrink-0 text-muted-foreground' />
                               <span className='flex-1 truncate text-[13px]'>{result.title}</span>
@@ -2897,6 +2932,7 @@ export default function SdlcScreen(): ReactElement {
                                 aria-label='Remove related artifact'
                                 data-track-category='SdlcHub'
                                 data-track-name='RelatedArtifactRemoved'
+                                data-track-kind='active'
                                 onClick={() =>
                                   setRelatedCanvasIds(prev =>
                                     prev.filter(existing => existing !== id),
@@ -2917,6 +2953,7 @@ export default function SdlcScreen(): ReactElement {
                           className='inline-flex h-[26px] items-center rounded-md border border-dashed px-2.5 text-[12.5px] text-muted-foreground hover:border-foreground/40 hover:text-foreground'
                           data-track-category='SdlcHub'
                           data-track-name='RelatedArtifactsExpandToggled'
+                          data-track-kind='passive'
                         >
                           {relatedChipsExpanded
                             ? 'Show less'
@@ -2944,6 +2981,7 @@ export default function SdlcScreen(): ReactElement {
                 placeholder='e.g. focus on retry semantics and the ledger contract; skip the mobile flow.'
                 data-track-category='SdlcHub'
                 data-track-name='ArtifactAiPromptChanged'
+                data-track-kind='active'
               />
               <span className='text-xs text-muted-foreground'>
                 Ignored if you write it yourself.
@@ -2958,6 +2996,7 @@ export default function SdlcScreen(): ReactElement {
               className='text-[12.5px] text-muted-foreground hover:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='ArtifactDialogCancelled'
+              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -2978,6 +3017,7 @@ export default function SdlcScreen(): ReactElement {
                 }
                 data-track-category='SdlcHub'
                 data-track-name='BlankArtifactCreated'
+                data-track-kind='active'
               >
                 <Pencil />
                 Write it myself
@@ -3115,6 +3155,7 @@ export default function SdlcScreen(): ReactElement {
                 className='mt-2 h-10 w-full rounded-md border bg-background px-3'
                 data-track-category='SdlcHub'
                 data-track-name='LinkTypeChanged'
+                data-track-kind='passive'
               >
                 {[
                   'MESSAGE',
@@ -3142,6 +3183,7 @@ export default function SdlcScreen(): ReactElement {
                 placeholder='Paste stable entity ID'
                 data-track-category='SdlcHub'
                 data-track-name='LinkTargetChanged'
+                data-track-kind='passive'
               />
               <div className='mt-4 flex justify-end'>
                 <Button
@@ -3275,6 +3317,7 @@ function ArtifactCard({
       onClick={onOpen}
       data-track-category='SdlcHub'
       data-track-name='ArtifactCanvasOpened'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ title, artifactKind: eyebrow })}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {

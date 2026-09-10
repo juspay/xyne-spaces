@@ -445,6 +445,7 @@ const AppSidebar = (): ReactElement => {
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         path: item.path,
                         label: item.label,
@@ -524,6 +525,7 @@ const AppSidebar = (): ReactElement => {
                           data-testid={`nav-artifact-app-${app.id}`}
                           data-track-category='App_Sidebar'
                           data-track-name='Sidebar_Pinned_App'
+                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ appId: app.id })}
                           className={cn(
                             'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
@@ -561,6 +563,7 @@ const AppSidebar = (): ReactElement => {
                         data-testid='nav-more'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'
+                        data-track-kind='passive'
                         className={cn(
                           'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
                           isMoreActive || isMoreOpen
@@ -601,6 +604,7 @@ const AppSidebar = (): ReactElement => {
                 data-testid='nav-invite-people'
                 data-track-category='App_Sidebar'
                 data-track-name='Sidebar_InvitePeople_Open'
+                data-track-kind='active'
                 className={cn(
                   'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
                   isInviteDialogOpen
@@ -630,6 +634,7 @@ const AppSidebar = (): ReactElement => {
                 data-testid='nav-support'
                 data-track-category='App_Sidebar'
                 data-track-name='Sidebar_Support_Toggle'
+                data-track-kind='passive'
                 className={cn(
                   'size-8 mb-2 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
                   isSupportOpen
@@ -798,6 +803,7 @@ const SidebarMoreMenu = ({
                   data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                   data-track-category='App_Sidebar'
                   data-track-name='Sidebar_More_Item'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                   className={cn(
                     'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
@@ -827,6 +833,7 @@ const SidebarMoreMenu = ({
         data-testid='more-customize-toolbar'
         data-track-category='App_Sidebar'
         data-track-name='Sidebar_Customize_Toolbar'
+        data-track-kind='passive'
         className='block w-full rounded-md px-2.5 py-2 text-left text-sm font-medium text-[color:var(--mention-color)] transition-colors hover:bg-accent'
       >
         Customize toolbar
@@ -853,6 +860,7 @@ const SidebarSupportMenu = ({
             data-testid='support-report-issue'
             data-track-category='App_Sidebar'
             data-track-name='Sidebar_Support_ReportIssue'
+            data-track-kind='passive'
             className='flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
           >
             <span className='flex size-5 shrink-0 items-center justify-center'>
@@ -868,6 +876,7 @@ const SidebarSupportMenu = ({
             data-testid='support-view-my-tickets'
             data-track-category='App_Sidebar'
             data-track-name='Sidebar_Support_ViewMyTickets'
+            data-track-kind='passive'
             className='flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
           >
             <span className='flex size-5 shrink-0 items-center justify-center'>
@@ -987,6 +996,7 @@ const MobileNavbar = ({
                   onClick={() => onNavigationClick(item.label)}
                   data-track-category='Mobile_Sidebar'
                   data-track-name='Mobile_Nav_Item'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                   className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer'
                 >
@@ -1032,6 +1042,7 @@ const MobileNavbar = ({
               aria-label='More options'
               data-track-category='Mobile_Sidebar'
               data-track-name='Toggle_Mobile_Menu'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ isOpen: !isMenuOpen })}
               className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer relative'
             >
@@ -1087,6 +1098,7 @@ const MobileNavbar = ({
                           aria-label={item.label}
                           data-track-category='Mobile_Sidebar'
                           data-track-name='Mobile_Menu_Item'
+                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({
                             path: item.path,
                             label: item.label,
@@ -1123,6 +1135,7 @@ const MobileNavbar = ({
                         }}
                         data-track-category='Mobile_Sidebar'
                         data-track-name='Mobile_Menu_Link'
+                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                       >
                         <div className='relative'>

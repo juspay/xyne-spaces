@@ -216,6 +216,7 @@ const OnboardingScreen: React.FC = () => {
                 onClick={nextStep}
                 data-track-category='Onboarding'
                 data-track-name='GetStarted'
+                data-track-kind='passive'
               >
                 <div className='text-sm md:text-base font-sans leading-4'>Get Started -&gt;</div>
               </button>
@@ -270,6 +271,7 @@ const OnboardingScreen: React.FC = () => {
           '
                 data-track-category='Onboarding'
                 data-track-name='ContinueStep'
+                data-track-kind='passive'
               >
                 -&gt;
               </button>
@@ -314,6 +316,7 @@ const OnboardingScreen: React.FC = () => {
                   className='h-10 px-6 rounded-xl bg-slate-500 text-white text-sm font-medium transition hover:bg-slate-600 disabled:opacity-60 inline-flex items-center gap-2 focus:outline-none'
                   data-track-category='Onboarding'
                   data-track-name='OpenWorkspace'
+                  data-track-kind='passive'
                 >
                   {isCompleting ? 'Completing...' : 'Open My Workspace'}
                   <span
@@ -412,6 +415,7 @@ const OnboardingScreen: React.FC = () => {
           '
                 data-track-category='Onboarding'
                 data-track-name='ContinueDefaultStep'
+                data-track-kind='passive'
               >
                 -&gt;
               </button>

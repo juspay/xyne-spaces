@@ -413,6 +413,7 @@ export function RequestsTab({
         placeholder='Search requests'
         ariaLabel='Search requests'
         trackName='Admin: search requests'
+        trackKind='passive'
         className='w-full'
       />
       <div className='flex flex-wrap items-center justify-end gap-2'>
@@ -454,6 +455,7 @@ export function RequestsTab({
                       className='truncate text-left text-sm font-medium text-foreground hover:underline'
                       data-track-category='Claw Admin'
                       data-track-name='Open requested item'
+                      data-track-kind='passive'
                     >
                       <HighlightMatch text={row.title} query={query} />
                     </button>
@@ -494,6 +496,7 @@ export function RequestsTab({
                       className='size-7 text-muted-foreground hover:text-foreground'
                       data-track-category='Claw Admin'
                       data-track-name='View request details'
+                      data-track-kind='passive'
                     >
                       <Eye02On className='size-4' />
                     </Button>
@@ -513,6 +516,7 @@ export function RequestsTab({
                     className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
                     data-track-category='Claw Admin'
                     data-track-name={`Approve ${row.kind} request`}
+                    data-track-kind='active'
                   >
                     <CheckTickCircle className='size-4' />
                   </Button>
@@ -532,6 +536,7 @@ export function RequestsTab({
                     className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
                     data-track-category='Claw Admin'
                     data-track-name={`Reject ${row.kind} request`}
+                    data-track-kind='active'
                   >
                     <MultipleCrossCancelCircle className='size-4' />
                   </Button>
@@ -557,6 +562,7 @@ export function RequestsTab({
                 onClick={() => row.onReject(rejectNote.trim() || undefined)}
                 data-track-category='Claw Admin'
                 data-track-name='Confirm reject request'
+                data-track-kind='active'
               >
                 Confirm reject
               </Button>

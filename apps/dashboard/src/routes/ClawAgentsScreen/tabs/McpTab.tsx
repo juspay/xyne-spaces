@@ -81,6 +81,7 @@ const FilterButton = ({
     onClick={onClick}
     data-track-category='Claw Agents'
     data-track-name={`Filter MCPs by category: ${label}`}
+    data-track-kind='passive'
     className={cn(
       'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
       active
@@ -216,6 +217,7 @@ const McpTab = (): ReactElement => {
                 onChange={e => setQuery(e.target.value)}
                 data-track-category='Claw Agents'
                 data-track-name='Search MCP integrations'
+                data-track-kind='passive'
                 placeholder='Search integrations'
                 className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />
@@ -237,6 +239,7 @@ const McpTab = (): ReactElement => {
                   onClick={() => void refetch()}
                   data-track-category='Claw Agents'
                   data-track-name='Retry MCP integrations load'
+                  data-track-kind='passive'
                   className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
                 >
                   Retry

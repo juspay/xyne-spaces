@@ -60,6 +60,7 @@ export function LabelChip({
           onClick={onRemove}
           data-track-category={trackCategory}
           data-track-name='remove_recording_label'
+          data-track-kind='active'
         >
           <MultipleCrossCancelDefault className='size-3' aria-hidden='true' />
         </button>
@@ -95,6 +96,7 @@ export function SuggestedLabelChip({
         }}
         data-track-category={trackCategory}
         data-track-name='confirm_suggested_label'
+        data-track-kind='active'
       >
         <CheckTickSingle className='size-3' aria-hidden='true' />
       </button>
@@ -108,6 +110,7 @@ export function SuggestedLabelChip({
         }}
         data-track-category={trackCategory}
         data-track-name='reject_suggested_label'
+        data-track-kind='active'
       >
         <MultipleCrossCancelDefault className='size-3' aria-hidden='true' />
       </button>
@@ -247,6 +250,7 @@ export function LabelPicker({
         emptyMessage='No labels yet'
         trackCategory={trackCategory}
         trackName='toggle_recording_label'
+        trackKind='active'
         trigger={
           <Button
             type='button'
@@ -256,6 +260,7 @@ export function LabelPicker({
             aria-label='Add a label'
             data-track-category={trackCategory}
             data-track-name='open_recording_labels'
+            data-track-kind='passive'
           >
             <PlusDefault className='size-3.5' aria-hidden='true' />
             Label

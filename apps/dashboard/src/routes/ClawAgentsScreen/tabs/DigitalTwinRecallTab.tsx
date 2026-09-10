@@ -29,6 +29,7 @@ const DigitalTwinRecallTab = (): ReactElement => {
           onChange={e => setQuery(e.target.value)}
           data-track-category='Claw Agents'
           data-track-name='Digital Twin recall query'
+          data-track-kind='passive'
           placeholder='Ask a question your Twin might answer…'
           rows={3}
           className='w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
@@ -41,6 +42,7 @@ const DigitalTwinRecallTab = (): ReactElement => {
             onClick={submit}
             data-track-category='Claw Agents'
             data-track-name='SUBMIT_DIGITAL_TWIN_RECALL'
+            data-track-kind='active'
           >
             <Search className='size-3.5' />
             {recall.isPending ? 'Recalling…' : 'Test recall'}

@@ -66,6 +66,7 @@ export function EmailReceivedFilterForm({
           onClick={() => setExcludeOpen(o => !o)}
           data-track-category='automation-builder'
           data-track-name='email-filter-toggle-exclude'
+          data-track-kind='passive'
           className={cn(
             'flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',

@@ -152,6 +152,7 @@ export const DeskLabelsSidebar = ({
           title='Create new label'
           data-track-category='Support'
           data-track-name='OpenCreateLabel'
+          data-track-kind='passive'
         >
           <Plus size={14} />
         </button>
@@ -180,6 +181,7 @@ export const DeskLabelsSidebar = ({
                   className='flex items-center gap-3 flex-1 min-w-0 px-3 h-full text-left'
                   data-track-category='Support'
                   data-track-name='SelectSidebarLabel'
+                  data-track-kind='passive'
                 >
                   <span className='size-4 flex items-center justify-center shrink-0'>
                     <Tag size={14} style={{ color }} fill={color} />
@@ -195,6 +197,7 @@ export const DeskLabelsSidebar = ({
                   title='Delete label'
                   data-track-category='Support'
                   data-track-name='DeleteLabel'
+                  data-track-kind='active'
                 >
                   {deleteLoadingId === label.id ? (
                     <Loader2 size={12} className='animate-spin' />
@@ -228,6 +231,7 @@ export const DeskLabelsSidebar = ({
               aria-label='Close'
               data-track-category='Support'
               data-track-name='CloseCreateLabel'
+              data-track-kind='passive'
             >
               <X className='size-4' />
             </button>
@@ -251,6 +255,7 @@ export const DeskLabelsSidebar = ({
               className='w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring'
               data-track-category='Support'
               data-track-name='NewLabelNameInput'
+              data-track-kind='passive'
             />
           </div>
           <div className='flex justify-end gap-2 px-5 py-4'>
@@ -260,6 +265,7 @@ export const DeskLabelsSidebar = ({
               className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
               data-track-category='Support'
               data-track-name='CancelCreateLabel'
+              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -271,6 +277,7 @@ export const DeskLabelsSidebar = ({
               className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50 disabled:pointer-events-none transition-colors'
               data-track-category='Support'
               data-track-name='ConfirmCreateLabel'
+              data-track-kind='active'
             >
               Create
             </button>
@@ -308,6 +315,7 @@ export const DeskLabelsSidebar = ({
                 className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
                 data-track-category='Support'
                 data-track-name='CancelDeleteLabel'
+                data-track-kind='passive'
               >
                 Cancel
               </button>
@@ -319,6 +327,7 @@ export const DeskLabelsSidebar = ({
                 className='inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 disabled:pointer-events-none transition-colors'
                 data-track-category='Support'
                 data-track-name='ConfirmDeleteLabel'
+                data-track-kind='active'
               >
                 {deleteSubmitting && <Loader2 className='size-4 animate-spin' />}
                 Delete

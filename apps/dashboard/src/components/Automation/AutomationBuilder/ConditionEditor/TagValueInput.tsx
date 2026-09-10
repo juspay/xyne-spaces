@@ -119,6 +119,7 @@ export function TagValueInput({ value, onChange }: TagValueInputProps): React.Re
         onKeyDown={() => inputRef.current?.focus()}
         data-track-category='automation-builder'
         data-track-name='tag-value-input-focus'
+        data-track-kind='passive'
       >
         {parsed.tags.map(tag => (
           <span
@@ -134,6 +135,7 @@ export function TagValueInput({ value, onChange }: TagValueInputProps): React.Re
               }}
               data-track-category='automation-builder'
               data-track-name='tag-value-remove'
+              data-track-kind='active'
               aria-label={`Remove tag ${tag}`}
               className='text-muted-foreground hover:text-foreground'
             >

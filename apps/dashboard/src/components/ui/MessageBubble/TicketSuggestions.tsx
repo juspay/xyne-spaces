@@ -121,6 +121,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
               onClick={() => handleNavigateToTicket(created)}
               data-track-category='MESSAGE'
               data-track-name='OPEN_SUGGESTED_TICKET'
+              data-track-kind='passive'
               className='text-sm text-left hover:underline focus:outline-none bg-transparent border-none p-0'
             >
               <span className='font-semibold text-primary'>{created.xyneId}</span>
@@ -147,6 +148,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
               onChange={() => toggleSelection(suggestion.suggestionId)}
               data-track-category='MESSAGE'
               data-track-name='TOGGLE_TICKET_SUGGESTION'
+              data-track-kind='passive'
             />
             <label htmlFor={checkboxId} className='text-sm text-left flex-1 cursor-pointer'>
               <span className='font-medium text-foreground'>{suggestion.title}</span>
@@ -166,6 +168,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
             onClick={startCreation}
             data-track-category='MESSAGE'
             data-track-name='START_TICKET_FROM_SUGGESTION'
+            data-track-kind='active'
             disabled={isUpdating}
             className='text-sm font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed bg-transparent border-none p-0'
           >

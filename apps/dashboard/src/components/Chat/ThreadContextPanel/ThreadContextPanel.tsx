@@ -36,6 +36,7 @@ const ContextItemRow = ({
       aria-label={`Remove ${item.title}`}
       data-track-category='THREAD_CONTEXT'
       data-track-name='REMOVE_CONTEXT_ITEM'
+      data-track-kind='active'
       data-track-metdata={JSON.stringify({ itemId: item.id, itemType: item.type })}
     >
       <X size={12} />
@@ -68,6 +69,7 @@ const ThreadContextPanel = ({
             className='text-[10px] text-muted-foreground hover:text-foreground transition-colors'
             data-track-category='THREAD_CONTEXT'
             data-track-name='CLEAR_ALL_CONTEXT_ITEMS'
+            data-track-kind='passive'
             data-track-metdata={JSON.stringify({ itemCount: items.length })}
           >
             Clear all
@@ -97,6 +99,7 @@ const ThreadContextPanel = ({
           trackId='confirm_thread_context'
           data-track-category='THREAD_CONTEXT'
           data-track-name='CONFIRM_THREAD_CONTEXT'
+          data-track-kind='active'
         >
           Add to Thread
         </Button>

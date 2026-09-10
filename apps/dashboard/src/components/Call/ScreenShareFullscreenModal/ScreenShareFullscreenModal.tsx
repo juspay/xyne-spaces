@@ -158,6 +158,7 @@ export function ScreenShareFullscreenModal({
       data-testid='screen-share-fullscreen-modal'
       data-track-category='CALLS'
       data-track-name='Close_ScreenShare_Fullscreen_Backdrop'
+      data-track-kind='passive'
       tabIndex={-1}
     >
       {/* Close Button */}
@@ -177,6 +178,7 @@ export function ScreenShareFullscreenModal({
         aria-label='Close fullscreen view'
         data-track-category='CALLS'
         data-track-name='Close_ScreenShare_Fullscreen'
+        data-track-kind='passive'
       >
         <Minimize2 className='w-5 h-5' />
       </button>

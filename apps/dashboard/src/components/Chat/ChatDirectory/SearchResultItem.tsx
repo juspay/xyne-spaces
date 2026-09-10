@@ -285,6 +285,7 @@ const AttachmentSearchResultItem = ({
                 title='Preview file'
                 data-track-category='GLOBAL_SEARCH'
                 data-track-name='PREVIEW_SEARCH_RESULT'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   resultId: result.id,
                   resultType: result.type,

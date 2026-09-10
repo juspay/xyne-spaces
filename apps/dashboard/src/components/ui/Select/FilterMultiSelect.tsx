@@ -134,6 +134,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
                         onClick={e => removePill(opt.value, e)}
                         data-track-category='ENTITY_PICKER'
                         data-track-name='REMOVE_FILTER_PILL'
+                        data-track-kind='active'
                         className='ml-0.5 rounded-full p-px text-muted-foreground hover:text-foreground'
                         aria-label={`Remove ${opt.label}`}
                       >
@@ -215,6 +216,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
                     onClick={() => toggle(option.value)}
                     data-track-category='ENTITY_PICKER'
                     data-track-name='TOGGLE_FILTER_OPTION'
+                    data-track-kind='passive'
                     onMouseEnter={() => setFocusedIndex(index)}
                     className={cn(
                       'relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none transition-colors',
@@ -243,6 +245,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
                 onClick={() => onChange([])}
                 data-track-category='ENTITY_PICKER'
                 data-track-name='CLEAR_ALL_FILTERS'
+                data-track-kind='passive'
                 className='w-full rounded-sm px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors text-center'
               >
                 Clear all

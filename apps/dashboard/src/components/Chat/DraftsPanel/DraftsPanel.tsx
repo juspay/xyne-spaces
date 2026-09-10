@@ -132,6 +132,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
         aria-label='Edit draft'
         data-track-category='DRAFTS_PANEL'
         data-track-name='EDIT_DRAFT'
+        data-track-kind='active'
       >
         <Pencil size={14} />
       </button>
@@ -142,6 +143,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
         aria-label='Send draft'
         data-track-category='DRAFTS_PANEL'
         data-track-name='SEND_DRAFT'
+        data-track-kind='active'
       >
         <Send size={14} />
       </button>
@@ -152,6 +154,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
         aria-label='Schedule draft'
         data-track-category='DRAFTS_PANEL'
         data-track-name='SCHEDULE_DRAFT'
+        data-track-kind='active'
       >
         <Clock size={14} />
       </button>
@@ -162,6 +165,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
         aria-label='Delete draft'
         data-track-category='DRAFTS_PANEL'
         data-track-name='DELETE_DRAFT'
+        data-track-kind='active'
       >
         <Trash2 size={14} />
       </button>
@@ -214,6 +218,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 aria-label='Close'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='close-delete-draft-dialog'
+                data-track-kind='passive'
               >
                 <X className='size-4' />
               </button>
@@ -229,6 +234,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='cancel-delete-draft'
+                data-track-kind='passive'
               >
                 Cancel
               </button>
@@ -238,6 +244,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 className='text-sm font-bold px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='confirm-delete-draft'
+                data-track-kind='active'
                 data-ph-capture-attribute-track-id='delete_draft'
               >
                 Delete Draft
@@ -269,6 +276,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 aria-label='Close'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='close-send-draft-dialog'
+                data-track-kind='passive'
               >
                 <X className='size-4' />
               </button>
@@ -284,6 +292,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='cancel-send-draft'
+                data-track-kind='passive'
               >
                 Cancel
               </button>
@@ -293,6 +302,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='confirm-send-draft'
+                data-track-kind='active'
                 data-ph-capture-attribute-track-id='send_draft'
               >
                 Send now

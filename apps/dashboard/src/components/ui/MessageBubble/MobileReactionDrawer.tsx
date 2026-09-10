@@ -182,6 +182,7 @@ export default function MobileReactionDrawer({
           onClick={() => setIsOpen(false)}
           data-track-category='MESSAGE'
           data-track-name='CLOSE_REACTION_DRAWER_OVERLAY'
+          data-track-kind='passive'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}
@@ -212,6 +213,7 @@ export default function MobileReactionDrawer({
                   onClick={() => handleTabClick('all')}
                   data-track-category='MESSAGE'
                   data-track-name='SWITCH_REACTION_TAB'
+                  data-track-kind='passive'
                 >
                   <span>All</span>
                   <span className='text-xs text-muted-foreground'>
@@ -226,6 +228,7 @@ export default function MobileReactionDrawer({
                     onClick={() => handleTabClick(emojiName)}
                     data-track-category='MESSAGE'
                     data-track-name='SWITCH_REACTION_TAB'
+                    data-track-kind='passive'
                   >
                     <span>{renderEmoji(emojiName)}</span>
                     <span className='text-xs text-muted-foreground'>{count}</span>
@@ -264,6 +267,7 @@ export default function MobileReactionDrawer({
                           onClick={() => paginate(idx + 1 - currentTabIndex)}
                           data-track-category='MESSAGE'
                           data-track-name='SWITCH_REACTION_TAB'
+                          data-track-kind='passive'
                           className='flex items-start gap-3 px-2 py-2 w-full text-left hover:bg-accent active:bg-accent rounded-lg transition-colors'
                         >
                           <span className='*:text-2xl flex-shrink-0'>
@@ -285,6 +289,7 @@ export default function MobileReactionDrawer({
                               onClick={() => handleUserClick(user.userId)}
                               data-track-category='MESSAGE'
                               data-track-name='OPEN_REACTOR_PROFILE'
+                              data-track-kind='passive'
                               key={idx}
                               className='flex items-center gap-3 px-2 py-2'
                             >

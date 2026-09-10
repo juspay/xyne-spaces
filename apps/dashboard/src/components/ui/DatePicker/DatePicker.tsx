@@ -136,6 +136,7 @@ const MonthView: React.FC<{
               `}
               data-track-category='Tickets'
               data-track-name='SelectDate'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 date: `${year}-${month}-${day}`,
                 disabled: isDisabled,
@@ -365,6 +366,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           )}
           data-track-category='Tickets'
           data-track-name='ToggleDatePicker'
+          data-track-kind='passive'
         >
           <Calendar
             className={cn(
@@ -386,6 +388,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               className='ml-1 flex-shrink-0 hover:bg-muted rounded p-0.5 transition-colors'
               data-track-category='Tickets'
               data-track-name='ClearSelectedDate'
+              data-track-kind='passive'
             >
               <X className='w-3 h-3 text-muted-foreground' />
             </button>
@@ -456,6 +459,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               className='h-8 px-3 text-sm text-muted-foreground font-semibold rounded-lg border border-border hover:bg-muted transition-colors'
               data-track-category='Tickets'
               data-track-name='CancelDatePicker'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -464,6 +468,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               className='h-8 px-3 text-sm font-semibold rounded-lg transition-colors bg-[var(--ticket-accent)] hover:bg-[var(--ticket-accent)]/90 text-white'
               data-track-category='Tickets'
               data-track-name='ApplyDatePicker'
+              data-track-kind='passive'
             >
               Apply
             </Button>

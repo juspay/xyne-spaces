@@ -91,6 +91,7 @@ export function RecordingButton({
         data-track-event='BUTTON_CLICK'
         data-track-category='CALLS'
         data-track-name='TOGGLE_RECORDING'
+        data-track-kind='active'
         data-track-metadata={JSON.stringify({ callId, isRecording })}
       >
         {isRecording ? (
@@ -125,6 +126,7 @@ export function RecordingButton({
             className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
             data-track-category='CALLS'
             data-track-name='start-recording-audio-only'
+            data-track-kind='active'
           >
             <Mic className='w-4 h-4 text-blue-400 flex-shrink-0' />
             <div>
@@ -138,6 +140,7 @@ export function RecordingButton({
             className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
             data-track-category='CALLS'
             data-track-name='start-recording-audio-screen'
+            data-track-kind='active'
           >
             <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0' />
             <div>

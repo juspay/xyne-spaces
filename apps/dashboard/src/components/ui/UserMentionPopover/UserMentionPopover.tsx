@@ -139,6 +139,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
         }}
         data-track-category='MENTION'
         data-track-name='OPEN_USER_PROFILE_FROM_MENTION'
+        data-track-kind='passive'
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -166,6 +167,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
           }}
           data-track-category='MENTION'
           data-track-name='OPEN_USER_PROFILE_FROM_MENTION'
+          data-track-kind='passive'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
@@ -235,6 +237,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
               onClick={handleSendMessage}
               data-track-category='MENTION'
               data-track-name='SEND_MESSAGE_FROM_MENTION'
+              data-track-kind='active'
               className='flex items-center gap-2'
             >
               <ChatDefault className='size-4' />
@@ -246,6 +249,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
               onClick={handleHuddleClick}
               data-track-category='MENTION'
               data-track-name='START_HUDDLE_FROM_MENTION'
+              data-track-kind='active'
               className='flex items-center gap-2'
             >
               <Headphones className='size-4' />

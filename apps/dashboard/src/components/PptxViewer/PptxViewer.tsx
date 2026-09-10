@@ -129,6 +129,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
               data-track-category='XyneAI'
               data-track-name='PPTX_PREVIEW'
+              data-track-kind='passive'
             >
               Preview
             </button>
@@ -138,6 +139,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
               data-track-category='XyneAI'
               data-track-name='PPTX_DOWNLOAD'
+              data-track-kind='passive'
             >
               <Download size={12} />
               Download
@@ -155,6 +157,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               style={{ aspectRatio: '16/9', maxHeight: '200px' }}
               data-track-category='XyneAI'
               data-track-name='PPTX_SLIDE_PREVIEW'
+              data-track-kind='passive'
             >
               <div className='w-full h-full overflow-hidden'>
                 <PptSlideViewer
@@ -177,6 +180,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               style={{ aspectRatio: '16/9', maxHeight: '200px' }}
               data-track-category='XyneAI'
               data-track-name='PPTX_ICON_PREVIEW'
+              data-track-kind='passive'
             >
               <div className='flex flex-col items-center gap-2'>
                 <div className='w-16 h-16 rounded-lg bg-orange-500 flex items-center justify-center shadow-lg'>
@@ -208,6 +212,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
           }}
           data-track-category='XyneAI'
           data-track-name='PPTX_FULLSCREEN_VIEWER'
+          data-track-kind='passive'
         >
           {/* Header */}
           <div
@@ -254,6 +259,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                 }}
                 data-track-category='XyneAI'
                 data-track-name='PPTX_FS_DOWNLOAD'
+                data-track-kind='passive'
               >
                 <Download size={14} />
                 Download
@@ -273,6 +279,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                 }}
                 data-track-category='XyneAI'
                 data-track-name='PPTX_FS_CLOSE'
+                data-track-kind='passive'
               >
                 <X size={16} />
               </button>
@@ -320,6 +327,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                     onClick={() => void handleDownload()}
                     data-track-category='XyneAI'
                     data-track-name='PPTX_FS_DOWNLOAD'
+                    data-track-kind='passive'
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',

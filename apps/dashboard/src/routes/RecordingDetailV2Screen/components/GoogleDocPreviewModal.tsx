@@ -188,6 +188,7 @@ export function GoogleDocPreviewModal({
           aria-label='Close Google Docs preview'
           data-track-category={trackCategory}
           data-track-name='close_google_doc_preview'
+          data-track-kind='passive'
         >
           <X className='size-[15px]' aria-hidden='true' />
         </button>
@@ -225,6 +226,7 @@ export function GoogleDocPreviewModal({
               className='inline-flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground'
               data-track-category={trackCategory}
               data-track-name='copy_recording_google_doc_link'
+              data-track-kind='passive'
             >
               <LinkIcon className='size-[15px]' aria-hidden='true' />
             </button>
@@ -236,6 +238,7 @@ export function GoogleDocPreviewModal({
               className='inline-flex shrink-0 items-center gap-[7px] rounded-[9px] bg-foreground px-3 py-2 text-[12.5px] font-semibold text-background hover:opacity-90'
               data-track-category={trackCategory}
               data-track-name='open_recording_google_doc'
+              data-track-kind='passive'
             >
               Open doc
               <SquareArrowOutUpRight className='size-3.5' aria-hidden='true' />
@@ -252,6 +255,7 @@ export function GoogleDocPreviewModal({
               aria-expanded={earlierOpen}
               data-track-category={trackCategory}
               data-track-name='toggle_earlier_google_doc_exports'
+              data-track-kind='passive'
             >
               <ChevronDown
                 className={`size-3 shrink-0 transition-transform ${earlierOpen ? '' : '-rotate-90'}`}
@@ -282,6 +286,7 @@ export function GoogleDocPreviewModal({
                       className='inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted'
                       data-track-category={trackCategory}
                       data-track-name='open_recording_google_doc'
+                      data-track-kind='passive'
                     >
                       Open
                       <ExternalLink className='size-3' aria-hidden='true' />
@@ -329,6 +334,7 @@ export function GoogleDocPreviewModal({
               loading={isConnecting}
               data-track-category={trackCategory}
               data-track-name='recording_google_doc_connect_calendar'
+              data-track-kind='passive'
             >
               Connect Google Docs
             </Button>
@@ -345,6 +351,7 @@ export function GoogleDocPreviewModal({
               onClick={onClose}
               data-track-category={trackCategory}
               data-track-name='cancel_google_doc_export'
+              data-track-kind='passive'
               disabled={isExporting}
             >
               Cancel
@@ -361,6 +368,7 @@ export function GoogleDocPreviewModal({
               loading={isExporting}
               data-track-category={trackCategory}
               data-track-name='create_recording_google_doc'
+              data-track-kind='active'
             >
               {latestDoc ? (
                 <>

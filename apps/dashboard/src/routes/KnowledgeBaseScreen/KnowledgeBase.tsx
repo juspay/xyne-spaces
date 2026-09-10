@@ -169,6 +169,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     onKeyDown={e => e.key === 'Enter' && setSelectedDocument(doc)}
                     data-track-category='knowledge-base'
                     data-track-name='SelectDocument'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       documentId: doc.id,
                       documentTitle: doc.title,
@@ -197,6 +198,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                         title='Delete document'
                         data-track-category='knowledge-base'
                         data-track-name='DeleteDocument'
+                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({ documentId: doc.id })}
                       >
                         {deletingId === doc.id ? (
@@ -223,6 +225,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
                       data-track-category='knowledge-base'
                       data-track-name='PreviousPage'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >
                       <ChevronLeft size={16} />
@@ -233,6 +236,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                       className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
                       data-track-category='knowledge-base'
                       data-track-name='NextPage'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >
                       <ChevronRight size={16} />

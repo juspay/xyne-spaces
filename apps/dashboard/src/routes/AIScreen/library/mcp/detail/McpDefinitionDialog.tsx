@@ -89,6 +89,7 @@ export const McpDefinitionDialog = ({
         data-testid={`mcp-def-${key}`}
         data-track-category='Claw MCP'
         data-track-name='EditMcpDefinitionField'
+        data-track-kind='passive'
       />
     </div>
   );
@@ -107,6 +108,7 @@ export const McpDefinitionDialog = ({
             onClick={(): void => onOpenChange(false)}
             data-track-category='Claw MCP'
             data-track-name='CancelEditMcpDefinition'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -115,6 +117,7 @@ export const McpDefinitionDialog = ({
             disabled={submitting || !patch.name.trim()}
             data-track-category='Claw MCP'
             data-track-name='SubmitEditMcpDefinition'
+            data-track-kind='active'
           >
             {submitting ? 'Saving…' : needsReview ? 'Submit for review' : 'Save'}
           </Button>

@@ -221,6 +221,7 @@ const ClawCitationChip = ({
       onClick={() => onOpenToolDebug(toolCallId)}
       data-track-category='XyneAI'
       data-track-name='DEBUG_CITATION_OPEN'
+      data-track-kind='passive'
     >
       {chipInner}
     </button>
@@ -265,6 +266,7 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
                           to={citation.url}
                           data-track-category='XyneAI'
                           data-track-name='inline-citation-link-click'
+                          data-track-kind='passive'
                           className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                         >
                           <Link2 size={10} />
@@ -284,6 +286,7 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
                   to={citation.url}
                   data-track-category='XyneAI'
                   data-track-name='inline-citation-link-click'
+                  data-track-kind='passive'
                   className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                 >
                   <Link2 size={10} />
@@ -364,6 +367,7 @@ const ImageWithDownload = ({
         title='Download image'
         data-track-category='XyneAI'
         data-track-name='download-image'
+        data-track-kind='passive'
       >
         {downloaded ? (
           <Check size={14} className='text-green-600' />
@@ -806,6 +810,7 @@ const AttachmentImagePreview = ({
         title='Download image'
         data-track-category='XyneAI'
         data-track-name='download-image'
+        data-track-kind='passive'
       >
         {isDownloading ? (
           <Loader2 size={14} className='animate-spin text-muted-foreground' />
@@ -975,6 +980,7 @@ export const AttachmentPreview = ({
           className='flex items-center gap-2 hover:opacity-80 transition-opacity disabled:opacity-50'
           data-track-category='XyneAI'
           data-track-name='attachment-download'
+          data-track-kind='passive'
         >
           <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
             <FileDocumentIcon color='currentColor' size={20} className='text-muted-foreground' />
@@ -1033,6 +1039,7 @@ const SelectionContextPreview = ({
       title={`From canvas: ${selection.canvasTitle || 'Untitled'}`}
       data-track-category='XyneAI'
       data-track-name='SELECTION_CONTEXT_CLICK'
+      data-track-kind='passive'
     >
       <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-background rounded'>
         <FileDocumentIcon color='currentColor' size={20} className='text-primary' />
@@ -1061,6 +1068,7 @@ const SelectionContextPreview = ({
         aria-label='Remove this context'
         data-track-category='XyneAI'
         data-track-name='EDIT_REMOVE_SELECTION_CONTEXT'
+        data-track-kind='active'
       >
         <X size={12} />
       </button>
@@ -1085,6 +1093,7 @@ const BranchNavigator = ({
       className='p-0.5 hover:bg-muted rounded transition-colors'
       data-track-category='XyneAI'
       data-track-name='BRANCH_NAVIGATE_PREV'
+      data-track-kind='passive'
     >
       <ChevronLeft size={14} />
     </button>
@@ -1097,6 +1106,7 @@ const BranchNavigator = ({
       className='p-0.5 hover:bg-muted rounded transition-colors'
       data-track-category='XyneAI'
       data-track-name='BRANCH_NAVIGATE_NEXT'
+      data-track-kind='passive'
     >
       <ChevronRight size={14} />
     </button>
@@ -1273,6 +1283,7 @@ export const MessageItem = React.memo(
             title='Edit message'
             data-track-category='XyneAI'
             data-track-name='EDIT_MESSAGE'
+            data-track-kind='active'
           >
             <Pencil size={14} className='text-muted-foreground' />
           </button>
@@ -1338,6 +1349,7 @@ export const MessageItem = React.memo(
                           aria-label='Remove this attachment'
                           data-track-category='XyneAI'
                           data-track-name='EDIT_REMOVE_ATTACHMENT'
+                          data-track-kind='active'
                         >
                           <X size={12} />
                         </button>
@@ -1362,6 +1374,7 @@ export const MessageItem = React.memo(
                   rows={Math.max(2, editText.split('\n').length)}
                   data-track-category='XyneAI'
                   data-track-name='EDIT_TEXTAREA'
+                  data-track-kind='passive'
                 />
                 <div className='flex justify-end gap-2'>
                   <button
@@ -1369,6 +1382,7 @@ export const MessageItem = React.memo(
                     className="px-3 py-1.5 text-xs font-medium rounded-full border border-border bg-background hover:bg-accent transition-colors font-['Inter']"
                     data-track-category='XyneAI'
                     data-track-name='EDIT_CANCEL'
+                    data-track-kind='passive'
                   >
                     Cancel
                   </button>
@@ -1384,6 +1398,7 @@ export const MessageItem = React.memo(
                     className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
                     data-track-category='XyneAI'
                     data-track-name='EDIT_SUBMIT'
+                    data-track-kind='active'
                   >
                     Send
                   </button>
@@ -1442,6 +1457,7 @@ export const MessageItem = React.memo(
                               rel='noopener noreferrer'
                               data-track-category='XyneAI'
                               data-track-name='open-external-link'
+                              data-track-kind='passive'
                               className='text-blue-500 hover:text-blue-600 underline'
                               {...props}
                             >
@@ -1457,6 +1473,7 @@ export const MessageItem = React.memo(
                               className='text-blue-500 hover:text-blue-600 underline'
                               data-track-category='XyneAI'
                               data-track-name='api-download'
+                              data-track-kind='passive'
                               onClick={e => {
                                 e.preventDefault();
                                 window.location.href = href!;
@@ -1473,6 +1490,7 @@ export const MessageItem = React.memo(
                             href={href}
                             data-track-category='XyneAI'
                             data-track-name='open-internal-link'
+                            data-track-kind='passive'
                             className='text-blue-500 hover:text-blue-600 underline'
                             {...props}
                           >
@@ -1595,6 +1613,7 @@ export const MessageItem = React.memo(
                         title='Debug this response'
                         data-track-category='XyneAI'
                         data-track-name='DEBUG_RESPONSE'
+                        data-track-kind='passive'
                       >
                         <Bug size={12} /> Debug
                       </button>
@@ -1649,6 +1668,7 @@ export const MessageItem = React.memo(
                   className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ suggestion })}
                 >
                   {suggestion}
@@ -1874,6 +1894,7 @@ const MessageContent = ({
               rel='noopener noreferrer'
               data-track-category='XyneAI'
               data-track-name='open-external-link'
+              data-track-kind='passive'
               {...props}
             >
               {children}
@@ -1887,6 +1908,7 @@ const MessageContent = ({
               href={href}
               data-track-category='XyneAI'
               data-track-name='api-download'
+              data-track-kind='passive'
               onClick={e => {
                 e.preventDefault();
                 window.location.href = href!;
@@ -1903,6 +1925,7 @@ const MessageContent = ({
             href={href}
             data-track-category='XyneAI'
             data-track-name='open-internal-link'
+            data-track-kind='passive'
             {...props}
           >
             {children}
@@ -2236,6 +2259,7 @@ const SummarizerContent = ({
                         rel='noopener noreferrer'
                         data-track-category='XyneAI'
                         data-track-name='open-external-link'
+                        data-track-kind='passive'
                         {...props}
                       >
                         {children}
@@ -2249,6 +2273,7 @@ const SummarizerContent = ({
                         href={href}
                         data-track-category='XyneAI'
                         data-track-name='api-download'
+                        data-track-kind='passive'
                         onClick={e => {
                           e.preventDefault();
                           window.location.href = href!;
@@ -2265,6 +2290,7 @@ const SummarizerContent = ({
                       href={href}
                       data-track-category='XyneAI'
                       data-track-name='open-internal-link'
+                      data-track-kind='passive'
                       {...props}
                     >
                       {children}
@@ -2357,6 +2383,7 @@ const SummarizerContent = ({
                                   rel='noopener noreferrer'
                                   data-track-category='XyneAI'
                                   data-track-name='open-external-link'
+                                  data-track-kind='passive'
                                   {...props}
                                 >
                                   {children}
@@ -2370,6 +2397,7 @@ const SummarizerContent = ({
                                   href={href}
                                   data-track-category='XyneAI'
                                   data-track-name='api-download'
+                                  data-track-kind='passive'
                                   onClick={e => {
                                     e.preventDefault();
                                     window.location.href = href!;
@@ -2386,6 +2414,7 @@ const SummarizerContent = ({
                                 href={href}
                                 data-track-category='XyneAI'
                                 data-track-name='open-internal-link'
+                                data-track-kind='passive'
                                 {...props}
                               >
                                 {children}
@@ -2417,6 +2446,7 @@ const SummarizerContent = ({
                               title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
                               data-track-category='XyneAI'
                               data-track-name='SUMMARIZER_CITATION_CLICK'
+                              data-track-kind='passive'
                               data-track-metadata={JSON.stringify({
                                 messageIndex: keyPoint.citation.messageIndex,
                               })}
@@ -2488,6 +2518,7 @@ const GeniusKeyPoints = ({
                           rel='noopener noreferrer'
                           data-track-category='XyneAI'
                           data-track-name='open-external-link'
+                          data-track-kind='passive'
                           {...props}
                         >
                           {children}
@@ -2501,6 +2532,7 @@ const GeniusKeyPoints = ({
                           href={href}
                           data-track-category='XyneAI'
                           data-track-name='api-download'
+                          data-track-kind='passive'
                           onClick={e => {
                             e.preventDefault();
                             window.location.href = href!;
@@ -2517,6 +2549,7 @@ const GeniusKeyPoints = ({
                         href={href}
                         data-track-category='XyneAI'
                         data-track-name='open-internal-link'
+                        data-track-kind='passive'
                         {...props}
                       >
                         {children}
@@ -2542,6 +2575,7 @@ const GeniusKeyPoints = ({
                   title={`Jump to message ${keypointNum}`}
                   data-track-category='XyneAI'
                   data-track-name='KEY_POINT_CITATION_CLICK'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ keypointNum })}
                 >
                   {keypointNum}
@@ -2672,6 +2706,7 @@ const MessageActions = ({
         title={copied ? 'Copied!' : 'Copy'}
         data-track-category='XyneAI'
         data-track-name='COPY_MESSAGE'
+        data-track-kind='passive'
       >
         {copied ? (
           <img src='/svgs/icons/check-success.svg' alt='Copied' width='16' height='16' />
@@ -2689,6 +2724,7 @@ const MessageActions = ({
           title='Regenerate response'
           data-track-category='XyneAI'
           data-track-name='REGENERATE_MESSAGE'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ messageId: message.id })}
         >
           <RefreshCw size={16} className='text-current' />
@@ -2714,6 +2750,7 @@ const MessageActions = ({
             title='Like'
             data-track-category='XyneAI'
             data-track-name='LIKE_MESSAGE'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId: message.id })}
           >
             <svg
@@ -2757,6 +2794,7 @@ const MessageActions = ({
             title='Dislike'
             data-track-category='XyneAI'
             data-track-name='DISLIKE_MESSAGE'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId: message.id })}
           >
             <svg
@@ -2822,6 +2860,7 @@ const MessageActions = ({
           rel='noopener noreferrer'
           data-track-category='XyneAI'
           data-track-name='open-searxng-attribution'
+          data-track-kind='passive'
           className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
         >
           <Globe className='w-2 h-2 text-primary-foreground' />

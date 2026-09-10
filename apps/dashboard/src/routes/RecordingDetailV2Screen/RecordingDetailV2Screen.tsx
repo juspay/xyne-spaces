@@ -1090,6 +1090,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                     className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
                     data-track-category='RecordingDetailV2'
                     data-track-name='breadcrumb_recordings'
+                    data-track-kind='passive'
                   >
                     Recordings
                   </button>
@@ -1116,6 +1117,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                     aria-label='Share recording'
                     data-track-category='RecordingDetailV2'
                     data-track-name='share_recording'
+                    data-track-kind='active'
                   >
                     <Share02 className='size-4' />
                   </Button>
@@ -1132,6 +1134,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                     aria-label='Ask AI about this recording'
                     data-track-category='RecordingDetailV2'
                     data-track-name='ask_ai_recording'
+                    data-track-kind='active'
                   >
                     <XyneAIStar />
                   </Button>
@@ -1214,6 +1217,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   }
                   data-track-category='RecordingDetailV2'
                   data-track-name='mark_moment'
+                  data-track-kind='active'
                 >
                   <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
                   Mark this moment
@@ -1229,6 +1233,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold !rounded-2xl`}
                       data-track-category='RecordingDetailV2'
                       data-track-name='open_post_to_channel_modal'
+                      data-track-kind='passive'
                     >
                       <Hashtag className='size-3.5' />
                       Post to channel
@@ -1243,6 +1248,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                         className={POST_SPLIT_BUTTON_CLASS}
                         data-track-category='RecordingDetailV2'
                         data-track-name='open_recording_share_menu'
+                        data-track-kind='passive'
                       >
                         <ChevronDown className='size-3.5' />
                       </Button>
@@ -1261,6 +1267,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       className='rounded-lg px-2.5 py-2'
                       data-track-category='RecordingDetailV2'
                       data-track-name='open_post_to_channel_from_menu'
+                      data-track-kind='passive'
                     >
                       <Hashtag className='size-4 text-muted-foreground' />
                       Post to channel
@@ -1273,6 +1280,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       className='rounded-lg px-2.5 py-2'
                       data-track-category='RecordingDetailV2'
                       data-track-name='open_post_to_email_modal'
+                      data-track-kind='passive'
                     >
                       <EnvelopeDefault className='size-4 text-muted-foreground' />
                       Draft follow-up email
@@ -1283,6 +1291,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       className='rounded-lg px-2.5 py-2'
                       data-track-category='RecordingDetailV2'
                       data-track-name='export_recording_google_doc'
+                      data-track-kind='passive'
                     >
                       <File02Text className='size-4 text-muted-foreground' />
                       {isExportingGoogleDoc ? 'Creating Google Doc…' : 'Export to Google Docs'}
@@ -1336,6 +1345,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       aria-label={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
                       data-track-category='RecordingDetailV2'
                       data-track-name='open_transcript_panel'
+                      data-track-kind='passive'
                     >
                       {showTranscriptPanel ? (
                         <SidebarRightClose className='size-4' aria-hidden='true' variant='Solid' />
@@ -1384,6 +1394,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                                 className='h-7 gap-1.5 rounded-lg text-xs font-medium text-muted-foreground'
                                 data-track-category='RecordingDetailV2'
                                 data-track-name='retry_with_fast'
+                                data-track-kind='active'
                               >
                                 <RefreshCw className='size-3.5' />
                                 Retry with Fast
@@ -1400,6 +1411,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                                 className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
                                 data-track-category='RecordingDetailV2'
                                 data-track-name='retry_fast_once'
+                                data-track-kind='active'
                               >
                                 <p className='text-sm font-medium text-foreground'>
                                   Just this summary
@@ -1414,6 +1426,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                                 className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
                                 data-track-category='RecordingDetailV2'
                                 data-track-name='retry_fast_always'
+                                data-track-kind='active'
                               >
                                 <p className='text-sm font-medium text-foreground'>
                                   All future summaries
@@ -1453,6 +1466,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                                 className='h-7 gap-1.5 rounded-lg text-xs font-medium text-muted-foreground'
                                 data-track-category='RecordingDetailV2'
                                 data-track-name='retry_with_thinking'
+                                data-track-kind='active'
                               >
                                 <RefreshCw className='size-3.5' />
                                 Retry with Thinking
@@ -1469,6 +1483,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                                 className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
                                 data-track-category='RecordingDetailV2'
                                 data-track-name='retry_thinking_once'
+                                data-track-kind='active'
                               >
                                 <p className='text-sm font-medium text-foreground'>
                                   Just this summary
@@ -1483,6 +1498,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                                 className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
                                 data-track-category='RecordingDetailV2'
                                 data-track-name='retry_thinking_always'
+                                data-track-kind='active'
                               >
                                 <p className='text-sm font-medium text-foreground'>
                                   All future summaries

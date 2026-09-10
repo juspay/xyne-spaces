@@ -116,6 +116,7 @@ const TitleRow: React.FC<{ title: string; url?: string | undefined }> = ({ title
         className='shrink-0 !text-muted-foreground !no-underline hover:!text-foreground'
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='OPEN_PR_LINK'
+        data-track-kind='passive'
       >
         <ExternalLink size={16} className='block' />
       </a>
@@ -185,6 +186,7 @@ const Actions: React.FC = () => {
         )}
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='CLICK_APPROVE'
+        data-track-kind='active'
         data-ph-capture-attribute-track-id='pr_approval_approve'
       >
         {inFlight === 'approved' && <Spinner size={14} className='animate-spin' />}
@@ -201,6 +203,7 @@ const Actions: React.FC = () => {
         )}
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='CLICK_DENY'
+        data-track-kind='active'
         data-ph-capture-attribute-track-id='pr_approval_deny'
       >
         {inFlight === 'denied' && <Spinner size={14} className='animate-spin' />}

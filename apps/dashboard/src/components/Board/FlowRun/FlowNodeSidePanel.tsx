@@ -322,6 +322,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                   onClick={() => onShowDetails(ticket)}
                   data-track-category='flow_board'
                   data-track-name='show_node_details'
+                  data-track-kind='passive'
                   className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                 >
                   <PanelRight size={14} />
@@ -340,6 +341,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                   }
                   data-track-category='flow_board'
                   data-track-name='go_to_node_channel'
+                  data-track-kind='passive'
                   className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                 >
                   <Hash size={14} />
@@ -355,6 +357,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
             onClick={onClose}
             data-track-category='flow_board'
             data-track-name='close_node_panel'
+            data-track-kind='passive'
             className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           >
             <X size={13} />
@@ -395,6 +398,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                     onClick={() => void handleStatusAction(ticket.id, action.to)}
                     data-track-category='flow_board'
                     data-track-name={`run_status_${action.to.toLowerCase()}`}
+                    data-track-kind='passive'
                   >
                     {action.label}
                   </Button>
@@ -424,6 +428,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                       onClick={() => onSelectBacklog?.(step)}
                       data-track-category='flow_board'
                       data-track-name='open_backlog_step'
+                      data-track-kind='passive'
                       className='flex items-center gap-2 rounded-md border border-amber-500/15 bg-background px-2.5 py-2 text-left transition-colors hover:border-amber-500/35 hover:bg-amber-500/[0.04]'
                     >
                       <Archive size={12} className='shrink-0 text-amber-600' />
@@ -466,6 +471,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                     onClick={() => void handleStatusAction(ticket.id, TicketStatusV2.COMPLETED)}
                     data-track-category='flow_board'
                     data-track-name='confirm_step'
+                    data-track-kind='active'
                   >
                     {backlogged ? 'Confirm' : 'Confirm & move'}
                   </Button>
@@ -481,6 +487,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                         onClick={() => void handleBacklogAction(ticket.id)}
                         data-track-category='flow_board'
                         data-track-name='backlog_step'
+                        data-track-kind='passive'
                       >
                         Backlog
                       </Button>
@@ -491,6 +498,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                       onClick={() => void handleStatusAction(ticket.id, TicketStatusV2.CANCELLED)}
                       data-track-category='flow_board'
                       data-track-name='cancel_step'
+                      data-track-kind='passive'
                     >
                       Cancel
                     </Button>
@@ -534,6 +542,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                       onClick={() => void handleBacklogAction(ticket.id)}
                       data-track-category='flow_board'
                       data-track-name='backlog_step'
+                      data-track-kind='passive'
                     >
                       Backlog
                     </Button>
@@ -544,6 +553,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                     onClick={() => void handleStatusAction(ticket.id, TicketStatusV2.CANCELLED)}
                     data-track-category='flow_board'
                     data-track-name='cancel_step'
+                    data-track-kind='passive'
                   >
                     Cancel step
                   </Button>

@@ -101,6 +101,7 @@ export function SdlcActivityPreview({ channelId }: SdlcActivityPreviewProps): Re
               }}
               data-track-category='SdlcHub'
               data-track-name='ShowMoreActivity'
+              data-track-kind='passive'
             >
               Show more
             </Button>

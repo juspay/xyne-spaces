@@ -178,6 +178,7 @@ const CreateCollectionModal = ({
               disabled={isCreating}
               data-track-category='knowledge-base'
               data-track-name='collection-name-input'
+              data-track-kind='passive'
             />
           </div>
 

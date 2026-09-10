@@ -67,6 +67,7 @@ const SplashLoadingScreen = ({
                     className='inline cursor-pointer border-none bg-transparent p-0 text-sm sm:text-base font-medium text-primary underline underline-offset-4'
                     data-track-category='Auth'
                     data-track-name='ElectronRetrySignIn'
+                    data-track-kind='passive'
                   >
                     Retry sign-in
                   </button>

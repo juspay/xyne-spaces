@@ -87,6 +87,7 @@ const DigitalTwinSettingsTab = (): ReactElement => {
             maxLength={MAX_SUFFIX_LEN}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin response suffix'
+            data-track-kind='passive'
             className='w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none'
           />
           {suffix.trim().length > 0 && (
@@ -138,6 +139,7 @@ const DigitalTwinSettingsTab = (): ReactElement => {
                 onChange={e => setScore(Number(e.target.value))}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin auto-approve threshold'
+                data-track-kind='active'
                 style={{
                   background: `linear-gradient(to right, hsl(var(--primary)) ${fillPct}%, hsl(var(--border)) ${fillPct}%)`,
                 }}

@@ -52,6 +52,7 @@ export function CallParticipantsPopover({
       aria-label={`${participantCount} participants`}
       data-track-category='CallDetail'
       data-track-name='open-participants-modal'
+      data-track-kind='passive'
       className={cn(
         'inline-flex h-7 items-center gap-1.5 rounded-full border pl-[3px] pr-2.5 transition-colors',
         isOpen ? 'border-foreground/30 bg-accent' : 'border-border',

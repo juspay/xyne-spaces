@@ -640,6 +640,7 @@ export function StagePicker({
       aria-label='Change stage'
       data-track-category='Tickets'
       data-track-name='ToggleRowStage'
+      data-track-kind='passive'
     >
       <StageIndicator
         stages={stages}
@@ -680,6 +681,7 @@ export function StagePicker({
               )}
               data-track-category='Tickets'
               data-track-name='SelectRowStage'
+              data-track-kind='active'
             >
               <StageIndicator
                 stages={stages}

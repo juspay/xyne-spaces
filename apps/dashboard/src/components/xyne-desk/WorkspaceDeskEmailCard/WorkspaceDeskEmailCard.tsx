@@ -100,6 +100,7 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
                   disabled={isDisconnecting}
                   data-track-category='workspace-desk-email'
                   data-track-name='reconnect'
+                  data-track-kind='passive'
                 >
                   <Plug size={14} className='mr-1.5' />
                   Reconnect
@@ -111,6 +112,7 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
                   disabled={isDisconnecting}
                   data-track-category='workspace-desk-email'
                   data-track-name='open-disconnect-confirm'
+                  data-track-kind='passive'
                 >
                   <Unplug size={14} className='mr-1.5' />
                   Disconnect
@@ -129,6 +131,7 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
                   onClick={() => handleConnect('google')}
                   data-track-category='workspace-desk-email'
                   data-track-name='setup-google'
+                  data-track-kind='active'
                   className='gap-1.5'
                 >
                   <svg className='w-4 h-4' viewBox='0 0 24 24' fill='currentColor'>
@@ -145,6 +148,7 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
                   onClick={() => handleConnect('microsoft')}
                   data-track-category='workspace-desk-email'
                   data-track-name='setup-microsoft'
+                  data-track-kind='active'
                   className='gap-1.5'
                 >
                   <svg className='w-4 h-4' viewBox='0 0 21 21' fill='currentColor'>
@@ -185,6 +189,7 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
               onClick={() => setShowDisconnectConfirm(false)}
               data-track-category='workspace-desk-email'
               data-track-name='CANCEL_DISCONNECT'
+              data-track-kind='passive'
               disabled={isDisconnecting}
             >
               Cancel
@@ -196,6 +201,7 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
               disabled={isDisconnecting}
               data-track-category='workspace-desk-email'
               data-track-name='confirm-disconnect'
+              data-track-kind='active'
             >
               {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
             </Button>

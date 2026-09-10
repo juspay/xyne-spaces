@@ -270,6 +270,7 @@ export const FilePill: React.FC<FilePillProps> = ({
       onClick={onClick}
       data-track-category='MESSAGE_ATTACHMENT'
       data-track-name='OPEN_FILE_PILL'
+      data-track-kind='passive'
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={
@@ -326,6 +327,7 @@ export const FilePill: React.FC<FilePillProps> = ({
             }}
             data-track-category='MESSAGE_ATTACHMENT'
             data-track-name='DOWNLOAD_FILE_PILL'
+            data-track-kind='passive'
             className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
             title='Download'
             aria-label={`Download ${fileName}`}
@@ -344,6 +346,7 @@ export const FilePill: React.FC<FilePillProps> = ({
             }}
             data-track-category='MESSAGE_ATTACHMENT'
             data-track-name='DELETE_FILE_PILL'
+            data-track-kind='active'
             className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
             title='Delete'
             aria-label={`Delete ${fileName}`}
@@ -362,6 +365,7 @@ export const FilePill: React.FC<FilePillProps> = ({
             }}
             data-track-category='MESSAGE_ATTACHMENT'
             data-track-name='REMOVE_FILE_PILL'
+            data-track-kind='active'
             className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
             title='Remove'
             aria-label={`Remove ${fileName}`}

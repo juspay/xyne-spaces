@@ -67,6 +67,7 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({ headings, onHe
                 aria-label={heading.text}
                 data-track-category='CANVAS'
                 data-track-name='Navigate_To_Heading'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   headingId: heading.id,
                   headingText: heading.text,

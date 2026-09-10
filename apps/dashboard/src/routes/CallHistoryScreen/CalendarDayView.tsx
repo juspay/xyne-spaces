@@ -129,6 +129,7 @@ function DayViewCallCard({
           title={call.title ?? 'Call'}
           data-track-category='CALLS'
           data-track-name='calendar-day-call-card'
+          data-track-kind='passive'
           className='group absolute left-2 right-2 rounded overflow-hidden text-left z-[5] focus:outline-none'
           style={{
             top,
@@ -203,6 +204,7 @@ function DayViewCallCard({
               onKeyDown={e => e.stopPropagation()}
               data-track-category='CALLS'
               data-track-name='calendar-resize-handle'
+              data-track-kind='passive'
             >
               <div className='w-6 h-0.5 rounded-full bg-blue-500' />
             </div>
@@ -296,6 +298,7 @@ function DroppableDayColumn({
       onDragCreatePointerDown={onDragCreatePointerDown}
       consumeDragEnd={consumeDragEnd}
       trackName='calendar-day-slot-create'
+      trackKind='active'
       {...(className !== undefined ? { className } : {})}
     >
       {children}

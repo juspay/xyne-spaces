@@ -32,6 +32,7 @@ export function SkillFileTree({
               aria-expanded={openFolders.has(node.path)}
               data-track-category='Claw Agents'
               data-track-name='Create agent v2: toggle skill folder'
+              data-track-kind='active'
               className={cn(ROW, 'justify-between gap-2 hover:bg-muted/60')}
             >
               <span className='flex min-w-0 items-center gap-2'>
@@ -66,6 +67,7 @@ export function SkillFileTree({
             title={node.path}
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: open skill file'
+            data-track-kind='active'
             className={cn(ROW, node.path === selectedPath ? 'bg-muted' : 'hover:bg-muted/60')}
           >
             <span className={LABEL}>{node.name}</span>

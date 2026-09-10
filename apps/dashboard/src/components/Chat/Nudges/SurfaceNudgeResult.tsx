@@ -55,6 +55,7 @@ export const SurfaceNudgeResult: React.FC<SurfaceNudgeResultProps> = ({
           }
           data-track-category='NUDGES'
           data-track-name='OPEN_NUDGE_RESULT_CREATED_TICKET'
+          data-track-kind='passive'
         >
           Open ticket
         </Button>
@@ -87,6 +88,7 @@ export const SurfaceNudgeResult: React.FC<SurfaceNudgeResultProps> = ({
           }
           data-track-category='NUDGES'
           data-track-name='OPEN_NUDGE_RESULT_TICKET'
+          data-track-kind='passive'
         >
           Open ticket
         </Button>
@@ -119,6 +121,7 @@ export const SurfaceNudgeResult: React.FC<SurfaceNudgeResultProps> = ({
           }
           data-track-category='NUDGES'
           data-track-name='OPEN_NUDGE_RESULT_MESSAGE'
+          data-track-kind='passive'
         >
           View message
         </Button>

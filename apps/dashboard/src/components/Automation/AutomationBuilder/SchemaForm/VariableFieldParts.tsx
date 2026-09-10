@@ -59,6 +59,7 @@ export function ReferenceChip({
         onClick={onClear}
         data-track-category='automation-builder'
         data-track-name='schema-form-detach-variable'
+        data-track-kind='active'
         className='ml-1 rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60'
         aria-label='Detach variable'
       >
@@ -94,6 +95,7 @@ export function UseVariableButton({
       aria-label='Use variable'
       data-track-category='automation-builder'
       data-track-name='use-variable-open'
+      data-track-kind='passive'
       onClick={
         soleMatch
           ? (e): void => {

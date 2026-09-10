@@ -258,6 +258,7 @@ export function TemplateAttachmentsField({
             type='button'
             data-track-category='automation-builder'
             data-track-name='send-message-create-template'
+            data-track-kind='active'
             onClick={openNewFileEditor}
             className='flex min-h-20 items-center justify-center gap-3 rounded-md border border-border px-4 py-3 text-left text-muted-foreground hover:border-foreground/30 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40'
           >
@@ -271,6 +272,7 @@ export function TemplateAttachmentsField({
             type='button'
             data-track-category='automation-builder'
             data-track-name='send-message-attach-template'
+            data-track-kind='active'
             disabled={uploading}
             onClick={() => inputRef.current?.click()}
             onDragEnter={event => {
@@ -362,6 +364,7 @@ export function TemplateAttachmentsField({
                   <input
                     data-track-category='automation-builder'
                     data-track-name='template-editor-file-name'
+                    data-track-kind='passive'
                     value={getBasename(editorSession.filename)}
                     onChange={event =>
                       setEditorSession({
@@ -379,6 +382,7 @@ export function TemplateAttachmentsField({
                   <select
                     data-track-category='automation-builder'
                     data-track-name='template-editor-file-type'
+                    data-track-kind='passive'
                     value={getExtension(editorSession.filename)}
                     onChange={event =>
                       setEditorSession({
@@ -412,6 +416,7 @@ export function TemplateAttachmentsField({
                   type='button'
                   data-track-category='automation-builder'
                   data-track-name='template-editor-insert-variable'
+                  data-track-kind='active'
                   disabled={editorLoading}
                   className='flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs text-foreground hover:bg-accent'
                 >
@@ -442,6 +447,7 @@ export function TemplateAttachmentsField({
                   <textarea
                     data-track-category='automation-builder'
                     data-track-name='template-editor-content'
+                    data-track-kind='passive'
                     ref={editorRef}
                     value={editorContent}
                     onChange={event => setEditorContent(event.target.value)}
@@ -468,6 +474,7 @@ export function TemplateAttachmentsField({
               type='button'
               data-track-category='automation-builder'
               data-track-name='template-editor-cancel'
+              data-track-kind='passive'
               disabled={editorSaving}
               onClick={() => setEditorSession(null)}
               className='h-9 rounded-md border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-50'
@@ -478,6 +485,7 @@ export function TemplateAttachmentsField({
               type='button'
               data-track-category='automation-builder'
               data-track-name='template-editor-apply'
+              data-track-kind='active'
               data-ph-capture-attribute-track-id='automation_template_save'
               disabled={editorLoading || editorSaving}
               onClick={() => void saveEditor()}
@@ -613,6 +621,7 @@ function IconButton({
       type='button'
       data-track-category='automation-builder'
       data-track-name='template-attachment-action'
+      data-track-kind='passive'
       aria-label={label}
       title={label}
       disabled={disabled}

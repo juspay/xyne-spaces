@@ -241,6 +241,7 @@ export const BookmarkItem = ({
       data-testid={`bookmark-item-${entityId}`}
       data-track-category='CHAT_BOOKMARK'
       data-track-name='Open_Bookmark'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ entityId, entityType })}
       onKeyDown={(e): void => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -285,6 +286,7 @@ export const BookmarkItem = ({
               data-ph-capture-attribute-track-id='mark_bookmark_done'
               data-track-category='CHAT_BOOKMARK'
               data-track-name='Mark_Bookmark_Done'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ entityId })}
             >
               <Check size={16} className='text-muted-foreground' strokeWidth={1.33} />
@@ -301,6 +303,7 @@ export const BookmarkItem = ({
                     aria-label={reminderActionLabel}
                     data-track-category='CHAT_BOOKMARK'
                     data-track-name='Open_Reminder_Menu'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ entityId })}
                   >
                     <Clock size={16} className='text-foreground' strokeWidth={1.33} />
@@ -330,6 +333,7 @@ export const BookmarkItem = ({
                         }}
                         data-track-category='CHAT_BOOKMARK'
                         data-track-name='Remove_Bookmark_Reminder'
+                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({ entityId })}
                       >
                         Remove reminder
@@ -358,6 +362,7 @@ export const BookmarkItem = ({
               onClick={() => setIsCustomReminderModalOpen(false)}
               data-track-category='CHAT_BOOKMARK'
               data-track-name='Close_Custom_Reminder_Modal'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ entityId })}
             >
               <X className='h-4 w-4' />
@@ -409,6 +414,7 @@ export const BookmarkItem = ({
               }}
               data-track-category='CHAT_BOOKMARK'
               data-track-name='OPEN_CUSTOM_REMINDER'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -417,6 +423,7 @@ export const BookmarkItem = ({
               trackId='save_bookmark_reminder'
               data-track-category='CHAT_BOOKMARK'
               data-track-name='SAVE_CUSTOM_REMINDER'
+              data-track-kind='active'
               disabled={!customReminderDate}
             >
               Save

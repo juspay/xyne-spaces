@@ -176,6 +176,7 @@ const CreateRoleDialog = ({
             onClick={() => onOpenChange(false)}
             data-track-category='ROLES'
             data-track-name='CANCEL_CREATE_ROLE'
+            data-track-kind='passive'
             disabled={saving}
           >
             Cancel
@@ -185,6 +186,7 @@ const CreateRoleDialog = ({
             onClick={() => void handleCreate()}
             data-track-category='ROLES'
             data-track-name='CREATE_ROLE'
+            data-track-kind='active'
             disabled={!canSubmit}
             loading={saving}
           >
@@ -239,6 +241,7 @@ const MemberRow = ({
         onClick={() => void onRemove(mapping.id, userId)}
         data-track-category='ROLES'
         data-track-name='REMOVE_ROLE_MEMBER'
+        data-track-kind='active'
         disabled={removing}
         className='opacity-0 group-hover:opacity-100 transition-opacity h-7 px-2 text-muted-foreground hover:text-destructive'
       >
@@ -383,6 +386,7 @@ const AddMembersDialog = ({
                   onClick={() => toggle(u.id)}
                   data-track-category='ROLES'
                   data-track-name='ToggleAddMember'
+                  data-track-kind='active'
                   className={cn(
                     'w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-left transition-colors',
                     selected ? 'bg-accent' : 'hover:bg-accent/60',
@@ -418,6 +422,7 @@ const AddMembersDialog = ({
             onClick={() => onOpenChange(false)}
             data-track-category='ROLES'
             data-track-name='CANCEL_ADD_MEMBERS'
+            data-track-kind='passive'
             disabled={saving}
           >
             Cancel
@@ -427,6 +432,7 @@ const AddMembersDialog = ({
             onClick={() => void handleAdd()}
             data-track-category='ROLES'
             data-track-name='ADD_ROLE_MEMBERS'
+            data-track-kind='active'
             disabled={pending.size === 0 || saving}
             loading={saving}
           >
@@ -656,6 +662,7 @@ export const RoleManagementScreen = (): ReactElement => {
                   onClick={() => setShowCreate(true)}
                   data-track-category='ROLES'
                   data-track-name='OPEN_CREATE_ROLE_DIALOG'
+                  data-track-kind='passive'
                 >
                   <Plus size={14} /> New role
                 </Button>
@@ -693,6 +700,7 @@ export const RoleManagementScreen = (): ReactElement => {
                         onClick={() => setShowAddMembers(true)}
                         data-track-category='ROLES'
                         data-track-name='OPEN_ADD_MEMBERS_DIALOG'
+                        data-track-kind='passive'
                         className='mt-3'
                       >
                         <UserPlus size={14} /> Add users

@@ -618,6 +618,7 @@ export const EmailBodyRenderer = ({
             className='text-primary hover:underline font-medium cursor-pointer'
             data-track-category='Support'
             data-track-name='ShowEmailImages'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ emailId })}
           >
             Show images

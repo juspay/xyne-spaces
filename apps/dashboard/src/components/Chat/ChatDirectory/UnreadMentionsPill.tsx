@@ -90,6 +90,7 @@ const UnreadMentionsPill = ({
       onClick={() => target.scrollIntoView({ block: 'start', behavior: 'smooth' })}
       data-track-category='CHAT_SIDEBAR'
       data-track-name='JUMP_TO_UNREAD_MENTION'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ direction })}
     >
       {direction === 'up' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}

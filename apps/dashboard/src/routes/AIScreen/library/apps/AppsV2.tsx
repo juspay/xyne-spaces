@@ -191,6 +191,7 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
                 )}
                 data-track-category='AskAI'
                 data-track-name='ArtifactAppPin'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ pinned: !isPinned(app.id) })}
               >
                 <Pin

@@ -165,6 +165,7 @@ export function MyAutoLabelRules({
           onClick={onRetry}
           data-track-category='xyne-desk'
           data-track-name='auto-label-rules-retry'
+          data-track-kind='passive'
         >
           <RefreshCw className='size-4' />
           Try again
@@ -273,6 +274,7 @@ export function MyAutoLabelRules({
                     }
                     data-track-category='xyne-desk'
                     data-track-name='auto-label-toggle-rule'
+                    data-track-kind='active'
                     aria-label={isActive ? 'Disable rule' : 'Activate rule'}
                   >
                     {isUpdatingStatus ? (
@@ -292,6 +294,7 @@ export function MyAutoLabelRules({
                     onClick={() => archiveMutation.mutate(item)}
                     data-track-category='xyne-desk'
                     data-track-name='auto-label-archive-rule'
+                    data-track-kind='active'
                     aria-label='Archive rule'
                   >
                     {isArchiving ? (
@@ -316,6 +319,7 @@ export function MyAutoLabelRules({
             onClick={onLoadMore}
             data-track-category='xyne-desk'
             data-track-name='auto-label-load-more-rules'
+            data-track-kind='passive'
           >
             {isFetchingMore ? (
               <>

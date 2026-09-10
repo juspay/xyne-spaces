@@ -60,6 +60,7 @@ export function SubagentReviewDialog({
           aria-label='Close'
           data-track-category='Claw Agents'
           data-track-name='Create subagent v2: close review'
+          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -98,6 +99,7 @@ export function SubagentReviewDialog({
           className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
           data-track-category='Claw Agents'
           data-track-name='Create subagent v2: cancel from review'
+          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -107,6 +109,7 @@ export function SubagentReviewDialog({
           className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
           data-track-category='Claw Agents'
           data-track-name='Create subagent v2: confirm create'
+          data-track-kind='active'
         >
           Create
         </Button>

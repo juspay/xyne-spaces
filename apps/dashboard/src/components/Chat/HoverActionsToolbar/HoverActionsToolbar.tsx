@@ -263,6 +263,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-reply-in-thread'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='REPLY_IN_THREAD'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <MessageCircleMore className='w-4 h-4' />
@@ -281,6 +282,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-create-ticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='CREATE_TICKET_FROM_MESSAGE'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <Ticket className='w-4 h-4' />
@@ -299,6 +301,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-create-subticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='CREATE_SUBTICKET_FROM_MESSAGE'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <SquareAsterisk className='w-4 h-4' />
@@ -318,6 +321,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-initiate-call'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='INITIATE_CALL'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <Headphones className='w-4 h-4' />
@@ -337,6 +341,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-start-recording'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='START_RECORDING_FROM_MESSAGE'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <Mic className='w-4 h-4' />
@@ -355,6 +360,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-ask-ai'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='ASK_AI'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <XyneAIStar size={16} />
@@ -403,6 +409,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-edit-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='EDIT_MESSAGE'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -419,6 +426,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       onClick={onSendToChannel}
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='SEND_TO_CHANNEL'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -451,6 +459,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-mark-unread'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='MARK_AS_UNREAD'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -486,6 +495,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         data-testid='hover-action-thread-tags'
                         data-track-category='HOVER_ACTIONS_TOOLBAR'
                         data-track-name='OPEN_THREAD_TAG_MENU'
+                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ messageId })}
                       >
                         <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -509,6 +519,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         data-testid='hover-action-remind-me'
                         data-track-category='HOVER_ACTIONS_TOOLBAR'
                         data-track-name='OPEN_REMINDER_MENU'
+                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ messageId })}
                       >
                         <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -542,6 +553,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       }
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='TOGGLE_PIN_MESSAGE'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ isPinned, messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -562,6 +574,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-copy-link'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='COPY_LINK'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -579,6 +592,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-copy-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='COPY_MESSAGE'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -595,6 +609,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-forward-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='FORWARD_MESSAGE'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
@@ -628,6 +643,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                               onClick={() => onRunShortcut?.(shortcut)}
                               data-track-category='HOVER_ACTIONS_TOOLBAR'
                               data-track-name='RUN_SHORTCUT'
+                              data-track-kind='active'
                             >
                               <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                 <Zap className='w-3.5 h-3.5' />
@@ -647,6 +663,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                                 onClick={onShowAllShortcuts}
                                 data-track-category='HOVER_ACTIONS_TOOLBAR'
                                 data-track-name='SHOW_ALL_SHORTCUTS'
+                                data-track-kind='passive'
                               >
                                 <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                   <Zap className='w-4 h-4' />
@@ -668,6 +685,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-delete-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='DELETE_MESSAGE'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center'>

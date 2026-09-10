@@ -88,6 +88,7 @@ export function LabelFilter({
       emptyMessage='No labels found'
       trackCategory={trackCategory}
       trackName='toggle_label_filter'
+      trackKind='passive'
       className={LIST_INHERITS_POPOVER_CLASS_NAME}
       trigger={
         <Button
@@ -104,6 +105,7 @@ export function LabelFilter({
           }
           data-track-category={trackCategory}
           data-track-name='open_label_filter'
+          data-track-kind='passive'
         >
           Labels
           {selectedLabels.length > 0 && (

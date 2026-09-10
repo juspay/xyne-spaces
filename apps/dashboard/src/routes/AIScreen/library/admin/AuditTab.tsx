@@ -98,6 +98,7 @@ export function AuditTab({
         placeholder='Search audit log'
         ariaLabel='Search audit log'
         trackName='Admin: search audit log'
+        trackKind='passive'
         className='w-full'
       />
       <div className='flex flex-wrap items-center justify-end gap-2'>

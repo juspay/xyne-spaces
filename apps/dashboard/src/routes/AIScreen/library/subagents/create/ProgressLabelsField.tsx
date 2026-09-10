@@ -30,6 +30,7 @@ export function ProgressLabelsField({ labels, onChange }: ProgressLabelsFieldPro
           title={atMax ? `Up to ${MAX_LABELS} labels` : 'Add label'}
           data-track-category='Claw Agents'
           data-track-name='Create subagent v2: add progress label'
+          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40'
         >
           <PlusDefault className='size-4' aria-hidden />
@@ -52,6 +53,7 @@ export function ProgressLabelsField({ labels, onChange }: ProgressLabelsFieldPro
               aria-label={`Progress label ${index + 1}`}
               data-track-category='Claw Agents'
               data-track-name='Create subagent v2: progress label'
+              data-track-kind='active'
               className='h-11 min-w-0 flex-1 rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
             />
             <button
@@ -63,6 +65,7 @@ export function ProgressLabelsField({ labels, onChange }: ProgressLabelsFieldPro
               title={isOnly ? 'At least one label is required' : 'Remove label'}
               data-track-category='Claw Agents'
               data-track-name='Create subagent v2: remove progress label'
+              data-track-kind='active'
               className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40'
             >
               <MultipleCrossCancelDefault className='size-4' aria-hidden />

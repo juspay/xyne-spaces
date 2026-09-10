@@ -151,6 +151,7 @@ export const SupportRail = ({
           data-testid='support-rail-home'
           data-track-category='App_Sidebar'
           data-track-name='Support_Rail_Back'
+          data-track-kind='passive'
           className='size-8 flex items-center justify-center rounded-lg text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
         >
           <ArrowLeft size={16} />
@@ -189,6 +190,7 @@ export const SupportRail = ({
               data-testid={`support-rail-${item.key}`}
               data-track-category='App_Sidebar'
               data-track-name='Support_Rail_Item'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
               className={cn(
                 'size-8 flex items-center justify-center rounded-lg border border-transparent transition-colors',

@@ -58,6 +58,7 @@ export function DeviceSelector({
           className='transition-colors w-full cursor-pointer px-2 text-left '
           data-track-category='CALLS'
           data-track-name='Toggle_Device_Selector'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ deviceType: label })}
         >
           <div className='flex items-center px-3 py-2 gap-3 hover:bg-gray-700 rounded-lg'>
@@ -99,6 +100,7 @@ export function DeviceSelector({
                     className='w-full px-4 py-2.5 rounded-lg text-left text-sm hover:bg-gray-700 flex items-center justify-between transition-colors'
                     data-track-category='CALLS'
                     data-track-name='SelectMobileDevice'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       deviceType: label,
                       deviceLabel: device.label,
@@ -131,6 +133,7 @@ export function DeviceSelector({
         title={`Select ${label.toLowerCase()}`}
         data-track-category='CALLS'
         data-track-name='Toggle_Device_Dropdown'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ deviceType: label })}
       >
         {icon && React.createElement(icon, { className: 'w-4 h-4 flex-shrink-0 text-white' })}
@@ -161,6 +164,7 @@ export function DeviceSelector({
                   className='w-full px-4 py-2.5 text-left text-sm hover:bg-gray-700 flex items-center justify-between transition-colors'
                   data-track-category='CALLS'
                   data-track-name='Select_Device'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     deviceType: label,
                     deviceLabel: device.label,

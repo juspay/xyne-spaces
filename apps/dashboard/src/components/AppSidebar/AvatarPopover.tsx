@@ -85,6 +85,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 onMouseLeave={() => setIsHovered(false)}
                 data-track-category='App_Sidebar_Avatar_Popover'
                 data-track-name='Edit_Status'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ hasStatus: true, statusContent })}
               >
                 <div className='flex items-center gap-2 p-2 rounded-lg hover:bg-muted transition-colors'>
@@ -113,6 +114,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                     title='Clear status'
                     data-track-category='App_Sidebar_Avatar_Popover'
                     data-track-name='Clear_Status'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ statusContent })}
                   >
                     <X className='size-4 text-muted-foreground' />
@@ -128,6 +130,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 onKeyDown={handleKeyDown}
                 data-track-category='App_Sidebar_Avatar_Popover'
                 data-track-name='Set_Status'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ hasStatus: false })}
               >
                 <div className='flex items-center gap-2'>

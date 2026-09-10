@@ -175,6 +175,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 title='Open conversation'
                 data-track-category='CALLS'
                 data-track-name='OpenThreadFromCallCard'
+                data-track-kind='passive'
                 className={cn(
                   'text-sm font-semibold text-foreground text-left bg-transparent border-0 p-0 cursor-pointer hover:underline focus-visible:underline focus:outline-none',
                   isMobileLiveCall ? 'text-md mb-1' : '',
@@ -235,6 +236,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 data-track-category='CALLS'
                 data-ph-capture-attribute-track-id='leave_call'
                 data-track-name='LeaveCall'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   callId: call.externalId,
                   channelId: call.channelId,

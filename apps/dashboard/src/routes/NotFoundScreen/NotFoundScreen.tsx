@@ -60,6 +60,7 @@ const NotFoundScreen = ({ fallbackPath }: NotFoundScreenProps = {}): ReactElemen
             className='h-auto gap-1.5 rounded-lg border-[0.5px] bg-foreground/[6%] px-[15.5px] py-[8.5px] text-base'
             data-track-category='NOT_FOUND'
             data-track-name='GO_BACK'
+            data-track-kind='passive'
           >
             <ArrowLeft size={16} />
             Go back

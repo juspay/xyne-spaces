@@ -88,6 +88,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
       }}
       data-track-category='Tickets'
       data-track-name='StageFormDocFieldPick'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ fieldId })}
     />
   );
@@ -101,6 +102,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
           onClick={() => setLocalViewerOpen(true)}
           data-track-category='Tickets'
           data-track-name='StageFormDocFieldOpenLocalPreview'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ fieldId })}
         >
           <div className='flex items-center gap-3'>
@@ -130,6 +132,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
               onClick={openPicker}
               data-track-category='Tickets'
               data-track-name='StageFormDocFieldReplace'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ fieldId })}
             >
               Replace document
@@ -141,6 +144,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
               onClick={handleRemove}
               data-track-category='Tickets'
               data-track-name='StageFormDocFieldRemoveLocal'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ fieldId })}
             >
               Remove
@@ -166,6 +170,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
           onClick={() => handlePreviewClick(existingAttachment)}
           data-track-category='Tickets'
           data-track-name='StageFormDocFieldOpenPreview'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ fieldId })}
         >
           <div className='flex items-center gap-3'>
@@ -191,6 +196,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
               onClick={openPicker}
               data-track-category='Tickets'
               data-track-name='StageFormDocFieldReplace'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ fieldId })}
             >
               Replace document
@@ -202,6 +208,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
               onClick={handleRemove}
               data-track-category='Tickets'
               data-track-name='StageFormDocFieldRemovePersisted'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ fieldId })}
             >
               Remove
@@ -238,6 +245,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
               onClick={openPicker}
               data-track-category='Tickets'
               data-track-name='StageFormDocFieldReplace'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ fieldId })}
             >
               Replace document
@@ -249,6 +257,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
               onClick={handleRemove}
               data-track-category='Tickets'
               data-track-name='StageFormDocFieldRemovePersisted'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ fieldId })}
             >
               Remove
@@ -272,6 +281,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
         className='w-full border-2 border-dashed border-border rounded-lg p-6 text-center hover:bg-muted/50 transition-colors'
         data-track-category='Tickets'
         data-track-name='StageFormDocFieldOpenPicker'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ fieldId })}
       >
         <Upload size={24} className='mx-auto mb-2 text-muted-foreground' />

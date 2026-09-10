@@ -37,6 +37,7 @@ import type {
   SelectedTranscript,
   SelectedRecording,
 } from './ContextPickerPanel';
+import type { InteractionKind } from '@xyne/shared';
 
 /** A pill kind keyed only by `id` + display name. */
 interface NamedItem {
@@ -75,7 +76,13 @@ const CONTEXT_PILL_TRIGGER_CLASS =
  */
 const pillContent = (
   content: ReactNode,
-  action?: { onClick: () => void; ariaLabel: string; trackName: string; trackMetadata: string },
+  action?: {
+    onClick: () => void;
+    ariaLabel: string;
+    trackName: string;
+    trackKind?: InteractionKind;
+    trackMetadata: string;
+  },
 ): ReactElement =>
   action ? (
     <button
@@ -85,6 +92,7 @@ const pillContent = (
       aria-label={action.ariaLabel}
       data-track-category='XyneAI'
       data-track-name={action.trackName}
+      data-track-kind={action.trackKind}
       data-track-metadata={action.trackMetadata}
     >
       {content}
@@ -314,6 +322,7 @@ export const ContextPillRow = ({
             {...(threadInfo.senderName && { title: threadInfo.senderName })}
             data-track-category='XyneAI'
             data-track-name='ClickThreadContextPill'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ thread: threadInfo })}
           >
             {/* The avatar stands in for the sender's name — no presence dot, it
@@ -341,6 +350,7 @@ export const ContextPillRow = ({
             aria-label='Remove thread context'
             data-track-category='XyneAI'
             data-track-name='RemoveThreadContext'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ thread: threadInfo })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -362,6 +372,7 @@ export const ContextPillRow = ({
             aria-label={`Navigate to canvas: ${canvasInfo.title || 'Untitled Canvas'}`}
             data-track-category='XyneAI'
             data-track-name='ClickCanvasContextPill'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ canvasId: canvasInfo.canvasId })}
           >
             <FileText className={CONTEXT_PILL_ICON_CLASS} />
@@ -376,6 +387,7 @@ export const ContextPillRow = ({
             aria-label='Remove canvas context'
             data-track-category='XyneAI'
             data-track-name='RemoveCanvasContext'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ canvasId: canvasInfo.canvasId })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -397,6 +409,7 @@ export const ContextPillRow = ({
             aria-label={`Navigate to canvas with selection: ${selection.preview}`}
             data-track-category='XyneAI'
             data-track-name='ClickSelectionContextPill'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ canvasId: selection.canvasId })}
           >
             <FileText className={CONTEXT_PILL_ICON_CLASS} />
@@ -411,6 +424,7 @@ export const ContextPillRow = ({
             aria-label='Remove selection context'
             data-track-category='XyneAI'
             data-track-name='RemoveSelectionContext'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ canvasId: selection.canvasId })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -433,6 +447,7 @@ export const ContextPillRow = ({
             title={`${browserContext.title}\n${browserContext.url}`}
             data-track-category='XyneAI'
             data-track-name='ClickBrowserContextPill'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({
               url: browserContext.url,
               domain: browserContext.domain,
@@ -451,6 +466,7 @@ export const ContextPillRow = ({
             aria-label='Remove browser context'
             data-track-category='XyneAI'
             data-track-name='RemoveBrowserContext'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ url: browserContext.url })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -486,6 +502,7 @@ export const ContextPillRow = ({
             aria-label={`Remove ${channel.name}`}
             data-track-category='XyneAI'
             data-track-name='REMOVE_CHANNEL'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -516,6 +533,7 @@ export const ContextPillRow = ({
               aria-label={`Remove file scope ${fs.name}`}
               data-track-category='XyneAI'
               data-track-name='REMOVE_FILE_SCOPE'
+              data-track-kind='active'
             >
               <MultipleCrossCancelDefault className='w-3 h-3' />
             </button>
@@ -546,6 +564,7 @@ export const ContextPillRow = ({
               aria-label={`Remove folder scope ${fo.name}`}
               data-track-category='XyneAI'
               data-track-name='REMOVE_FOLDER_SCOPE'
+              data-track-kind='active'
             >
               <MultipleCrossCancelDefault className='w-3 h-3' />
             </button>
@@ -575,6 +594,7 @@ export const ContextPillRow = ({
             aria-label={`Remove ${collection.name}`}
             data-track-category='XyneAI'
             data-track-name='REMOVE_COLLECTION'
+            data-track-kind='active'
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
           </button>
@@ -602,6 +622,7 @@ export const ContextPillRow = ({
             aria-label={`Remove ${attachment.name}`}
             data-track-category='XyneAI'
             data-track-name='REMOVE_ATTACHMENT'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ attachmentId: attachment.id })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -633,6 +654,7 @@ export const ContextPillRow = ({
             aria-label={`Remove ticket ${ticket.title}`}
             data-track-category='XyneAI'
             data-track-name='REMOVE_TICKET'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -660,6 +682,7 @@ export const ContextPillRow = ({
               onClick: (): void => onCanvasClick(canvas),
               ariaLabel: `Open canvas ${canvas.title}`,
               trackName: 'CLICK_CANVAS_CONTEXT_PILL',
+              trackKind: 'passive' as const,
               trackMetadata: JSON.stringify({ canvasId: canvas.canvasId ?? canvas.id }),
             },
           )}
@@ -672,6 +695,7 @@ export const ContextPillRow = ({
             aria-label={`Remove canvas ${canvas.title}`}
             data-track-category='XyneAI'
             data-track-name='REMOVE_CANVAS'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -702,6 +726,7 @@ export const ContextPillRow = ({
                   onClick: (): void => onTranscriptClick(transcript),
                   ariaLabel: `Open conversation for ${transcript.title}`,
                   trackName: 'CLICK_TRANSCRIPT_CONTEXT_PILL',
+                  trackKind: 'passive' as const,
                   trackMetadata: JSON.stringify({ transcriptId: transcript.id }),
                 }
               : undefined,
@@ -715,6 +740,7 @@ export const ContextPillRow = ({
             aria-label={`Remove transcript ${transcript.title}`}
             data-track-category='XyneAI'
             data-track-name='REMOVE_TRANSCRIPT'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ transcriptId: transcript.id })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -745,6 +771,7 @@ export const ContextPillRow = ({
                     ? `Open transcript for ${recording.title}`
                     : `Open recording ${recording.title}`,
                   trackName: 'CLICK_RECORDING_CONTEXT_PILL',
+                  trackKind: 'passive' as const,
                   trackMetadata: JSON.stringify({ recordingId: recording.id }),
                 }
               : undefined,
@@ -758,6 +785,7 @@ export const ContextPillRow = ({
             aria-label={`Remove recording ${recording.title}`}
             data-track-category='XyneAI'
             data-track-name='REMOVE_RECORDING'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ recordingId: recording.id })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -783,6 +811,7 @@ export const ContextPillRow = ({
             aria-label='Remove all activities'
             data-track-category='XyneAI'
             data-track-name='RemoveAllActivities'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ activityCount: activities.length })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
@@ -867,6 +896,7 @@ export const ContextPillRow = ({
       aria-label={`Show ${count} more context ${count === 1 ? 'item' : 'items'}`}
       data-track-category='XyneAI'
       data-track-name='EXPAND_CONTEXT_PILLS'
+      data-track-kind='passive'
     >
       <span className={CONTEXT_PILL_LABEL_CLASS}>+{count} more</span>
     </button>

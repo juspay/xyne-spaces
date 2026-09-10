@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'react';
 import { ChevronRight } from '@xyne/icons';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
+import type { InteractionKind } from '@xyne/shared';
 
 export interface EntitySharePillProps {
   title: string;
@@ -12,6 +13,7 @@ export interface EntitySharePillProps {
   /** Omit to render the card inert — the viewer has no access to open it. */
   onOpen?: (() => void) | undefined;
   trackName?: string;
+  trackKind?: InteractionKind;
 }
 
 /**
@@ -26,6 +28,7 @@ export const EntitySharePill: React.FC<EntitySharePillProps> = ({
   ariaLabel,
   onOpen,
   trackName = 'OPEN_SHARED_ENTITY',
+  trackKind = 'passive',
 }) => (
   <button
     type='button'
@@ -38,6 +41,7 @@ export const EntitySharePill: React.FC<EntitySharePillProps> = ({
     aria-label={ariaLabel}
     data-track-category='MESSAGE'
     data-track-name={trackName}
+    data-track-kind={trackKind}
   >
     <span
       className='flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors'

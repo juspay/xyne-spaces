@@ -62,6 +62,7 @@ export function PriorityPicker({
       aria-label='Change priority'
       data-track-category='Tickets'
       data-track-name='ToggleRowPriority'
+      data-track-kind='active'
     >
       {getPriorityIcon(current)}
       {!compact && <span>{label(current)}</span>}
@@ -94,6 +95,7 @@ export function PriorityPicker({
             )}
             data-track-category='Tickets'
             data-track-name='SelectRowPriority'
+            data-track-kind='active'
           >
             {getPriorityIcon(p)}
             <span className='text-foreground'>{label(p)}</span>

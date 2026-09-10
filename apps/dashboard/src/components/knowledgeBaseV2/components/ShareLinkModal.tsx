@@ -51,6 +51,7 @@ export const ShareLinkModal = ({
             className='p-1 hover:bg-muted rounded transition-colors flex-shrink-0'
             data-track-category='knowledge-base'
             data-track-name='close-share-link-modal'
+            data-track-kind='passive'
           >
             <X size={20} className='text-muted-foreground' />
           </button>
@@ -77,6 +78,7 @@ export const ShareLinkModal = ({
             onClick={handleCopyLink}
             data-track-category='knowledge-base'
             data-track-name='share-link-modal-copy'
+            data-track-kind='passive'
             className='inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 -ml-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-primary'
           >
             <Link2 size={16} />
@@ -86,6 +88,7 @@ export const ShareLinkModal = ({
             onClick={onClose}
             data-track-category='knowledge-base'
             data-track-name='share-link-modal-done'
+            data-track-kind='passive'
           >
             Done
           </Button>

@@ -91,6 +91,7 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
               title='New chat'
               data-track-category='CLAW_CHAT'
               data-track-name='NEW_CHAT'
+              data-track-kind='active'
               className='flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             >
               <SquarePen className='size-4' />
@@ -105,6 +106,7 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
               title='Conversation history'
               data-track-category='CLAW_CHAT'
               data-track-name='TOGGLE_HISTORY'
+              data-track-kind='passive'
               className='flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             >
               <History className='size-4' />
@@ -119,6 +121,7 @@ function ClawChat({ onRequestClose }: ClawChatProps = {}): ReactElement {
               title='Settings'
               data-track-category='CLAW_CHAT'
               data-track-name='TOGGLE_SETTINGS'
+              data-track-kind='active'
               className='flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             >
               <Settings className='size-4' />

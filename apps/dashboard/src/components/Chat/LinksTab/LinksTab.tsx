@@ -155,6 +155,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
         className='group flex items-start gap-3 p-3 rounded-lg border border-border hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer'
         data-track-category='CHANNEL_LINKS'
         data-track-name='OpenLink'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ linkId: link.id, url: link.url, title: link.title })}
       >
         {link.favicon ? (
@@ -188,6 +189,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               title='Edit link'
               data-track-category='CHANNEL_LINKS'
               data-track-name='EditLink'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({
                 linkId: link.id,
                 title: link.title,
@@ -205,6 +207,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               title='Delete link'
               data-track-category='CHANNEL_LINKS'
               data-track-name='DeleteLink'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({
                 linkId: link.id,
                 title: link.title,
@@ -241,6 +244,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               className='flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm'
               data-track-category='CHANNEL_LINKS'
               data-track-name='OpenAddLinkDialog'
+              data-track-kind='passive'
             >
               <Plus size={16} />
               Add Link
@@ -270,6 +274,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground disabled:bg-muted disabled:cursor-not-allowed'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkUrl'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({
                     linkId: linkToEdit?.id,
                     url: formData.url,
@@ -298,6 +303,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkTitle'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({
                     linkId: linkToEdit?.id,
                     title: formData.title,
@@ -321,6 +327,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground resize-none'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkDescription'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({
                     linkId: linkToEdit?.id,
                     description: formData.description,
@@ -344,6 +351,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                     }`}
                     data-track-category='CHANNEL_LINKS'
                     data-track-name='SelectSharedVisibility'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       linkId: linkToEdit?.id,
                       visibility: 'DEFAULT',
@@ -365,6 +373,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                     }`}
                     data-track-category='CHANNEL_LINKS'
                     data-track-name='SelectPersonalVisibility'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       linkId: linkToEdit?.id,
                       visibility: 'PERSONAL',
@@ -389,6 +398,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   className='flex-1 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-accent transition-colors text-sm font-medium'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='CancelAddLink'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ linkId: linkToEdit?.id })}
                 >
                   Cancel
@@ -510,6 +520,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               className='flex-1 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-accent transition-colors text-sm font-medium'
               data-track-category='CHANNEL_LINKS'
               data-track-name='CancelDeleteLink'
+              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -519,6 +530,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               className='flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium'
               data-track-category='CHANNEL_LINKS'
               data-track-name='ConfirmDeleteLink'
+              data-track-kind='active'
               data-ph-capture-attribute-track-id='delete_channel_link'
             >
               Delete Link

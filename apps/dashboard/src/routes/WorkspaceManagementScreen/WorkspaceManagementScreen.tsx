@@ -60,6 +60,7 @@ export const WorkspaceManagementScreen = (): ReactElement => {
           onClick={handleBack}
           data-track-category='workspace-management'
           data-track-name='BACK_FROM_WORKSPACE_MANAGEMENT'
+          data-track-kind='passive'
           className='gap-2'
         >
           <ChevronLeft className='w-4 h-4' />

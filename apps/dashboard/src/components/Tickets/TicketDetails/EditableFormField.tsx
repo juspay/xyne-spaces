@@ -248,6 +248,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
               data-track-category='Tickets'
               data-track-name='EditDateField'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ fieldName })}
             />
           </div>
@@ -363,6 +364,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
             data-track-category='Tickets'
             data-track-name='EditTextField'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ fieldName, fieldType })}
           />
         </div>
@@ -394,6 +396,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
           }}
           data-track-category='TicketDetails'
           data-track-name='EditUserField'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({
             fieldName,
             fieldType,
@@ -441,6 +444,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
         }}
         data-track-category='TicketDetails'
         data-track-name='EditField'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
       >
         {displayValue || '—'}

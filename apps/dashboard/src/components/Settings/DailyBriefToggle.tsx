@@ -17,6 +17,7 @@ export function DailyBriefToggle({ available }: DailyBriefToggleProps): ReactEle
       className='mt-3 border-t border-border pt-3'
       data-track-category='DailyBrief'
       data-track-name='daily-brief-preferences-toggle'
+      data-track-kind='passive'
     >
       <div className='flex items-center justify-between gap-4'>
         <div className={cn(!available && 'opacity-50')}>

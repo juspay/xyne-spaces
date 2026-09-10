@@ -79,6 +79,7 @@ const AppNavigator = (): ReactElement => {
             className={canGoBack ? buttonClass : disabledButtonClass}
             data-track-category='APP_NAVIGATOR'
             data-track-name='GO_BACK'
+            data-track-kind='passive'
           >
             <ArrowLeft size={16} />
           </button>
@@ -92,6 +93,7 @@ const AppNavigator = (): ReactElement => {
             className={canGoForward ? buttonClass : disabledButtonClass}
             data-track-category='APP_NAVIGATOR'
             data-track-name='GO_FORWARD'
+            data-track-kind='passive'
           >
             <ArrowRight size={16} />
           </button>
@@ -106,6 +108,7 @@ const AppNavigator = (): ReactElement => {
             className={buttonClass}
             data-track-category='APP_NAVIGATOR'
             data-track-name='OPEN_SEARCH'
+            data-track-kind='passive'
           >
             <SearchBig size={16} />
           </button>

@@ -301,6 +301,7 @@ function JsonNode({
         type='button'
         data-track-category='XyneAI'
         data-track-name='DEBUG_JSON_NODE_TOGGLE'
+        data-track-kind='passive'
         onClick={() => setExpanded(current => !current)}
         className='flex w-full min-w-0 items-center gap-1 py-px text-left hover:bg-black/[0.04] dark:hover:bg-white/[0.04]'
       >
@@ -353,6 +354,7 @@ function CopyJsonButton({ value }: { value: unknown }) {
       type='button'
       data-track-category='XyneAI'
       data-track-name='DEBUG_JSON_COPY'
+      data-track-kind='passive'
       onClick={() => void copy()}
       className='flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
       title='Copy'
@@ -421,6 +423,7 @@ function JsonViewerModal({
             type='button'
             data-track-category='XyneAI'
             data-track-name='DEBUG_JSON_MODAL_CLOSE'
+            data-track-kind='passive'
             onClick={onClose}
             className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
             title='Close'
@@ -467,6 +470,7 @@ function JsonViewer({
             type='button'
             data-track-category='XyneAI'
             data-track-name='DEBUG_JSON_EXPAND'
+            data-track-kind='passive'
             onClick={() => setExpanded(true)}
             className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
             title='Open expanded JSON viewer'
@@ -540,6 +544,7 @@ function ToolResultView({ value }: { value: unknown }) {
                 type='button'
                 data-track-category='XyneAI'
                 data-track-name='DEBUG_TOOL_RESULT_VIEW'
+                data-track-kind='passive'
                 onClick={() => setView(v.id)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${activeView === v.id ? 'bg-xyne-brand text-xyne-fg-inverse' : 'text-xyne-fg-muted hover:text-xyne-fg-primary'}`}
               >
@@ -553,6 +558,7 @@ function ToolResultView({ value }: { value: unknown }) {
               type='button'
               data-track-category='XyneAI'
               data-track-name='DEBUG_TOOL_RESULT_EXPAND'
+              data-track-kind='passive'
               onClick={() => setExpanded(true)}
               className='rounded p-1 text-xyne-fg-muted hover:bg-black/5 dark:hover:bg-white/10 hover:text-xyne-fg-primary'
               title='Open expanded viewer'
@@ -1192,6 +1198,7 @@ function DebugTimelineSection({
                     type='button'
                     data-track-category='XyneAI'
                     data-track-name='DEBUG_TIMELINE_EXPAND_ALL'
+                    data-track-kind='passive'
                     onClick={e => {
                       // Inside <summary> — stop the click from toggling the Timeline itself.
                       e.preventDefault();
@@ -1207,6 +1214,7 @@ function DebugTimelineSection({
                     type='button'
                     data-track-category='XyneAI'
                     data-track-name='DEBUG_TIMELINE_COLLAPSE_ALL'
+                    data-track-kind='passive'
                     onClick={e => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -2592,6 +2600,7 @@ function DebugSessionBody({
                 type='button'
                 data-track-category='XyneAI'
                 data-track-name='DEBUG_TIME_MODE'
+                data-track-kind='passive'
                 onClick={() => setTimeMode(m)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${timeMode === m ? 'bg-xyne-brand text-xyne-fg-inverse' : 'text-xyne-fg-muted hover:text-xyne-fg-primary'}`}
               >
@@ -2949,6 +2958,7 @@ export function AskAIDebugPanel({
           type='button'
           data-track-category='XyneAI'
           data-track-name='DEBUG_PANEL_REFRESH'
+          data-track-kind='passive'
           onClick={() => {
             if (!conversationId) return;
             setRefreshVersion(version => version + 1);
@@ -2963,6 +2973,7 @@ export function AskAIDebugPanel({
           type='button'
           data-track-category='XyneAI'
           data-track-name='DEBUG_PANEL_CLOSE'
+          data-track-kind='passive'
           onClick={onClose}
           className='flex h-7 w-7 items-center justify-center rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface hover:text-xyne-fg-primary'
           aria-label='Close debugger'

@@ -44,6 +44,7 @@ export const AIOnboardingOverlay = (): ReactElement | null => {
       aria-hidden='true'
       data-track-category='AIOnboarding'
       data-track-name='OverlayClick'
+      data-track-kind='passive'
     >
       <button
         onClick={e => {
@@ -54,6 +55,7 @@ export const AIOnboardingOverlay = (): ReactElement | null => {
         aria-label='Skip AI onboarding'
         data-track-category='AIOnboarding'
         data-track-name='SkipButton'
+        data-track-kind='passive'
       >
         Skip
       </button>

@@ -54,6 +54,7 @@ export function IncomingCallActions({
           data-ph-capture-attribute-track-id='reject_incoming_call'
           data-track-category='CALLS_NOTIFICATIONS'
           data-track-name='REJECT_INCOMING_CALL'
+          data-track-kind='active'
           data-track-metadata={trackMetadata}
         >
           <X className='h-[22px] w-[22px]' strokeWidth={2} />
@@ -76,6 +77,7 @@ export function IncomingCallActions({
           data-ph-capture-attribute-track-id='accept_incoming_call'
           data-track-category='CALLS_NOTIFICATIONS'
           data-track-name='ACCEPT_INCOMING_CALL'
+          data-track-kind='active'
           data-track-metadata={trackMetadata}
         >
           <Phone className='h-[22px] w-[22px]' strokeWidth={2} />
@@ -91,6 +93,7 @@ export function IncomingCallActions({
             data-ph-capture-attribute-track-id='accept_incoming_call'
             data-track-category='CALLS_NOTIFICATIONS'
             data-track-name='ACCEPT_INCOMING_CALL'
+            data-track-kind='active'
             data-track-metadata={trackMetadata}
           >
             <Phone className='h-[22px] w-[22px]' strokeWidth={2} />

@@ -400,6 +400,7 @@ function Collapsible({
         onClick={onToggle}
         data-track-category='automation-builder'
         data-track-name='webhook-collapsible-toggle'
+        data-track-kind='passive'
         className={cn(
           'flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
@@ -485,6 +486,7 @@ function AuthEditor({
                 aria-pressed={showPassword}
                 data-track-category='automation-builder'
                 data-track-name='webhook-toggle-password-visibility'
+                data-track-kind='passive'
                 className={cn(
                   'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-border',
                   'text-muted-foreground hover:text-foreground hover:bg-accent/40',
@@ -676,6 +678,7 @@ function HeadersEditor({
               aria-label={`Remove header ${i + 1}`}
               data-track-category='automation-builder'
               data-track-name='webhook-header-remove'
+              data-track-kind='active'
               className={cn(
                 'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                 'hover:text-red-600 hover:bg-red-500/10',
@@ -693,6 +696,7 @@ function HeadersEditor({
         onClick={addRow}
         data-track-category='automation-builder'
         data-track-name='ADD_WEBHOOK_ROW'
+        data-track-kind='active'
         className='self-start'
       >
         <Plus className='size-4' />

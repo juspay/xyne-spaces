@@ -168,6 +168,7 @@ const RecipientLine = ({
         onClick={() => inputRef.current?.focus()}
         data-track-category={trackCategory}
         data-track-name={`recording_email_${field}_recipients_focus`}
+        data-track-kind='active'
         onKeyDown={event => {
           if (
             event.target === event.currentTarget &&
@@ -203,6 +204,7 @@ const RecipientLine = ({
           aria-label={`${label} recipients`}
           data-track-category={trackCategory}
           data-track-name={`recording_email_${field}_input`}
+          data-track-kind='active'
         />
         <RecipientSuggestionsDropdown
           visible={suggestionsOpen}
@@ -410,6 +412,7 @@ export const PostRecordingToEmailModal = ({
             aria-label='Close email draft'
             data-track-category={trackCategory}
             data-track-name='close_recording_email_draft'
+            data-track-kind='passive'
           >
             <X className='size-5' aria-hidden='true' />
           </button>
@@ -454,6 +457,7 @@ export const PostRecordingToEmailModal = ({
                 className='rounded px-1 py-0.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground'
                 data-track-category={trackCategory}
                 data-track-name='recording_email_open_cc'
+                data-track-kind='passive'
               >
                 Cc
               </button>
@@ -480,6 +484,7 @@ export const PostRecordingToEmailModal = ({
                 aria-label='Remove Cc field'
                 data-track-category={trackCategory}
                 data-track-name='recording_email_remove_cc'
+                data-track-kind='active'
               >
                 <X className='size-3.5' aria-hidden='true' />
               </button>
@@ -498,6 +503,7 @@ export const PostRecordingToEmailModal = ({
             aria-label='Email subject'
             data-track-category={trackCategory}
             data-track-name='recording_email_subject_input'
+            data-track-kind='passive'
           />
         </label>
 
@@ -514,6 +520,7 @@ export const PostRecordingToEmailModal = ({
                 loading={isConnectingGoogle}
                 data-track-category={trackCategory}
                 data-track-name='recording_email_connect_google'
+                data-track-kind='active'
               >
                 Connect Google email
               </Button>
@@ -597,6 +604,7 @@ export const PostRecordingToEmailModal = ({
                     disabled={isSending}
                     data-track-category={trackCategory}
                     data-track-name='recording_email_remove_attachment'
+                    data-track-kind='active'
                   >
                     <X className='size-3.5' aria-hidden='true' />
                   </button>
@@ -624,6 +632,7 @@ export const PostRecordingToEmailModal = ({
             className='min-w-[164px] gap-2'
             data-track-category={trackCategory}
             data-track-name='send_recording_email'
+            data-track-kind='active'
           >
             {isSending ? <Loader2 className='size-4 animate-spin' /> : <Send className='size-4' />}
             {isSending

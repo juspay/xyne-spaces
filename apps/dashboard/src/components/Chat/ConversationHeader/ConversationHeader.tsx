@@ -262,6 +262,7 @@ const ConversationHeader = ({
               style={APP_NO_DRAG_STYLE}
               data-track-category='CHANNELS'
               data-track-name='TOGGLE_STAR_CHANNEL'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({
                 channelId,
                 isStarred: channelUserStatus?.isStarred,
@@ -294,6 +295,7 @@ const ConversationHeader = ({
               data-testid='channel-info-trigger'
               data-track-category='CHANNELS'
               data-track-name='OPEN_CHANNEL_INFO'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ channelId: channel.id, isDM })}
             >
               <span className='shrink-0 inline-flex items-center leading-none'>
@@ -331,6 +333,7 @@ const ConversationHeader = ({
                   className={cn('h-7 gap-1.5 px-2 rounded-[10px]', actionIconClass)}
                   data-track-category='CHANNELS'
                   data-track-name='VIEW_MEMBERS'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ channelId })}
                 >
                   <span className='shrink-0'>
@@ -351,6 +354,7 @@ const ConversationHeader = ({
                 }}
                 data-track-category='CHANNELS'
                 data-track-name='OPEN_CHANNEL_NOTIFICATIONS'
+                data-track-kind='passive'
                 className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               >
                 <span className='shrink-0'>
@@ -377,6 +381,7 @@ const ConversationHeader = ({
               className='h-7 w-7 rounded-lg'
               data-track-category='CHANNELS'
               data-track-name='OPEN_XYNE_AI'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ channelId })}
             >
               <XyneAIStar />
@@ -391,6 +396,7 @@ const ConversationHeader = ({
                 className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                 data-track-category='CHANNELS'
                 data-track-name='SEARCH_IN_CHANNEL'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ channelId })}
               >
                 <SearchDefault size={16} />
@@ -422,6 +428,7 @@ const ConversationHeader = ({
                   className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                   data-track-category='CHANNELS'
                   data-track-name='OPEN_CHANNEL_MENU'
+                  data-track-kind='passive'
                 >
                   <ThreeDotsMenuVertical size={16} />
                 </Button>
@@ -435,6 +442,7 @@ const ConversationHeader = ({
                   }}
                   data-track-category='CHANNELS'
                   data-track-name='OPEN_CHANNEL_ABOUT'
+                  data-track-kind='passive'
                 >
                   <InformationCircle size={16} className='shrink-0' />
                   Channel details
@@ -444,6 +452,7 @@ const ConversationHeader = ({
                   onClick={() => handleOpenAllLinks()}
                   data-track-category='CHANNELS'
                   data-track-name='OPEN_ALL_CHANNEL_LINKS'
+                  data-track-kind='passive'
                 >
                   <ExternalLinkSquare size={16} className='shrink-0' />
                   Open all links
@@ -464,6 +473,7 @@ const ConversationHeader = ({
                           onClick={() => handleMoveToSection(section.id)}
                           data-track-category='CHANNELS'
                           data-track-name='MOVE_CHANNEL_TO_SECTION'
+                          data-track-kind='active'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -486,6 +496,7 @@ const ConversationHeader = ({
                       onClick={handleLeaveChannel}
                       data-track-category='CHANNELS'
                       data-track-name='LEAVE_CHANNEL'
+                      data-track-kind='active'
                     >
                       <UserArrowRight size={16} className='shrink-0' />
                       Leave channel
@@ -502,6 +513,7 @@ const ConversationHeader = ({
               onClick={onClose}
               data-track-category='CHANNELS'
               data-track-name='CLOSE_CONVERSATION_HEADER'
+              data-track-kind='passive'
               className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               aria-label='Close'
             >
@@ -522,6 +534,7 @@ const ConversationHeader = ({
                   data-testid={`channel-tab-${tab.value}`}
                   data-track-category='CHANNELS'
                   data-track-name='SWITCH_TAB'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ tabValue: tab.value })}
                   onClick={e => setActiveTab?.(tab.value || '', e)}
                   className={cn(

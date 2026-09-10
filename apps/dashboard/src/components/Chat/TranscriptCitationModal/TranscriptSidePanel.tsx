@@ -149,6 +149,7 @@ export function TranscriptSidePanel({
               aria-label='Copy transcript'
               data-track-category='TranscriptPanel'
               data-track-name='copy_transcript'
+              data-track-kind='passive'
             >
               <CopyDefault size={16} aria-hidden='true' />
             </Button>
@@ -163,6 +164,7 @@ export function TranscriptSidePanel({
               aria-label='Download transcript'
               data-track-category='TranscriptPanel'
               data-track-name='download_transcript'
+              data-track-kind='passive'
             >
               <DownloadDown size={16} aria-hidden='true' />
             </Button>
@@ -177,6 +179,7 @@ export function TranscriptSidePanel({
               aria-label='Close transcript'
               data-track-category='TranscriptPanel'
               data-track-name='close_transcript'
+              data-track-kind='passive'
             >
               <MultipleCrossCancelDefault size={16} aria-hidden='true' />
             </Button>
@@ -198,6 +201,7 @@ export function TranscriptSidePanel({
             className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
             data-track-category='TranscriptPanel'
             data-track-name='search_transcript'
+            data-track-kind='passive'
           />
           {search.query ? (
             <>
@@ -216,6 +220,7 @@ export function TranscriptSidePanel({
                 aria-label='Previous match'
                 data-track-category='TranscriptPanel'
                 data-track-name='transcript_search_previous'
+                data-track-kind='passive'
               >
                 <ChevronUp className='size-3.5' aria-hidden='true' />
               </Button>
@@ -229,6 +234,7 @@ export function TranscriptSidePanel({
                 aria-label='Next match'
                 data-track-category='TranscriptPanel'
                 data-track-name='transcript_search_next'
+                data-track-kind='passive'
               >
                 <ChevronDown className='size-3.5' aria-hidden='true' />
               </Button>
@@ -241,6 +247,7 @@ export function TranscriptSidePanel({
                 aria-label='Clear transcript search'
                 data-track-category='TranscriptPanel'
                 data-track-name='clear_transcript_search'
+                data-track-kind='passive'
               >
                 <MultipleCrossCancelDefault className='size-3.5' aria-hidden='true' />
               </Button>

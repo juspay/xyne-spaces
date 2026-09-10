@@ -76,6 +76,7 @@ const DigitalTwinSettingsTab = (): ReactElement => {
           maxLength={MAX_SUFFIX_LEN}
           data-track-category='Claw Agents'
           data-track-name='Digital Twin response suffix'
+          data-track-kind='passive'
           className='w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none'
         />
         <div className='flex justify-end text-[11px]'>
@@ -139,6 +140,7 @@ const DigitalTwinSettingsTab = (): ReactElement => {
               onChange={e => setScore(Number(e.target.value))}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin auto-approve threshold'
+              data-track-kind='active'
               className='w-full accent-primary'
             />
             <div className='mt-1 flex justify-between text-[10px] text-muted-foreground'>
@@ -154,6 +156,7 @@ const DigitalTwinSettingsTab = (): ReactElement => {
           onClick={save}
           data-track-category='Claw Agents'
           data-track-name='SAVE_DIGITAL_TWIN_SETTINGS'
+          data-track-kind='active'
           loading={updateMutation.isPending}
           disabled={!dirty}
         >

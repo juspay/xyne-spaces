@@ -59,6 +59,7 @@ export function TableList({ tables, selectedId, onSelect, search }: TableListPro
                     onClick={() => onSelect(t.id)}
                     data-track-category='DYNAMIC_DASHBOARD'
                     data-track-name='Db_Browser_Select_Table'
+                    data-track-kind='passive'
                     className={`group relative w-full flex items-center gap-2.5 pl-3 pr-2 py-[7px] text-left transition-colors ${
                       active ? 'bg-accent' : 'hover:bg-accent/50'
                     }`}

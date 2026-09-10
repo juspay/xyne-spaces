@@ -74,6 +74,7 @@ const MeetWithPanel = ({
           className='flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-muted cursor-text overflow-hidden'
           data-track-category='CALENDAR'
           data-track-name='meet-with-input-focus'
+          data-track-kind='passive'
           onClick={() => inputRef.current?.focus()}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') inputRef.current?.focus();
@@ -123,6 +124,7 @@ const MeetWithPanel = ({
               value={query}
               data-track-category='CALENDAR'
               data-track-name='meet-with-search'
+              data-track-kind='passive'
               onChange={e => {
                 setQuery(e.target.value);
                 setIsOpen(true);

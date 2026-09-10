@@ -98,6 +98,7 @@ const SidebarItems = ({
           className={baseClasses}
           data-track-category='team-intelligence'
           data-track-name='select-sidebar-item'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({
             label: typeof label === 'string' ? label : 'rich-label',
             isActive,
@@ -112,6 +113,7 @@ const SidebarItems = ({
           className={baseClasses}
           data-track-category='team-intelligence'
           data-track-name='select-sidebar-item'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({
             label: typeof label === 'string' ? label : 'rich-label',
             isActive,

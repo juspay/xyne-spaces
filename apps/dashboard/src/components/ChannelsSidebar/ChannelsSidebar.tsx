@@ -87,6 +87,7 @@ const ChannelsSidebar = ({
                 title='Collapse sidebar'
                 data-track-category='Support'
                 data-track-name='CollapseChannelsSidebar'
+                data-track-kind='passive'
               >
                 <ChevronLeft className='size-4 text-muted-foreground' />
               </button>

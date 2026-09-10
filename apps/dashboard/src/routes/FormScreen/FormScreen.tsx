@@ -90,6 +90,7 @@ const FormScreen = (): ReactElement => {
                 onClick={handleCreateFormClick}
                 data-track-category='Forms'
                 data-track-name='CreateForm'
+                data-track-kind='active'
               >
                 <PlusDefault className='size-4' />
                 Create Form
@@ -111,6 +112,7 @@ const FormScreen = (): ReactElement => {
                 aria-label='Search forms'
                 data-track-category='Forms'
                 data-track-name='Search forms'
+                data-track-kind='passive'
                 className='min-w-0 flex-1 bg-transparent text-sm font-[450] leading-[1.2] text-foreground outline-none placeholder:text-muted-foreground'
               />
             </div>
@@ -127,6 +129,7 @@ const FormScreen = (): ReactElement => {
                   onClick={() => handleFormCardClick(form)}
                   data-track-category='Forms'
                   data-track-name='SelectForm'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ formId: form.id })}
                 />
               ))}

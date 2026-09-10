@@ -67,6 +67,7 @@ export const TimeRangePicker = ({ value, onChange }: TimeRangePickerProps): Reac
           }`}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Open_Time_Range_Picker'
+          data-track-kind='passive'
         >
           <span>{label}</span>
           <ChevronDown size={14} className='text-xyne-gray-400' />
@@ -191,6 +192,7 @@ const RangeCalendar = ({ initial, onSelect }: RangeCalendarProps): ReactElement 
           aria-label='Previous month'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Calendar_Prev_Month'
+          data-track-kind='passive'
         >
           <ChevronLeft className='size-4' />
         </button>
@@ -202,6 +204,7 @@ const RangeCalendar = ({ initial, onSelect }: RangeCalendarProps): ReactElement 
           aria-label='Next month'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Calendar_Next_Month'
+          data-track-kind='passive'
         >
           <ChevronRight className='size-4' />
         </button>
@@ -229,6 +232,7 @@ const RangeCalendar = ({ initial, onSelect }: RangeCalendarProps): ReactElement 
               onMouseLeave={() => setHoverDate(null)}
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Calendar_Pick_Day'
+              data-track-kind='passive'
               className={cn(
                 'flex items-center justify-center h-8 w-8 mx-auto text-sm rounded-full cursor-pointer',
                 getDayClass(day),
@@ -256,6 +260,7 @@ const PresetItem = ({ label, selected, onClick }: PresetItemProps): ReactElement
     }`}
     data-track-category='DYNAMIC_DASHBOARD'
     data-track-name='Select_Time_Preset'
+    data-track-kind='passive'
   >
     <span>{label}</span>
     {selected && <Check size={12} className='text-foreground' />}
@@ -293,6 +298,7 @@ export const AutoRefreshPicker = ({ value, onChange }: AutoRefreshPickerProps): 
           }`}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Open_Auto_Refresh_Picker'
+          data-track-kind='passive'
         >
           <RefreshCw
             size={14}

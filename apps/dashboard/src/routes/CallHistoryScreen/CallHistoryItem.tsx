@@ -222,6 +222,7 @@ function renderCallItem({
       data-testid={`${statusText}`}
       data-track-category='CALLS'
       data-track-name='OpenCallHistory'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ callId: call.id })}
     >
       <div className='flex items-center justify-between gap-4'>
@@ -287,6 +288,7 @@ function renderCallItem({
             }}
             data-track-category='CALLS'
             data-track-name='ViewParticipants'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ callId: call.id })}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -315,6 +317,7 @@ function renderCallItem({
               }}
               data-track-category='CALLS'
               data-track-name='GoToTranscript'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ callId: call.id })}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -349,6 +352,7 @@ function renderCallItem({
               }}
               data-track-category='CALL_HISTORY'
               data-track-name='DownloadTranscript'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ callId: call.id })}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {

@@ -104,6 +104,7 @@ export function ReadonlyContextPills({
         className='flex h-6 flex-shrink-0 items-center gap-1 rounded-md border border-border bg-muted/60 px-1.5 text-[11.5px] font-medium text-muted-foreground transition hover:border-secondary hover:bg-secondary hover:text-foreground'
         data-track-category='XyneAI'
         data-track-name='TOGGLE_CONTEXT_PILLS'
+        data-track-kind='passive'
       >
         <Paperclip className='h-3 w-3 shrink-0' aria-hidden />
         <span>{items.length}</span>

@@ -85,6 +85,7 @@ const SidebarItem = ({
       )}
       data-track-category='Projects'
       data-track-name='SelectSidebarItem'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({
         label: typeof label === 'string' ? label : 'highlighted-text',
         isActive,

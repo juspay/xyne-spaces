@@ -821,6 +821,7 @@ const SearchResults = (): ReactElement => {
             className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
             data-track-category='SEARCH_RESULTS'
             data-track-name='GO_BACK'
+            data-track-kind='passive'
           >
             <ArrowLeft size={16} />
           </button>
@@ -835,6 +836,7 @@ const SearchResults = (): ReactElement => {
             className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
             data-track-category='SEARCH_RESULTS'
             data-track-name='GO_FORWARD'
+            data-track-kind='passive'
           >
             <ArrowRight size={16} />
           </button>
@@ -868,6 +870,7 @@ const SearchResults = (): ReactElement => {
               title='Compare how results ranked'
               data-track-category='SEARCH_RESULTS'
               data-track-name='TOGGLE_COMPARE'
+              data-track-kind='passive'
               className={cn(
                 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
                 compareMode
@@ -935,6 +938,7 @@ const SearchResults = (): ReactElement => {
                 onClick={clearSelection}
                 data-track-category='SEARCH_RESULTS'
                 data-track-name='CLEAR_COMPARE'
+                data-track-kind='passive'
                 className='text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-full hover:bg-muted active:scale-[0.96] transition'
               >
                 Clear
@@ -944,6 +948,7 @@ const SearchResults = (): ReactElement => {
                 disabled={selected.length < 2}
                 data-track-category='SEARCH_RESULTS'
                 data-track-name='OPEN_COMPARE'
+                data-track-kind='passive'
                 className='inline-flex items-center gap-1.5 text-xs font-medium bg-primary text-primary-foreground px-3 py-1.5 rounded-full shadow-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.96] transition'
               >
                 <GitCompare size={13} />
@@ -1101,6 +1106,7 @@ function UserResultCard({
       className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_USER'
+      data-track-kind='passive'
     >
       <Avatar userId={result.id} size='md' showActiveStatus />
       <div className='min-w-0'>
@@ -1263,6 +1269,7 @@ function ResultsBody({
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_ATTACHMENT'
+          data-track-kind='passive'
         >
           <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
             {icon}
@@ -1312,6 +1319,7 @@ function ResultsBody({
           className='w-full flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_MAIL'
+          data-track-kind='passive'
         >
           <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
             <Mail className='size-4 text-muted-foreground' />
@@ -1384,6 +1392,7 @@ function ResultsBody({
           className='w-full'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_DESK_TICKET_RESULT'
+          data-track-kind='passive'
         >
           <TicketCardV2
             ticket={ticketSummary}
@@ -1521,6 +1530,7 @@ function ResultsBody({
               className='mt-2 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline'
               data-track-category='SEARCH_RESULTS'
               data-track-name='TOGGLE_LOCAL_SECTION'
+              data-track-kind='passive'
             >
               {isExpanded ? 'See less' : `See ${hiddenCount} more`}
             </button>
@@ -1549,6 +1559,7 @@ function ResultsBody({
               className='mt-2 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline'
               data-track-category='SEARCH_RESULTS'
               data-track-name='TOGGLE_USERS_SECTION'
+              data-track-kind='passive'
             >
               {isExpanded ? 'See less' : `See ${hiddenCount} more`}
             </button>
@@ -1715,6 +1726,7 @@ function MobileLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): R
                 aria-label='Close thread'
                 data-track-category='SEARCH_RESULTS'
                 data-track-name='CLOSE_THREAD_PANEL'
+                data-track-kind='passive'
               >
                 <X size={18} />
               </button>

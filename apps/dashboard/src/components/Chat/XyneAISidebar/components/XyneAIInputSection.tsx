@@ -47,6 +47,7 @@ export const XyneAIInputSection = forwardRef<XyneAIInputBoxHandle, XyneAIInputSe
               aria-label='Close context modal'
               data-track-category='XyneAI'
               data-track-name='CLOSE_CONTEXT_MODAL_BACKDROP'
+              data-track-kind='passive'
             />
             <div
               className={

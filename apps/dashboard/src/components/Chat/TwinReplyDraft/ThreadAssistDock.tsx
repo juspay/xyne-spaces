@@ -242,6 +242,7 @@ function EditHeader({
         aria-label='Back to drafts'
         data-track-category='twin-dock'
         data-track-name='edit-back'
+        data-track-kind='active'
         className='absolute inset-0 cursor-pointer transition-colors hover:bg-muted/20'
       />
       <span className='pointer-events-none relative flex h-[22px] w-4 shrink-0 items-center justify-center text-muted-foreground'>
@@ -282,6 +283,7 @@ function CollapsedBar({
         aria-label='Expand AI replies'
         data-track-category='twin-dock'
         data-track-name='expand'
+        data-track-kind='passive'
         className='flex w-full select-none items-center gap-1.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/[0.04]'
       >
         <span className='flex shrink-0 items-center gap-1'>
@@ -306,6 +308,7 @@ function CollapsedBar({
       aria-label='Expand'
       data-track-category='twin-dock'
       data-track-name='expand'
+      data-track-kind='passive'
       className='flex w-full select-none items-center gap-2.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/[0.04]'
     >
       <span className='text-sm font-semibold leading-[22px] tracking-[-0.1px] text-foreground'>
@@ -346,6 +349,7 @@ function ExpandedHeader({
         aria-label='Collapse'
         data-track-category='twin-dock'
         data-track-name='collapse'
+        data-track-kind='passive'
         className='absolute inset-0 cursor-pointer transition-colors hover:bg-muted/30'
       />
       {showToggle ? (
@@ -398,6 +402,7 @@ function HeaderTab({
       onClick={onClick}
       data-track-category='twin-dock'
       data-track-name={`tab-${label.toLowerCase()}`}
+      data-track-kind='passive'
       className={cn(
         'pointer-events-auto flex h-[22px] items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors',
         active
@@ -430,6 +435,7 @@ function Pager({
           aria-label='Previous draft'
           data-track-category='twin-dock'
           data-track-name='pager-prev'
+          data-track-kind='passive'
           className={btn}
         >
           <ChevronBigLeft size={16} />
@@ -448,6 +454,7 @@ function Pager({
           aria-label='Next draft'
           data-track-category='twin-dock'
           data-track-name='pager-next'
+          data-track-kind='passive'
           className={btn}
         >
           <ChevronBigRight size={16} />
@@ -620,6 +627,7 @@ function SourcePreview({ source }: { source: TwinSourceInfo }): ReactElement | n
       aria-label={clickable ? 'Jump to message' : undefined}
       data-track-category='twin-dock'
       data-track-name='jump-to-source'
+      data-track-kind='passive'
       className={cn(
         'group flex w-full min-w-0 items-center gap-2 rounded-md border-[0.4px] border-border/60 bg-muted py-2 pl-2 pr-2.5',
         clickable && 'cursor-pointer',
@@ -781,6 +789,7 @@ function ReplyCard({
             onChange={e => setEditText(e.target.value)}
             data-track-category='twin-dock'
             data-track-name='edit-draft'
+            data-track-kind='active'
             className='h-[120px] w-full resize-none rounded-md bg-background px-2 py-1.5 text-sm leading-[22px] text-foreground outline-none ring-1 ring-border focus:ring-foreground/40'
           />
         ) : (
@@ -814,6 +823,7 @@ function ReplyCard({
                     aria-expanded={reasoningOpen}
                     data-track-category='twin-dock'
                     data-track-name='open-reasoning'
+                    data-track-kind='passive'
                     // Same px-[9px] py-1.5 band as the icon buttons beside it, so
                     // the four controls read as one row.
                     className={cn(
@@ -834,6 +844,7 @@ function ReplyCard({
                 aria-label='Discard draft'
                 data-track-category='twin-dock'
                 data-track-name='decline'
+                data-track-kind='active'
                 className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
               >
                 <ChatCancel size={14} />
@@ -847,6 +858,7 @@ function ReplyCard({
                   aria-label={editing ? 'Cancel edit' : 'Edit draft'}
                   data-track-category='twin-dock'
                   data-track-name='edit'
+                  data-track-kind='active'
                   className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
                 >
                   <PencilEraserEditLine size={14} />
@@ -858,6 +870,7 @@ function ReplyCard({
             size='sm'
             data-track-category='twin-dock'
             data-track-name='send-draft'
+            data-track-kind='active'
             trackId='twin_send_reply'
             trackAction={send}
             disabled={loading}

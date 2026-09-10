@@ -75,6 +75,7 @@ export function ValidationBanner({
         onClick={() => setExpanded(prev => !prev)}
         data-track-category='automation-builder'
         data-track-name='validation-banner-toggle'
+        data-track-kind='passive'
       >
         <AlertTriangle className='size-4 flex-shrink-0' />
         <span className='flex-1 font-medium'>

@@ -131,6 +131,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 className='hover:bg-border rounded-full p-0.5'
                 data-track-category='Tickets'
                 data-track-name='RemoveTag'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ tag })}
               >
                 <X className='size-2.5' />
@@ -147,6 +148,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
             data-track-event='blur'
             data-track-category='Tickets'
             data-track-name='TagSearchInput'
+            data-track-kind='passive'
           />
         </label>
       </Popover.Trigger>
@@ -179,6 +181,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                     } ${selected ? 'text-blue-700 font-medium' : 'text-foreground'}`}
                     data-track-category='Tickets'
                     data-track-name='SelectTag'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ tag, selected: !selected })}
                   >
                     <div className='flex items-center gap-2'>
@@ -210,6 +213,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                   }`}
                   data-track-category='Tickets'
                   data-track-name='CreateTag'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ tagName: search.trim() })}
                 >
                   <Plus className='size-4' />

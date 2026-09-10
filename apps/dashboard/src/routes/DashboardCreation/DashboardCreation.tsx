@@ -97,6 +97,7 @@ export const DashboardCreation: React.FC = () => {
               className='w-full'
               data-track-category='Dashboards'
               data-track-name='CreateDashboard'
+              data-track-kind='active'
             >
               <LayoutDashboard className='w-4 h-4' />
               Create Dashboard
@@ -138,6 +139,7 @@ export const DashboardCreation: React.FC = () => {
                       className='flex-1 text-left'
                       data-track-category='Dashboards'
                       data-track-name='SelectDashboard'
+                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         dashboardId: dashboard.id,
                         dashboardName: dashboard.name,
@@ -150,6 +152,7 @@ export const DashboardCreation: React.FC = () => {
                       className='p-1 text-muted-foreground hover:text-red-500'
                       data-track-category='Dashboards'
                       data-track-name='DeleteDashboard'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
                     >
                       <Trash2 className='w-4 h-4' />
@@ -163,6 +166,7 @@ export const DashboardCreation: React.FC = () => {
                     className='text-sm text-blue-600 hover:text-blue-800'
                     data-track-category='Dashboards'
                     data-track-name='OpenDashboard'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
                   >
                     Open Dashboard →

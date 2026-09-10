@@ -136,6 +136,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           onClick={handleEditorClick}
           data-track-category='CHAT_INPUT'
           data-track-name='FOCUS_MOBILE_EDITOR'
+          data-track-kind='passive'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               // Don't intercept when editor has focus — let Enter insert newline, Space insert space
@@ -191,6 +192,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           }}
           data-track-category='CHAT_INPUT'
           data-track-name='FOCUS_MOBILE_EDITOR'
+          data-track-kind='passive'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
@@ -208,6 +210,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
             }}
             data-track-category='CHAT_INPUT'
             data-track-name='ATTACH_FILES'
+            data-track-kind='active'
             disabled={disabled || isSending}
             className='p-2 text-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
             aria-label='Attach files'
@@ -244,6 +247,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
               }}
               data-track-category='CHAT_INPUT'
               data-track-name='TOGGLE_VOICE_INPUT'
+              data-track-kind='passive'
               disabled={disabled || isSending || isVoiceTranscribing}
               className={`p-2 rounded-full transition-colors flex-shrink-0 ${
                 isVoiceRecording
@@ -283,6 +287,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   onClick={onAttachClick}
                   data-track-category='CHAT_INPUT'
                   data-track-name='ATTACH_FILES'
+                  data-track-kind='active'
                   disabled={disabled || isSending}
                   className='p-2 text-foreground hover:text-muted-foreground transition-colors'
                   aria-label='Attach files'
@@ -298,6 +303,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                 onClick={() => onShowFormattingToolbar?.()}
                 data-track-category='CHAT_INPUT'
                 data-track-name='OPEN_FORMAT_TOOLBAR'
+                data-track-kind='passive'
                 className='p-2 rounded-full hover:bg-accent active:bg-accent transition-colors'
                 aria-label='Text formatting'
                 onMouseDown={e => e.preventDefault()}
@@ -341,6 +347,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   }}
                   data-track-category='CHAT_INPUT'
                   data-track-name='INSERT_USER_MENTION'
+                  data-track-kind='active'
                   className='p-2 rounded-full hover:bg-accent active:bg-accent transition-colors'
                   aria-label='Mention user'
                   onMouseDown={e => e.preventDefault()}
@@ -359,6 +366,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   }}
                   data-track-category='CHAT_INPUT'
                   data-track-name='INSERT_CHANNEL_MENTION'
+                  data-track-kind='active'
                   className='p-2 rounded-full hover:bg-accent active:bg-accent transition-colors'
                   aria-label='Mention channel'
                   onMouseDown={e => e.preventDefault()}
@@ -373,6 +381,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   onClick={onVoiceToggle}
                   data-track-category='CHAT_INPUT'
                   data-track-name='TOGGLE_VOICE_INPUT'
+                  data-track-kind='passive'
                   disabled={disabled || isSending || isVoiceTranscribing}
                   className={`p-2 rounded-full transition-colors ${
                     isVoiceRecording
@@ -399,6 +408,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
                   onClick={onSend}
                   data-track-category='CHAT_INPUT'
                   data-track-name='SEND_MESSAGE'
+                  data-track-kind='active'
                   disabled={disabled || isSending || !hasContent}
                   className={`
                 p-2 rounded-full transition-all duration-300 flex items-center justify-center

@@ -96,6 +96,7 @@ const FilesystemBlockComponent = ({ jsonSource }: FilesystemBlockProps): ReactEl
               className='flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors'
               data-track-category='FilesystemBlock'
               data-track-name='BACK'
+              data-track-kind='passive'
             >
               <ChevronLeft className='w-3 h-3' />
               Back
@@ -125,6 +126,7 @@ const FilesystemBlockComponent = ({ jsonSource }: FilesystemBlockProps): ReactEl
             className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${viewMode === 'diagram' ? 'bg-blue-100 text-blue-700' : 'text-muted-foreground hover:bg-accent'}`}
             data-track-category='FilesystemBlock'
             data-track-name='VIEW_DIAGRAM'
+            data-track-kind='passive'
           >
             <ImageIcon className='w-3 h-3' />
             Diagram
@@ -134,6 +136,7 @@ const FilesystemBlockComponent = ({ jsonSource }: FilesystemBlockProps): ReactEl
             className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${viewMode === 'code' ? 'bg-blue-100 text-blue-700' : 'text-muted-foreground hover:bg-accent'}`}
             data-track-category='FilesystemBlock'
             data-track-name='VIEW_CODE'
+            data-track-kind='passive'
           >
             <Code2 className='w-3 h-3' />
             Code
@@ -148,6 +151,7 @@ const FilesystemBlockComponent = ({ jsonSource }: FilesystemBlockProps): ReactEl
               title='Download as D2 project (ZIP) — open in d2studio.ai'
               data-track-category='FilesystemBlock'
               data-track-name='DOWNLOAD_D2'
+              data-track-kind='passive'
             >
               <Download className='w-3 h-3' />
             </button>
@@ -161,6 +165,7 @@ const FilesystemBlockComponent = ({ jsonSource }: FilesystemBlockProps): ReactEl
               title='Copy JSON source'
               data-track-category='FilesystemBlock'
               data-track-name='COPY_CODE'
+              data-track-kind='passive'
             >
               {copied ? (
                 <>

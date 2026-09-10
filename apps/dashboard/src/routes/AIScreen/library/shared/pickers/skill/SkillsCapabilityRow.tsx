@@ -52,6 +52,7 @@ export function SkillsCapabilityRow({
           aria-label='Browse skills'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse skills'
+          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <PlusDefault className='size-4' aria-hidden />

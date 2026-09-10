@@ -418,6 +418,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           onClick={e => e.stopPropagation()}
           data-track-category='Tickets'
           data-track-name='EditAssignee'
+          data-track-kind='active'
         >
           <AssigneeEditor
             selectedValue={
@@ -475,6 +476,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           className='cursor-pointer hover:opacity-80 transition-opacity'
           data-track-category='Tickets'
           data-track-name='EditAssigneeInline'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
         >
           {assigneeDisplay}
@@ -581,6 +583,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           )}
           data-track-category='Tickets'
           data-track-name='OpenTicketCard'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
         >
           <span className='text-xs font-medium text-muted-foreground font-mono shrink-0'>
@@ -629,6 +632,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
       )}
       data-track-category='Tickets'
       data-track-name='OpenTicketCard'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
     >
       <div className={`flex ${!isCompact ? 'h-[145px]' : ''}`}>
@@ -694,6 +698,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         onClick={e => e.stopPropagation()}
                         data-track-category='Tickets'
                         data-track-name='EditPriorityInline'
+                        data-track-kind='active'
                       >
                         <EntitySelector
                           options={PriorityOptions}
@@ -720,6 +725,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         )}
                         data-track-category='Tickets'
                         data-track-name='OpenPriorityEditor'
+                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                       >
                         <Tooltip content={` Priority: ${ticket.priority}`}>
@@ -880,6 +886,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                             }}
                             data-track-category='Tickets'
                             data-track-name='EditTagsInline'
+                            data-track-kind='active'
                             data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                           >
                             <span className='w-2 h-2 rounded-full bg-xyne-purple-400 shrink-0' />
@@ -897,6 +904,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                             className='inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border cursor-pointer hover:border-input'
                             data-track-category='Tickets'
                             data-track-name='ExpandTicketTags'
+                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                           >
                             +{tags.length - 1}
@@ -912,6 +920,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         }}
                         data-track-category='Tickets'
                         data-track-name='EditTagsInline'
+                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
                       >
                         <Tooltip content='Add labels'>

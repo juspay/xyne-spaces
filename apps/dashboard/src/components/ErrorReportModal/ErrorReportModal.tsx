@@ -366,6 +366,7 @@ export const ErrorReportModal = ({
             aria-label='Close'
             data-track-category='ERROR_REPORT'
             data-track-name='CloseModal'
+            data-track-kind='passive'
           >
             <X className='size-5' />
           </button>
@@ -390,6 +391,7 @@ export const ErrorReportModal = ({
                 className='inline-flex items-center gap-1.5 text-sm font-medium text-action-primary hover:text-action-primary/80 transition-colors'
                 data-track-category='ERROR_REPORT'
                 data-track-name='ViewMyTickets'
+                data-track-kind='passive'
               >
                 View my tickets
                 <ExternalLink className='size-4' />
@@ -421,6 +423,7 @@ export const ErrorReportModal = ({
                   className='min-h-0 py-2 overflow-hidden'
                   data-track-category='ERROR_REPORT'
                   data-track-name='TitleChanged'
+                  data-track-kind='passive'
                 />
               </div>
 
@@ -439,6 +442,7 @@ export const ErrorReportModal = ({
                   className='min-h-[140px]'
                   data-track-category='ERROR_REPORT'
                   data-track-name='DescriptionChanged'
+                  data-track-kind='passive'
                 />
               </div>
 
@@ -496,6 +500,7 @@ export const ErrorReportModal = ({
                           aria-label='Cancel picker'
                           data-track-category='ERROR_REPORT'
                           data-track-name='CancelPicker'
+                          data-track-kind='passive'
                         >
                           <X className='size-4' />
                         </button>
@@ -510,6 +515,7 @@ export const ErrorReportModal = ({
                           className='flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background hover:border-action-primary hover:bg-action-primary/5 p-2 transition-colors text-left'
                           data-track-category='ERROR_REPORT'
                           data-track-name='SelectSource'
+                          data-track-kind='passive'
                         >
                           <img
                             src={source.thumbnail}
@@ -535,6 +541,7 @@ export const ErrorReportModal = ({
                       onDragOver={handleDragOver}
                       data-track-category='ERROR_REPORT'
                       data-track-name='DragDropArea'
+                      data-track-kind='passive'
                       onDrop={handleDrop}
                       className={`flex-1 rounded-lg border border-dashed border-action-primary transition-all flex flex-col items-center justify-center gap-2 px-4 py-8 text-sm cursor-pointer text-action-primary ${
                         isDragging
@@ -558,6 +565,7 @@ export const ErrorReportModal = ({
                           onClick={() => void handleStartRecordingPicker()}
                           data-track-category='ERROR_REPORT'
                           data-track-name='StartRecording'
+                          data-track-kind='active'
                           className='rounded-lg border border-dashed border-muted-foreground/40 flex flex-col items-center justify-center gap-2 px-5 py-8 text-sm cursor-pointer text-muted-foreground hover:text-foreground hover:border-muted-foreground hover:bg-muted/30 transition-all'
                         >
                           <Monitor className='size-6' />
@@ -597,6 +605,7 @@ export const ErrorReportModal = ({
                             className='flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors'
                             data-track-category='ERROR_REPORT'
                             data-track-name='SaveVideoToDisk'
+                            data-track-kind='active'
                             title='Save to desktop'
                           >
                             <Download className='size-3' />
@@ -622,6 +631,7 @@ export const ErrorReportModal = ({
                   disabled={isSubmitting}
                   data-track-category='ERROR_REPORT'
                   data-track-name='Cancel'
+                  data-track-kind='passive'
                 >
                   Cancel
                 </Button>
@@ -633,6 +643,7 @@ export const ErrorReportModal = ({
                   className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
                   data-track-category='ERROR_REPORT'
                   data-track-name='Submit'
+                  data-track-kind='active'
                 >
                   Submit report
                 </Button>

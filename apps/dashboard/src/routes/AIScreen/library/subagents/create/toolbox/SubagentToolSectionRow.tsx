@@ -58,6 +58,7 @@ export function SubagentToolSectionRow({
           aria-label={`Browse ${section.title}`}
           data-track-category='Claw Agents'
           data-track-name='Create subagent v2: browse tools'
+          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <PlusDefault className='size-4' aria-hidden />

@@ -136,6 +136,7 @@ const UserGuideScreen = (): ReactElement => {
                 placeholder="Try 'create ticket' or 'Xyne AI'"
                 data-track-category='USER_GUIDE'
                 data-track-name='SEARCH_FEATURES'
+                data-track-kind='passive'
                 className='w-full rounded-xl border border-border bg-background py-2.5 pl-10 pr-3.5 text-base text-foreground outline-none focus:ring-2 focus:ring-primary/35 placeholder:text-muted-foreground/55'
               />
             </div>
@@ -165,6 +166,7 @@ const UserGuideScreen = (): ReactElement => {
                     onClick={() => setQuery(suggestion)}
                     data-track-category='USER_GUIDE'
                     data-track-name='SEARCH_SUGGESTION'
+                    data-track-kind='passive'
                     className='text-sm px-3 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 text-foreground transition-colors'
                   >
                     {suggestion}
@@ -177,6 +179,7 @@ const UserGuideScreen = (): ReactElement => {
               onClick={() => setQuery('')}
               data-track-category='USER_GUIDE'
               data-track-name='CLEAR_SEARCH'
+              data-track-kind='passive'
               className='text-sm text-primary hover:underline mt-1'
             >
               Clear search
@@ -195,6 +198,7 @@ const UserGuideScreen = (): ReactElement => {
                 onChange={e => scrollToSection(`guide-${e.target.value}`)}
                 data-track-category='USER_GUIDE'
                 data-track-name='JUMP_TO_SECTION'
+                data-track-kind='passive'
                 className='w-full rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground focus:ring-2 focus:ring-primary/35 outline-none'
               >
                 {grouped.map(({ category }) => (
@@ -237,6 +241,7 @@ const UserGuideScreen = (): ReactElement => {
           onClick={() => contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
           data-track-category='USER_GUIDE'
           data-track-name='BACK_TO_TOP'
+          data-track-kind='passive'
           className='fixed bottom-6 right-6 z-50 flex items-center justify-center h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 transition-opacity'
           aria-label='Back to top'
         >

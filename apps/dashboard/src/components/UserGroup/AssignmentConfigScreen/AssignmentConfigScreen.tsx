@@ -926,6 +926,7 @@ export const AssignmentConfigScreen = ({
               data-track-event='change'
               data-track-category='UserGroups'
               data-track-name='ToggleIsNotified'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ userId: user.id })}
             />
           </div>
@@ -937,6 +938,7 @@ export const AssignmentConfigScreen = ({
                 className='flex items-center justify-center'
                 data-track-category='UserGroups'
                 data-track-name='ToggleExpertise'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ userId: user.id })}
               >
                 <Checkbox
@@ -1060,6 +1062,7 @@ export const AssignmentConfigScreen = ({
             aria-label='Back to user groups'
             data-track-category='UserGroups'
             data-track-name='BackToUserGroups'
+            data-track-kind='passive'
           >
             <ArrowLeft size={16} />
           </Button>
@@ -1078,6 +1081,7 @@ export const AssignmentConfigScreen = ({
             disabled={!hasChanges || isSaving || !isPercentageValid}
             data-track-category='UserGroups'
             data-track-name='SaveAssignmentConfig'
+            data-track-kind='active'
           >
             {isSaving ? 'Saving…' : 'Save changes'}
           </Button>
@@ -1100,6 +1104,7 @@ export const AssignmentConfigScreen = ({
               )}
               data-track-category='UserGroups'
               data-track-name='AssignmentTabAvailability'
+              data-track-kind='passive'
             >
               Availability
             </button>
@@ -1114,6 +1119,7 @@ export const AssignmentConfigScreen = ({
               )}
               data-track-category='UserGroups'
               data-track-name='AssignmentTabVisibility'
+              data-track-kind='passive'
             >
               Visibility
             </button>
@@ -1166,6 +1172,7 @@ export const AssignmentConfigScreen = ({
                           aria-label='Rotation interval'
                           data-track-category='UserGroups'
                           data-track-name='ChangeRotationInterval'
+                          data-track-kind='active'
                         >
                           <SelectValue placeholder='Select an interval' />
                         </SelectTrigger>
@@ -1184,6 +1191,7 @@ export const AssignmentConfigScreen = ({
                       onClick={() => setIsRotationModalOpen(true)}
                       data-track-category='UserGroups'
                       data-track-name='OPEN_ON_CALL_ROTATION_MODAL'
+                      data-track-kind='passive'
                     >
                       <Settings02 size={16} />
                       Configure on-call sets
@@ -1280,6 +1288,7 @@ export const AssignmentConfigScreen = ({
                       data-track-event='change'
                       data-track-category='UserGroups'
                       data-track-name='SetMaxWorkload'
+                      data-track-kind='active'
                     />
                     {maxWorkloadError && (
                       <p className='text-[13px] text-destructive'>{maxWorkloadError}</p>
@@ -1303,6 +1312,7 @@ export const AssignmentConfigScreen = ({
                       aria-label='Filter by board'
                       data-track-category='UserGroups'
                       data-track-name='SelectBoardFilter'
+                      data-track-kind='passive'
                     >
                       <SelectValue placeholder='All boards' />
                     </SelectTrigger>
@@ -1355,6 +1365,7 @@ export const AssignmentConfigScreen = ({
                       data-track-event='change'
                       data-track-category='UserGroups'
                       data-track-name='SetBoardWeight'
+                      data-track-kind='active'
                     />
                   </div>
 
@@ -1408,6 +1419,7 @@ export const AssignmentConfigScreen = ({
                       data-track-event='click'
                       data-track-category='UserGroups'
                       data-track-name='ApplyNotifyByRole'
+                      data-track-kind='active'
                     >
                       Apply
                     </Button>
@@ -1599,6 +1611,7 @@ export const AssignmentConfigScreen = ({
               onClick={cancelReassignPrompt}
               data-track-category='UserGroups'
               data-track-name='CancelReassignOnDeactivate'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1606,6 +1619,7 @@ export const AssignmentConfigScreen = ({
               onClick={confirmReassignPrompt}
               data-track-category='UserGroups'
               data-track-name='ConfirmReassignOnDeactivate'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ userGroupId, reassignPromptChecked })}
             >
               Continue
@@ -1632,6 +1646,7 @@ export const AssignmentConfigScreen = ({
               onClick={() => setShowDisableRotationWarning(false)}
               data-track-category='UserGroups'
               data-track-name='CancelDisableRotation'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1643,6 +1658,7 @@ export const AssignmentConfigScreen = ({
               }}
               data-track-category='UserGroups'
               data-track-name='ConfirmDisableRotation'
+              data-track-kind='active'
               data-track-metadata={JSON.stringify({ userGroupId })}
             >
               Disable rotation

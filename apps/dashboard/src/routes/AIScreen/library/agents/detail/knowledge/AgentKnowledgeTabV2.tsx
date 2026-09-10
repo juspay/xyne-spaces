@@ -64,6 +64,7 @@ function ManageButton({ label, onClick }: { label: string; onClick: () => void }
       aria-label={label}
       data-track-category='Claw Agents'
       data-track-name='Agent detail v2: manage knowledge'
+      data-track-kind='passive'
       className='flex h-6 shrink-0 items-center rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
     >
       Manage
@@ -205,6 +206,7 @@ export function AgentKnowledgeTabV2({
               disabled={knowledge.saving}
               label='Who this applies to'
               trackName='Agent detail v2: set kb scope'
+              trackKind='passive'
               onChange={next =>
                 knowledge.saveKb(
                   next === 'USER' ? 'USER' : 'COLLECTIONS',
@@ -224,6 +226,7 @@ export function AgentKnowledgeTabV2({
                 onClick={() => knowledge.openBrowse('documents')}
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: add collections'
+                data-track-kind='active'
                 className='flex h-9 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-sm leading-5 text-foreground transition-colors hover:bg-muted/50'
               >
                 <PlusDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />

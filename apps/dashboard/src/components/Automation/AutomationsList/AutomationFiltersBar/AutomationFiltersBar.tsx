@@ -114,6 +114,7 @@ function OptionsChecklist<T extends string>({
             placeholder={search.placeholder}
             data-track-category='automations-list'
             data-track-name={`filter-search-${search.name}`}
+            data-track-kind='passive'
             className='w-full rounded bg-transparent py-1 pl-7 pr-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
           />
         </div>
@@ -139,6 +140,7 @@ function OptionsChecklist<T extends string>({
               }
               data-track-category='automations-list'
               data-track-name={`filter-toggle-${option.value}`}
+              data-track-kind='passive'
               className={cn(
                 'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors outline-none',
                 isSelected ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted',
@@ -293,6 +295,7 @@ export function AutomationFiltersBar({
           count={filters.triggerTypes.length}
           data-track-category='automations-list'
           data-track-name='filter-trigger'
+          data-track-kind='passive'
         />,
         <OptionsChecklist
           options={triggerOptions}
@@ -310,6 +313,7 @@ export function AutomationFiltersBar({
             count={filters.statuses.length}
             data-track-category='automations-list'
             data-track-name='filter-status'
+            data-track-kind='passive'
           />,
           <OptionsChecklist
             options={statusOptions}
@@ -326,6 +330,7 @@ export function AutomationFiltersBar({
           count={filters.channelIds.length}
           data-track-category='automations-list'
           data-track-name='filter-channels'
+          data-track-kind='passive'
         />,
         <OptionsChecklist
           options={channelOptions}
@@ -348,6 +353,7 @@ export function AutomationFiltersBar({
           count={filters.createdByUserIds.length}
           data-track-category='automations-list'
           data-track-name='filter-created-by'
+          data-track-kind='passive'
         />,
         <OptionsChecklist
           options={createdByOptions}
@@ -369,6 +375,7 @@ export function AutomationFiltersBar({
             type='button'
             data-track-category='automations-list'
             data-track-name={`filter-date-field-${opt.value}`}
+            data-track-kind='passive'
             onClick={() => onChange({ ...filters, dateField: opt.value })}
             className={cn(
               'rounded px-2 py-1 text-xs font-medium transition-colors',
@@ -397,6 +404,7 @@ export function AutomationFiltersBar({
           }}
           data-track-category='automations-list'
           data-track-name='filter-clear'
+          data-track-kind='passive'
           className='text-xs text-muted-foreground'
         >
           <MultipleCrossCancelDefault className='size-3.5' />

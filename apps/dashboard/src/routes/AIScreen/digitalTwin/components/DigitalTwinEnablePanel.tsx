@@ -102,7 +102,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
 
           {r.selection === 'custom' && (
             <div className='mt-4 flex flex-col gap-2.5'>
-              <DateRangeInputs range={r} trackName='Digital Twin enable' />
+              <DateRangeInputs range={r} trackName='Digital Twin enable' trackKind='active' />
               <div className='flex flex-wrap gap-1.5'>
                 {QUICK_DAYS.map(n => (
                   <button
@@ -111,6 +111,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                     onClick={() => r.applyQuickDays(n)}
                     data-track-category='Claw Agents'
                     data-track-name='Digital Twin enable quick days'
+                    data-track-kind='active'
                     className='rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                   >
                     last {n}d
@@ -126,6 +127,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
               loading={enableMutation.isPending}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin: enable'
+              data-track-kind='active'
             >
               {!enableMutation.isPending && <Brain className='size-4' />}
               {enableMutation.isPending ? 'Enabling…' : 'Enable & start'}

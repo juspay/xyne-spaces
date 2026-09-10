@@ -207,6 +207,7 @@ const RecordingAskAIModal = ({
             className='shrink-0 text-muted-foreground hover:text-foreground'
             data-track-category='RecordingsV2'
             data-track-name='close_ask_ai_context_modal'
+            data-track-kind='passive'
           >
             <MultipleCrossCancelDefault size={16} />
           </Button>
@@ -228,6 +229,7 @@ const RecordingAskAIModal = ({
             className='w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
             data-track-category='RecordingsV2'
             data-track-name='search_ask_ai_context_recordings'
+            data-track-kind='passive'
           />
         </div>
 
@@ -258,6 +260,7 @@ const RecordingAskAIModal = ({
                 className='font-medium text-foreground underline-offset-2 hover:underline'
                 data-track-category='RecordingsV2'
                 data-track-name='clear_ask_ai_context_selection'
+                data-track-kind='passive'
               >
                 Clear
               </button>
@@ -334,6 +337,7 @@ const RecordingAskAIModal = ({
             className='h-8 shrink-0 rounded-lg px-3 text-xs font-semibold'
             data-track-category='RecordingsV2'
             data-track-name='cancel_ask_ai_context'
+            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -344,6 +348,7 @@ const RecordingAskAIModal = ({
             className='h-8 shrink-0 gap-2.5 rounded-lg px-5 text-xs font-semibold bg-foreground text-background hover:bg-foreground/80 transition-opacity duration-300'
             data-track-category='RecordingsV2'
             data-track-name='send_recordings_to_ask_ai'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ recordingCount: selectedCount })}
           >
             <XyneAIStar size={12} />
@@ -398,6 +403,7 @@ const RecordingOption = ({
       )}
       data-track-category='RecordingsV2'
       data-track-name='toggle_ask_ai_context_recording'
+      data-track-kind='active'
     >
       <span className='pointer-events-none shrink-0'>
         <Checkbox checked={checked} onChange={() => onToggle(recording.id)} label='' />

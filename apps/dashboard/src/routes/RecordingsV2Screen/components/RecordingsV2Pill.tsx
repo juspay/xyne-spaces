@@ -151,6 +151,7 @@ export const RecordingsV2LivePill = ({
         className='h-9 shrink-0 rounded-xl bg-foreground px-3 text-sm text-background hover:bg-foreground/90 hover:text-background'
         data-track-category='RecordingsV2'
         data-track-name='open_live_recording_window'
+        data-track-kind='passive'
       >
         <span className='hidden sm:inline'>Open window</span>
         <ChevronRight size={16} />
@@ -316,6 +317,7 @@ const RecordingsV2Pill = ({
       }
       data-track-category='RecordingsV2'
       data-track-name='open_recording'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ recordingId: recording.id })}
     >
       <div className='relative mt-0.5 shrink-0'>
@@ -374,6 +376,7 @@ const RecordingsV2Pill = ({
                   aria-label='Recording actions'
                   data-track-category='RecordingsV2'
                   data-track-name='open_recording_actions_menu'
+                  data-track-kind='passive'
                 >
                   <ThreeDotsMenuHorizontal size={14} />
                 </Button>
@@ -389,6 +392,7 @@ const RecordingsV2Pill = ({
                     onClick={() => onShare(recording)}
                     data-track-category='RecordingsV2'
                     data-track-name='share_recording'
+                    data-track-kind='active'
                   >
                     <Share01 size={14} className='shrink-0' />
                     <span className='flex-1'>Share...</span>
@@ -400,6 +404,7 @@ const RecordingsV2Pill = ({
                   onClick={() => void handleDownloadTranscript()}
                   data-track-category='RecordingsV2'
                   data-track-name='download_transcript'
+                  data-track-kind='passive'
                 >
                   <DownloadBarDown size={16} className='shrink-0' />
                   <span className='flex-1'>Download transcript</span>
@@ -410,6 +415,7 @@ const RecordingsV2Pill = ({
                   onClick={() => void handleDownloadRecording()}
                   data-track-category='RecordingsV2'
                   data-track-name='download_recording'
+                  data-track-kind='passive'
                 >
                   <MusicQuaverNote size={16} className='shrink-0' />
                   <span className='flex-1'>Download recording</span>
@@ -422,6 +428,7 @@ const RecordingsV2Pill = ({
                       onClick={() => onDelete(recording)}
                       data-track-category='RecordingsV2'
                       data-track-name='delete_recording'
+                      data-track-kind='active'
                     >
                       <DeleteDustbin02 size={16} className='shrink-0' />
                       <span className='flex-1'>Delete recording</span>
@@ -465,6 +472,7 @@ const RecordingsV2Pill = ({
               className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground'
               data-track-category='RecordingsV2'
               data-track-name='generate_recording_labels'
+              data-track-kind='active'
             >
               {!isGeneratingLabels && (
                 <Ai01 size={14} variant='Duo Solid' className='shrink-0 text-primary' />

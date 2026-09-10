@@ -48,6 +48,7 @@ export function RecordingStopDialog({
         onClick={onDismiss}
         data-track-category='CALLS'
         data-track-name='RECORDING_RENAME_DISMISS_BACKDROP'
+        data-track-kind='passive'
       />
       <div
         role='dialog'
@@ -71,6 +72,7 @@ export function RecordingStopDialog({
           placeholder={defaultName}
           data-track-category='CALLS'
           data-track-name='RECORDING_RENAME_INPUT'
+          data-track-kind='passive'
         />
         <div className='mt-4 flex justify-end gap-2'>
           <button
@@ -79,6 +81,7 @@ export function RecordingStopDialog({
             className='rounded-lg px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-50'
             data-track-category='CALLS'
             data-track-name='RECORDING_RENAME_SKIP'
+            data-track-kind='active'
           >
             Skip
           </button>
@@ -88,6 +91,7 @@ export function RecordingStopDialog({
             className='rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50'
             data-track-category='CALLS'
             data-track-name='RECORDING_RENAME_SAVE'
+            data-track-kind='active'
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

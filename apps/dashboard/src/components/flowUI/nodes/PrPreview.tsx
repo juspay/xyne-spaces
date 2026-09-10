@@ -69,6 +69,7 @@ const PanelHeader: React.FC<{ label: string; onClose?: (() => void) | undefined 
         className='rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         data-track-category='PR_ARTIFACT'
         data-track-name='CLOSE_PR_PREVIEW'
+        data-track-kind='passive'
       >
         <MultipleCrossCancelDefault size={18} />
       </button>

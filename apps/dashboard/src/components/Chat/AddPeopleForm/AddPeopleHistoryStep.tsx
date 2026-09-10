@@ -47,6 +47,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                 className='flex w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
                 data-track-category='ADD_CHAT_PARTICIPANTS'
                 data-track-name='SELECT_HISTORY_SCOPE'
+                data-track-kind='passive'
               >
                 <span
                   className={cn(
@@ -69,6 +70,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                   aria-label='Custom history start date'
                   data-track-category='ADD_CHAT_PARTICIPANTS'
                   data-track-name='SELECT_CUSTOM_HISTORY_DATE'
+                  data-track-kind='passive'
                 />
               )}
             </div>

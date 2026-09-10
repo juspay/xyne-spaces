@@ -70,6 +70,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
         }}
         data-track-category='MOBILE_PROFILE_MENU'
         data-track-name='OPEN_USER_MENU'
+        data-track-kind='passive'
       >
         {hasValidStatus && (
           <span className='text-[19px] leading-none flex items-center justify-center shrink-0'>
@@ -85,6 +86,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
             onClick={() => setIsOpen(false)}
             data-track-category='MOBILE_PROFILE_MENU'
             data-track-name='CLOSE_USER_MENU_BACKDROP'
+            data-track-kind='passive'
           />
           <Drawer.Content
             asChild

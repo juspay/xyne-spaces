@@ -2149,6 +2149,7 @@ const XyneAISidebar = ({
                   className='font-medium text-primary hover:underline'
                   data-track-category='AskAI'
                   data-track-name='GoToRespondingChat'
+                  data-track-kind='passive'
                 >
                   Go to responding chat
                 </button>
@@ -2165,6 +2166,7 @@ const XyneAISidebar = ({
                   className='font-medium text-destructive hover:underline'
                   data-track-category='AskAI'
                   data-track-name='AbortOtherChats'
+                  data-track-kind='active'
                 >
                   Abort others
                 </button>
@@ -2229,6 +2231,7 @@ const XyneAISidebar = ({
                             className='rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                             data-track-category='AIOnboarding'
                             data-track-name='SuggestionChip'
+                            data-track-kind='passive'
                           >
                             {suggestion}
                           </button>
@@ -2369,6 +2372,7 @@ const XyneAISidebar = ({
                                 className='rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                                 data-track-category='AIOnboarding'
                                 data-track-name='SuggestionChip'
+                                data-track-kind='passive'
                               >
                                 {suggestion}
                               </button>
@@ -2395,6 +2399,7 @@ const XyneAISidebar = ({
                   className='w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
                   data-track-category='AIOnboarding'
                   data-track-name='DoneExploring'
+                  data-track-kind='passive'
                 >
                   Done exploring — open my workspace
                 </button>
@@ -2458,6 +2463,7 @@ const XyneAISidebar = ({
             onMouseDown={handleDebuggerResizeStart}
             data-track-category='XyneAI'
             data-track-name='DEBUG_PANEL_RESIZE'
+            data-track-kind='passive'
           >
             <span className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-primary/60' />
           </button>

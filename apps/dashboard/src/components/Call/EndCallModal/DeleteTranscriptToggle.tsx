@@ -37,6 +37,7 @@ export function DeleteTranscriptToggle({
           data-testid='delete-transcript-toggle'
           data-track-category='CALLS'
           data-track-name='DELETE_TRANSCRIPT_TOGGLE'
+          data-track-kind='active'
           className='mt-0.5 h-4 w-4 flex-shrink-0 accent-[var(--destructive)]'
         />
       </div>

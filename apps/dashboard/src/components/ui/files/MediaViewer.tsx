@@ -188,6 +188,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       onClick={onClose}
       data-track-category='FileViewer'
       data-track-name='CLOSE_MEDIA_VIEWER_BACKDROP'
+      data-track-kind='passive'
       onKeyDown={(e): void => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -208,6 +209,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
               }}
               data-track-category='FileViewer'
               data-track-name='DOWNLOAD_FROM_MEDIA_VIEWER'
+              data-track-kind='passive'
               className='p-2 rounded-full hover:bg-background/10 transition-colors text-white'
               title='Download file'
             >
@@ -218,6 +220,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             onClick={onClose}
             data-track-category='FileViewer'
             data-track-name='CLOSE_MEDIA_VIEWER'
+            data-track-kind='passive'
             className='p-2 rounded-full hover:bg-background/10 transition-colors text-white'
             title='Close (Esc)'
           >
@@ -245,6 +248,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
               onClick={onClose}
               data-track-category='FileViewer'
               data-track-name='CLOSE_MEDIA_VIEWER'
+              data-track-kind='passive'
               className='px-6 py-2 bg-muted-foreground text-white rounded-lg hover:bg-foreground transition-colors'
             >
               Close

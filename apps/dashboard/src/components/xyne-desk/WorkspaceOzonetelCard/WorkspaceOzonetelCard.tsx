@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { cn } from '../../../utils/classNames';
 import { useAllChannels } from '../../../hooks/useChannels';
+import type { InteractionKind } from '@xyne/shared';
 
 const inputClass =
   'w-full rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent';
@@ -262,6 +263,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
               className='inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
               data-track-category='workspace-ozonetel'
               data-track-name='OpenConfigModal'
+              data-track-kind='passive'
             >
               <Settings2 size={14} />
               {data?.configured ? 'Manage setup' : 'Configure'}
@@ -303,6 +305,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                 aria-label='Close'
                 data-track-category='workspace-ozonetel'
                 data-track-name='CloseConfigModal'
+                data-track-kind='passive'
               >
                 <X className='size-5' />
               </button>
@@ -326,6 +329,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       onChange={e => setApiKey(e.target.value)}
                       data-track-category='workspace-ozonetel'
                       data-track-name='EditApiKey'
+                      data-track-kind='active'
                       placeholder={data?.configured ? '•••••••• (unchanged)' : 'Ozonetel API key'}
                       className={inputClass}
                     />
@@ -337,6 +341,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       onChange={e => setApiUser(e.target.value)}
                       data-track-category='workspace-ozonetel'
                       data-track-name='EditApiUser'
+                      data-track-kind='active'
                       className={inputClass}
                     />
                   </Field>
@@ -347,6 +352,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       onChange={e => setBaseUrl(e.target.value)}
                       data-track-category='workspace-ozonetel'
                       data-track-name='EditBaseUrl'
+                      data-track-kind='active'
                       className={inputClass}
                     />
                   </Field>
@@ -360,6 +366,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       onChange={e => setToolbarUrl(e.target.value)}
                       data-track-category='workspace-ozonetel'
                       data-track-name='EditToolbarUrl'
+                      data-track-kind='active'
                       placeholder='https://agent.ccaas.ozonetel.com/toolbar_widget/index.html'
                       className={inputClass}
                     />
@@ -383,6 +390,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       disabled={!data?.configured || subscribeMutation.isPending}
                       label={subscribeMutation.isPending ? 'Subscribing…' : 'Reconnect live events'}
                       trackName='SubscribeLiveEvents'
+                      trackKind='active'
                       trackId='subscribe_ozonetel_live_events'
                     />
                   </div>
@@ -396,6 +404,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       onChange={e => setAgentMappingText(e.target.value)}
                       data-track-category='workspace-ozonetel'
                       data-track-name='EditAgentMapping'
+                      data-track-kind='active'
                       rows={5}
                       className={`${inputClass} min-h-[132px] font-mono`}
                     />
@@ -450,6 +459,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                         onChange={e => setTicketSubjectTemplate(e.target.value)}
                         data-track-category='workspace-ozonetel'
                         data-track-name='EditSubjectTemplate'
+                        data-track-kind='active'
                         className={inputClass}
                       />
                     </Field>
@@ -468,6 +478,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                         }
                         data-track-category='workspace-ozonetel'
                         data-track-name='SelectCreateTicketOn'
+                        data-track-kind='passive'
                         className={inputClass}
                       >
                         <option value='new_call'>New Call</option>
@@ -486,6 +497,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           setTicketRules(prev => ({ ...prev, createTicketOnInbound: checked }))
                         }
                         trackName='ToggleInboundTicketCreation'
+                        trackKind='passive'
                       />
                       <ToggleRow
                         label='Manual Calls'
@@ -494,6 +506,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           setTicketRules(prev => ({ ...prev, createTicketOnManual: checked }))
                         }
                         trackName='ToggleManualTicketCreation'
+                        trackKind='passive'
                       />
                       <ToggleRow
                         label='Preview Calls'
@@ -502,6 +515,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           setTicketRules(prev => ({ ...prev, createTicketOnPreview: checked }))
                         }
                         trackName='TogglePreviewTicketCreation'
+                        trackKind='passive'
                       />
                       <ToggleRow
                         label='Progressive Calls'
@@ -510,6 +524,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           setTicketRules(prev => ({ ...prev, createTicketOnProgressive: checked }))
                         }
                         trackName='ToggleProgressiveTicketCreation'
+                        trackKind='passive'
                       />
                       <ToggleRow
                         label='Predictive Calls'
@@ -518,6 +533,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           setTicketRules(prev => ({ ...prev, createTicketOnPredictive: checked }))
                         }
                         trackName='TogglePredictiveTicketCreation'
+                        trackKind='passive'
                       />
                     </div>
                   </div>
@@ -618,6 +634,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                                 className='inline-flex shrink-0 items-center justify-center rounded-[10px] border border-border px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
                                 data-track-category='workspace-ozonetel'
                                 data-track-name='RemoveCampaignRoute'
+                                data-track-kind='active'
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -636,6 +653,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           className='inline-flex w-fit items-center gap-2 rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
                           data-track-category='workspace-ozonetel'
                           data-track-name='AddCampaignRoute'
+                          data-track-kind='active'
                         >
                           <Plus size={14} />
                           Add campaign route
@@ -667,6 +685,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                 className='rounded-[12px] border border-desk-accent bg-desk-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='workspace-ozonetel'
                 data-track-name='SaveConfig'
+                data-track-kind='active'
                 data-ph-capture-attribute-track-id='save_ozonetel_config'
               >
                 {mutation.isPending ? 'Saving…' : 'Save Ozonetel config'}
@@ -747,12 +766,14 @@ function ActionButton({
   disabled,
   label,
   trackName,
+  trackKind,
   trackId,
 }: {
   onClick: () => void;
   disabled: boolean;
   label: string;
   trackName: string;
+  trackKind?: InteractionKind;
   trackId?: string;
 }): ReactElement {
   return (
@@ -766,6 +787,7 @@ function ActionButton({
       )}
       data-track-category='workspace-ozonetel'
       data-track-name={trackName}
+      data-track-kind={trackKind}
       {...(trackId ? { trackId } : {})}
     >
       {label}
@@ -778,11 +800,13 @@ function ToggleRow({
   checked,
   onCheckedChange,
   trackName,
+  trackKind,
 }: {
   label: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   trackName: string;
+  trackKind?: InteractionKind;
 }): ReactElement {
   return (
     <label className='flex items-center justify-between gap-4 rounded-[12px] border border-border bg-background/80 px-3 py-2.5 shadow-sm'>
@@ -793,6 +817,7 @@ function ToggleRow({
         onChange={e => onCheckedChange(e.target.checked)}
         data-track-category='workspace-ozonetel'
         data-track-name={trackName}
+        data-track-kind={trackKind}
         className='h-4 w-4 rounded border-border text-desk-accent focus:ring-desk-accent'
       />
     </label>
@@ -822,6 +847,7 @@ function CopyField({
           disabled={!value}
           data-track-category='workspace-ozonetel'
           data-track-name='CopyField'
+          data-track-kind='passive'
           className='inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
         >
           {copied ? <Check className='size-3.5' /> : <Copy className='size-3.5' />}

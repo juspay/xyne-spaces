@@ -85,6 +85,7 @@ export const DashboardChatTranscript = ({
                     className='inline-flex items-center px-2.5 py-1 rounded-full border border-border bg-card text-[12px] text-foreground hover:bg-accent'
                     data-track-category={trackCategory}
                     data-track-name='Ai_Suggestion_Chip_Click'
+                    data-track-kind='passive'
                   >
                     {s.label}
                   </button>

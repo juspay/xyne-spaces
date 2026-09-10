@@ -49,6 +49,7 @@ export const ChannelEmailCard: React.FC<ChannelEmailCardProps> = ({
         onClick={() => setExpanded(prev => !prev)}
         data-track-category='MESSAGE'
         data-track-name='TOGGLE_EMAIL_CARD'
+        data-track-kind='passive'
         className='flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors'
       >
         <Mail className='h-4 w-4 shrink-0 text-muted-foreground' />

@@ -187,6 +187,7 @@ export const RCADetailsView = ({
                 onClick={onEdit}
                 data-track-category='RCA'
                 data-track-name='EDIT_RCA'
+                data-track-kind='active'
               >
                 Edit
               </Button>

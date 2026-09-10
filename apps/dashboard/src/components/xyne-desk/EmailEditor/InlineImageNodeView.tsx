@@ -95,6 +95,7 @@ export const InlineImageNodeView = ({
           title='Drag to resize'
           data-track-category='Support'
           data-track-name='InlineImageResizeDrag'
+          data-track-kind='passive'
         />
       )}
     </NodeViewWrapper>

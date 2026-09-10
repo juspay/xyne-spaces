@@ -229,6 +229,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
               className='w-[16px] h-[16px] text-foreground hover:opacity-70'
               data-track-category={trackCategory}
               data-track-name='navigate_back'
+              data-track-kind='passive'
             >
               <ChevronLeft size={16} />
             </Button>
@@ -309,6 +310,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
                 placeholder='e.g. Customer Onboarding'
                 data-track-category={trackCategory}
                 data-track-name='input_board_name'
+                data-track-kind='passive'
                 aria-invalid={nameCollision || undefined}
                 className='text-[13px]'
               />
@@ -334,6 +336,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
                 rows={3}
                 data-track-category={trackCategory}
                 data-track-name='input_board_description'
+                data-track-kind='passive'
                 className='text-[13px]'
               />
             </div>

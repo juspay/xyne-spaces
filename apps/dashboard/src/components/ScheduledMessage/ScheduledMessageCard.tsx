@@ -119,6 +119,7 @@ const ScheduledMessageCard = ({
       )}
       data-track-category='scheduled-message'
       data-track-name='OpenScheduledMessage'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({
         messageId: scheduledMessage.id,
         channelId: scheduledMessage.channelId,

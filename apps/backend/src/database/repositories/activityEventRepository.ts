@@ -64,6 +64,7 @@ export class ActivityEventRepository extends BaseRepository<
         url: data.url,
         triggerType: data.triggerType ?? 'CLICK',
         contextMetadata: data.contextMetadata as Record<string,string>,
+        interactionKind: data.interactionKind ?? null,
         platform: data.platform,
         timestamp: data.timestamp,
       },

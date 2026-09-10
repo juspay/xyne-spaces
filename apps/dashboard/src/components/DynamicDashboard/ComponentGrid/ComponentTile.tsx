@@ -220,6 +220,7 @@ const ComponentTile = ({
                 aria-label='Component menu'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Open_Component_Menu'
+                data-track-kind='passive'
               >
                 <MoreVertical size={16} />
               </button>
@@ -230,6 +231,7 @@ const ComponentTile = ({
                   onClick={() => onEdit(component.id)}
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Edit_Component'
+                  data-track-kind='active'
                 >
                   <Pencil size={14} className='mr-2' />
                   Edit
@@ -240,6 +242,7 @@ const ComponentTile = ({
                   onClick={() => setPreviewOpen(true)}
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Preview_Component'
+                  data-track-kind='passive'
                 >
                   <Eye size={14} className='mr-2' />
                   Preview
@@ -251,6 +254,7 @@ const ComponentTile = ({
                 }}
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Duplicate_Component'
+                data-track-kind='active'
               >
                 <Copy size={14} className='mr-2' />
                 Duplicate
@@ -259,6 +263,7 @@ const ComponentTile = ({
                 onClick={() => setDeleteOpen(true)}
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='OPEN_DELETE_COMPONENT_CONFIRM'
+                data-track-kind='passive'
                 className='text-rose-600'
               >
                 <Trash2 size={14} className='mr-2' />
@@ -314,6 +319,7 @@ const ComponentTile = ({
               onClick={() => setDeleteOpen(false)}
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Cancel_Delete_Component'
+              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -325,6 +331,7 @@ const ComponentTile = ({
               trackId='delete_component'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Confirm_Delete_Component'
+              data-track-kind='active'
             >
               Delete
             </Button>
@@ -413,6 +420,7 @@ function ErrorState({ message }: { message: string }): ReactElement {
               className='inline-flex items-center gap-1 text-[11px] text-muted-foreground/80 hover:text-foreground transition-colors'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Toggle_Tile_Raw_Error'
+              data-track-kind='passive'
             >
               {showRaw ? <ChevronDown className='w-3 h-3' /> : <ChevronRight className='w-3 h-3' />}
               Technical details

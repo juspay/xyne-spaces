@@ -610,6 +610,7 @@ export function BrowserTabsScreen({
                   title='Open in system browser'
                   data-track-category='BROWSER'
                   data-track-name='OpenInSystemBrowser'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ url: activeTab.url })}
                 >
                   <ExternalLink size={14} />
@@ -621,6 +622,7 @@ export function BrowserTabsScreen({
                 title='Close browser panel'
                 data-track-category='BROWSER'
                 data-track-name='CloseBrowserPanel'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
               >
                 <X size={16} />
@@ -642,6 +644,7 @@ export function BrowserTabsScreen({
                   title='Open in system browser'
                   data-track-category='BROWSER'
                   data-track-name='OpenInSystemBrowser'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ url: activeTab.url })}
                 >
                   <ExternalLink size={16} />
@@ -682,6 +685,7 @@ export function BrowserTabsScreen({
                   }`}
                   data-track-category='BROWSER'
                   data-track-name='SwitchTab'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
                 >
                   {tab.isLoading ? (
@@ -710,6 +714,7 @@ export function BrowserTabsScreen({
                     className='p-0.5 hover:bg-muted-foreground/20 rounded transition-colors flex-shrink-0'
                     data-track-category='BROWSER'
                     data-track-name='CloseTab'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
                   >
                     <X size={isPanel ? 12 : 14} />
@@ -725,6 +730,7 @@ export function BrowserTabsScreen({
           title='New tab'
           data-track-category='BROWSER'
           data-track-name='CreateNewTab'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ url: 'https://www.google.com' })}
         >
           <Plus size={isPanel ? 14 : 16} />
@@ -748,6 +754,7 @@ export function BrowserTabsScreen({
           aria-pressed={areControlsVisible}
           data-track-category='BROWSER'
           data-track-name='ToggleBrowserControls'
+          data-track-kind='passive'
         >
           {areControlsVisible ? (
             <EyeOff size={isPanel ? 14 : 16} />
@@ -765,6 +772,7 @@ export function BrowserTabsScreen({
             title='Close browser panel'
             data-track-category='BROWSER'
             data-track-name='CloseBrowserPanel'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
           >
             <X size={isPanel ? 14 : 16} />
@@ -786,6 +794,7 @@ export function BrowserTabsScreen({
             title='Go back'
             data-track-category='BROWSER'
             data-track-name='GoBack'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ url: activeTab?.url })}
           >
             <ArrowLeft size={isPanel ? 14 : 16} />
@@ -797,6 +806,7 @@ export function BrowserTabsScreen({
             title='Go forward'
             data-track-category='BROWSER'
             data-track-name='GoForward'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ url: activeTab?.url })}
           >
             <ArrowRight size={isPanel ? 14 : 16} />
@@ -808,6 +818,7 @@ export function BrowserTabsScreen({
             title='Reload'
             data-track-category='BROWSER'
             data-track-name='ReloadPage'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ url: activeTab?.url })}
           >
             {activeTab?.isLoading ? (
@@ -831,6 +842,7 @@ export function BrowserTabsScreen({
               }`}
               data-track-category='BROWSER'
               data-track-name='EditUrlBar'
+              data-track-kind='active'
             />
           </form>
         </div>
@@ -888,6 +900,7 @@ export function BrowserTabsScreen({
               className='flex-1 bg-muted px-3 py-1.5 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
               data-track-category='BROWSER'
               data-track-name='FIND_IN_PAGE_INPUT'
+              data-track-kind='passive'
             />
             {findResults.matches > 0 && (
               <span className='text-xs text-muted-foreground whitespace-nowrap'>
@@ -901,6 +914,7 @@ export function BrowserTabsScreen({
               title='Previous match (Shift+Enter)'
               data-track-category='BROWSER'
               data-track-name='FIND_PREVIOUS_MATCH'
+              data-track-kind='passive'
             >
               <ChevronUp size={16} />
             </button>
@@ -911,6 +925,7 @@ export function BrowserTabsScreen({
               title='Next match (Enter)'
               data-track-category='BROWSER'
               data-track-name='FIND_NEXT_MATCH'
+              data-track-kind='passive'
             >
               <ChevronDown size={16} />
             </button>
@@ -920,6 +935,7 @@ export function BrowserTabsScreen({
               title='Close (Esc)'
               data-track-category='BROWSER'
               data-track-name='CLOSE_FIND_BAR'
+              data-track-kind='passive'
             >
               <X size={16} />
             </button>
@@ -947,6 +963,7 @@ export function BrowserTabsScreen({
                 }`}
                 data-track-category='BROWSER'
                 data-track-name='OpenGoogle'
+                data-track-kind='passive'
               >
                 {isPanel ? 'Google' : 'Open Google'}
               </button>
@@ -957,6 +974,7 @@ export function BrowserTabsScreen({
                 }`}
                 data-track-category='BROWSER'
                 data-track-name='OpenGitHub'
+                data-track-kind='passive'
               >
                 {isPanel ? 'GitHub' : 'Open GitHub'}
               </button>

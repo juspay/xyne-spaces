@@ -201,6 +201,7 @@ export function SpotlightView({
                 aria-label='Back to grid view'
                 data-track-category='CALLS'
                 data-track-name='Exit_Spotlight_View'
+                data-track-kind='passive'
               >
                 <Minimize2 className='w-4 h-4' />
               </button>
@@ -222,6 +223,7 @@ export function SpotlightView({
                 aria-label='Show screen share'
                 data-track-category='CALLS'
                 data-track-name='Restore_ScreenShare_Main'
+                data-track-kind='active'
               >
                 <MonitorPlay className={cn(compact ? 'w-3 h-3' : 'w-3.5 h-3.5 sm:w-4 sm:h-4')} />
                 {!compact && <span>Back to screen share</span>}
@@ -246,6 +248,7 @@ export function SpotlightView({
                 }
                 data-track-category='CALLS'
                 data-track-name='Open_Spotlight_Fullscreen'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   participantIdentity: mainParticipant.identity,
                 })}
@@ -291,6 +294,7 @@ export function SpotlightView({
               requestedAiController={requestedAiController}
               data-track-category='CALLS'
               data-track-name='Select_Spotlight_Sidebar_Tile'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
             />
           ))}

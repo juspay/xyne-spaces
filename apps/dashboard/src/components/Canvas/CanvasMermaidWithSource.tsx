@@ -127,6 +127,7 @@ export function CanvasMermaidWithSource(props: {
             aria-label='Done editing'
             data-track-category='Mermaid'
             data-track-name='DONE_EDITING_DIAGRAM'
+            data-track-kind='passive'
           >
             <Check className='h-3 w-3' />
           </button>

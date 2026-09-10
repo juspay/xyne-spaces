@@ -165,6 +165,7 @@ const RecordingPanelHeader = ({
             className='min-w-0 w-min cursor-pointer rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring'
             data-track-category={TRACK_CATEGORY}
             data-track-name='edit_title_click_title'
+            data-track-kind='active'
           >
             <h2
               className='truncate text-sm font-semibold tracking-tight text-foreground w-min max-w-64'
@@ -204,6 +205,7 @@ const RecordingPanelHeader = ({
           title='Minimize to floating pill'
           data-track-category={TRACK_CATEGORY}
           data-track-name='minimize_panel'
+          data-track-kind='passive'
         >
           <ChevronDown size={16} strokeWidth={2.2} />
         </Button>
@@ -270,6 +272,7 @@ const MarkMomentButton = ({
         title={justMarked ? 'Moment marked' : 'Mark moment'}
         data-track-category={TRACK_CATEGORY}
         data-track-name='mark_moment'
+        data-track-kind='active'
       >
         {justMarked && (
           <span
@@ -338,6 +341,7 @@ const RecordingControlBar = ({
         title='Open recording details'
         data-track-category={TRACK_CATEGORY}
         data-track-name='open_recording_details'
+        data-track-kind='passive'
       >
         <Maximize2 strokeWidth={2.8} className='size-3' />
         <span>Full screen</span>
@@ -371,6 +375,7 @@ const RecordingControlBar = ({
           title='Stop recording'
           data-track-category={TRACK_CATEGORY}
           data-track-name='stop_recording'
+          data-track-kind='active'
         >
           <StopBig size={16} variant='Solid' />
         </Button>
@@ -487,6 +492,7 @@ const RecordingMiniPill = ({
       title='Click to expand'
       data-track-category={TRACK_CATEGORY}
       data-track-name='expand_pill'
+      data-track-kind='passive'
     >
       <span className='pointer-events-none flex h-6 shrink-0 items-center'>
         <span className='flex w-7 shrink-0 items-center justify-center'>
@@ -550,6 +556,7 @@ const RecordingMiniPill = ({
         title='Stop recording'
         data-track-category={TRACK_CATEGORY}
         data-track-name='stop_recording'
+        data-track-kind='active'
       >
         <span className='flex w-7 shrink-0 items-center justify-center'>
           <span
@@ -778,6 +785,7 @@ export function NoteTakerOverlay({
           aria-label='Drag live recording transcript'
           data-track-category={TRACK_CATEGORY}
           data-track-name='drag_handle'
+          data-track-kind='passive'
         />
         <section
           className='flex h-[min(70vh,600px)] max-h-[calc(100vh-3rem)] w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl ring-1 ring-foreground/5 min-[700px]:h-[min(40rem,calc(100vh-3rem))] '
@@ -821,6 +829,7 @@ export function NoteTakerOverlay({
                 )}
                 data-track-category={TRACK_CATEGORY}
                 data-track-name='open_notes'
+                data-track-kind='passive'
               >
                 Notes
               </Button>
@@ -838,6 +847,7 @@ export function NoteTakerOverlay({
                 )}
                 data-track-category={TRACK_CATEGORY}
                 data-track-name='open_transcript'
+                data-track-kind='passive'
               >
                 Transcript
               </Button>

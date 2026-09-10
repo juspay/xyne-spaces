@@ -216,6 +216,7 @@ const ProviderCard = ({
           onClick={onOpenDialog}
           data-track-category='claw-settings'
           data-track-name='OPEN_SETTINGS_DIALOG'
+          data-track-kind='passive'
         >
           {isConnected ? 'Configure' : 'Connect'}
         </Button>
@@ -466,6 +467,7 @@ const CopilotConfigForm = ({
             onClick={() => void startLogin()}
             data-track-category='claw-settings'
             data-track-name='START_GITHUB_LOGIN'
+            data-track-kind='active'
             disabled={starting}
           >
             {starting ? <Loader2 className='size-4 animate-spin' /> : <Plug className='size-4' />}
@@ -498,6 +500,7 @@ const CopilotConfigForm = ({
               onClick={() => void startLogin()}
               data-track-category='claw-settings'
               data-track-name='RESTART_GITHUB_LOGIN'
+              data-track-kind='active'
               disabled={starting || saving}
             >
               <Github className='size-4' />
@@ -508,6 +511,7 @@ const CopilotConfigForm = ({
               onClick={() => void handleDisconnect()}
               data-track-category='claw-settings'
               data-track-name='DISCONNECT_GITHUB'
+              data-track-kind='active'
               disabled={saving}
             >
               <Trash2 className='size-4' />
@@ -531,6 +535,7 @@ const CopilotConfigForm = ({
               onClick={() => void navigator.clipboard.writeText(device.userCode)}
               data-track-category='claw-settings'
               data-track-name='COPY_GITHUB_DEVICE_CODE'
+              data-track-kind='passive'
             >
               <Copy className='size-4' />
             </Button>
@@ -852,6 +857,7 @@ const GenericProviderConfigForm = ({
                   onClick={() => void startCodexOAuth()}
                   data-track-category='claw-settings'
                   data-track-name='START_CODEX_OAUTH'
+                  data-track-kind='active'
                   disabled={codexBusy}
                 >
                   {codexBusy ? (
@@ -885,6 +891,7 @@ const GenericProviderConfigForm = ({
                       onClick={() => void completeCodexOAuth()}
                       data-track-category='claw-settings'
                       data-track-name='COMPLETE_CODEX_OAUTH'
+                      data-track-kind='active'
                       disabled={codexBusy || !codexCode.trim()}
                     >
                       {codexBusy ? 'Verifying...' : 'Complete sign-in'}
@@ -898,6 +905,7 @@ const GenericProviderConfigForm = ({
                       }}
                       data-track-category='claw-settings'
                       data-track-name='CANCEL_CODEX_OAUTH'
+                      data-track-kind='passive'
                     >
                       Cancel
                     </Button>
@@ -988,6 +996,7 @@ const GenericProviderConfigForm = ({
             onClick={() => void handleDelete()}
             data-track-category='claw-settings'
             data-track-name='DELETE_MODEL_PROVIDER'
+            data-track-kind='active'
             disabled={deleting || saving}
           >
             {deleting ? 'Removing...' : 'Remove'}
@@ -997,6 +1006,7 @@ const GenericProviderConfigForm = ({
           onClick={() => void handleSave()}
           data-track-category='claw-settings'
           data-track-name='SAVE_MODEL_PROVIDER'
+          data-track-kind='active'
           loading={saving}
           disabled={!apiKey && !hasKey}
         >
@@ -1023,6 +1033,7 @@ const AuthMethodOption = ({
     onClick={onSelect}
     data-track-category='claw-settings'
     data-track-name={`SelectAuthMethod-${label}`}
+    data-track-kind='passive'
     className={cn(
       'flex min-h-16 flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
       selected
@@ -1204,6 +1215,7 @@ const AdvancedSettingsSection = (): ReactElement => {
         onClick={() => setExpanded(value => !value)}
         data-track-category='claw-settings'
         data-track-name='ToggleAdvancedSettings'
+        data-track-kind='active'
         className='flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-muted/30 px-4 py-3 text-left transition-colors hover:bg-muted'
       >
         <div>

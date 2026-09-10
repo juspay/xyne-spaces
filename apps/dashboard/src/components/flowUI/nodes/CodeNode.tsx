@@ -62,6 +62,7 @@ export const CodeNode: React.FC<{ node: FlowComponent; children?: React.ReactNod
             className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             data-track-category='CODE_ARTIFACT'
             data-track-name='COPY_CODE'
+            data-track-kind='passive'
           >
             {copied ? (
               <CopyCopied size={16} className='shrink-0' />
@@ -77,6 +78,7 @@ export const CodeNode: React.FC<{ node: FlowComponent; children?: React.ReactNod
               className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
               data-track-category='CODE_ARTIFACT'
               data-track-name='EXPAND_CODE'
+              data-track-kind='passive'
             >
               <MaximizeFourArrow size={16} className='shrink-0' />
             </button>

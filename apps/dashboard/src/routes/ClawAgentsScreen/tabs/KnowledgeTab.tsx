@@ -266,6 +266,7 @@ const KnowledgeTab = ({ agent, permissions }: KnowledgeTabProps): ReactElement =
       title={skill.description || skill.slug}
       data-track-category='Claw Agents'
       data-track-name='Knowledge Tab: Toggle Skill'
+      data-track-kind='passive'
       className={cn(
         'rounded-full border px-2.5 py-1 text-xs transition-colors',
         draftSkillIds.includes(skill.id)
@@ -379,6 +380,7 @@ const KnowledgeTab = ({ agent, permissions }: KnowledgeTabProps): ReactElement =
                       onChange={() => setDraftKbScope(opt.value)}
                       data-track-category='Claw Agents'
                       data-track-name='Knowledge Tab: Set KB Scope'
+                      data-track-kind='passive'
                       className='size-3.5'
                     />
                     <span className='text-sm font-medium text-foreground'>{opt.label}</span>
@@ -418,6 +420,7 @@ const KnowledgeTab = ({ agent, permissions }: KnowledgeTabProps): ReactElement =
           onClick={() => void handleSave()}
           data-track-category='Claw Agents'
           data-track-name='SAVE_KNOWLEDGE'
+          data-track-kind='active'
         >
           {saving ? 'Saving…' : 'Save changes'}
         </Button>

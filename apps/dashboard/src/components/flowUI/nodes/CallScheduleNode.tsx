@@ -174,6 +174,7 @@ const ProposedCall: React.FC<{
           )}
           data-track-category='CALL_SCHEDULE_ARTIFACT'
           data-track-name='CLICK_APPROVE'
+          data-track-kind='active'
           data-ph-capture-attribute-track-id='call_schedule_approve'
         >
           {inFlight && <Spinner size={14} className='animate-spin' />}
@@ -185,6 +186,7 @@ const ProposedCall: React.FC<{
           className='rounded-lg px-3 py-1.5 text-sm font-medium leading-[1.2] text-foreground/80'
           data-track-category='CALL_SCHEDULE_ARTIFACT'
           data-track-name='CLICK_SET_MANUALLY'
+          data-track-kind='active'
         >
           Set manually
         </button>
@@ -265,6 +267,7 @@ const DurationSwitcher: React.FC<{
         )}
         data-track-category='CALL_SCHEDULE_ARTIFACT'
         data-track-name='OPEN_DURATION_SWITCHER'
+        data-track-kind='passive'
       >
         <ClockDefault size={16} className='shrink-0' />
         <span className='tabular-nums'>{durationLabel(value)}</span>
@@ -307,6 +310,7 @@ const SlotRow: React.FC<{
     )}
     data-track-category='CALL_SCHEDULE_ARTIFACT'
     data-track-name='SELECT_SLOT'
+    data-track-kind='passive'
   >
     <RadioSlot>{selected ? <FilledDot /> : <EmptyCircle />}</RadioSlot>
     <SlotLabel start={slot.start} duration={duration} />

@@ -155,6 +155,7 @@ export const GeneratedTagsSubmenu = ({
             aria-label='Back to categories'
             data-track-category='Tickets'
             data-track-name='BackToGeneratedTagCategories'
+            data-track-kind='passive'
           >
             <ArrowLeft className='w-4 h-4' />
           </button>
@@ -199,6 +200,7 @@ export const GeneratedTagsSubmenu = ({
                     }`}
                     data-track-category='Tickets'
                     data-track-name='ToggleGeneratedTagFilter'
+                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ tag: tagKey, selected: !isSelected })}
                   >
                     <span className='text-sm truncate'>{tagValue}</span>
@@ -261,6 +263,7 @@ export const GeneratedTagsSubmenu = ({
                   className='w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-none hover:bg-muted text-foreground focus-visible:ring-2 focus-visible:ring-ring'
                   data-track-category='Tickets'
                   data-track-name='OpenGeneratedTagCategory'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ category })}
                 >
                   <span className='text-sm truncate'>{category}</span>

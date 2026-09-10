@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import type { InteractionKind } from '@xyne/shared';
 
 /**
  * Represents a single selectable option in the EntitySelector
@@ -118,6 +119,7 @@ export interface EntitySelectorProps {
     onClick: () => void;
     trackCategory?: string;
     trackName?: string;
+    trackKind?: InteractionKind;
   };
 
   /** Lock the dropdown to the trigger's width instead of letting content size it. */

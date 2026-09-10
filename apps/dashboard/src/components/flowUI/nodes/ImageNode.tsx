@@ -133,6 +133,7 @@ export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
           className='p-0 border-0 bg-transparent cursor-pointer'
           data-track-category='FLOW_IMAGE'
           data-track-name='OpenImageViewer'
+          data-track-kind='passive'
         >
           <img
             src={displaySrc}
@@ -182,6 +183,7 @@ export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
                 title='Copy Image'
                 data-track-category='FLOW_IMAGE'
                 data-track-name='CopyImage'
+                data-track-kind='passive'
               >
                 {copied ? (
                   <CopyCopied size={18} className='text-status-success' />

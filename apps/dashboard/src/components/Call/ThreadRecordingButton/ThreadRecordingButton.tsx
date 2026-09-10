@@ -1,6 +1,7 @@
 import { MicOn } from '@xyne/icons';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
+import type { InteractionKind } from '@xyne/shared';
 
 interface ThreadRecordingButtonProps {
   onStartRecording: () => void;
@@ -8,6 +9,7 @@ interface ThreadRecordingButtonProps {
   testId?: string;
   trackCategory?: string;
   trackName?: string;
+  trackKind?: InteractionKind;
   trackMetadata?: Record<string, unknown>;
 }
 

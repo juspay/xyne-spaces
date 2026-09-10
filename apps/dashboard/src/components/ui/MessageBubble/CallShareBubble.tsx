@@ -54,6 +54,7 @@ export const CallShareBubble: React.FC<CallShareBubbleProps> = ({ message }) => 
             : undefined
         }
         trackName='OPEN_SHARED_CALL'
+        trackKind='passive'
       />
     </div>
   );

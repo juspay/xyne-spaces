@@ -153,6 +153,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
         maxLength={2}
         data-track-category='DeskMetrics'
         data-track-name='TimeInputHour'
+        data-track-kind='passive'
         onChange={handleHourChange}
         onKeyDown={keyDown}
         onBlur={e => commit(e.target.value, m)}
@@ -169,6 +170,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
         maxLength={2}
         data-track-category='DeskMetrics'
         data-track-name='TimeInputMinute'
+        data-track-kind='passive'
         onChange={handleMinChange}
         onKeyDown={keyDown}
         onBlur={e => commit(h, e.target.value)}
@@ -232,6 +234,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
           type='button'
           data-track-category='DeskMetrics'
           data-track-name='DateRangePickerOpen'
+          data-track-kind='passive'
           className='inline-flex h-[32px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground hover:bg-muted/50 dark:border-border'
         >
           <span>{label}</span>
@@ -253,6 +256,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
                 type='button'
                 data-track-category='DeskMetrics'
                 data-track-name='DateRangePreset'
+                data-track-kind='passive'
                 onClick={() => {
                   onChange(p.getValue(), '00:00', '23:59');
                   setOpen(false);
@@ -271,6 +275,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
               type='button'
               data-track-category='DeskMetrics'
               data-track-name='DateRangeCustomToggle'
+              data-track-kind='passive'
               onClick={() => setShowCustom(v => !v)}
               className={cn(
                 'flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm select-none',
@@ -322,6 +327,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
                   }}
                   data-track-category='DeskMetrics'
                   data-track-name='DateRangeApply'
+                  data-track-kind='passive'
                   className='w-full rounded-[8px] bg-desk-accent py-1.5 text-sm font-medium text-white hover:opacity-90'
                 >
                   Apply

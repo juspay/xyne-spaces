@@ -372,6 +372,7 @@ export const RCAForm = ({
               onBlur={() => handleFieldBlur('title')}
               data-track-category='RCA'
               data-track-name='RcaTitleInput'
+              data-track-kind='passive'
               placeholder='Short RCA title...'
               readOnly={!isRcaEditable}
               className='w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -439,6 +440,7 @@ export const RCAForm = ({
                 onBlur={() => handleFieldBlur('severity')}
                 data-track-category='RCA'
                 data-track-name='RcaSeveritySelect'
+                data-track-kind='passive'
                 disabled={!isRcaEditable}
                 className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
               >
@@ -465,6 +467,7 @@ export const RCAForm = ({
                 onBlur={() => handleFieldBlur('bugType')}
                 data-track-category='RCA'
                 data-track-name='RcaBugTypeSelect'
+                data-track-kind='passive'
                 disabled={!isRcaEditable}
                 className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
               >
@@ -490,6 +493,7 @@ export const RCAForm = ({
                   onBlur={() => handleFieldBlur('category')}
                   data-track-category='RCA'
                   data-track-name='RcaCategoryTypeSelect'
+                  data-track-kind='passive'
                   disabled={!isRcaEditable}
                   className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
                 >
@@ -519,6 +523,7 @@ export const RCAForm = ({
                   onBlur={() => handleFieldBlur('issueCategory')}
                   data-track-category='RCA'
                   data-track-name='RcaIssueCategorySelect'
+                  data-track-kind='passive'
                   disabled={!isRcaEditable}
                   className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
                 >
@@ -552,6 +557,7 @@ export const RCAForm = ({
                 onChange={e => handleFieldChange('issueStartAt', fromDateTimeLocal(e.target.value))}
                 data-track-category='RCA'
                 data-track-name='RcaIssueStartInput'
+                data-track-kind='passive'
                 disabled={!isRcaEditable}
                 className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
               />
@@ -571,6 +577,7 @@ export const RCAForm = ({
                 onClick={() => void handleSaveDraftClick()}
                 data-track-category='RCA'
                 data-track-name='SAVE_RCA_DRAFT'
+                data-track-kind='active'
                 loading={isSubmitting}
                 disabled={isSubmitting}
               >

@@ -1,5 +1,20 @@
 import type { Platform } from '../zero/types.js';
 
+/**
+ * Whether a tracked interaction persisted a write (`active`: send, create,
+ * edit, delete, join, star, change a setting, ...) or only read / navigated
+ * (`passive`: open, view, search, filter, switch tab, expand, cancel, ...).
+ * Declared where the event is emitted: `data-track-kind` on the tracked
+ * element, or explicitly by backend emitters. `null` means the emitter did
+ * not declare one.
+ */
+export type InteractionKind = 'active' | 'passive';
+export const INTERACTION_KINDS: readonly InteractionKind[] = ['active', 'passive'];
+
+export function isInteractionKind(value: unknown): value is InteractionKind {
+  return typeof value === 'string' && (INTERACTION_KINDS as readonly string[]).includes(value);
+}
+
 // UserActivity type for API responses
 export interface UserActivity {
   id: string;
@@ -13,6 +28,7 @@ export interface UserActivity {
   url: string;
   triggerType: string;
   contextMetadata: Record<string, unknown> | null;
+  interactionKind: InteractionKind | null;
   platform: Platform;
   timestamp: string; // ISO 8601
   hasAlias: boolean;
@@ -37,6 +53,7 @@ export interface ActivityEventPayload {
   url: string;
   trigger_type: string;
   context_metadata?: Record<string, unknown>;
+  interaction_kind?: InteractionKind | null;
   platform: Platform;
   timestamp: number;
 }
@@ -50,6 +67,7 @@ export interface CreateActivityEventInput {
   url: string;
   triggerType?: string;
   contextMetadata?: Record<string, unknown>;
+  interactionKind?: InteractionKind | null;
   platform: Platform;
   timestamp: Date;
 }
@@ -60,6 +78,7 @@ export interface TrackActivityOptions {
   url?: string;
   eventLabel?: string;
   contextMetadata?: Record<string, unknown>;
+  interactionKind?: InteractionKind;
 }
 
 export interface ActivityAlias {

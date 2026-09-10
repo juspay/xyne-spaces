@@ -51,6 +51,7 @@ export function V2Dialog({
           aria-label='Close'
           data-track-category='Claw Agents'
           data-track-name={`Close dialog: ${title}`}
+          data-track-kind='passive'
           className='flex size-7 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <MultipleCrossCancelDefault className='size-4' aria-hidden />

@@ -145,6 +145,7 @@ export const DateRangeFilter = ({
         onClick={() => setIsOpen(!isOpen)}
         data-track-category='TicketFilters'
         data-track-name='ToggleDateRangeDropdown'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ filterType: 'dateRange', isOpen })}
         className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors min-w-0 ${
           hasSelection
@@ -170,6 +171,7 @@ export const DateRangeFilter = ({
           onClick={handleClear}
           data-track-category='TicketFilters'
           data-track-name='ClearDateRangeFilter'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ filterType: 'dateRange', startDate, endDate })}
           className='absolute -top-1 -right-1 bg-muted hover:bg-border rounded-full p-1 transition-colors'
           title={`Clear ${label.toLowerCase()} filter`}
@@ -190,6 +192,7 @@ export const DateRangeFilter = ({
                   onClick={() => handlePresetClick('today')}
                   data-track-category='TicketFilters'
                   data-track-name='PresetDateRangeToday'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ filterType: 'dateRange', preset: 'today' })}
                   variant='ghost'
                   size='sm'
@@ -201,6 +204,7 @@ export const DateRangeFilter = ({
                   onClick={() => handlePresetClick('week')}
                   data-track-category='TicketFilters'
                   data-track-name='PresetDateRangeWeek'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ filterType: 'dateRange', preset: 'week' })}
                   variant='ghost'
                   size='sm'
@@ -212,6 +216,7 @@ export const DateRangeFilter = ({
                   onClick={() => handlePresetClick('month')}
                   data-track-category='TicketFilters'
                   data-track-name='PresetDateRangeMonth'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ filterType: 'dateRange', preset: 'month' })}
                   variant='ghost'
                   size='sm'
@@ -243,6 +248,7 @@ export const DateRangeFilter = ({
                     className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                     data-track-category='Tickets'
                     data-track-name='FilterStartDate'
+                    data-track-kind='passive'
                   />
                 </div>
 
@@ -263,6 +269,7 @@ export const DateRangeFilter = ({
                     className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                     data-track-category='Tickets'
                     data-track-name='FilterEndDate'
+                    data-track-kind='passive'
                   />
                 </div>
               </div>
@@ -275,6 +282,7 @@ export const DateRangeFilter = ({
                   onClick={handleClear}
                   data-track-category='TicketFilters'
                   data-track-name='ClearDateRangeFilterDropdown'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     filterType: 'dateRange',
                     startDate,

@@ -68,6 +68,7 @@ export const AgentSummaryNode: React.FC<{ node: FlowComponent; children?: React.
                   className={cn('flex min-w-0 flex-1 flex-col', LINK_BUTTON)}
                   data-track-category='Claw Agents'
                   data-track-name='ViewAgentFromCard'
+                  data-track-kind='passive'
                 >
                   <span className='truncate text-sm font-medium leading-5 text-foreground'>
                     {agent.name}
@@ -98,6 +99,7 @@ export const AgentSummaryNode: React.FC<{ node: FlowComponent; children?: React.
           )}
           data-track-category='Claw Agents'
           data-track-name='BrowseAgentLibrary'
+          data-track-kind='passive'
         >
           Browse agents
         </Link>

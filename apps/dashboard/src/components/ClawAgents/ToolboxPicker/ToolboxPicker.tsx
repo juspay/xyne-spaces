@@ -634,6 +634,7 @@ export function ToolboxPicker({
       type='button'
       data-track-category='Claw Agents'
       data-track-name='Toggle tool selection'
+      data-track-kind='passive'
       onClick={() => {
         onClickFn();
         pinDetail(detailKey);
@@ -678,6 +679,7 @@ export function ToolboxPicker({
             data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
             data-track-category='Claw Agents'
             data-track-name='Re-suggest tools'
+            data-track-kind='active'
             onClick={reRollSuggestion}
             className='shrink-0 font-medium underline-offset-2 hover:underline'
           >
@@ -687,6 +689,7 @@ export function ToolboxPicker({
             type='button'
             data-track-category='Claw Agents'
             data-track-name='Dismiss suggestion'
+            data-track-kind='passive'
             onClick={() => setSuggestionDismissed(true)}
             aria-label='Dismiss suggestion'
             className='shrink-0 text-muted-foreground hover:text-foreground transition-colors'
@@ -743,6 +746,7 @@ export function ToolboxPicker({
                   type='button'
                   data-track-category='Claw Agents'
                   data-track-name='Dismiss suggestion'
+                  data-track-kind='passive'
                   onClick={() => setSuggestionDismissed(true)}
                   aria-label='Dismiss suggestion'
                   className='shrink-0 hover:text-foreground transition-colors'
@@ -763,6 +767,7 @@ export function ToolboxPicker({
                   type='button'
                   data-track-category='Claw Agents'
                   data-track-name='Dismiss suggestion'
+                  data-track-kind='passive'
                   onClick={() => setSuggestionDismissed(true)}
                   className='text-[11px] text-muted-foreground hover:text-foreground transition-colors'
                 >
@@ -842,6 +847,7 @@ export function ToolboxPicker({
                   type='button'
                   data-track-category='Claw Agents'
                   data-track-name='Accept suggested tools'
+                  data-track-kind='active'
                   onClick={applySuggestion}
                   className='inline-flex items-center gap-1 rounded bg-foreground px-3 py-1.5 text-[12px] font-medium text-background transition-colors hover:bg-foreground/90'
                 >
@@ -852,6 +858,7 @@ export function ToolboxPicker({
                   data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
                   data-track-category='Claw Agents'
                   data-track-name='Re-suggest tools'
+                  data-track-kind='active'
                   onClick={reRollSuggestion}
                   className='rounded bg-muted px-3 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted/70'
                 >
@@ -871,6 +878,7 @@ export function ToolboxPicker({
             data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
             data-track-category='Claw Agents'
             data-track-name='Re-suggest tools'
+            data-track-kind='active'
             onClick={reRollSuggestion}
             className='shrink-0 font-medium underline-offset-2 hover:underline'
           >
@@ -890,6 +898,7 @@ export function ToolboxPicker({
           type='button'
           data-track-category='Claw Agents'
           data-track-name='Open suggest tools dialog'
+          data-track-kind='passive'
           onClick={() => setRefineDialogOpen(true)}
           className='inline-flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted/70'
         >
@@ -914,6 +923,7 @@ export function ToolboxPicker({
           <textarea
             data-track-category='Claw Agents'
             data-track-name='Describe tools to add'
+            data-track-kind='passive'
             value={refineIntent}
             onChange={e => setRefineIntent(e.target.value)}
             onKeyDown={e => {
@@ -934,6 +944,7 @@ export function ToolboxPicker({
             type='button'
             data-track-category='Claw Agents'
             data-track-name='Cancel suggest tools dialog'
+            data-track-kind='passive'
             onClick={() => setRefineDialogOpen(false)}
             className='rounded-md bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/70'
           >
@@ -944,6 +955,7 @@ export function ToolboxPicker({
             data-ph-capture-attribute-track-id='claw_toolbox_suggest_submit'
             data-track-category='Claw Agents'
             data-track-name='Submit suggest tools'
+            data-track-kind='active'
             onClick={submitRefine}
             disabled={!refineIntent.trim()}
             className='inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-40 disabled:cursor-not-allowed'
@@ -969,6 +981,7 @@ export function ToolboxPicker({
           <select
             data-track-category='Claw Agents'
             data-track-name='Select research agent product'
+            data-track-kind='passive'
             value={researchAgent.productId}
             onChange={e => researchAgent.onProductIdChange(e.target.value)}
             className='min-w-0 w-full rounded-lg bg-muted px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40'
@@ -983,6 +996,7 @@ export function ToolboxPicker({
           <select
             data-track-category='Claw Agents'
             data-track-name='Select research agent repository'
+            data-track-kind='passive'
             value={researchAgent.repositoryId}
             onChange={e => researchAgent.onRepositoryIdChange(e.target.value)}
             className='min-w-0 w-full rounded-lg bg-muted px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40'
@@ -1093,6 +1107,7 @@ export function ToolboxPicker({
                         type='button'
                         data-track-category='Claw Agents'
                         data-track-name='Filter tools by category'
+                        data-track-kind='passive'
                         onClick={() => setToolTab('all')}
                         aria-current={toolTab === 'all' ? 'page' : undefined}
                         className={rowCls(toolTab === 'all')}
@@ -1110,6 +1125,7 @@ export function ToolboxPicker({
                               type='button'
                               data-track-category='Claw Agents'
                               data-track-name='Filter tools by category'
+                              data-track-kind='passive'
                               onClick={() => setToolTab(g.key)}
                               aria-current={toolTab === g.key ? 'page' : undefined}
                               className={rowCls(toolTab === g.key)}
@@ -1129,6 +1145,7 @@ export function ToolboxPicker({
                                 type='button'
                                 data-track-category='Claw Agents'
                                 data-track-name='Filter tools by category'
+                                data-track-kind='passive'
                                 onClick={() => setToolTab(g.key)}
                                 aria-current={toolTab === g.key ? 'page' : undefined}
                                 className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-left transition-colors ${toolTab === g.key ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
@@ -1146,6 +1163,7 @@ export function ToolboxPicker({
                                 type='button'
                                 data-track-category='Claw Agents'
                                 data-track-name='Toggle category group'
+                                data-track-kind='passive'
                                 onClick={() => toggleRailGroup(g.key)}
                                 aria-expanded={expanded}
                                 aria-label={`${expanded ? 'Collapse' : 'Expand'} ${g.label}`}
@@ -1166,6 +1184,7 @@ export function ToolboxPicker({
                                     type='button'
                                     data-track-category='Claw Agents'
                                     data-track-name='Filter tools by category'
+                                    data-track-kind='passive'
                                     onClick={() => setToolTab(c.key)}
                                     aria-current={toolTab === c.key ? 'page' : undefined}
                                     className={rowCls(toolTab === c.key, true)}
@@ -1191,6 +1210,7 @@ export function ToolboxPicker({
                     type='search'
                     data-track-category='Claw Agents'
                     data-track-name='Search tools'
+                    data-track-kind='passive'
                     value={toolSearch}
                     onChange={e => setToolSearch(e.target.value)}
                     placeholder='Search tools…'
@@ -1202,6 +1222,7 @@ export function ToolboxPicker({
                       type='button'
                       data-track-category='Claw Agents'
                       data-track-name='Clear tool search'
+                      data-track-kind='passive'
                       onClick={() => setToolSearch('')}
                       aria-label='Clear search'
                       className='absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors'
@@ -1251,6 +1272,7 @@ export function ToolboxPicker({
                               type='button'
                               data-track-category='Claw Agents'
                               data-track-name='Select all tools in group'
+                              data-track-kind='passive'
                               onClick={onSelectAll}
                               className='ml-auto text-[11px] font-medium text-foreground/80 hover:text-foreground transition-colors'
                             >
@@ -1507,6 +1529,7 @@ export function ToolboxPicker({
                       type='button'
                       data-track-category='Claw Agents'
                       data-track-name='Clear all selected tools'
+                      data-track-kind='passive'
                       onClick={clearAll}
                       className='text-[11px] text-muted-foreground hover:text-red-500 transition-colors'
                     >
@@ -1550,6 +1573,7 @@ export function ToolboxPicker({
                             type='button'
                             data-track-category='Claw Agents'
                             data-track-name='Remove selected tool'
+                            data-track-kind='active'
                             onClick={onRemove}
                             aria-label={`Remove ${label}`}
                             className='flex-shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 focus-visible:opacity-100 focus-visible:outline-none transition-all'
@@ -1605,6 +1629,7 @@ export function ToolboxPicker({
                   type='button'
                   data-track-category='Claw Agents'
                   data-track-name='Clear all selected tools'
+                  data-track-kind='passive'
                   onClick={clearAll}
                   className='text-[11px] text-muted-foreground hover:text-red-500 transition-colors'
                 >
@@ -1642,6 +1667,7 @@ export function ToolboxPicker({
                             type='button'
                             data-track-category='Claw Agents'
                             data-track-name='Remove selected tool'
+                            data-track-kind='active'
                             onClick={onRemove}
                             aria-label={`Remove ${label}`}
                             className='ml-0.5 rounded-full hover:text-red-500 transition-colors focus-visible:outline-none'
@@ -1662,6 +1688,7 @@ export function ToolboxPicker({
               type='search'
               data-track-category='Claw Agents'
               data-track-name='Search tools'
+              data-track-kind='passive'
               value={toolSearch}
               onChange={e => setToolSearch(e.target.value)}
               placeholder='Search tools…'
@@ -1673,6 +1700,7 @@ export function ToolboxPicker({
                 type='button'
                 data-track-category='Claw Agents'
                 data-track-name='Clear tool search'
+                data-track-kind='passive'
                 onClick={() => setToolSearch('')}
                 aria-label='Clear search'
                 className='absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors'
@@ -1723,6 +1751,7 @@ export function ToolboxPicker({
                       type='button'
                       data-track-category='Claw Agents'
                       data-track-name='Filter tools by category'
+                      data-track-kind='passive'
                       onClick={() => setToolTab(key)}
                       aria-pressed={active}
                       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition ${active ? 'border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] text-[var(--claw-ai-fg)]' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
@@ -1778,6 +1807,7 @@ export function ToolboxPicker({
                     type='button'
                     data-track-category='Claw Agents'
                     data-track-name='Close tool detail'
+                    data-track-kind='passive'
                     onClick={() => setPinnedDetail(null)}
                     aria-label='Close detail'
                     className='flex-shrink-0 text-muted-foreground hover:text-foreground transition ml-1'
@@ -1823,6 +1853,7 @@ export function ToolboxPicker({
                     type='button'
                     data-track-category='Claw Agents'
                     data-track-name='Toggle subagents section'
+                    data-track-kind='passive'
                     onClick={() => toggleSection('subagents')}
                     aria-expanded={sectionOpen(
                       'subagents',
@@ -1856,6 +1887,7 @@ export function ToolboxPicker({
                     type='button'
                     data-track-category='Claw Agents'
                     data-track-name='Select all subagents'
+                    data-track-kind='passive'
                     onClick={() =>
                       toggleAll(
                         'subagents',
@@ -1889,6 +1921,7 @@ export function ToolboxPicker({
                             type='button'
                             data-track-category='Claw Agents'
                             data-track-name='Toggle subagent selection'
+                            data-track-kind='passive'
                             onClick={() => {
                               toggle('subagents', sa.name);
                               pinDetail(sa.name);
@@ -1964,6 +1997,7 @@ export function ToolboxPicker({
                             type='button'
                             data-track-category='Claw Agents'
                             data-track-name='Toggle MCP server section'
+                            data-track-kind='passive'
                             onClick={() => toggleSection(source)}
                             aria-expanded={open}
                             aria-controls={`toolbox-${source}`}
@@ -1992,6 +2026,7 @@ export function ToolboxPicker({
                             type='button'
                             data-track-category='Claw Agents'
                             data-track-name='Select all MCP tools'
+                            data-track-kind='passive'
                             onClick={() =>
                               gatewaySource
                                 ? setGatewayBulkSelection(source, serverTools, !allSel)
@@ -2020,6 +2055,7 @@ export function ToolboxPicker({
                                   type='button'
                                   data-track-category='Claw Agents'
                                   data-track-name='Toggle MCP tool selection'
+                                  data-track-kind='passive'
                                   onClick={() => {
                                     setGatewayToolSelection(source, serverTools, t, !selected);
                                     pinDetail(selectionKey);
@@ -2081,6 +2117,7 @@ export function ToolboxPicker({
                             type='button'
                             data-track-category='Claw Agents'
                             data-track-name='Toggle built-in tools section'
+                            data-track-kind='passive'
                             onClick={() => toggleSection(g.source)}
                             aria-expanded={open}
                             aria-controls={`toolbox-${g.source}`}
@@ -2109,6 +2146,7 @@ export function ToolboxPicker({
                             type='button'
                             data-track-category='Claw Agents'
                             data-track-name='Select all built-in tools'
+                            data-track-kind='passive'
                             onClick={() => toggleCustomGroup(slugs, allSel)}
                             className='flex-shrink-0 px-1.5 py-1 text-[11px] font-medium text-foreground/80 hover:text-foreground transition-colors'
                           >
@@ -2131,6 +2169,7 @@ export function ToolboxPicker({
                                   type='button'
                                   data-track-category='Claw Agents'
                                   data-track-name='Toggle built-in tool selection'
+                                  data-track-kind='passive'
                                   onClick={() => {
                                     toggle('custom', t.slug);
                                     pinDetail(t.name);

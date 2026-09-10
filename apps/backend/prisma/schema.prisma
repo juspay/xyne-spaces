@@ -3611,6 +3611,8 @@ model UserActivityEvent {
   url             String
   triggerType     String    @default("CLICK")
   contextMetadata Json?   
+  // 'active' (persisted a write) | 'passive' (read/navigation) | null (client could not classify)
+  interactionKind String?
   platform        String
   timestamp       DateTime
 

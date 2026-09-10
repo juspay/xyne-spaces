@@ -66,6 +66,7 @@ const SortableFieldOption = ({
         className='min-w-0 flex-1 bg-transparent text-sm font-[450] leading-[1.2] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50'
         data-track-category='Forms'
         data-track-name='EditFieldOption'
+        data-track-kind='active'
         data-track-metadata={trackMetadata}
       />
       <button
@@ -76,6 +77,7 @@ const SortableFieldOption = ({
         className='flex size-4 shrink-0 items-center justify-center text-destructive outline-none transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
         data-track-category='Forms'
         data-track-name='RemoveFieldOption'
+        data-track-kind='active'
         data-track-metadata={trackMetadata}
       >
         <DeleteDustbin02 className='size-4' />

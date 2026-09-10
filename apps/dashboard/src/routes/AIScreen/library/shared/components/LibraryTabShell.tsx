@@ -63,6 +63,7 @@ export function LibraryTabShell({
             onClick={error.onRetry}
             data-track-category='Claw Agents'
             data-track-name='Retry library load'
+            data-track-kind='passive'
             className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
           >
             Retry

@@ -82,6 +82,7 @@ const FieldOptionsList = ({
         className='flex w-fit items-center gap-2 rounded-[12px] border border-border bg-card px-3 py-2.5 text-sm font-[450] leading-[1.2] text-foreground outline-none transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring'
         data-track-category='Forms'
         data-track-name='AddFieldOption'
+        data-track-kind='active'
         data-track-metadata={JSON.stringify({ fieldIndex })}
       >
         <PlusDefault className='size-4' />

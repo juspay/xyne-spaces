@@ -23,6 +23,7 @@ const AgentsScreen = (): ReactElement => {
                 className='bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors'
                 data-track-category='Auth'
                 data-track-name='Logout'
+                data-track-kind='passive'
               >
                 Logout
               </button>

@@ -71,6 +71,7 @@ const InlineNameCell: React.FC<{
       aria-label='Rename'
       data-track-category='knowledge-base'
       data-track-name='rename-entry-inline'
+      data-track-kind='active'
       className='h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring'
     />
   );
@@ -245,6 +246,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                       className='flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left'
                       data-track-category='knowledge-base'
                       data-track-name='open-entry'
+                      data-track-kind='passive'
                     >
                       <span className='flex-shrink-0 pr-1'>
                         {e.type === 'FOLDER' ? (
@@ -280,6 +282,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                     className='hidden md:block truncate text-left tabular-nums text-[12px] text-muted-foreground'
                     data-track-category='knowledge-base'
                     data-track-name='open-entry-column'
+                    data-track-kind='passive'
                   >
                     {getColumnValue(e, c.key)}
                   </button>
@@ -303,6 +306,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                         className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='ask-ai-entry'
+                        data-track-kind='active'
                       >
                         <XyneAIStar size={14} />
                       </button>
@@ -319,6 +323,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                         className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='share-entry'
+                        data-track-kind='active'
                       >
                         <Share2 className='h-3.5 w-3.5' strokeWidth={1.75} />
                       </button>
@@ -335,6 +340,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                         className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='rename-entry'
+                        data-track-kind='active'
                       >
                         <Pencil className='h-3.5 w-3.5' strokeWidth={1.75} />
                       </button>
@@ -351,6 +357,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                         className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 dark:hover:bg-red-950/40'
                         data-track-category='knowledge-base'
                         data-track-name='delete-entry'
+                        data-track-kind='active'
                       >
                         <Trash2 className='h-3.5 w-3.5' strokeWidth={1.75} />
                       </button>

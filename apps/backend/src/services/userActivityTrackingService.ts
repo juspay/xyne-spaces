@@ -51,6 +51,8 @@ class UserActivityTrackingService {
         url: 'backend',
         trigger_type: TriggerType.DB_MUTATION,
         context_metadata: params.metadata,
+        // Every event on this path records a persisted server-side write.
+        interaction_kind: 'active' as const,
         platform: Platform.WEB,
         timestamp: Date.now(),
       };

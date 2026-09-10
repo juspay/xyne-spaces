@@ -1103,6 +1103,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                   data-ph-capture-attribute-track-id='reconnect_zero'
                   data-track-category='CHAT_INPUT'
                   data-track-name='RECONNECT_ZERO'
+                  data-track-kind='passive'
                 >
                   {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
                 </button>
@@ -1126,6 +1127,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                     className='font-semibold text-primary hover:underline'
                     data-track-category='CHAT_INPUT'
                     data-track-name='open-delayed-messages-from-banner'
+                    data-track-kind='passive'
                   >
                     See all scheduled messages
                   </button>
@@ -1252,6 +1254,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                         aria-label='Open shortcuts'
                         data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'
+                        data-track-kind='passive'
                       >
                         <Zap className='h-4 w-4 text-muted-foreground' />
                       </button>

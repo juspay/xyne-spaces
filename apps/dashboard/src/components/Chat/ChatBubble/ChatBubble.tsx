@@ -1541,6 +1541,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 onClick={e => handleReminderPresetSelect(option.option, e)}
                 data-track-category='CHAT_BUBBLE'
                 data-track-name='SELECT_REMINDER_PRESET'
+                data-track-kind='passive'
               >
                 {option.label}
               </Button>
@@ -1565,6 +1566,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 onClick={() => setIsCustomReminderModalOpen(false)}
                 data-track-category='CHAT_BUBBLE'
                 data-track-name='Close_Custom_Reminder_Modal'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ messageId: message.messageId })}
               >
                 <X className='h-4 w-4' />
@@ -1619,6 +1621,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 onClick={() => setIsCustomReminderModalOpen(false)}
                 data-track-category='CHAT_BUBBLE'
                 data-track-name='CANCEL_CUSTOM_REMINDER'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -1626,6 +1629,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 onClick={handleSaveCustomReminder}
                 data-track-category='CHAT_BUBBLE'
                 data-track-name='SAVE_CUSTOM_REMINDER'
+                data-track-kind='active'
                 disabled={!customReminderDate}
               >
                 Save
@@ -1651,6 +1655,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 onClick={() => setShowDeleteConfirm(false)}
                 data-track-category='CHAT_BUBBLE'
                 data-track-name='CLOSE_DELETE_CONFIRM_DIALOG'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
               >
                 <X className='h-4 w-4' />
@@ -1736,6 +1741,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   disabled={isDeleting}
                   data-track-category='CHAT_BUBBLE'
                   data-track-name='CANCEL_DELETE_CONFIRM_DIALOG'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
                 >
                   Cancel
@@ -1750,6 +1756,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   data-testid='confirm-delete-message'
                   data-track-category='CHAT_BUBBLE'
                   data-track-name='CONFIRM_DELETE_MESSAGE'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ messageId: message?.messageId })}
                 >
                   {isDeleting ? 'Deleting...' : 'Delete'}

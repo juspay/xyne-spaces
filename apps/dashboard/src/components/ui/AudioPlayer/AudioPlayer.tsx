@@ -113,6 +113,7 @@ export function AudioPlayer({
           onClick={stopPropagation ? e => e.stopPropagation() : undefined}
           data-track-category={trackCategory}
           data-track-name='seek_recording'
+          data-track-kind='passive'
           className='absolute inset-0 w-full opacity-0 cursor-pointer disabled:cursor-default'
         />
       </div>

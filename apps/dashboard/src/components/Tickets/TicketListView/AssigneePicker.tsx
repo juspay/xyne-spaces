@@ -91,6 +91,7 @@ export function AssigneePicker({
       aria-label={resolvedAssigneeId ? 'Change assignee' : 'Assign ticket'}
       data-track-category='Tickets'
       data-track-name='ToggleRowAssignee'
+      data-track-kind='active'
     >
       <span className='flex items-center justify-center w-5 h-5 shrink-0 overflow-hidden rounded-sm leading-none'>
         {avatar}
@@ -109,6 +110,7 @@ export function AssigneePicker({
       aria-label={resolvedAssigneeId ? 'Change assignee' : 'Assign ticket'}
       data-track-category='Tickets'
       data-track-name='ToggleRowAssignee'
+      data-track-kind='active'
     >
       {avatar}
     </button>
@@ -137,6 +139,7 @@ export function AssigneePicker({
               className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md bg-background text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
               data-track-category='Tickets'
               data-track-name='SearchAssigneePicker'
+              data-track-kind='passive'
             />
           </div>
         </div>
@@ -154,6 +157,7 @@ export function AssigneePicker({
             )}
             data-track-category='Tickets'
             data-track-name='UnassignRowTicket'
+            data-track-kind='active'
           >
             <span className='flex items-center justify-center w-5 h-5 rounded-sm bg-border'>
               <X className='w-3 h-3 text-muted-foreground' />
@@ -175,6 +179,7 @@ export function AssigneePicker({
               )}
               data-track-category='Tickets'
               data-track-name='SelectRowAssignee'
+              data-track-kind='active'
             >
               <UserAvatar userId={user.id} showActiveStatus={false} size={AvatarSize.SM} />
               <div className='flex-1 min-w-0'>

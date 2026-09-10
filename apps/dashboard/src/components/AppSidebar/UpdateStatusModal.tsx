@@ -280,6 +280,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
             data-track-category='Update_User_Status_Modal'
             data-track-name='Close_Status_Modal'
+            data-track-kind='passive'
           >
             <X className='size-4' />
           </Button>
@@ -354,6 +355,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                       className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
                       data-track-category='Update_User_Status_Modal'
                       data-track-name='Select_Recent_Status'
+                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({
                         statusText: status.text,
                         expiry: status.expiry,
@@ -388,6 +390,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='Update_User_Status_Modal'
                     data-track-name='Select_Status_Suggestion'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({
                       statusText: suggestion.text,
                       expiry: suggestion.expiry,
@@ -459,6 +462,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 data-track-event='blur'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Status_Text_Input'
+                data-track-kind='passive'
                 autoFocus={!isMobile}
               />
 
@@ -469,6 +473,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   className='h-auto p-0 flex-shrink-0 flex items-center gap-1 text-muted-foreground hover:text-muted-foreground hover:bg-transparent'
                   data-track-category='Update_User_Status_Modal'
                   data-track-name='Clear_Status_In_Modal'
+                  data-track-kind='passive'
                 >
                   <span className='text-xs opacity-60'>(Clear status)</span>
                   <X className='size-4' />
@@ -545,6 +550,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 className='text-foreground hover:bg-muted'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Cancel_Status_Update'
+                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -557,6 +563,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 className='ml-auto px-6 bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Save_Status'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ statusText, expiryOption })}
                 data-testid='update-status-save-btn'
               >

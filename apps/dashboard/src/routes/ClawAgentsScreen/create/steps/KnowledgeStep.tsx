@@ -51,6 +51,7 @@ export function KnowledgeStep({ state, update }: Props): ReactElement {
       title={skill.description || skill.slug}
       data-track-category='Claw Agents'
       data-track-name='Toggle agent skill'
+      data-track-kind='passive'
       className={cn(
         'rounded-full border px-2.5 py-1 text-[12px] transition',
         selectedSkillIds.includes(skill.id)
@@ -136,6 +137,7 @@ export function KnowledgeStep({ state, update }: Props): ReactElement {
                     onChange={() => update({ selectedKbScope: opt.value })}
                     data-track-category='Claw Agents'
                     data-track-name='Select knowledge base scope'
+                    data-track-kind='passive'
                     className='h-3.5 w-3.5'
                   />
                   <span className='text-[13px] font-medium text-foreground'>{opt.label}</span>

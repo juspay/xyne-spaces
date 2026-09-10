@@ -140,6 +140,7 @@ export const ShareViewDialog = ({
                   )}
                   data-track-category='Projects'
                   data-track-name='ToggleShareViewUser'
+                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ userId: u.id, selected: !isSelected })}
                 >
                   <div className='flex-1 min-w-0'>

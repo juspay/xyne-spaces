@@ -174,6 +174,7 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
               className='ml-auto shrink-0 rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent'
               data-track-category='CANVAS'
               data-track-name='OPEN_CANVAS_TICKET_PREVIEW'
+              data-track-kind='passive'
               onClick={event => {
                 event.preventDefault();
                 event.stopPropagation();

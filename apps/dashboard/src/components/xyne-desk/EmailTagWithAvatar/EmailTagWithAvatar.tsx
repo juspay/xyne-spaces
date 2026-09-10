@@ -71,6 +71,7 @@ export const EmailTagWithAvatar = ({
             aria-label={`Remove ${email}`}
             data-track-category='EMAIL'
             data-track-name='RemoveEmailTag'
+            data-track-kind='active'
             data-track-metadata={JSON.stringify({ email })}
           >
             <X size={14} className='text-muted-foreground' />

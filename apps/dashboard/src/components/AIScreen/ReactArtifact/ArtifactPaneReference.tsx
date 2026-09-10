@@ -62,6 +62,7 @@ export const ArtifactPaneReference = ({
         title={isViewing ? 'This version is open in the pane' : 'Show this version in the pane'}
         data-track-category='AskAI'
         data-track-name='ArtifactPaneReferenceSelect'
+        data-track-kind='passive'
       >
         <AppIcon
           name={icon}
@@ -97,6 +98,7 @@ export const ArtifactPaneReference = ({
           }
           data-track-category='AskAI'
           data-track-name='ArtifactPaneReferenceRestore'
+          data-track-kind='active'
         >
           <RotateLeft size={14} aria-hidden='true' />
           Restore

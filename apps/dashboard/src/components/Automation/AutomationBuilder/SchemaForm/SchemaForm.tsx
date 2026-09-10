@@ -744,6 +744,7 @@ function ArrayField({
                 aria-label='Remove entry'
                 data-track-category='automation-builder'
                 data-track-name='schema-form-array-remove'
+                data-track-kind='active'
                 className='mt-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-red-600 hover:bg-red-500/10'
               >
                 <Trash2 className='size-4' />
@@ -758,6 +759,7 @@ function ArrayField({
         onClick={handleAdd}
         data-track-category='automation-builder'
         data-track-name='ADD_SCHEMA_FIELD'
+        data-track-kind='passive'
         className='self-start'
       >
         <Plus className='size-4' />
@@ -845,6 +847,7 @@ function RecordField({
         onClick={handleAdd}
         data-track-category='automation-builder'
         data-track-name='ADD_SCHEMA_FIELD'
+        data-track-kind='passive'
         className='self-start'
       >
         <Plus className='mr-1 size-3.5' />
@@ -902,6 +905,7 @@ function RecordRow({
         aria-label='Remove row'
         data-track-category='automation-builder'
         data-track-name='schema-form-record-remove-row'
+        data-track-kind='active'
         className='flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/40 hover:text-foreground'
       >
         <Trash2 className='size-4' />

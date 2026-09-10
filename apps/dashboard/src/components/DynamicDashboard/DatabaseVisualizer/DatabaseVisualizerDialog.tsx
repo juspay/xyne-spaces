@@ -120,6 +120,7 @@ export function DatabaseVisualizerDialog({
                   aria-label='Re-ingest this database'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Db_Viz_Refresh_Source'
+                  data-track-kind='passive'
                   className='shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 >
                   <RefreshCw
@@ -138,6 +139,7 @@ export function DatabaseVisualizerDialog({
                   aria-label='Delete this database'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Db_Viz_Delete_Source'
+                  data-track-kind='active'
                   className='shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 >
                   <Trash2 size={15} />
@@ -165,6 +167,7 @@ export function DatabaseVisualizerDialog({
                 aria-label='Search tables'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Db_Viz_Search'
+                data-track-kind='passive'
                 className='h-9 w-56 pl-9 pr-3 text-[13px] bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/15 transition-colors'
               />
             </div>
@@ -174,6 +177,7 @@ export function DatabaseVisualizerDialog({
               aria-label='Close'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Close'
+              data-track-kind='passive'
               className='shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
             >
               <X size={17} />
@@ -202,6 +206,7 @@ export function DatabaseVisualizerDialog({
                   onClick={() => void schemaQuery.refetch()}
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Db_Viz_Retry'
+                  data-track-kind='passive'
                   className='mt-1 text-sm text-primary hover:underline'
                 >
                   Retry
@@ -250,6 +255,7 @@ export function DatabaseVisualizerDialog({
               disabled={refreshMutation.isPending}
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Refresh_Source_Cancel'
+              data-track-kind='passive'
               className='h-9 px-3 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50'
             >
               Cancel
@@ -261,6 +267,7 @@ export function DatabaseVisualizerDialog({
               data-ph-capture-attribute-track-id='reingest_data_source'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Refresh_Source_Confirm'
+              data-track-kind='passive'
               className='h-9 px-3 rounded-lg text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5'
             >
               {refreshMutation.isPending && <Loader2 size={13} className='animate-spin' />}
@@ -294,6 +301,7 @@ export function DatabaseVisualizerDialog({
               disabled={deleteMutation.isPending}
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Delete_Source_Cancel'
+              data-track-kind='passive'
               className='h-9 px-3 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50'
             >
               Cancel
@@ -305,6 +313,7 @@ export function DatabaseVisualizerDialog({
               data-ph-capture-attribute-track-id='delete_data_source'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Delete_Source_Confirm'
+              data-track-kind='active'
               className='h-9 px-3 rounded-lg text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5'
             >
               {deleteMutation.isPending && <Loader2 size={13} className='animate-spin' />}

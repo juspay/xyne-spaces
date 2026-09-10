@@ -105,6 +105,7 @@ const CanvasCreationFallback = ({
           className='px-4 py-2 text-sm font-medium rounded-lg bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors'
           data-track-category='RecordingsScreen'
           data-track-name='retry_create_canvas'
+          data-track-kind='active'
         >
           Try Again
         </button>
@@ -113,6 +114,7 @@ const CanvasCreationFallback = ({
           className='px-4 py-2 text-sm font-medium rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-colors'
           data-track-category='RecordingsScreen'
           data-track-name='switch_to_transcript_only'
+          data-track-kind='passive'
         >
           Use Transcript Only
         </button>
@@ -503,6 +505,7 @@ export default function RecordingsScreen(): ReactElement {
             className='mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors'
             data-track-category='RecordingsScreen'
             data-track-name='try_again'
+            data-track-kind='passive'
           >
             Try Again
           </button>
@@ -546,6 +549,7 @@ export default function RecordingsScreen(): ReactElement {
                     className='flex items-center gap-2 px-3 py-1.5 text-sm bg-background border border-border rounded-lg hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                     data-track-category='RecordingsScreen'
                     data-track-name='open_stt_picker'
+                    data-track-kind='passive'
                   >
                     <span className='text-muted-foreground'>STT:</span>
                     <span className='font-medium text-foreground'>{sttModelLabels[sttModel]}</span>
@@ -562,6 +566,7 @@ export default function RecordingsScreen(): ReactElement {
                         aria-label='Close STT picker'
                         data-track-category='RecordingsScreen'
                         data-track-name='close_stt_picker'
+                        data-track-kind='passive'
                       />
                       <div className='absolute right-0 top-full mt-1 w-40 bg-background rounded-lg shadow-lg border border-border py-1 z-50'>
                         {(['google', 'azure', 'deepgram'] as const).map(model => (
@@ -574,6 +579,7 @@ export default function RecordingsScreen(): ReactElement {
                             className='w-full px-4 py-2 text-left text-sm hover:bg-muted flex items-center justify-between'
                             data-track-category='RecordingsScreen'
                             data-track-name={`select_stt_model_${model}`}
+                            data-track-kind='passive'
                           >
                             <span
                               className={
@@ -654,6 +660,7 @@ export default function RecordingsScreen(): ReactElement {
                             className='flex-1 min-w-0 text-left p-4 cursor-pointer'
                             data-track-category='RecordingsScreen'
                             data-track-name='view_recording'
+                            data-track-kind='passive'
                           >
                             <div className='flex items-start gap-4'>
                               {/* Icon */}
@@ -736,6 +743,7 @@ export default function RecordingsScreen(): ReactElement {
                               aria-label={`Select ${recording.title ?? 'recording'}`}
                               data-track-category='RecordingsScreen'
                               data-track-name='toggle_select_recording'
+                              data-track-kind='active'
                             />
                           </label>
                         </div>

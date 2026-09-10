@@ -50,6 +50,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             variant='outline'
             data-track-category='PROFILE'
             data-track-name='CloseProfile'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ channelId, userId })}
           >
             Go Back
@@ -82,6 +83,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             title='Close'
             data-track-category='PROFILE'
             data-track-name='CloseProfileSidebar'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ channelId, userId })}
           >
             <X className='size-4' />

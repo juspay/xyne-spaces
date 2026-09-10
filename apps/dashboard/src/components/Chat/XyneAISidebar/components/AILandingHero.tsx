@@ -288,6 +288,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
                     className='self-start text-xs text-primary hover:underline sm:ml-4 sm:shrink-0'
                     data-track-category='AILanding'
                     data-track-name='ViewAllRecaps'
+                    data-track-kind='passive'
                   >
                     View all
                   </button>
@@ -388,6 +389,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
                 aria-label='Close'
                 data-track-category='AILanding'
                 data-track-name='CloseRecapPreview'
+                data-track-kind='passive'
               >
                 <X className='h-3.5 w-3.5' />
               </button>
@@ -422,6 +424,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
                       title={`View source for point ${idx + 1}`}
                       data-track-category='AILanding'
                       data-track-name='ViewRecapCitation'
+                      data-track-kind='passive'
                     >
                       {selectedCard.citationIndices?.[`${idx + 1}`] ?? idx + 1}
                     </button>
@@ -443,6 +446,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
                     className='inline-flex items-center gap-1 text-xs text-primary transition-colors hover:underline'
                     data-track-category='AILanding'
                     data-track-name='AskAIRecapReference'
+                    data-track-kind='active'
                   >
                     <XyneAIStar size={13} />
                     Ask AI
@@ -457,6 +461,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
                   className='text-xs text-primary transition-colors hover:underline'
                   data-track-category='AILanding'
                   data-track-name='ViewAllFromRecapPreview'
+                  data-track-kind='passive'
                 >
                   View all recaps
                 </button>
@@ -522,6 +527,7 @@ export class AILandingHeroErrorBoundary extends Component<
             className='text-xs text-primary underline underline-offset-2 hover:text-primary/80 transition-colors'
             data-track-category='AILanding'
             data-track-name='RetryAfterError'
+            data-track-kind='passive'
           >
             Try again
           </button>

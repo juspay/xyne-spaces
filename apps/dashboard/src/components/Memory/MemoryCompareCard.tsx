@@ -35,6 +35,7 @@ const AutoResizeTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElem
       }}
       data-track-category='Memory'
       data-track-name='AutoResizeTextarea'
+      data-track-kind='passive'
     />
   );
 };
@@ -185,6 +186,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
               title='Delete document'
               data-track-category='Memory'
               data-track-name='ShowDeleteConfirm'
+              data-track-kind='passive'
             >
               <Trash2 size={14} />
             </button>
@@ -200,6 +202,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
                 data-ph-capture-attribute-track-id='memory_confirm_delete_document'
                 data-track-category='Memory'
                 data-track-name='ConfirmDeleteDocument'
+                data-track-kind='active'
               >
                 <Check size={14} />
               </button>
@@ -209,6 +212,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
                 title='Cancel delete'
                 data-track-category='Memory'
                 data-track-name='CancelDeleteDocument'
+                data-track-kind='passive'
               >
                 <X size={14} />
               </button>
@@ -220,6 +224,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
             title='Remove from compare'
             data-track-category='Memory'
             data-track-name='RemoveFromCompare'
+            data-track-kind='active'
           >
             <X size={14} />
           </button>
@@ -354,6 +359,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
               placeholder='tag1, tag2, tag3'
               data-track-category='Memory'
               data-track-name='TagsInput'
+              data-track-kind='passive'
             />
           }
           viewContent={
@@ -477,6 +483,7 @@ const EditableSection: React.FC<{
               data-ph-capture-attribute-track-id='memory_save_field_edit'
               data-track-category='Memory'
               data-track-name='SaveEdit'
+              data-track-kind='active'
             >
               <Check size={12} />
             </button>
@@ -486,6 +493,7 @@ const EditableSection: React.FC<{
               title='Cancel'
               data-track-category='Memory'
               data-track-name='CancelEdit'
+              data-track-kind='passive'
             >
               <X size={12} />
             </button>
@@ -564,6 +572,7 @@ const EditableMetadataRow: React.FC<{
               className={`flex-1 text-xs bg-muted/50 rounded px-2 py-1 border border-border focus:outline-none focus:ring-1 focus:ring-blue-500 text-foreground ${mono ? 'font-mono' : ''}`}
               data-track-category='Memory'
               data-track-name='MetadataInput'
+              data-track-kind='passive'
             />
             <button
               onClick={onSave}
@@ -573,6 +582,7 @@ const EditableMetadataRow: React.FC<{
               data-ph-capture-attribute-track-id='memory_save_metadata_edit'
               data-track-category='Memory'
               data-track-name='SaveMetadataEdit'
+              data-track-kind='active'
             >
               <Check size={12} />
             </button>
@@ -582,6 +592,7 @@ const EditableMetadataRow: React.FC<{
               title='Cancel'
               data-track-category='Memory'
               data-track-name='CancelMetadataEdit'
+              data-track-kind='passive'
             >
               <X size={12} />
             </button>
@@ -671,6 +682,7 @@ const ReviewStatusRow: React.FC<{
                   tabIndex={0}
                   data-track-category='Memory'
                   data-track-name={`SelectStatus${opt}`}
+                  data-track-kind='active'
                 >
                   {opt}
                 </button>
@@ -684,6 +696,7 @@ const ReviewStatusRow: React.FC<{
               data-ph-capture-attribute-track-id='memory_save_status_edit'
               data-track-category='Memory'
               data-track-name='SaveStatusEdit'
+              data-track-kind='active'
             >
               <Check size={12} />
             </button>
@@ -693,6 +706,7 @@ const ReviewStatusRow: React.FC<{
               title='Cancel'
               data-track-category='Memory'
               data-track-name='CancelStatusEdit'
+              data-track-kind='passive'
             >
               <X size={12} />
             </button>
@@ -715,6 +729,7 @@ const ReviewStatusRow: React.FC<{
                 title='Edit status'
                 data-track-category='Memory'
                 data-track-name='StartEditStatus'
+                data-track-kind='passive'
               >
                 <Pencil size={10} />
               </button>

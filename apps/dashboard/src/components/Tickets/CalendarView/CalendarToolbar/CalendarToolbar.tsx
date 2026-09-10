@@ -38,6 +38,7 @@ export function CalendarToolbar({
             aria-label='Previous period'
             data-track-category='CALENDAR'
             data-track-name='NavigatePrevious'
+            data-track-kind='passive'
           >
             <ChevronLeft className='w-4 h-4 text-muted-foreground' />
           </button>
@@ -47,6 +48,7 @@ export function CalendarToolbar({
             className='px-3 py-1.5 text-sm font-medium text-foreground hover:bg-background hover:shadow-sm rounded-md transition-all duration-200'
             data-track-category='CALENDAR'
             data-track-name='NavigateToday'
+            data-track-kind='passive'
           >
             Today
           </button>
@@ -57,6 +59,7 @@ export function CalendarToolbar({
             aria-label='Next period'
             data-track-category='CALENDAR'
             data-track-name='NavigateNext'
+            data-track-kind='passive'
           >
             <ChevronRight className='w-4 h-4 text-muted-foreground' />
           </button>
@@ -82,6 +85,7 @@ export function CalendarToolbar({
             }`}
             data-track-category='CALENDAR'
             data-track-name='ChangeViewMode'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ viewMode: mode.value })}
           >
             {mode.label}

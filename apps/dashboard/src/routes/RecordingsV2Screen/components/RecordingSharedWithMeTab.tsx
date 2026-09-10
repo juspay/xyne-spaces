@@ -77,6 +77,7 @@ export function RecordingSharedWithMeTab({
       emptyMessage='No people found'
       trackCategory='RecordingsV2'
       trackName='toggle_shared_by_filter'
+      trackKind='passive'
       trigger={
         <button
           type='button'
@@ -95,6 +96,7 @@ export function RecordingSharedWithMeTab({
           }
           data-track-category='RecordingsV2'
           data-track-name='show_shared_with_me'
+          data-track-kind='passive'
         >
           Shared with me
           {isActive && selectedSharerIds.length > 0 && (

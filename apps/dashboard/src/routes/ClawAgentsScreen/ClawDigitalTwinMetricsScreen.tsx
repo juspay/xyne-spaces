@@ -38,6 +38,7 @@ const ClawDigitalTwinMetricsScreen = (): ReactElement => {
               onClick={() => setDays(option.value)}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin metrics range'
+              data-track-kind='passive'
               className={cn(
                 'rounded-full px-3 py-1 text-xs font-medium transition-colors',
                 days === option.value

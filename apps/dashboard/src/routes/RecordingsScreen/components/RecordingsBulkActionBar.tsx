@@ -32,6 +32,7 @@ export function RecordingsBulkActionBar({
       className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
       data-track-category='RecordingsScreen'
       data-track-name='ask_ai_selected'
+      data-track-kind='passive'
     >
       {isPreparingAskAI ? (
         <Loader2 className='w-4 h-4 animate-spin' />
@@ -57,6 +58,7 @@ export function RecordingsBulkActionBar({
           aria-label='Clear selection'
           data-track-category='RecordingsScreen'
           data-track-name='clear_selection'
+          data-track-kind='passive'
         >
           <X className='w-4 h-4' />
         </button>
@@ -80,6 +82,7 @@ export function RecordingsBulkActionBar({
           className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-destructive hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
           data-track-category='RecordingsScreen'
           data-track-name='delete_selected'
+          data-track-kind='active'
         >
           <Trash2 className='w-4 h-4' />
           Delete

@@ -481,6 +481,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                     type='checkbox'
                     data-track-category='confluence_migration'
                     data-track-name='toggle_attachment_migration'
+                    data-track-kind='passive'
                     checked={migrateAttachments}
                     onChange={event => setMigrateAttachments(event.target.checked)}
                     className='h-4 w-4 rounded border-border text-sky-600 focus:ring-sky-500'
@@ -495,6 +496,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                   onClick={() => void handlePreview()}
                   data-track-category='confluence_migration'
                   data-track-name='PREVIEW_MIGRATION'
+                  data-track-kind='passive'
                   disabled={!canPreview || isPreviewLoading}
                 >
                   {isPreviewLoading
@@ -508,6 +510,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                   onClick={() => setIsHistoryModalOpen(true)}
                   data-track-category='confluence_migration'
                   data-track-name='OPEN_MIGRATION_HISTORY'
+                  data-track-kind='passive'
                   disabled={history.length === 0}
                 >
                   View Imported Canvases
@@ -651,6 +654,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                     }}
                     data-track-category='confluence_migration'
                     data-track-name='START_MIGRATION'
+                    data-track-kind='active'
                     disabled={isImportLoading}
                   >
                     {isImportLoading ? 'Migrating...' : 'Migrate Space'}

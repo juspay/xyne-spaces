@@ -192,6 +192,7 @@ const PeopleTab = ({ agent, permissions }: PeopleTabProps): ReactElement => {
                         onClick={() => void handleAdd(u)}
                         data-track-category='Claw Agents'
                         data-track-name='Add person to agent'
+                        data-track-kind='active'
                         disabled={!!addingId}
                         className='flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:opacity-60'
                       >
@@ -282,6 +283,7 @@ const PeopleTab = ({ agent, permissions }: PeopleTabProps): ReactElement => {
                       onClick={() => void handleRemove(share)}
                       data-track-category='Claw Agents'
                       data-track-name='Remove person from agent'
+                      data-track-kind='active'
                       disabled={removingId === share.id}
                       aria-label={`Remove ${share.user.name || share.user.email}`}
                       className={cn(

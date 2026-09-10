@@ -248,6 +248,7 @@ export const UserSubmenu = ({
         `}
         data-track-category='Tickets'
         data-track-name='ToggleUnassignedFilter'
+        data-track-kind='passive'
       >
         <span className='w-6 h-6 rounded-full border border-dashed border-muted-foreground flex items-center justify-center shrink-0'>
           <UserIcon className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={1.5} />
@@ -272,6 +273,7 @@ export const UserSubmenu = ({
       `}
       data-track-category='Tickets'
       data-track-name='ToggleSelectAllUsers'
+      data-track-kind='passive'
     >
       <span className='flex-1 text-left text-sm font-medium text-primary'>
         {allVisibleSelected ? 'Deselect all' : 'Select all'}
@@ -303,6 +305,7 @@ export const UserSubmenu = ({
         `}
         data-track-category='Tickets'
         data-track-name='ToggleUserFilter'
+        data-track-kind='passive'
         data-track-metadata={JSON.stringify({
           userId: user.id,
           userName: displayName,

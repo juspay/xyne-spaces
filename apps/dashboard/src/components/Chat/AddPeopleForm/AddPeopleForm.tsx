@@ -199,6 +199,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           disabled={isLoading}
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='Back_History_Scope'
+          data-track-kind='passive'
         >
           Back
         </Button>
@@ -211,6 +212,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           data-testid='add-people-confirm'
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='ADD_PEOPLE_SUBMIT'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ selectedUsers, scopeMode })}
         >
           Done
@@ -236,6 +238,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           disabled={isLoading}
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='Go_Back_Full_History'
+          data-track-kind='passive'
         >
           Go Back
         </Button>
@@ -248,6 +251,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           data-testid='add-people-confirm-full-history'
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='CONFIRM_FULL_HISTORY'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ selectedUsers })}
         >
           Confirm
@@ -306,6 +310,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
             disabled={isLoading}
             data-track-category='ADD_CHAT_PARTICIPANTS'
             data-track-name='Cancel_Add_People'
+            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ selectedUsers: selectedUsers })}
           >
             Cancel

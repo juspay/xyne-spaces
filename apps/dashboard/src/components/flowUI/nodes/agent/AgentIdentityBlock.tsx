@@ -85,6 +85,7 @@ const CapabilityChip: React.FC<{
       className={className}
       data-track-category='AGENT_ARTIFACT'
       data-track-name='TOGGLE_CAPABILITY'
+      data-track-kind='active'
     >
       {content}
     </button>
@@ -192,6 +193,7 @@ const CapabilityGroup: React.FC<{
       aria-expanded={expanded}
       data-track-category='AGENT_ARTIFACT'
       data-track-name='TOGGLE_CAPABILITY_OVERFLOW'
+      data-track-kind='passive'
     >
       {text}
     </button>
@@ -309,6 +311,7 @@ export const AgentConnectPrompt: React.FC<{
         className='whitespace-nowrap text-xs font-medium leading-[1.2] text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300'
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CLICK_CONNECT_UNCONNECTED'
+        data-track-kind='passive'
       >
         Connect {unconnected.length} unconnected {unconnected.length === 1 ? 'tool' : 'tools'}
       </button>
@@ -333,6 +336,7 @@ export const AgentConnectLinks: React.FC<{ agent: AgentIdentity }> = ({ agent })
           className='text-xs font-medium leading-[1.3] text-foreground underline underline-offset-2 hover:text-foreground/80'
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_CONNECT'
+          data-track-kind='passive'
         >
           Connect {link.displayName}
         </a>

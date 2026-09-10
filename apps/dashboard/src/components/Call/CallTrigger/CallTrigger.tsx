@@ -126,6 +126,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
           data-testid='start-call-button'
           data-track-category='CALLS'
           data-track-name='Call_Trigger'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({
             hasActiveCall: hasActiveCallInChannel,
             isInCall,

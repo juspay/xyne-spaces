@@ -114,6 +114,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
             title='Diagram'
             data-track-category='D2'
             data-track-name='VIEW_DIAGRAM'
+            data-track-kind='passive'
           >
             <ImageIcon className='h-3.5 w-3.5' />
           </button>
@@ -123,6 +124,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
             title='Code'
             data-track-category='D2'
             data-track-name='VIEW_CODE'
+            data-track-kind='passive'
           >
             <Code2 className='h-3.5 w-3.5' />
           </button>
@@ -136,6 +138,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
               title='Download as PNG'
               data-track-category='D2'
               data-track-name='DOWNLOAD_PNG'
+              data-track-kind='passive'
             >
               <Download className='h-3.5 w-3.5' />
             </button>
@@ -146,6 +149,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
               title='Copy code'
               data-track-category='D2'
               data-track-name='COPY_CODE'
+              data-track-kind='passive'
             >
               {copied ? (
                 <Check className='h-3.5 w-3.5 text-green-600' />
@@ -174,6 +178,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
             title='Click to preview'
             data-track-category='D2'
             data-track-name='OPEN_PREVIEW'
+            data-track-kind='passive'
           />
         ) : (
           <div className='p-3 pt-10'>
@@ -203,6 +208,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
             aria-label='Close preview'
             data-track-category='D2'
             data-track-name='CLOSE_PREVIEW'
+            data-track-kind='passive'
           >
             <X className='h-5 w-5 text-muted-foreground' />
           </button>

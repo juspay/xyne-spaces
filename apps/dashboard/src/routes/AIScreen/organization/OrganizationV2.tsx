@@ -185,6 +185,7 @@ const OrganizationV2 = (): ReactElement => {
                 onClick={() => void org.refetch()}
                 data-track-category='Claw Organization'
                 data-track-name='Organization: retry load'
+                data-track-kind='passive'
               >
                 Try again
               </Button>
@@ -228,6 +229,7 @@ const OrganizationV2 = (): ReactElement => {
                 onClick={() => setAddOpen(true)}
                 data-track-category='Claw Organization'
                 data-track-name='Organization: open add member'
+                data-track-kind='passive'
               >
                 <PlusDefault className='size-4' aria-hidden />
                 Add member
@@ -255,6 +257,7 @@ const OrganizationV2 = (): ReactElement => {
               ariaLabel='Search members'
               trackCategory='Claw Organization'
               trackName='Organization: search members'
+              trackKind='passive'
               className='w-full'
             />
           )}
@@ -337,6 +340,7 @@ const OrganizationV2 = (): ReactElement => {
                             disabled={busyUserId !== null}
                             label={`Role for ${displayName}`}
                             trackName='Organization: set member role'
+                            trackKind='active'
                             triggerClassName='h-8 !w-32 rounded-md border-0 bg-transparent px-3 text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent [&>svg]:text-current [&>svg]:opacity-100'
                             onChange={next => {
                               if (isOrgRole(next)) void changeRole(member, next);
@@ -359,6 +363,7 @@ const OrganizationV2 = (): ReactElement => {
                               aria-label={`Remove ${displayName}`}
                               data-track-category='Claw Organization'
                               data-track-name='Organization: remove member'
+                              data-track-kind='active'
                               className='text-muted-foreground hover:text-destructive focus-visible:bg-muted focus-visible:ring-0'
                             >
                               <DeleteDustbin01 className='size-4' aria-hidden />

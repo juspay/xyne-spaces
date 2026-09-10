@@ -232,6 +232,7 @@ export function ParticipantTile({
       onKeyDown={onKeyDown}
       data-track-category='CALLS'
       data-track-name='Participant_Tile'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({
         participantIdentity: participant.identity,
         participantName: participant.name,
@@ -252,6 +253,7 @@ export function ParticipantTile({
           aria-label={`Expand ${participant.isLocal ? 'your' : `${participant.name}'s`} video`}
           data-track-category='CALLS'
           data-track-name='Expand_Participant_Tile'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
           className={cn(
             'absolute top-1 right-1 sm:top-2 sm:right-2 z-20 flex items-center justify-center',
@@ -473,6 +475,7 @@ export function ParticipantTile({
           aria-label={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
           data-track-category='CALLS'
           data-track-name='TOGGLE_BACKGROUND_BLUR_TILE'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ enabled: !isBackgroundBlurEnabled })}
           className={cn(
             'absolute z-10 flex items-center justify-center rounded-full shadow-md transition-colors',
@@ -518,6 +521,7 @@ export function ParticipantTile({
           aria-label={isHandRaised ? 'Lower hand' : 'Raise hand'}
           data-track-category='CALLS'
           data-track-name='TOGGLE_HAND_RAISE_TILE'
+          data-track-kind='active'
           data-track-metadata={JSON.stringify({ raised: !isHandRaised })}
           className={cn(
             'absolute z-10 flex items-center justify-center rounded-full shadow-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/60',

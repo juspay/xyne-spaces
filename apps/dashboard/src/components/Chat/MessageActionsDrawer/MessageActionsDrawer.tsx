@@ -164,6 +164,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
       }`}
       data-track-category='MESSAGE'
       data-track-name='MESSAGE_ACTION'
+      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ action: label })}
     >
       <span className='flex-shrink-0 w-5 h-5 flex items-center justify-center'>{icon}</span>
@@ -200,6 +201,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                     onClick={() => setView('default')}
                     data-track-category='MESSAGE'
                     data-track-name='BACK_TO_MESSAGE_ACTIONS'
+                    data-track-kind='passive'
                   >
                     <ArrowLeft className='size-5' />
                     <span>Back</span>

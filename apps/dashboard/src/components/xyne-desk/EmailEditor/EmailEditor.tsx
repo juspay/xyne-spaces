@@ -435,6 +435,7 @@ export const EmailEditor = ({
             className='inline-flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur hover:bg-muted transition-colors'
             data-track-category='YourDraft'
             data-track-name='RefineSelection'
+            data-track-kind='active'
           >
             <Quote size={12} className='text-red-500 dark:text-red-400' />
             <span>Refine selection</span>

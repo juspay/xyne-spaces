@@ -21,6 +21,7 @@ export function ReasoningBlock({ text, streaming }: ReasoningBlockProps): ReactE
         type='button'
         data-track-category='XyneAI'
         data-track-name='toggle-reasoning-block'
+        data-track-kind='passive'
       >
         <ChevronRight
           size={14}

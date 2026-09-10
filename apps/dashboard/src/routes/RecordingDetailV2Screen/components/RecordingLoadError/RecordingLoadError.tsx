@@ -36,6 +36,7 @@ export function RecordingLoadError({
                     className='flex items-center gap-1.5 text-muted-foreground transition-colors duration-300 hover:text-foreground'
                     data-track-category='RecordingDetailV2'
                     data-track-name='breadcrumb_recordings_from_error'
+                    data-track-kind='passive'
                   >
                     <UturnLeft className='size-3.5' variant='Stroke' aria-hidden='true' />
                     Recordings
@@ -106,6 +107,7 @@ export function RecordingLoadError({
                   className='mt-6 h-9 gap-2 rounded-full bg-foreground px-5 text-[13px] font-medium text-background shadow-sm hover:bg-foreground/90 hover:text-background'
                   data-track-category='RecordingDetailV2'
                   data-track-name='back_to_recordings_from_error'
+                  data-track-kind='passive'
                 >
                   <ArrowLeft className='size-4' aria-hidden='true' />
                   Back to recordings

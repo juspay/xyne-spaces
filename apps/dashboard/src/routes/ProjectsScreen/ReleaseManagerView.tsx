@@ -69,6 +69,7 @@ const ReleaseManagerView = (): ReactElement => {
               onClick={() => setShowCreateModal(true)}
               data-track-category='ReleaseManager'
               data-track-name='CreateReleaseProject'
+              data-track-kind='active'
             />
           </div>
           <p className='text-xs text-muted-foreground'>Projects with repositories</p>
@@ -82,6 +83,7 @@ const ReleaseManagerView = (): ReactElement => {
               className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='ReleaseManager'
               data-track-name='SearchReleaseProjects'
+              data-track-kind='passive'
             />
           </div>
         </div>
@@ -147,6 +149,7 @@ const ReleaseManagerView = (): ReactElement => {
               className='mb-3 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='ReleaseManager'
               data-track-name='SearchAttachableProjects'
+              data-track-kind='passive'
             />
             {attachableProjects.length === 0 ? (
               <p className='py-6 text-center text-sm text-muted-foreground'>
@@ -166,6 +169,7 @@ const ReleaseManagerView = (): ReactElement => {
                     className='flex w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2.5 text-left transition-colors hover:bg-muted'
                     data-track-category='ReleaseManager'
                     data-track-name='SelectProjectForRelease'
+                    data-track-kind='passive'
                   >
                     <span className='truncate text-sm font-semibold text-foreground'>{p.name}</span>
                     <span className='ml-2 shrink-0 rounded-md bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>

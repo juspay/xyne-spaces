@@ -18,6 +18,7 @@ export function BuiltinChip({ label, selected, onToggle }: BuiltinChipProps): Re
       aria-pressed={selected}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: toggle built-in chip'
+      data-track-kind='active'
       className={cn(
         'flex h-7 shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-border px-2 transition-colors',
         selected

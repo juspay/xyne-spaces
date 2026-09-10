@@ -114,6 +114,7 @@ export const LocalHarnessStepPanel = ({
               }`}
               data-track-category='Questionnaire'
               data-track-name='SelectLocalHarness'
+              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ provider: install.provider })}
             >
               <span
@@ -168,6 +169,7 @@ export const LocalHarnessStepPanel = ({
             className='text-[14px] text-[#8E939D] hover:text-[#272B35] transition-colors disabled:opacity-50'
             data-track-category='Questionnaire'
             data-track-name='LocalHarnessBack'
+            data-track-kind='passive'
           >
             Back
           </button>
@@ -178,6 +180,7 @@ export const LocalHarnessStepPanel = ({
             className='inline-flex h-[48px] items-center gap-2.5 px-5 bg-[#FF6868] text-white text-[15px] font-semibold rounded-[10px] hover:bg-[#FF5A5A] disabled:bg-[#B9B9B9] disabled:opacity-100 disabled:cursor-not-allowed transition-colors'
             data-track-category='Questionnaire'
             data-track-name='ConnectLocalHarness'
+            data-track-kind='active'
           >
             {isConnecting ? (
               <>
@@ -198,6 +201,7 @@ export const LocalHarnessStepPanel = ({
             className='text-[14px] text-[#8E939D] hover:text-[#272B35] transition-colors disabled:opacity-50'
             data-track-category='Questionnaire'
             data-track-name='SkipLocalHarness'
+            data-track-kind='passive'
           >
             Not now
           </button>

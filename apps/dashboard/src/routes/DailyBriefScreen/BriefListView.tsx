@@ -39,6 +39,7 @@ export function BriefListView({
                   onClick={() => onSelect(item.date, 'history_menu')}
                   data-track-category='DailyBrief'
                   data-track-name='daily-brief-history-item'
+                  data-track-kind='passive'
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left',
                     'text-[14px] tracking-[-0.1px] transition-colors',
@@ -61,6 +62,7 @@ export function BriefListView({
           onClick={onBrowseDates}
           data-track-category='DailyBrief'
           data-track-name='daily-brief-browse-by-date'
+          data-track-kind='passive'
           className='flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-[14px] font-normal tracking-[-0.1px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         >
           <CalendarFilled size={16} className='shrink-0' />

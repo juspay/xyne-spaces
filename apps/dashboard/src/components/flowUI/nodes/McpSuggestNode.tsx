@@ -136,6 +136,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
                   className={cn('flex min-w-0 flex-1 items-start gap-2', LINK_BUTTON)}
                   data-track-category='Claw MCP'
                   data-track-name='ViewMcpFromCard'
+                  data-track-kind='passive'
                 >
                   <McpLogo type={entry?.iconType ?? item.serverType} name={item.name} size='sm' />
                   <div className='flex min-w-0 flex-1 flex-col'>
@@ -168,6 +169,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
                     onClick={(): void => void handleConnect(item.serverType)}
                     data-track-category='Claw MCP'
                     data-track-name='ConnectSuggestedMcp'
+                    data-track-kind='active'
                   >
                     {busyType === item.serverType ? 'Connecting…' : 'Connect'}
                   </Button>
@@ -194,6 +196,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
             )}
             data-track-category='Claw MCP'
             data-track-name='BrowseMcpLibrary'
+            data-track-kind='passive'
           >
             Browse MCPs
           </Link>

@@ -246,6 +246,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
           data-ph-capture-attribute-track-id='rca_start_from_panel'
           data-track-category='RCA'
           data-track-name='StartRCAFromPanel'
+          data-track-kind='active'
         >
           {isCreatingRCA ? 'Creating...' : 'Start RCA'}
         </button>
@@ -387,6 +388,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
               onClick={() => closeConfirmDialog(false)}
               data-track-category='RCA'
               data-track-name='CANCEL_RCA_CONFIRM'
+              data-track-kind='passive'
             >
               Skip Save
             </Button>
@@ -395,6 +397,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
               onClick={() => closeConfirmDialog(true)}
               data-track-category='RCA'
               data-track-name='CONFIRM_RCA_ACTION'
+              data-track-kind='active'
             >
               Save and Continue
             </Button>
@@ -412,6 +415,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
             title='Collapse'
             data-track-category='RCA'
             data-track-name='CollapseRCAPanel'
+            data-track-kind='passive'
           >
             <Minimize2 size={16} />
           </button>
@@ -430,6 +434,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
             title='Expand'
             data-track-category='RCA'
             data-track-name='ExpandRCAPanel'
+            data-track-kind='passive'
           >
             <Maximize2 size={16} />
           </button>

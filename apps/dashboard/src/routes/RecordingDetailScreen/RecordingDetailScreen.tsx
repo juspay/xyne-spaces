@@ -334,6 +334,7 @@ export default function RecordingDetailScreen(): ReactElement {
             className='mt-4 px-4 py-2 bg-action-primary text-action-primary-foreground rounded-md hover:opacity-90 transition-opacity'
             data-track-category='RecordingDetail'
             data-track-name='back_to_recordings_error'
+            data-track-kind='passive'
           >
             Back to Recordings
           </button>
@@ -361,6 +362,7 @@ export default function RecordingDetailScreen(): ReactElement {
             className='flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4'
             data-track-category='RecordingDetail'
             data-track-name='back_to_recordings'
+            data-track-kind='passive'
           >
             <ArrowLeft className='w-4 h-4' />
             Back to Recordings
@@ -385,12 +387,14 @@ export default function RecordingDetailScreen(): ReactElement {
                   autoFocus
                   data-track-category='RecordingDetail'
                   data-track-name='edit_title_input'
+                  data-track-kind='passive'
                 />
                 <button
                   onClick={() => void handleSaveTitle()}
                   className='p-2 text-status-success hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
                   data-track-name='save_title'
+                  data-track-kind='active'
                 >
                   <Check className='w-5 h-5' />
                 </button>
@@ -402,6 +406,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   className='p-2 text-destructive hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
                   data-track-name='cancel_edit_title'
+                  data-track-kind='passive'
                 >
                   <X className='w-5 h-5' />
                 </button>
@@ -414,6 +419,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   className='p-2 text-muted-foreground hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
                   data-track-name='edit_title'
+                  data-track-kind='active'
                 >
                   <Edit2 className='w-5 h-5' />
                 </button>
@@ -441,6 +447,7 @@ export default function RecordingDetailScreen(): ReactElement {
               className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category='RecordingDetail'
               data-track-name='ask_ai_recording'
+              data-track-kind='active'
             >
               <img
                 src='/svgs/icons/ai-bot-gradient-star.svg'
@@ -459,6 +466,7 @@ export default function RecordingDetailScreen(): ReactElement {
                 className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-action-primary hover:bg-muted rounded-md transition-colors'
                 data-track-category='RecordingDetail'
                 data-track-name='view_thread'
+                data-track-kind='passive'
               >
                 <MessageSquare className='w-4 h-4' />
                 View Thread
@@ -469,6 +477,7 @@ export default function RecordingDetailScreen(): ReactElement {
               className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors'
               data-track-category='RecordingDetail'
               data-track-name='share_recording'
+              data-track-kind='active'
             >
               <Share2 className='w-4 h-4' />
               Share Recording
@@ -480,6 +489,7 @@ export default function RecordingDetailScreen(): ReactElement {
                 className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-100 hover:bg-muted dark:hover:bg-gray-800 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='RecordingDetail'
                 data-track-name='download_recording'
+                data-track-kind='passive'
               >
                 {isDownloading ? (
                   <Loader2 className='w-4 h-4 animate-spin' />
@@ -494,6 +504,7 @@ export default function RecordingDetailScreen(): ReactElement {
               className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-muted rounded-md transition-colors'
               data-track-category='RecordingDetail'
               data-track-name='delete_recording'
+              data-track-kind='active'
             >
               <Trash2 className='w-4 h-4' />
               Delete Recording
@@ -595,6 +606,7 @@ export default function RecordingDetailScreen(): ReactElement {
               className='px-4 py-2 text-sm font-medium text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50'
               data-track-category='RecordingDetail'
               data-track-name='cancel_delete_recording'
+              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -604,6 +616,7 @@ export default function RecordingDetailScreen(): ReactElement {
               className='px-4 py-2 text-sm font-medium text-destructive-foreground bg-destructive hover:opacity-90 rounded-md transition-opacity disabled:opacity-50 flex items-center gap-2'
               data-track-category='RecordingDetail'
               data-track-name='confirm_delete_recording'
+              data-track-kind='active'
             >
               {isDeleting && <Loader2 className='w-4 h-4 animate-spin' />}
               Delete

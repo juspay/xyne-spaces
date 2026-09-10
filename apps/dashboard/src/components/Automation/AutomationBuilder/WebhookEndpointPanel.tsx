@@ -70,6 +70,7 @@ function CopyRow({ label, value }: { label: string; value: string }): React.Reac
         onClick={copy}
         data-track-category='automation-builder'
         data-track-name='CopyWebhookEndpointValue'
+        data-track-kind='passive'
         className='flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground'
       >
         {copied ? <Check className='size-3.5' /> : <Copy className='size-3.5' />}

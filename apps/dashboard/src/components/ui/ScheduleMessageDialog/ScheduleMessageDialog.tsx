@@ -151,6 +151,7 @@ export const ScheduleMessageDialog = ({
               )}
               data-track-category={trackCategory}
               data-track-name='schedule-preset-tomorrow'
+              data-track-kind='passive'
             >
               <span className='font-medium text-foreground'>Tomorrow 9:00 AM</span>
               <span className='text-muted-foreground tabular-nums shrink-0'>
@@ -168,6 +169,7 @@ export const ScheduleMessageDialog = ({
               )}
               data-track-category={trackCategory}
               data-track-name='schedule-preset-next-monday'
+              data-track-kind='passive'
             >
               <span className='font-medium text-foreground'>Next Monday 9:00 AM</span>
               <span className='text-muted-foreground tabular-nums shrink-0'>
@@ -185,6 +187,7 @@ export const ScheduleMessageDialog = ({
               )}
               data-track-category={trackCategory}
               data-track-name='schedule-preset-custom'
+              data-track-kind='passive'
             >
               <span className='font-medium text-foreground'>Custom date & time</span>
             </button>
@@ -209,6 +212,7 @@ export const ScheduleMessageDialog = ({
                   className='w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary'
                   data-track-category={trackCategory}
                   data-track-name='schedule-custom-datetime'
+                  data-track-kind='active'
                 />
                 {exceedsMaxDays && (
                   <p className='text-xs text-destructive mt-1'>
@@ -225,6 +229,7 @@ export const ScheduleMessageDialog = ({
               className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
               data-track-category={trackCategory}
               data-track-name='cancel-schedule-pick'
+              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -239,6 +244,7 @@ export const ScheduleMessageDialog = ({
               className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category={trackCategory}
               data-track-name='continue-schedule-pick'
+              data-track-kind='passive'
             >
               Continue
             </button>
@@ -257,6 +263,7 @@ export const ScheduleMessageDialog = ({
               aria-label='Close'
               data-track-category={trackCategory}
               data-track-name='close-schedule-confirm'
+              data-track-kind='passive'
             >
               <X className='size-4' />
             </button>
@@ -275,6 +282,7 @@ export const ScheduleMessageDialog = ({
               className='text-sm font-medium px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted/60 transition-colors'
               data-track-category={trackCategory}
               data-track-name='cancel-schedule-confirm'
+              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -288,6 +296,7 @@ export const ScheduleMessageDialog = ({
               className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
               data-track-category={trackCategory}
               data-track-name='confirm-schedule-send'
+              data-track-kind='active'
             >
               {mode === 'reschedule' ? 'Reschedule' : 'Schedule'}
             </button>

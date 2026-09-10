@@ -35,6 +35,7 @@ const ChannelDialogRow = ({ channel, checked, onChange }: ChannelDialogRowProps)
         onChange={onChange}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='MANAGE_SECTION_TOGGLE_CHANNEL'
+        data-track-kind='passive'
         className='size-4 accent-action-primary'
       />
       <span className='shrink-0 text-muted-foreground'>
@@ -126,6 +127,7 @@ export const ManageSectionChannelsDialog = ({
           aria-label='Close'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='CLOSE_MANAGE_SECTION'
+          data-track-kind='passive'
           className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <X className='size-5' />
@@ -141,6 +143,7 @@ export const ManageSectionChannelsDialog = ({
           autoComplete='off'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='MANAGE_SECTION_FILTER_CHANNELS'
+          data-track-kind='passive'
           className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
         />
         {filter && (
@@ -151,6 +154,7 @@ export const ManageSectionChannelsDialog = ({
             aria-label='Clear search'
             data-track-category='CHAT_SIDEBAR'
             data-track-name='MANAGE_SECTION_CLEAR_FILTER'
+            data-track-kind='passive'
           >
             <X className='size-4' />
           </button>
@@ -166,6 +170,7 @@ export const ManageSectionChannelsDialog = ({
               onChange={toggleSelectAll}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='MANAGE_SECTION_SELECT_ALL'
+              data-track-kind='passive'
               className='size-4 accent-action-primary'
             />
             Select all
@@ -198,6 +203,7 @@ export const ManageSectionChannelsDialog = ({
           onClick={onClose}
           data-track-category='CHAT_SIDEBAR'
           data-track-name='CANCEL_MANAGE_SECTION_CHANNELS'
+          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -208,6 +214,7 @@ export const ManageSectionChannelsDialog = ({
           onClick={handleSave}
           data-track-category='CHAT_SIDEBAR'
           data-track-name='SAVE_MANAGE_SECTION_CHANNELS'
+          data-track-kind='active'
           className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
         >
           Save

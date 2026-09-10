@@ -8,6 +8,7 @@ import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { FileFailedBadgeV2 } from './FileFailedBadgeV2';
+import type { InteractionKind } from '@xyne/shared';
 
 interface FileCardV2Props {
   file: CollectionChild;
@@ -52,6 +53,7 @@ const InlineName: React.FC<InlineNameProps> = ({ initial, onCommit, onCancel, cl
       aria-label='Rename'
       data-track-category='knowledge-base'
       data-track-name='rename-card-inline'
+      data-track-kind='active'
       className={cn(
         'h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring',
         className,
@@ -65,6 +67,7 @@ const InlineName: React.FC<InlineNameProps> = ({ initial, onCommit, onCancel, cl
 interface HoverActionProps {
   label: string;
   trackName: string;
+  trackKind?: InteractionKind;
   intent?: 'neutral' | 'danger';
   onClick: (ev: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
@@ -73,6 +76,7 @@ interface HoverActionProps {
 const HoverAction: React.FC<HoverActionProps> = ({
   label,
   trackName,
+  trackKind,
   intent = 'neutral',
   onClick,
   children,
@@ -84,6 +88,7 @@ const HoverAction: React.FC<HoverActionProps> = ({
     onClick={onClick}
     data-track-category='knowledge-base'
     data-track-name={trackName}
+    data-track-kind={trackKind}
     className={cn(
       'grid h-7 w-7 place-items-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100',
       intent === 'danger'
@@ -133,6 +138,7 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
         title={file.name}
         data-track-category='knowledge-base'
         data-track-name='open-file-card'
+        data-track-kind='passive'
       >
         <div className='relative pl-1 pt-1'>
           <FileCardPreviewV2 format={ext} size='md' />
@@ -169,6 +175,7 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
             <HoverAction
               label={`Ask AI about ${file.name}`}
               trackName='ask-ai-file-card'
+              trackKind='passive'
               onClick={ev => {
                 ev.stopPropagation();
                 onAskAI();
@@ -181,6 +188,7 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
             <HoverAction
               label={`Share ${file.name}`}
               trackName='share-file-card'
+              trackKind='passive'
               onClick={ev => {
                 ev.stopPropagation();
                 onShare();
@@ -193,6 +201,7 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
             <HoverAction
               label={`Rename ${file.name}`}
               trackName='rename-file-card'
+              trackKind='active'
               onClick={ev => {
                 ev.stopPropagation();
                 onRename();
@@ -205,6 +214,7 @@ export const FileCardV2: React.FC<FileCardV2Props> = ({
             <HoverAction
               label={`Delete ${file.name}`}
               trackName='delete-file-card'
+              trackKind='active'
               intent='danger'
               onClick={ev => {
                 ev.stopPropagation();
@@ -289,6 +299,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
         title={folder.name}
         data-track-category='knowledge-base'
         data-track-name='open-folder-card'
+        data-track-kind='passive'
       >
         {/* Plain outline glyph — same bounding box FileCardPreviewV2 reserves
             so rows line up evenly across mixed folder + file grids. */}
@@ -328,6 +339,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
             <HoverAction
               label={`Ask AI about ${folder.name}`}
               trackName='ask-ai-folder-card'
+              trackKind='passive'
               onClick={ev => {
                 ev.stopPropagation();
                 onAskAI();
@@ -340,6 +352,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
             <HoverAction
               label={`Share ${folder.name}`}
               trackName='share-folder-card'
+              trackKind='passive'
               onClick={ev => {
                 ev.stopPropagation();
                 onShare();
@@ -352,6 +365,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
             <HoverAction
               label={`Rename ${folder.name}`}
               trackName='rename-folder-card'
+              trackKind='active'
               onClick={ev => {
                 ev.stopPropagation();
                 onRename();
@@ -364,6 +378,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
             <HoverAction
               label={`Delete ${folder.name}`}
               trackName='delete-folder-card'
+              trackKind='active'
               intent='danger'
               onClick={ev => {
                 ev.stopPropagation();

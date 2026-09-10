@@ -67,6 +67,7 @@ export function CallWhiteboardView({
                 requestedAiController={requestedAiController ?? false}
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Participant_Tile'
+                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
               />
             );

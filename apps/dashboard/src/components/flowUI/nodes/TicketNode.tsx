@@ -234,6 +234,7 @@ export const TicketNode: React.FC<{ node: FlowComponent; children?: React.ReactN
               onClick={() => run(props.declineAction, 'decline')}
               data-track-category='TICKET_ARTIFACT'
               data-track-name='DECLINE_TICKET'
+              data-track-kind='active'
             >
               Decline
             </Button>
@@ -247,6 +248,7 @@ export const TicketNode: React.FC<{ node: FlowComponent; children?: React.ReactN
               onClick={() => run(props.approveAction, 'approve')}
               data-track-category='TICKET_ARTIFACT'
               data-track-name='APPROVE_TICKET'
+              data-track-kind='active'
             >
               Approve
             </Button>
@@ -261,6 +263,7 @@ export const TicketNode: React.FC<{ node: FlowComponent; children?: React.ReactN
               onClick={() => run(props.approveContinueAction, 'approve-continue')}
               data-track-category='TICKET_ARTIFACT'
               data-track-name='APPROVE_TICKET_AND_CONTINUE'
+              data-track-kind='active'
             >
               Accept &amp; start task
             </Button>

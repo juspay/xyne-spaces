@@ -37,6 +37,7 @@ const AddReactionDrawerMobile = ({
           onClick={e => e.stopPropagation()}
           data-track-category='MESSAGE'
           data-track-name='OPEN_ADD_REACTION_DRAWER'
+          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ messageId })}
         >
           <span className='text-sm font-medium'>+</span>
@@ -48,6 +49,7 @@ const AddReactionDrawerMobile = ({
           onClick={() => setEmojiPickerOpen(false)}
           data-track-category='MESSAGE'
           data-track-name='CLOSE_ADD_REACTION_DRAWER_BACKDROP'
+          data-track-kind='passive'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}

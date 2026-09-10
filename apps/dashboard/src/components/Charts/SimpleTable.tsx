@@ -136,6 +136,7 @@ const SimpleTable: React.FC<SimpleTableProps> = ({ data, className, style }) => 
               disabled={page === 1}
               data-track-category='Charts'
               data-track-name='TABLE_PAGE_PREV'
+              data-track-kind='passive'
               className='px-2 py-1 rounded disabled:opacity-40 hover:bg-muted transition-colors'
             >
               ←
@@ -165,6 +166,7 @@ const SimpleTable: React.FC<SimpleTableProps> = ({ data, className, style }) => 
                     onClick={() => typeof p === 'number' && setPage(p)}
                     data-track-category='Charts'
                     data-track-name='TABLE_PAGE_SELECT'
+                    data-track-kind='passive'
                     className={`px-2 py-1 rounded transition-colors ${
                       page === p ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
                     }`}
@@ -178,6 +180,7 @@ const SimpleTable: React.FC<SimpleTableProps> = ({ data, className, style }) => 
               disabled={page === totalPages}
               data-track-category='Charts'
               data-track-name='TABLE_PAGE_NEXT'
+              data-track-kind='passive'
               className='px-2 py-1 rounded disabled:opacity-40 hover:bg-muted transition-colors'
             >
               →

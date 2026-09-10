@@ -10832,6 +10832,7 @@ export function createMutators(
                 eventName: 'NUDGE_DISMISSED',
                 url: '',
                 triggerType: 'SYSTEM',
+                interactionKind: 'passive', // declining a nudge, not contributing
                 platform: Platform.WEB,
                 timestamp: new Date(timestamp),
                 contextMetadata: {
