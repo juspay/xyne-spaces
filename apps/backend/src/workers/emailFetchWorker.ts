@@ -186,7 +186,7 @@ class EmailFetchWorker {
   ): Promise<void> {
     const { sourceIds, channelId, workspaceId } = job.data;
     logger.info(
-      `[EMAIL-FETCH-WORKER] Processing Google Play job ${job.id} — channel ${channelId}`,
+      `[EMAIL-FETCH-WORKER] Processing review sync job ${job.id} — channel ${channelId}`,
     );
 
     const synced = await runAsServiceActor(
@@ -205,7 +205,7 @@ class EmailFetchWorker {
     );
 
     logger.info(
-      `[EMAIL-FETCH-WORKER] Google Play job ${job.id} done — new=${synced}`,
+      `[EMAIL-FETCH-WORKER] Review sync job ${job.id} done — new=${synced}`,
     );
     await this.notifySocialMediaSuccess(job.data, synced);
   }
@@ -333,8 +333,8 @@ class EmailFetchWorker {
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_COMPLETED,
         synced > 0
-          ? `Fetched ${synced} new Google Play interaction${synced === 1 ? '' : 's'}`
-          : 'Google Play reviews are up to date',
+          ? `Fetched ${synced} new review interaction${synced === 1 ? '' : 's'}`
+          : 'Reviews are up to date',
         synced > 0
           ? `${synced} new review interaction${synced === 1 ? '' : 's'} added to the desk.`
           : 'No new review interactions were found.',
@@ -346,7 +346,7 @@ class EmailFetchWorker {
         `/${data.workspaceId}/support/${data.channelId}`,
       );
     } catch (error) {
-      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play completion notification', {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish review sync completion notification', {
         error,
       });
     }
@@ -360,7 +360,7 @@ class EmailFetchWorker {
       await notificationService.sendNotification(
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_FAILED,
-        'Google Play review fetch failed',
+        'Review fetch failed',
         error.message.substring(0, 200),
         {
           channelId: data.channelId,
@@ -369,7 +369,7 @@ class EmailFetchWorker {
         `/${data.workspaceId}/support/${data.channelId}`,
       );
     } catch (notificationError) {
-      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play failure notification', {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish review sync failure notification', {
         error: notificationError,
       });
     }

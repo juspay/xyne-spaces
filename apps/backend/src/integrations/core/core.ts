@@ -137,6 +137,16 @@ export class ExternalSourceCore {
       }
     }
 
+    if (source && adapter.onIngestFailures) {
+      // Before the throw below, so an adapter can count attempts per item. Never let bookkeeping
+      // mask the real ingestion error.
+      try {
+        await adapter.onIngestFailures(source, failedExternalIds);
+      } catch (error) {
+        logger.error('Failed to record ingest failures', { sourceName, error });
+      }
+    }
+
     if (failedExternalIds.length > 0) {
       logger.error(
         `[INGEST_INCOMPLETE] ${failedExternalIds.length} message(s) not ingested from ${sourceName}`,

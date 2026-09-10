@@ -2564,6 +2564,7 @@ model ExternalSource {
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
   isActive        Boolean  @default(true)
   lastSyncCursor  String?                   // Per-adapter resume cursor. Google: Gmail historyId / calendar syncToken. Microsoft: ISO timestamp / calendar deltaLink.
+  externalMetadata Json?                    // Provider-specific extras that need no column of their own, e.g. App Store { bundleId }
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

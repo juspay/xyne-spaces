@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { apiInstance } from '../services/clients/apiClient';
 import { logger, Event } from '../utils/logger';
 
-export interface GooglePlayAppIntegration {
+export interface DeskAppIntegration {
   id: string;
   displayName: string;
-  packageName: string | null;
+  /** Play package name or Apple app id, depending on the desk's provider. */
+  externalIdentifier: string | null;
   isActive: boolean;
 }
 
@@ -16,7 +17,7 @@ interface ConnectedEmailInfo {
   sourceType: string | null;
   connectedLabel: string | null;
   outboundConfigured: boolean;
-  googlePlayApps: GooglePlayAppIntegration[];
+  deskApps: DeskAppIntegration[];
 }
 
 const EMPTY: ConnectedEmailInfo = {
@@ -26,7 +27,7 @@ const EMPTY: ConnectedEmailInfo = {
   sourceType: null,
   connectedLabel: null,
   outboundConfigured: true,
-  googlePlayApps: [],
+  deskApps: [],
 };
 
 const cache = new Map<string, ConnectedEmailInfo>();
@@ -55,7 +56,9 @@ const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => 
       sourceType?: string | null;
       connectedLabel?: string | null;
       outboundConfigured?: boolean;
-      googlePlayApps?: GooglePlayAppIntegration[];
+      deskApps?: DeskAppIntegration[];
+      /** Pre-rename alias still sent by older backends. */
+      googlePlayApps?: Array<DeskAppIntegration & { packageName?: string | null }>;
     }>(`/channels/${channelId}/connected-email`)
     .then(res => {
       const isConnected = res.data?.isConnected ?? res.data?.hasIntegration ?? false;
@@ -66,7 +69,13 @@ const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => 
         sourceType: res.data?.sourceType ?? null,
         connectedLabel: res.data?.connectedLabel ?? res.data?.email ?? null,
         outboundConfigured: res.data?.outboundConfigured ?? true,
-        googlePlayApps: res.data?.googlePlayApps ?? [],
+        deskApps:
+          res.data?.deskApps ??
+          res.data?.googlePlayApps?.map(app => ({
+            ...app,
+            externalIdentifier: app.externalIdentifier ?? app.packageName ?? null,
+          })) ??
+          [],
       };
       cache.set(channelId, info);
       return info;

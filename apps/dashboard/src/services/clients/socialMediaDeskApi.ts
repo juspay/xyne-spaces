@@ -72,3 +72,57 @@ export async function reconnectSocialMediaDesk(
   );
   return response.data.authorizationUrl;
 }
+
+export interface AppStoreCredentialsInput {
+  keyId: string;
+  privateKey: string;
+}
+
+/** App Store Connect authenticates with a signed JWT, so connecting is one POST — no OAuth. */
+export async function connectAppStoreDesk(
+  input: AppStoreCredentialsInput & {
+    channelName: string;
+    applications: Array<{ bundleId: string }>;
+    projectId: string;
+    boardId: string;
+    assigneeUserGroupId?: string;
+    visibility: 'PUBLIC' | 'PRIVATE';
+  },
+): Promise<string> {
+  const response = await apiInstance.post<{ channelId: string }>(
+    '/integrations/social-media/app-store/connect',
+    input,
+  );
+  return response.data.channelId;
+}
+
+export async function addAppStoreApps(
+  channelId: string,
+  input: { applications: Array<{ bundleId: string }> },
+): Promise<{ added: number }> {
+  const response = await apiInstance.post<{ added: number }>(
+    `/integrations/social-media/${channelId}/app-store/apps`,
+    input,
+  );
+  return response.data;
+}
+
+export async function setAppStoreAppConnection(
+  channelId: string,
+  sourceId: string,
+  connected: boolean,
+): Promise<void> {
+  await apiInstance.post(
+    `/integrations/social-media/${channelId}/app-store/apps/${sourceId}/${
+      connected ? 'reconnect' : 'disconnect'
+    }`,
+  );
+}
+
+/** Apple keys are rotated by pasting a new .p8, not by re-running a consent redirect. */
+export async function rotateAppStoreCredentials(
+  channelId: string,
+  input: AppStoreCredentialsInput,
+): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/app-store/credentials`, input);
+}
