@@ -129,11 +129,67 @@ async function authFetch<T>(path: string, sessionToken: string, init?: RequestIn
       ...init?.headers,
     },
   } as unknown as RequestInit);
-  const body = (await res.json()) as AuthResponse<T>;
+  // `/mcp/call` answers long tool calls as an NDJSON stream (Content-Type
+  // application/x-ndjson): heartbeat `ping` frames keep the hop warm, then a
+  // single terminal `result`/`error` frame. Every other endpoint (and every
+  // fast /mcp/call branch) still returns one JSON object. `bodyTimeout: 0` on
+  // authDispatcher is what lets the stream stay open for minutes.
+  const contentType = res.headers.get("content-type") ?? "";
+  const body = contentType.includes("application/x-ndjson")
+    ? await readMcpStream<T>(res)
+    : ((await res.json()) as AuthResponse<T>);
   if (!body.success || body.data === undefined) {
     throw new McpAuthServiceError(body.error ?? `Auth service error: ${res.status}`, res.status);
   }
   return body.data;
+}
+
+// Consume an NDJSON /mcp/call stream: skip heartbeat `ping` frames and resolve
+// on the terminal `result`/`error` frame. Streaming responses are always HTTP
+// 200 (headers flush before the tool settles), so a credential rejection can
+// never arrive here - those still come back as a plain JSON 401/403 on the
+// non-streamed branches, preserving onConnectorBlocked handling.
+async function readMcpStream<T>(res: Response): Promise<AuthResponse<T>> {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    throw new McpAuthServiceError(`Auth service returned an empty stream: ${res.status}`, res.status);
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const parseLine = (line: string): AuthResponse<T> | undefined => {
+    const trimmed = line.trim();
+    if (!trimmed) return undefined;
+    let frame: { type?: string; data?: T; error?: string };
+    try {
+      frame = JSON.parse(trimmed) as { type?: string; data?: T; error?: string };
+    } catch {
+      return undefined; // ignore any non-JSON keep-alive noise
+    }
+    if (frame.type === "result")
+      // exactOptionalPropertyTypes: omit `data` rather than set it undefined.
+      return frame.data === undefined ? { success: true } : { success: true, data: frame.data };
+    if (frame.type === "error") return { success: false, error: frame.error ?? "MCP call failed" };
+    return undefined; // ping / unknown -> keep reading
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n")) >= 0) {
+        const terminal = parseLine(buffer.slice(0, idx));
+        buffer = buffer.slice(idx + 1);
+        if (terminal) {
+          void reader.cancel().catch(() => {});
+          return terminal;
+        }
+      }
+    }
+    if (done) break;
+  }
+  const terminal = parseLine(buffer);
+  if (terminal) return terminal;
+  throw new McpAuthServiceError("MCP stream closed before a terminal frame", res.status);
 }
 
 function injectToolCallIdIntoClawCitations(content: string, toolCallId: string): string {
@@ -381,6 +437,9 @@ export async function loadMcpToolsForUser(
             sessionToken,
             {
               method: "POST",
+              // Opt into NDJSON streaming so claw-auth heartbeats this hop
+              // during long tool calls (see readMcpStream / authDispatcher).
+              headers: { "x-mcp-stream": "1" },
               body: JSON.stringify({
                 serverType: server.serverType,
                 tool: mcpTool.name,

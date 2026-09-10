@@ -1336,8 +1336,17 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
   }
 });
 
+// Heartbeat cadence for the streaming /mcp/call response. Kept well under
+// undici's (disabled here) and the in-mesh Envoy sidecar's stream_idle_timeout
+// (~5 min default) so a long, silent vendor MCP call never idles the hop.
+const MCP_STREAM_HEARTBEAT_MS = 15_000;
+
 router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, res: Response) => {
   const startedAt = Date.now();
+  // Opt-in NDJSON streaming (client sends x-mcp-stream: 1 on /mcp/call). Only
+  // the long vendor-MCP path below streams; every fast branch still res.json().
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const wantsStream = req.get("x-mcp-stream") === "1";
   try {
     const userId = req.session!.userId;
     const agentSlug = req.session?.agentSlug;
@@ -2003,6 +2012,36 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // access failure. The wrapper caps per-token concurrency to avoid tripping
     // the limit, and on error surfaces the true HTTP status (429 vs 403).
     const callStartedAt = Date.now();
+
+    // Long-running vendor MCP calls (e.g. hypersage, 5-15 min) make the
+    // xyne-claw -> claw-auth hop a single silent request: no bytes flow until
+    // callTool settles, so the in-mesh Envoy sidecar stream_idle_timeout and
+    // undici body timeout can sever it mid-call. When the caller opted in
+    // (x-mcp-stream: 1), switch to a chunked NDJSON response and emit our OWN
+    // heartbeat frames on a timer so the hop never idles - independent of
+    // whether the upstream MCP sends transport keep-alives (hypersage's is a
+    // transport ping the MCP client consumes, never re-emitted onto this hop).
+    // The client drops ping frames and resolves on the terminal frame; the
+    // real ceiling stays MCP_REQUEST_TIMEOUT_MS enforced inside callTool.
+    if (wantsStream) {
+      res.setHeader("Content-Type", "application/x-ndjson");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      heartbeat = setInterval(() => {
+        if (res.writableEnded) return;
+        res.write(`${JSON.stringify({ type: "ping", t: Date.now() })}\n`);
+        (res as unknown as { flush?: () => void }).flush?.();
+      }, MCP_STREAM_HEARTBEAT_MS);
+      (heartbeat as unknown as { unref?: () => void }).unref?.();
+      req.on("close", () => {
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = undefined;
+        }
+      });
+    }
+
     const upstreamResult =
       serverType === "bitbucket"
         ? await callBitbucketThrottled(userId, credentials, tool, effectiveParams, agentSlug)
@@ -2063,8 +2102,24 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       resultBytes: result.content?.length,
     });
 
-    res.json({ success: true, data: result });
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = undefined;
+    }
+    if (res.headersSent) {
+      // Streaming mode: deliver the result as the terminal NDJSON frame.
+      if (!res.writableEnded) {
+        res.write(`${JSON.stringify({ type: "result", success: true, data: result })}\n`);
+        res.end();
+      }
+    } else {
+      res.json({ success: true, data: result });
+    }
   } catch (err) {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = undefined;
+    }
     const msg = errMsg(err);
     // serverType/tool are block-scoped to the try above; re-read from the body
     // so the error is attributable to a server/tool in the structured log.
@@ -2080,6 +2135,17 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       httpStatus,
       errorMessage: msg,
     });
+    if (res.headersSent) {
+      // Streaming already began - the HTTP status is locked at 200, so deliver
+      // the failure as a terminal error frame instead of res.status(500).
+      if (!res.writableEnded) {
+        res.write(
+          `${JSON.stringify({ type: "error", success: false, error: err instanceof Error ? err.message : "Internal server error" })}\n`,
+        );
+        res.end();
+      }
+      return;
+    }
     res
       .status(500)
       .json({ success: false, error: err instanceof Error ? err.message : "Internal server error" });
