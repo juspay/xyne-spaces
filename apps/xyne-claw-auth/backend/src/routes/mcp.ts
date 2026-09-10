@@ -1740,6 +1740,16 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       };
     }
 
+    if (serverType === "xyne-workflows") {
+      const scalars = await loadRunScalars(req.params.sessionId);
+      effectiveParams = {
+        ...effectiveParams,
+        ...(scalars.workflowId ? { workflowId: scalars.workflowId } : {}),
+        ...(scalars.executionId ? { executionId: scalars.executionId } : {}),
+        ...(scalars.focusedStepId ? { focusedStepId: scalars.focusedStepId } : {}),
+      };
+    }
+
     // Write tools always require approval — cannot be overridden by agent config
     const definition = await resolveConnectorDefinition(serverType);
     const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
