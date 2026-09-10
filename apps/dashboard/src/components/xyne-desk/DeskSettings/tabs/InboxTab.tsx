@@ -50,7 +50,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     isSlack,
     isApp,
     isSocial,
-    isSocialMedia,
     isDeskChannel,
     ownerId,
     setOwner,
@@ -103,12 +102,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     <>
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isSocial && !isSocialMedia && (
-        <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />
-      )}
-      {isSocialMedia && (
-        <InstagramDeskIntegrationCard channelId={channelId} canManage={canManage} />
-      )}
+      {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocial && <InstagramDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {/*
         Single owner of app connections on every desk type, APP included. Apps are the
         one source type that went 1:N per channel, so unlike Slack/social they cannot be

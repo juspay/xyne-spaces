@@ -5576,8 +5576,8 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
-                    maxLength={350}
+                    placeholder={channelIntegrationInfo.sourceType === 'instagram' ? 'Reply to this DM…' : 'Reply to this review…'}
+                    maxLength={channelIntegrationInfo.sourceType === 'instagram' ? 1000 : 350}
                     trackingCategory='social-media-composer'
                   />
                 ) : null
