@@ -119,6 +119,8 @@ interface AttachmentsBlockProps {
   parentMessage?: AttachmentRef['parentMessage'];
 }
 
+const FILE_PILL_GRID_COLUMNS = 'repeat(auto-fill, minmax(min(240px, 100%), 1fr))';
+
 /**
  * Check if attachment has a document thumbnail (PDF with preview)
  */
@@ -193,7 +195,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   const nonPreviewableFiles = fileAttachments.filter(a => !hasDocumentThumbnail(a));
 
   // Check if we need to use FilePill for all files (mixed types)
-  const useFilePillForAllFiles = nonPreviewableFiles.length > 0;
+  const useFilePillForAllFiles = nonPreviewableFiles.length > 0 || fileAttachments.length > 1;
 
   const handleFileClick = (attachment: AttachmentType) => {
     // Build attachment refs for the viewer (same order as rendered)
@@ -359,13 +361,13 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
           {/* Non-previewable files - use FilePill component */}
           {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
           {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
-            <div className='flex flex-col gap-2'>
+            <div className='grid gap-2' style={{ gridTemplateColumns: FILE_PILL_GRID_COLUMNS }}>
               {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).map(attachment => (
                 <FilePill
                   key={attachment.id}
+                  className='max-w-none'
                   fileName={attachment.originalFilename}
                   mimeType={attachment.mimetype}
-                  fileSize={attachment.size}
                   fileId={attachment.id}
                   uploadedByUserId={attachment.uploadedByUserId}
                   onClick={() => handleFileClick(attachment)}
