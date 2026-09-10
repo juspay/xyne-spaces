@@ -90,7 +90,9 @@ import {
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
 import {
   SDLC_MEMBERSHIP_RELATION,
+  SDLC_CONTAINMENT_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
   entityLinkContextSchema,
@@ -1879,6 +1881,22 @@ export const mutators = defineMutators({
             createdBy: ctx.userID,
             createdAt: now,
           });
+          // A folder's discussion is filed on its track too, so the track's
+          // conversation list is everything discussed anywhere inside it.
+          if (entityLinkContext.trackRollUp) {
+            await tx.mutate.sdlc_entity_links.insert({
+              id: entityLinkContext.trackRollUp.linkId,
+              workspaceId: ctx.workspaceId,
+              channelId,
+              sourceType: 'TRACK',
+              sourceId: entityLinkContext.trackRollUp.trackId,
+              targetType: 'CONVERSATION',
+              targetId: conversationId,
+              relationType: SDLC_TRACK_FLAT_RELATION,
+              createdBy: ctx.userID,
+              createdAt: now,
+            });
+          }
         }
 
         await tx.mutate.messages.insert({
@@ -8142,6 +8160,190 @@ export const mutators = defineMutators({
           throw new Error('Structural SDLC edges are not deleted through the link API');
         }
         await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+      },
+    ),
+
+    /**
+     * A folder, and the two edges that place it.
+     *
+     * The containment edge is the tree: its source is the parent, a TRACK at the
+     * root or a FOLDER below it. The flat edge always points from the track, so
+     * "everything in this track" stays one indexed lookup however deep the
+     * folder sits. Both are written here so the pair cannot drift.
+     */
+    /**
+     * Move an item to another parent inside the same track.
+     *
+     * A move is a delete and an insert, never an update: entity links are
+     * immutable by ACL. Both happen here so an item cannot end up with two
+     * parents or none. The flat track edge is untouched — the item stays in the
+     * same track, which is the whole point of keeping that edge separate.
+     */
+    /** Rename a folder. Its placement and contents are untouched. */
+    renameSdlcFolder: defineMutator(
+      z.object({
+        folderId: z.string(),
+        channelId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        const folder = await tx.run(zql.sdlc_folders.where('id', args.folderId).one());
+        if (!folder) {
+          throw new Error('Folder not found');
+        }
+        await tx.mutate.sdlc_folders.update({
+          id: args.folderId,
+          name: args.name,
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+
+    moveSdlcItem: defineMutator(
+      z.object({
+        linkId: z.string(),
+        channelId: z.string(),
+        itemType: z.enum(['FOLDER', 'CANVAS']),
+        itemId: z.string(),
+        parentType: z.enum(['TRACK', 'FOLDER']),
+        parentId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        if (args.itemType === 'FOLDER' && args.itemId === args.parentId) {
+          throw new Error('A folder cannot contain itself');
+        }
+        const existing = await tx.run(
+          zql.sdlc_entity_links
+            .where('channelId', args.channelId)
+            .where('relationType', SDLC_CONTAINMENT_RELATION)
+            .where('targetType', args.itemType)
+            .where('targetId', args.itemId)
+            .one(),
+        );
+        if (!existing) {
+          throw new Error('Item is not filed anywhere');
+        }
+        if (existing.sourceId === args.parentId) {
+          return;
+        }
+        // Walk up from the new parent: dropping a folder inside its own subtree
+        // would detach that subtree from the track with nothing pointing at it.
+        if (args.itemType === 'FOLDER') {
+          let cursor: string | null = args.parentType === 'FOLDER' ? args.parentId : null;
+          for (let depth = 0; cursor && depth < 64; depth += 1) {
+            if (cursor === args.itemId) {
+              throw new Error('A folder cannot be moved inside itself');
+            }
+            const parentEdge = await tx.run(
+              zql.sdlc_entity_links
+                .where('channelId', args.channelId)
+                .where('relationType', SDLC_CONTAINMENT_RELATION)
+                .where('targetType', 'FOLDER')
+                .where('targetId', cursor)
+                .one(),
+            );
+            cursor = parentEdge?.sourceType === 'FOLDER' ? parentEdge.sourceId : null;
+          }
+        }
+        await tx.mutate.sdlc_entity_links.delete({ id: existing.id });
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.linkId,
+          workspaceId: ctx.workspaceId,
+          channelId: args.channelId,
+          sourceType: args.parentType,
+          sourceId: args.parentId,
+          targetType: args.itemType,
+          targetId: args.itemId,
+          relationType: SDLC_CONTAINMENT_RELATION,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
+      },
+    ),
+
+    createSdlcFolder: defineMutator(
+      z.object({
+        id: z.string(),
+        containmentLinkId: z.string(),
+        flatLinkId: z.string(),
+        channelId: z.string(),
+        trackId: z.string(),
+        parentType: z.enum(['TRACK', 'FOLDER']),
+        parentId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        // A folder nests under a folder in the same track, never a stray id.
+        if (args.parentType === 'FOLDER') {
+          const parent = await tx.run(zql.sdlc_folders.where('id', args.parentId).one());
+          if (!parent) {
+            throw new Error('Parent folder not found');
+          }
+        } else if (args.parentId !== args.trackId) {
+          throw new Error('A root folder belongs to the track it is created in');
+        }
+        await tx.mutate.sdlc_folders.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          name: args.name,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.containmentLinkId,
+          workspaceId: ctx.workspaceId,
+          channelId: args.channelId,
+          sourceType: args.parentType,
+          sourceId: args.parentId,
+          targetType: 'FOLDER',
+          targetId: args.id,
+          relationType: SDLC_CONTAINMENT_RELATION,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.flatLinkId,
+          workspaceId: ctx.workspaceId,
+          channelId: args.channelId,
+          sourceType: 'TRACK',
+          sourceId: args.trackId,
+          targetType: 'FOLDER',
+          targetId: args.id,
+          relationType: SDLC_TRACK_FLAT_RELATION,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
       },
     ),
 

@@ -2,7 +2,7 @@ import { ChannelType } from '@xyne/shared';
 import { sdlcSectionForCanvas, type SdlcNavTarget, type SdlcSection } from '@xyne/shared/sdlc';
 import { db } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
-import { resolveInheritedOwner } from './entityLinkService';
+import { resolveFolderTrackId, resolveInheritedOwner } from './entityLinkService';
 
 export interface SdlcNavIds {
   channelId?: string | null;
@@ -123,6 +123,12 @@ async function conversationLocation(conversationId: string): Promise<SdlcLocatio
   }
   if (owner.sourceType === 'TRACK') {
     return { section: 'tracks', trackId: owner.sourceId, discussionId: conversationId };
+  }
+  if (owner.sourceType === 'FOLDER') {
+    // A folder has no route of its own, and its conversations roll up to the
+    // track it lives in — which is where the reader will find this one.
+    const trackId = await resolveFolderTrackId(db, owner.sourceId);
+    return trackId ? { section: 'tracks', trackId, discussionId: conversationId } : null;
   }
   const canvas = await canvasLocation(owner.sourceId);
   return canvas ? { ...canvas, discussionId: conversationId } : null;

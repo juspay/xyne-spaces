@@ -915,7 +915,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               timestamp: messageCreatedAt,
               ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
               ...(entityLinkScope && {
-                entityLinkContext: { ...entityLinkScope, linkId: uuidv4() },
+                entityLinkContext: {
+                  sourceType: entityLinkScope.sourceType,
+                  sourceId: entityLinkScope.sourceId,
+                  linkId: uuidv4(),
+                  // Its own row, so its own id: the scope names the track, the
+                  // composer is what can mint an id the mutator will replay.
+                  ...(entityLinkScope.rollUpTrackId && {
+                    trackRollUp: {
+                      trackId: entityLinkScope.rollUpTrackId,
+                      linkId: uuidv4(),
+                    },
+                  }),
+                },
               }),
             });
 
