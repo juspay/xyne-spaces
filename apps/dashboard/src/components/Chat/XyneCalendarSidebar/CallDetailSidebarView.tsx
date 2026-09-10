@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import {
-  CalendarDefault,
   ChevronLeft,
   CopyDefault,
   DownloadDown,
@@ -40,7 +39,6 @@ import {
   type CallParticipant,
   isGoogleCalendarCall,
   isMicrosoftCalendarCall,
-  isScheduledCallJoinable,
   isScheduledCallManageable,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import {
@@ -545,8 +543,6 @@ const CallDetailSidebarView = ({
     : 'One-off';
 
   const isCurrentUserInCall = isRoomActive && currentCallExternalId === call.externalId;
-  const isUnavailableUntilScheduledStart = !isScheduledCallJoinable(call, now);
-  const isJoinDisabled = isCurrentUserInCall || isUnavailableUntilScheduledStart;
   const callDuration = isEnded ? formatCallDuration(call.startedAt, call.endedAt) : '';
   const startsInLabel =
     !isEnded && !isLive && startsAtTime !== null && now < startsAtTime
@@ -659,30 +655,21 @@ const CallDetailSidebarView = ({
         {canJoin && (
           <Button
             onClick={onJoinCall}
-            disabled={isJoinDisabled}
+            disabled={isCurrentUserInCall}
             data-track-category='Calendar'
             data-track-name='CALL_DETAIL_JOIN_CALL'
-            className={cn(
-              'mt-3 h-9 w-full rounded-lg text-sm font-semibold',
-              isUnavailableUntilScheduledStart
-                ? 'border border-border bg-background text-muted-foreground shadow-sm hover:bg-background disabled:bg-background disabled:text-muted-foreground disabled:opacity-100 font-medium select-none text-xs'
-                : 'bg-foreground text-background hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground',
-            )}
+            className='mt-3 h-9 w-full rounded-lg text-sm font-semibold bg-foreground text-background hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground'
           >
             {isCurrentUserInCall ? (
               <SpeakerOn className='size-4' strokeWidth={2} aria-hidden='true' />
-            ) : isUnavailableUntilScheduledStart ? (
-              <CalendarDefault className='size-4' strokeWidth={2} aria-hidden='true' />
             ) : (
               <Headphones className='size-4' strokeWidth={2} aria-hidden='true' />
             )}
             {isCurrentUserInCall
               ? 'Already joined'
-              : isUnavailableUntilScheduledStart
-                ? 'Available at scheduled time'
-                : isLive
-                  ? 'Join call — in progress'
-                  : 'Join call'}
+              : isLive
+                ? 'Join call — in progress'
+                : 'Join call'}
           </Button>
         )}
 

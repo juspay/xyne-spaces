@@ -501,11 +501,7 @@ const CalendarWeekView = ({
         </div>
 
         {/* Scrollable time grid */}
-        <div
-          ref={scrollRef}
-          className='overflow-y-auto'
-          style={{ maxHeight: isMobile ? 'calc(100dvh - 320px)' : 'calc(100dvh - 290px)' }}
-        >
+        <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto'>
           <div className='flex' style={{ height: HOUR_HEIGHT * 24 }}>
             {/* Time gutter */}
             <div

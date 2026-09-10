@@ -169,7 +169,7 @@ const CalendarMonthView = ({
   }
 
   return (
-    <div className='w-full  flex flex-col border border-border rounded-xl overflow-hidden'>
+    <div className='w-full h-full flex flex-col border border-border rounded-xl overflow-hidden'>
       {/* Day-of-week header */}
       <div className='grid grid-cols-7 bg-muted/20 border-b border-border shrink-0'>
         {DAYS_OF_WEEK.map(day => (
@@ -183,7 +183,7 @@ const CalendarMonthView = ({
       </div>
 
       {/* Weeks */}
-      <div className='overflow-y-auto' style={{ maxHeight: 'calc(100dvh - 278px)' }}>
+      <div className='flex-1 min-h-0 overflow-y-auto'>
         {weeks.map((week, wi) => (
           <div key={wi} className='grid grid-cols-7 border-b last:border-b-0 border-border'>
             {week.map((day, di) => {

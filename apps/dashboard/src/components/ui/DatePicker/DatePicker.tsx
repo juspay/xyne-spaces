@@ -20,6 +20,7 @@ interface DatePickerProps {
   /** Extra classes merged into the popover content — e.g. to raise its z-index
    * when the picker is opened from inside a higher-stacked overlay. */
   contentClassName?: string;
+  displayLabel?: string;
 }
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -176,6 +177,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   showClearButton = true,
   isInitialOpen = false,
   contentClassName,
+  displayLabel,
 }) => {
   const [isOpen, setIsOpen] = useState(isInitialOpen);
   const [months, setMonths] = useState<Array<{ year: number; month: number }>>([]);
@@ -391,7 +393,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               selectedDate ? 'text-foreground' : 'text-muted-foreground',
             )}
           >
-            {selectedDate ? formatDate(selectedDate) : placeholder}
+            {selectedDate ? (displayLabel ?? formatDate(selectedDate)) : placeholder}
           </span>
           {showClearButton && selectedDate && (
             <button

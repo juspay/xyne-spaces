@@ -2,7 +2,15 @@
  * Date utility functions for chat messages using date-fns
  */
 
-import { isSameDay as dateFnsIsSameDay, isToday, isYesterday, format } from 'date-fns';
+import {
+  isSameDay as dateFnsIsSameDay,
+  isSameMonth,
+  isToday,
+  isYesterday,
+  format,
+  startOfWeek,
+  endOfWeek,
+} from 'date-fns';
 
 /** Normalize Unix timestamps to JavaScript milliseconds. */
 export const normalizeTimestamp = (value: unknown): number => {
@@ -375,6 +383,25 @@ export const formatDatePill = (date: Date | number): string => {
 
   // Format as "Monday, January 15, 2024" for previous years
   return format(messageDate, 'EEEE, MMMM d, yyyy');
+};
+
+/**
+ * Format a Sunday-start week as a range label for a week-view date picker.
+ * - "Sep 1 - 7, 2026" (same month)
+ * - "Sep 28 - Oct 4, 2026" (crosses month)
+ * - "Dec 29, 2025 - Jan 4, 2026" (crosses year)
+ */
+export const formatWeekRangeLabel = (date: Date): string => {
+  const weekStart = startOfWeek(date, { weekStartsOn: 0 });
+  const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+
+  if (weekStart.getFullYear() !== weekEnd.getFullYear()) {
+    return `${format(weekStart, 'MMM d, yyyy')} - ${format(weekEnd, 'MMM d, yyyy')}`;
+  }
+  if (!isSameMonth(weekStart, weekEnd)) {
+    return `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`;
+  }
+  return `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'd, yyyy')}`;
 };
 
 /**
