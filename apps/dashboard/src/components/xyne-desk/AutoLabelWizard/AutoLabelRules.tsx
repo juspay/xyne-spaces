@@ -251,6 +251,7 @@ export function MyAutoLabelRules({
                     onClick={() => backfillMutation.mutate(item)}
                     data-track-category='xyne-desk'
                     data-track-name='auto-label-backfill-rule'
+                    data-track-kind='active'
                     aria-label='Apply to existing emails'
                   >
                     {isBackfilling ? (

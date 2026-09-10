@@ -2205,7 +2205,6 @@ export const userActivityEventTable = table("user_activity_events")
     url: string(),
     triggerType: string(),
     contextMetadata: json().optional(),
-    interactionKind: string().optional(),
     platform: string(),
     timestamp: number(),
   })

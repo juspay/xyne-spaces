@@ -1579,6 +1579,7 @@ function WarningsNotice({ warnings }: { warnings: string[] }) {
             type='button'
             data-track-category='XyneAI'
             data-track-name='DEBUG_WARNINGS_TOGGLE'
+            data-track-kind='passive'
             onClick={() => setExpanded(current => !current)}
             className='underline underline-offset-2 hover:no-underline'
           >

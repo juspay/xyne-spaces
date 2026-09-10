@@ -236,6 +236,7 @@ export const CanvasLabelManager = ({
                 onClick={() => void handleRemoveLabel(label.id)}
                 data-track-category='CANVAS'
                 data-track-name='REMOVE_CANVAS_LABEL'
+                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   canvasId: canvas.id,
                   labelId: label.id,
@@ -301,6 +302,7 @@ export const CanvasLabelManager = ({
                   onClick={() => void handleAddLabel(normalizedSearch)}
                   data-track-category='CANVAS'
                   data-track-name='CREATE_CANVAS_LABEL'
+                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({
                     canvasId: canvas.id,
                     label: normalizedSearch,
@@ -333,6 +335,7 @@ export const CanvasLabelManager = ({
                     aria-label={isApplied ? `${name} already added` : `Add ${name}`}
                     data-track-category='CANVAS'
                     data-track-name='ADD_CANVAS_LABEL'
+                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ canvasId: canvas.id, label: name })}
                   >
                     <span
