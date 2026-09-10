@@ -268,7 +268,7 @@ export const MentionExtension = Node.create<MentionOptions>({
       insertMention:
         attributes =>
         ({ chain, editor }) => {
-          const isInCode = editor.isActive('codeBlock');
+          const isInCode = editor.isActive('codeBlock') || editor.isActive('code');
 
           if (isInCode) {
             // Slack-style mention inside code → plain text only
@@ -287,7 +287,7 @@ export const MentionExtension = Node.create<MentionOptions>({
       insertGroupMention:
         attributes =>
         ({ chain, editor }) => {
-          const isInCode = editor.isActive('codeBlock');
+          const isInCode = editor.isActive('codeBlock') || editor.isActive('code');
 
           if (isInCode) {
             return chain().insertContent(`#${attributes.groupName}`).run();
@@ -304,7 +304,7 @@ export const MentionExtension = Node.create<MentionOptions>({
       insertSpecialMention:
         attributes =>
         ({ chain, editor }) => {
-          const isInCode = editor.isActive('codeBlock');
+          const isInCode = editor.isActive('codeBlock') || editor.isActive('code');
 
           if (isInCode) {
             return chain().insertContent(`@${attributes.mentionType}`).run();

@@ -18,6 +18,22 @@ export function sanitizeSearchQuery(query: string): string {
   ); // Enforce max length
 }
 
+export interface VespaTagSearchResponse {
+  success: boolean;
+  data?: {
+    tags: string[];
+    total: number;
+  };
+  error?: string;
+}
+
+export interface VespaTagSearchFilters {
+  query?: string | undefined;
+  projectId?: string | undefined;
+  boardIds?: string[] | undefined;
+  limit?: number | undefined;
+}
+
 export class SearchService {
   private vespaBaseUrl = '/vespaSearch';
 
@@ -295,6 +311,55 @@ export class SearchService {
     }
 
     return params;
+  }
+
+  /**
+   * Search for ticket tags via Vespa grouping
+   */
+  async searchTags(
+    filters: VespaTagSearchFilters,
+    signal?: AbortSignal,
+  ): Promise<{ tags: string[]; total: number }> {
+    try {
+      const params: Record<string, string> = {
+        type: 'ticket_tags',
+      };
+
+      if (filters.query) {
+        params['q'] = sanitizeSearchQuery(filters.query);
+      }
+
+      if (filters.projectId) {
+        params['projectId'] = filters.projectId;
+      }
+
+      if (filters.boardIds && filters.boardIds.length > 0) {
+        params['board'] = filters.boardIds.join(',');
+      }
+
+      if (filters.limit !== undefined) {
+        params['limit'] = filters.limit.toString();
+      }
+
+      const response = await apiInstance.get<VespaTagSearchResponse>(this.vespaBaseUrl, {
+        params,
+        ...(signal ? { signal } : {}),
+      });
+
+      if (!response.data.success || !response.data.data) {
+        throw new Error(response.data.error || 'Vespa tag search request failed');
+      }
+
+      return {
+        tags: response.data.data.tags,
+        total: response.data.data.total,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('Vespa tag search request failed');
+    }
   }
 }
 

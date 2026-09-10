@@ -1769,6 +1769,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <ForwardMessageForm
             message={message}
             channelId={channelId}
+            channelScopeType={channelScopeType}
             onCancel={() => setIsForwardModalOpen(false)}
             onSuccess={() => setIsForwardModalOpen(false)}
           />
