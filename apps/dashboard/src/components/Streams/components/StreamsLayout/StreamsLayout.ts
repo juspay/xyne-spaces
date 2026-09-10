@@ -541,9 +541,13 @@ export const loadLayout = (workspaceId?: string): StreamsLayout => {
     // copy. The failure this guards against is a *transient* one — a module
     // half-applied by a hot reload, say — so by the time anyone investigates,
     // the code that threw may read perfectly well.
+    // The key is a separate argument rather than interpolated: `workspaceId`
+    // comes from the URL, and `console.error` honours format specifiers, so a
+    // path containing `%s` would swallow `error` and hide the actual failure.
     // eslint-disable-next-line no-console -- the stored layout was unreadable; say so loudly
     console.error(
-      `[streams] could not read the stored layout — keeping the original at "${backupKey(workspaceId)}"`,
+      '[streams] could not read the stored layout, keeping the original at',
+      backupKey(workspaceId),
       error,
     );
     if (stored) backupUnreadable(stored, workspaceId);
