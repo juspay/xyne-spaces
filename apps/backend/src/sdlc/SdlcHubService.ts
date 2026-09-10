@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
+  SDLC_CONTAINMENT_RELATION,
   SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   CanvasVisibility,
@@ -908,6 +910,8 @@ export class SdlcHubService implements SdlcHub {
             },
           });
           if (input.kind !== 'BASELINE' && input.trackId) {
+            // Containment: a new artifact lands at the track's root, so the
+            // parent on the source side is the track itself.
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
@@ -916,7 +920,22 @@ export class SdlcHubService implements SdlcHub {
                 sourceId: input.trackId,
                 targetType: 'CANVAS',
                 targetId: canvas.id,
-                relationType: 'TRACK_ITEM',
+                relationType: SDLC_CONTAINMENT_RELATION,
+                createdBy: actor.userId,
+              },
+            });
+            // And the flat edge, which keeps pointing at the track wherever the
+            // artifact is later filed. Written with the artifact so the two
+            // cannot drift apart.
+            await tx.sdlcEntityLink.create({
+              data: {
+                workspaceId: actor.workspaceId,
+                channelId: repo.channelId,
+                sourceType: 'TRACK',
+                sourceId: input.trackId,
+                targetType: 'CANVAS',
+                targetId: canvas.id,
+                relationType: SDLC_TRACK_FLAT_RELATION,
                 createdBy: actor.userId,
               },
             });
