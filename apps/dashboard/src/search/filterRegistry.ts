@@ -52,6 +52,7 @@ export type TokenIcon =
   | { kind: 'priority'; value: string }
   | { kind: 'date' }
   | { kind: 'board' }
+  | { kind: 'entity' }
   | { kind: 'value' };
 
 /** One removable thing in the search box / bar. */
@@ -150,7 +151,7 @@ export interface TypedFilters {
 }
 
 /** The backend query-param names a text-list filter can set. */
-type SearchFilterKey = 'status' | 'board' | 'tags';
+type SearchFilterKey = 'status' | 'board' | 'tags' | 'entity';
 
 /** Filter values travel as plain strings (URL params, typed syntax), so options are too. */
 export type FilterOption = { value: string; label: string };
@@ -316,9 +317,10 @@ function textListEntry(opts: {
   id: string;
   label: string;
   param: string;
-  field: 'statuses' | 'boardIds' | 'tags';
+  field: 'statuses' | 'boardIds' | 'tags' | 'entities';
   syntax: string;
-  typedKey: 'status' | 'board' | 'tags';
+  /** Omitted for chip-only filters, whose value can only come from a chip or the param. */
+  typedKey?: 'status' | 'board' | 'tags';
   searchKey: SearchFilterKey;
   tokenIcon?: TokenIcon;
   appliesTo?: (docType: DocType) => boolean;
@@ -345,7 +347,7 @@ function textListEntry(opts: {
     read: (params, typed) => ({
       [opts.field]: params.get(opts.param)
         ? csv(params.get(opts.param))
-        : csv(typed[opts.typedKey]),
+        : csv(opts.typedKey ? typed[opts.typedKey] : undefined),
     }),
     write: (f, params) => setOrDelete(params, opts.param, f[opts.field].join(',')),
     queryText: f => (f[opts.field].length > 0 ? `${opts.syntax}${f[opts.field].join(',')}` : ''),
@@ -858,6 +860,28 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     // and a message's `messageActs`, so this is one filter over both.
     appliesTo: isTicketOrMessageType,
     control: { kind: 'text', placeholder: 'e.g. billing, urgent' },
+  }),
+  textListEntry({
+    id: 'entity',
+    label: 'Entity',
+    param: 'entity',
+    field: 'entities',
+    syntax: 'entity:',
+    searchKey: 'entity',
+    // Same glyph the palette chip uses (ChipIcon in FilterChipNode), so a filter looks
+    // identical in cmd+K and on the results page.
+    tokenIcon: { kind: 'entity' },
+    // Entity annotations live on both a message's and a ticket's `entityNames`, and the
+    // backend AND-s the values — two entities means docs mentioning both, not either.
+    appliesTo: isTicketOrMessageType,
+    control: { kind: 'text', placeholder: 'e.g. Big Basket, Swiggy' },
+    // The chip's value IS what the backend matches (an entity name, not an id), so unlike
+    // `board:` the label needs no resolver — it reads back exactly what was typed.
+    chip: {
+      type: ChipType.ENTITY,
+      prefix: 'entity:',
+      label: value => value,
+    },
   }),
 ];
 

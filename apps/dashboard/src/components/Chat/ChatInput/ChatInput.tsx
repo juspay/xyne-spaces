@@ -1241,6 +1241,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 sendDisabledReason: 'Attachment is still uploading',
               })}
               onScheduleSend={handleScheduleSend}
+              showSchedulePresets={!!isDM && !conversationId}
               {...(globalShortcuts.length > 0 && {
                 bottomLeftSlot: (
                   <>

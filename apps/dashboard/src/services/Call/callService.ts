@@ -203,6 +203,13 @@ export class CallService {
   }
 
   /**
+   * Rewrite the call's detailed summary with the chosen summary template.
+   */
+  async regenerateSummary(callId: string, summaryTemplateId: string): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/generate-summary`, { summaryTemplateId });
+  }
+
+  /**
    * Share a call with people, groups or channels, optionally with a note. Each
    * target also gets a card posted into the channel (or a DM, for a user target).
    */

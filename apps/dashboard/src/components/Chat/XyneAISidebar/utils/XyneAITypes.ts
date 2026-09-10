@@ -241,6 +241,10 @@ export interface DebugArtifactBundle {
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
   followUpDiagnostics?: FollowUpDiagnostic[];
+  /** Non-fatal problems hit while reading the trace (an unresolvable blob, a
+   *  truncated payload). Surfaced as a notice so a PARTIAL read is visible
+   *  rather than looking like an agent that did nothing. */
+  warnings?: string[];
 }
 
 export interface FollowUpDiagnostic {

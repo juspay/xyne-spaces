@@ -58,6 +58,11 @@ export interface SummaryTemplateSection {
   id: string;
   title: string;
   description: string;
+  /**
+   * Only meaningful on the reserved Decisions / Action Items sections. A Scribe admin can
+   * switch one off; it stays on the template but is dropped from summary generation.
+   */
+  disabled?: boolean;
 }
 
 export type SummaryTemplateInput = Pick<
@@ -132,6 +137,7 @@ export interface RecordingSharingResult {
   shares?: Array<{ id: string; target: RecordingShareTarget; access: string }>;
   visibility?: CallVisibility;
 }
+export type DetailedSummaryStatus = 'pending' | 'ready' | 'failed' | null;
 
 /**
  * The regenerate endpoint returns 202 immediately; generation runs in the
@@ -206,7 +212,7 @@ export interface RecordingDetail extends Recording {
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
-  detailedSummaryStatus: 'pending' | 'ready' | 'failed' | null;
+  detailedSummaryStatus: DetailedSummaryStatus;
   summaryModelUsed: 'fast' | 'thinking' | null;
   citationSegments: CitationSegment[];
   visibility?: CallVisibility;

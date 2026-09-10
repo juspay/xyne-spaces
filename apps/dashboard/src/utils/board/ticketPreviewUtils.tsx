@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { LayoutGrid, Folder, List } from 'lucide-react';
-import { TicketStatusIcon } from '../../components/Tickets/TicketStatus/TicketStatusIcon';
+import { TicketStatusV2 } from '@xyne/shared';
+import { StatusIndicator } from '../../components/Board/StatusIndicator';
 import type {
   PreviewField,
   CreateField,
@@ -80,7 +81,7 @@ export const renderPreviewFieldValue = (field: PreviewField): ReactNode => {
     case 'status':
       return (
         <>
-          <TicketStatusIcon size={14} progressPercentage={25} />
+          <StatusIndicator status={TicketStatusV2.STARTED} size={14} />
           <span className='text-[14px] text-muted-foreground'>User defined status</span>
         </>
       );

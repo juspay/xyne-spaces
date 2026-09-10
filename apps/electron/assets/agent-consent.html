@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;" />
+  <title>Agent Authorization</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #1a1a1e;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --card: #f9fafb;
+      --accent: #4f46e5;
+      --accent-fg: #ffffff;
+      --danger: #dc2626;
+      --warn-bg: #fff7ed;
+      --warn-border: #fdba74;
+      --warn-fg: #9a3412;
+      --ok: #16a34a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1c20;
+        --fg: #f3f4f6;
+        --muted: #9ca3af;
+        --border: #2f2f36;
+        --card: #26262c;
+        --accent: #6366f1;
+        --warn-bg: #3a2a1a;
+        --warn-border: #92400e;
+        --warn-fg: #fcd9a8;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--fg);
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.28);
+      width: 100%;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 20px 12px;
+    }
+    .icon {
+      width: 40px; height: 40px;
+      flex: 0 0 40px;
+      border-radius: 10px;
+      background: var(--accent);
+      color: var(--accent-fg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 700;
+    }
+    .title { font-size: 15px; font-weight: 600; line-height: 1.2; }
+    .subtitle { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px; margin-left: auto;
+      white-space: nowrap;
+    }
+    .badge.trusted { background: rgba(22,163,74,0.12); color: var(--ok); }
+    .badge.unknown { background: rgba(220,38,38,0.12); color: var(--danger); }
+
+    .body { padding: 4px 20px 8px; }
+
+    .row {
+      display: flex; gap: 10px;
+      padding: 8px 0;
+      font-size: 12.5px;
+      border-top: 1px solid var(--border);
+    }
+    .row .k { color: var(--muted); flex: 0 0 92px; }
+    .row .v { color: var(--fg); word-break: break-all; }
+    .row .v.path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .sig-unsigned { color: var(--danger); font-weight: 600; }
+    .sig-signed { color: var(--ok); font-weight: 600; }
+
+    .warn {
+      margin: 10px 0 4px;
+      padding: 10px 12px;
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      color: var(--warn-fg);
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .caps-title {
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.04em;
+      margin: 14px 0 6px;
+    }
+    ul.caps {
+      list-style: none; margin: 0; padding: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    ul.caps li {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 8px 12px; font-size: 12.5px;
+      border-top: 1px solid var(--border);
+    }
+    ul.caps li:first-child { border-top: none; }
+    ul.caps li::before {
+      content: "•"; color: var(--accent); font-weight: 700;
+      line-height: 1.3;
+    }
+
+    .duration { margin: 14px 0 4px; }
+    .duration-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .seg {
+      display: flex; gap: 6px;
+    }
+    .seg label {
+      flex: 1;
+      text-align: center;
+      font-size: 12.5px;
+      padding: 8px 4px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      background: var(--card);
+    }
+    .seg input { display: none; }
+    .seg input:checked + span { font-weight: 600; }
+    .seg label:has(input:checked) {
+      border-color: var(--accent);
+      background: rgba(79,70,229,0.10);
+      color: var(--accent);
+    }
+
+    .actions {
+      display: flex; gap: 10px;
+      padding: 14px 20px 18px;
+    }
+    button {
+      flex: 1;
+      font-size: 13.5px; font-weight: 600;
+      padding: 11px 12px;
+      border-radius: 9px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+    }
+    #deny { background: transparent; color: var(--fg); }
+    #deny:hover { background: rgba(0,0,0,0.05); }
+    #allow { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    #allow:hover { filter: brightness(1.05); }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="head">
+      <div class="icon">⚡</div>
+      <div>
+        <div class="title">Agent authorization request</div>
+        <div class="subtitle">A local agent wants to connect</div>
+      </div>
+      <span class="badge unknown" id="badge">Unregistered</span>
+    </div>
+
+    <div class="body">
+      <div class="row"><span class="k">Name</span><span class="v" id="name"></span></div>
+      <div class="row" id="type-row"><span class="k">Type</span><span class="v" id="type"></span></div>
+      <div class="row"><span class="k">Requested by</span><span class="v path" id="requestedBy"></span></div>
+      <div class="row" id="desc-row"><span class="k">Description</span><span class="v" id="description"></span></div>
+
+      <div class="warn" id="warn">
+        This process is not a recognised Xyne agent. Only allow it if you started it and trust it.
+      </div>
+
+      <div class="caps-title">If allowed, this agent can</div>
+      <ul class="caps" id="caps"></ul>
+
+      <div class="duration">
+        <div class="duration-label">Grant access for</div>
+        <div class="seg">
+          <label><input type="radio" name="dur" value="5min" checked /><span>5 minutes</span></label>
+          <label><input type="radio" name="dur" value="1hour" /><span>1 hour</span></label>
+          <label><input type="radio" name="dur" value="session" /><span>Session</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="deny">Deny</button>
+      <button id="allow">Allow</button>
+    </div>
+  </div>
+
+  <script>
+    const api = window.electronAPI?.agentConsent;
+    let responded = false;
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value ?? '';
+    }
+
+    function reportSize() {
+      const card = document.getElementById('card');
+      const rect = card.getBoundingClientRect();
+      window.electronAPI?.ipcSend?.('agent-consent:content-height', Math.ceil(rect.width), Math.ceil(rect.height));
+    }
+
+    function render(data) {
+      setText('name', data.agentName || 'Unnamed agent');
+      setText('requestedBy', data.requestedBy || 'unknown process');
+      setText('description', data.description || '—');
+
+      if (data.agentType) {
+        setText('type', data.agentType);
+      } else {
+        document.getElementById('type-row').style.display = 'none';
+      }
+
+      // signing suffix on the path
+      const rb = document.getElementById('requestedBy');
+      if (data.signed === false) {
+        const s = document.createElement('span');
+        s.className = 'sig-unsigned';
+        s.textContent = '  (unsigned)';
+        rb.appendChild(s);
+      } else if (data.signed === true) {
+        const s = document.createElement('span');
+        s.className = 'sig-signed';
+        s.textContent = '  (signed)';
+        rb.appendChild(s);
+      }
+
+      const badge = document.getElementById('badge');
+      if (data.isKnown) {
+        badge.className = 'badge trusted';
+        badge.textContent = 'Verified agent';
+        document.getElementById('warn').style.display = 'none';
+      } else {
+        badge.className = 'badge unknown';
+        badge.textContent = 'Unregistered';
+      }
+
+      const caps = document.getElementById('caps');
+      caps.innerHTML = '';
+      (data.capabilities || []).forEach((c) => {
+        const li = document.createElement('li');
+        const span = document.createElement('span');
+        span.textContent = c;
+        li.appendChild(span);
+        caps.appendChild(li);
+      });
+
+      requestAnimationFrame(reportSize);
+    }
+
+    function selectedDuration() {
+      const el = document.querySelector('input[name="dur"]:checked');
+      return el ? el.value : '5min';
+    }
+
+    function respond(result) {
+      if (responded) return;
+      responded = true;
+      api?.respond(result);
+    }
+
+    document.getElementById('allow').addEventListener('click', () => {
+      respond({ approved: true, duration: selectedDuration() });
+    });
+    document.getElementById('deny').addEventListener('click', () => {
+      respond({ approved: false, duration: 'none' });
+    });
+    // Esc = deny
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') respond({ approved: false, duration: 'none' });
+    });
+
+    if (api) api.onShow(render);
+    window.addEventListener('resize', reportSize);
+  </script>
+</body>
+</html>

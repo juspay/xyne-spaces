@@ -18,7 +18,7 @@ import { Readable } from 'stream';
 
 import { logger } from './logger.js';
 import { generateFilePath } from './pathUtils.js';
-import type { StorageService, S3StorageConfig, UploadOptions, UploadResult, DeleteResult, FileMetadata } from './types.js';
+import type { StorageService, S3StorageConfig, UploadOptions, UploadResult, DeleteResult, FileMetadata, ObjectInfo, ObjectRead } from './types.js';
 
 export class S3StorageService implements StorageService {
   private client: S3Client;
@@ -179,6 +179,59 @@ export class S3StorageService implements StorageService {
       new GetObjectCommand({ Bucket: this.bucketName, Key: filename }),
       { expiresIn: expirationHours * 3600 }
     );
+  }
+
+  private static isNotFound(error: unknown): boolean {
+    const e = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+    return e?.name === 'NotFound' || e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404;
+  }
+
+  private static toObjectInfo(resp: {
+    ContentLength?: number;
+    ContentType?: string;
+    ETag?: string;
+    LastModified?: Date;
+  }): ObjectInfo {
+    const info: ObjectInfo = {};
+    if (resp.ContentLength !== undefined) {
+      info.size = resp.ContentLength;
+    }
+    if (resp.ContentType) {
+      info.contentType = resp.ContentType;
+    }
+    if (resp.ETag) {
+      info.etag = resp.ETag.replace(/^W\//, '').replace(/"/g, '');
+    }
+    if (resp.LastModified) {
+      info.lastModified = resp.LastModified;
+    }
+    return info;
+  }
+
+  /** Metadata for one object, or null when it does not exist. */
+  async headObject(path: string): Promise<ObjectInfo | null> {
+    try {
+      const resp = await this.client.send(new HeadObjectCommand({ Bucket: this.bucketName, Key: path }));
+      return S3StorageService.toObjectInfo(resp);
+    } catch (error) {
+      if (S3StorageService.isNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** Stream one object with its metadata, or null when it does not exist. */
+  async getObject(path: string): Promise<ObjectRead | null> {
+    try {
+      const resp = await this.client.send(new GetObjectCommand({ Bucket: this.bucketName, Key: path }));
+      return { info: S3StorageService.toObjectInfo(resp), stream: resp.Body as NodeJS.ReadableStream };
+    } catch (error) {
+      if (S3StorageService.isNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async fileExists(filename: string): Promise<boolean> {

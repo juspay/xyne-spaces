@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import {
   applyConversationLabel,
   archiveConversationMailbox,
+  SKIPPABLE_LABEL_ERROR_CODES,
 } from '../services/conversation-label.service';
 
 const ApplyConversationLabelConfigSchema = z.object({
@@ -41,18 +42,6 @@ const ApplyConversationLabelOutputSchema = z.object({
   skipped: z.boolean(),
   skipReason: z.string().nullable(),
 });
-
-const SKIPPABLE_LABEL_ERROR_CODES = new Set([
-  'channel_not_found',
-  'label_not_found',
-  'label_id_mismatch',
-  'conversation_not_found',
-  'conversation_channel_mismatch',
-  'conversation_workspace_mismatch',
-  'ticket_not_found',
-  'ticket_channel_mismatch',
-  'ticket_workspace_mismatch',
-]);
 
 interface ApplyConversationLabelOutput extends Record<string, unknown> {
   conversationId: string | null;

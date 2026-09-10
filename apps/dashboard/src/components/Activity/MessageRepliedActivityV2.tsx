@@ -101,6 +101,7 @@ export const MessageRepliedActivityV2 = ({
           showAvatar={false}
           variant='default'
           contentOnly={true}
+          disableLinks={true}
         />
       ) : (
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
@@ -108,6 +109,7 @@ export const MessageRepliedActivityV2 = ({
             <RenderMessageWithHTML
               message={latestReplyMessage.content}
               showEdited={latestReplyMessage.edited}
+              disableLinks
             />
           )}
         </div>
