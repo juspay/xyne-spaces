@@ -1458,7 +1458,7 @@ export class SdlcHubService implements SdlcHub {
     // Suggestion gate (mirrors updateCanvas), no exceptions: every update to a
     // PRD/Tech Doc parks as suggestions for human review.
     // Null is a failed read, not an empty doc — see readFromYSweetOrNull.
-    const live = await readFromYSweetOrNull(existing.id);
+    const live = await readFromYSweetOrNull(existing.id, actor.userId);
     if (live === null) {
       throw new AppError('Could not read the artifact canvas right now. Try again shortly.', 503);
     }

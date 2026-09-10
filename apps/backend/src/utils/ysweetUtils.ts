@@ -428,39 +428,12 @@ export async function readFromYSweetStrict(
  *
  * @returns The blocks ([] for a genuinely empty document), or null if the read failed
  */
-export async function readFromYSweetOrNull(canvasId: string): Promise<BlockNoteBlock[] | null> {
+export async function readFromYSweetOrNull(
+  canvasId: string,
+  userId: string
+): Promise<BlockNoteBlock[] | null> {
   try {
-    const ysweetUrl = config.ysweet.url;
-    if (!ysweetUrl) {
-      logger.warn('[YSweetUtils] Y-Sweet URL not configured, cannot read content');
-      return null;
-    }
-
-    // Get a client token with read-only authorization
-    const clientToken = await ysweetGetClientToken(canvasId, {
-      authorization: 'read-only',
-    });
-
-    // Override URLs to use direct Y-Sweet URL instead of proxy URL
-    overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
-
-    const existingUpdate = await ysweetGetAsUpdate(clientToken);
-
-    if (!existingUpdate || existingUpdate.length === 0) {
-      logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
-      return [];
-    }
-
-    // Create a new Y.Doc and apply the existing state
-    const ydoc = new Y.Doc();
-    Y.applyUpdate(ydoc, existingUpdate);
-
-    // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
-    const editor = getServerEditor();
-    const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
-
-    logger.info(`[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`);
-    return blocks as BlockNoteBlock[];
+    return await readFromYSweetStrict(canvasId, userId);
   } catch (error) {
     if (error instanceof YSweetHttpError && error.status === 404) {
       logger.debug(`[YSweetUtils] No Y-Sweet document for canvas ${canvasId}; treating as empty`);

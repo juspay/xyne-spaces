@@ -84,7 +84,6 @@ import {
   CanvasRole,
   isBaselineCanvasType,
   computeDeletionEvents,
-  isBaselineCanvasType,
   type BlockDeletionEvent,
 } from '@xyne/shared';
 import { queries } from '../../../zero/queries';

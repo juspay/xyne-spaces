@@ -109,7 +109,10 @@ export interface BatchResult {
   error?: string;
 }
 
-export async function applySuggestionChanges(changeIds: string[]): Promise<BatchResult> {
+export async function applySuggestionChanges(
+  changeIds: string[],
+  userId: string
+): Promise<BatchResult> {
   const empty: BatchResult = { applied: 0, stale: 0 };
   if (!changeIds.length) return empty;
 
@@ -127,7 +130,7 @@ export async function applySuggestionChanges(changeIds: string[]): Promise<Batch
   return withCanvasLock(
     canvasId,
     async () => {
-      const current = await readFromYSweetOrNull(canvasId);
+      const current = await readFromYSweetOrNull(canvasId, userId);
       if (current === null) {
         logger.error(`[Suggestions] Could not read canvas ${canvasId}; no statuses written`);
         return { ...empty, error: 'Could not read the canvas; no changes applied' };
@@ -160,7 +163,7 @@ export async function applySuggestionChanges(changeIds: string[]): Promise<Batch
         return { applied: 0, stale: outcome.stale.length };
       }
 
-      const ok = await syncToYSweet(canvasId, outcome.blocks);
+      const ok = await syncToYSweet(canvasId, outcome.blocks, userId);
       if (!ok) {
         logger.error(`[Suggestions] Y-Sweet write failed for canvas ${canvasId}; no statuses written`);
         return { ...empty, error: 'Collaboration sync failed; no changes applied' };

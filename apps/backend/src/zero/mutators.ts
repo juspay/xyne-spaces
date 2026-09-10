@@ -10574,7 +10574,7 @@ export function createMutators(
           asyncTasks.push(async () => {
             try {
               const { applySuggestionChanges } = await import('@/services/canvas/suggestions');
-              await applySuggestionChanges([change.id]);
+              await applySuggestionChanges([change.id], authData.sub);
             } catch (error) {
               logger.error('[MUTATOR-SUGGESTION-ACCEPT] Failed to apply change:', error);
             }
@@ -10619,7 +10619,7 @@ export function createMutators(
           asyncTasks.push(async () => {
             try {
               const { applySuggestionChanges } = await import('@/services/canvas/suggestions');
-              const result = await applySuggestionChanges(ids);
+              const result = await applySuggestionChanges(ids, authData.sub);
               logger.info(
                 `[MUTATOR-SUGGESTION-ACCEPT-ALL] applied=${result.applied} stale=${result.stale}`
               );
