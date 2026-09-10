@@ -952,6 +952,39 @@ export const mcpSuggestComponentSchema = baseComponentSchema.extend({
 export type McpSuggestItem = z.infer<typeof mcpSuggestItemSchema>;
 export type McpSuggestProps = z.infer<typeof mcpSuggestPropsSchema>;
 
+export const providerSuggestItemSchema = z
+  .object({
+    provider: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    /** The user's own credential — never the agent's or an org-shared one. */
+    connected: z.boolean().optional(),
+    /** Available through a credential an admin shared, so it works unconfigured. */
+    sharedName: z.string().optional(),
+    /** How the card connects it: nothing else is a valid action. */
+    connectMethod: z.enum(['oauth', 'device', 'api_key', 'none']).optional(),
+  })
+  .strict();
+
+export const providerSuggestPropsSchema = z
+  .object({
+    title: z.string().optional(),
+    reason: z.string().optional(),
+    providers: z.array(providerSuggestItemSchema).min(1),
+    /** Roster mode: the user asked what exists, so offer a link to settings. */
+    browseAll: z.boolean().optional(),
+    totalCount: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const providerSuggestComponentSchema = baseComponentSchema.extend({
+  type: z.literal('provider_suggest'),
+  props: providerSuggestPropsSchema,
+});
+
+export type ProviderSuggestItem = z.infer<typeof providerSuggestItemSchema>;
+export type ProviderSuggestProps = z.infer<typeof providerSuggestPropsSchema>;
+
 export const mcpConfigureComponentSchema = baseComponentSchema.extend({
   type: z.literal('mcpConfigure'),
   props: mcpConfigurePropsSchema,
@@ -989,6 +1022,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     agentComponentSchema,
     mcpConfigureComponentSchema,
     mcpSuggestComponentSchema,
+    providerSuggestComponentSchema,
     slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
@@ -1026,7 +1060,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'row', 'column', 'card',
+  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'provider_suggest', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema
