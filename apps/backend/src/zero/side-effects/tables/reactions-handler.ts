@@ -4,12 +4,13 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { activityService } from '@/services/activity/activityService';
 import { radarReactionResolver } from '@/services/radar/radarReactionResolver';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 
 export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
   private async getReactionContext(reactionId: string) {
     const reaction = await db.reaction.findUnique({
       where: { reactionId },
-      select: { reactionId: true, messageId: true, userId: true },
+      select: { reactionId: true, messageId: true, userId: true, emojiName: true },
     });
 
     if (!reaction) {
@@ -27,7 +28,11 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const conversation = await db.conversation.findUnique({
       where: { conversationId: message.conversationId },
-      select: { channelId: true, initialMessageId: true },
+      select: {
+        channelId: true,
+        initialMessageId: true,
+        channel: { select: { name: true, scopeType: true } },
+      },
     });
 
     if (!conversation?.channelId) {
@@ -36,11 +41,6 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const messageAuthorId = message.senderId;
     const reactingUserId = reaction.userId;
-
-    if (messageAuthorId === reactingUserId) {
-      return null;
-    }
-
     const isThreadActivity = conversation.initialMessageId !== reaction.messageId;
 
     return {
@@ -48,7 +48,11 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
       messageId: reaction.messageId,
       messageAuthorId,
       channelId: conversation.channelId,
+      channelName: conversation.channel?.name ?? null,
+      scopeType: conversation.channel?.scopeType ?? null,
+      emojiName: reaction.emojiName,
       isThreadActivity,
+      isSelfReaction: messageAuthorId === reactingUserId,
     };
   }
 
@@ -68,6 +72,29 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
     const context = await this.getReactionContext(reactionId);
 
     if (!context) {
+      return;
+    }
+
+    // Usage analytics: every reaction in a channel counts, self-reactions
+    // included; the activity feed below deliberately skips those.
+    userActivityTrackingService
+      .trackReactionAdded(this.ctx.userID, {
+        messageId: context.messageId,
+        channelId: context.channelId,
+        ...(context.channelName && { channelName: context.channelName }),
+        ...(context.scopeType && { scopeType: context.scopeType }),
+        emojiName: context.emojiName,
+        isThreadReply: context.isThreadActivity,
+        isSelf: context.isSelfReaction,
+      })
+      .catch(error => {
+        logger.error('[UserActivityTracking] Failed to track reaction added activity:', {
+          reactionId,
+          error,
+        });
+      });
+
+    if (context.isSelfReaction) {
       return;
     }
 

@@ -297,7 +297,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
         // a second lookup.
-        channel: { select: { scopeType: true } },
+        channel: { select: { scopeType: true, name: true } },
       },
     });
 
@@ -315,6 +315,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {
       messageId,
       ...(conversation?.channelId && { channelId: conversation.channelId }),
+      ...(conversation?.channel?.name && { channelName: conversation.channel.name }),
+      ...(conversation?.channel?.scopeType && { scopeType: conversation.channel.scopeType }),
+      // Every channel message owns a conversation whose initialMessageId is the
+      // message itself; anything else in that conversation is a thread reply.
+      isThreadReply:
+        conversation?.initialMessageId != null && conversation.initialMessageId !== messageId,
       hasAttachment: message.hasAttachment,
     }).catch(error => {
       logger.error('[UserActivityTracking] Failed to track message sent activity:', {

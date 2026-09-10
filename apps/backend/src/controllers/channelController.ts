@@ -1359,6 +1359,7 @@ export class ChannelController {
       void userActivityTrackingService.trackChannelCreated(userId, {
         channelId: channel.id,
         name: channel.name,
+        channelName: channel.name,
         scopeType: channel.scopeType,
       });
 

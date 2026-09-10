@@ -5,6 +5,7 @@ import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
 import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
@@ -23,6 +24,20 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
     await refreshCanvasPermissionsForChannel(previousValue.channelId).catch(err =>
       logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
     );
+
+    const channel = await db.channel.findUnique({
+      where: { id: previousValue.channelId },
+      select: { name: true, scopeType: true },
+    });
+    userActivityTrackingService
+      .trackChannelLeft(this.ctx.userID, {
+        channelId: previousValue.channelId,
+        ...(channel?.name && { channelName: channel.name }),
+        ...(channel?.scopeType && { scopeType: channel.scopeType }),
+        memberId: previousValue.userId,
+        isSelf: this.ctx.userID === previousValue.userId,
+      })
+      .catch(err => logger.error('[UserActivityTracking] Failed to track channel left activity:', err));
   }
 
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -49,6 +64,21 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       await refreshCanvasPermissionsForChannel(channelId).catch(err =>
         logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`));
 
+      // Query channel for name
+      const channel = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { name: true, scopeType: true }
+      });
+
+      userActivityTrackingService
+        .trackChannelJoined(this.ctx.userID, {
+          channelId,
+          ...(channel?.name && { channelName: channel.name }),
+          ...(channel?.scopeType && { scopeType: channel.scopeType }),
+          memberId: userId,
+          isSelf: this.ctx.userID === userId,
+        })
+        .catch(err => logger.error('[UserActivityTracking] Failed to track channel joined activity:', err));
 
       if (this.ctx.userID === userId) {
         logger.info(`[ChannelParticipantsHandler] User ${userId} joined channel ${channelId} themselves - skipping notification`);
@@ -64,12 +94,6 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       const adderId = adder?.id || 'unknown';
       
       logger.info(`[ChannelParticipantsHandler] User ${userId} was added to channel ${channelId} by ${this.ctx.userID} (${adderName})`);
-
-      // Query channel for name
-      const channel = await db.channel.findUnique({
-        where: { id: channelId },
-        select: { name: true, scopeType: true }
-      });
 
       const channelName = channel?.name || 'a channel';
 

@@ -89,10 +89,41 @@ class UserActivityTrackingService {
 
   // ==================== Specific Message Operations ====================
 
-  async trackMessageSent(userId: string, metadata?: { messageId?: string; conversationId?: string; channelId?: string; hasAttachment?: boolean }): Promise<void> {
+  async trackMessageSent(
+    userId: string,
+    metadata?: {
+      messageId?: string;
+      conversationId?: string;
+      channelId?: string;
+      channelName?: string;
+      scopeType?: string;
+      isThreadReply?: boolean;
+      hasAttachment?: boolean;
+    },
+  ): Promise<void> {
     await this.track({
       userId,
       eventName: 'MESSAGE_SENT',
+      eventCategory: 'CHAT',
+      metadata,
+    });
+  }
+
+  async trackReactionAdded(
+    userId: string,
+    metadata?: {
+      messageId?: string;
+      channelId?: string;
+      channelName?: string;
+      scopeType?: string;
+      emojiName?: string;
+      isThreadReply?: boolean;
+      isSelf?: boolean;
+    },
+  ): Promise<void> {
+    await this.track({
+      userId,
+      eventName: 'REACTION_ADDED',
       eventCategory: 'CHAT',
       metadata,
     });
@@ -152,10 +183,46 @@ class UserActivityTrackingService {
 
   // ==================== Specific Channel Operations ====================
 
-  async trackChannelCreated(userId: string, metadata?: { channelId?: string; name?: string; scopeType?: string; projectId?: string }): Promise<void> {
+  async trackChannelCreated(
+    userId: string,
+    metadata?: { channelId?: string; name?: string; channelName?: string; scopeType?: string; projectId?: string },
+  ): Promise<void> {
     await this.track({
       userId,
       eventName: 'CHANNEL_CREATED',
+      eventCategory: 'CHANNEL',
+      metadata,
+    });
+  }
+
+  /**
+   * A user became a member of a channel. `userId` is the actor (who performed
+   * the add); `memberId` is the user who joined. `isSelf` is true when a user
+   * joined on their own rather than being added by someone else.
+   */
+  async trackChannelJoined(
+    userId: string,
+    metadata?: { channelId?: string; channelName?: string; scopeType?: string; memberId?: string; isSelf?: boolean },
+  ): Promise<void> {
+    await this.track({
+      userId,
+      eventName: 'CHANNEL_JOINED',
+      eventCategory: 'CHANNEL',
+      metadata,
+    });
+  }
+
+  /**
+   * A user stopped being a member of a channel. Same actor/member split as
+   * trackChannelJoined: `isSelf` false means the member was removed by someone.
+   */
+  async trackChannelLeft(
+    userId: string,
+    metadata?: { channelId?: string; channelName?: string; scopeType?: string; memberId?: string; isSelf?: boolean },
+  ): Promise<void> {
+    await this.track({
+      userId,
+      eventName: 'CHANNEL_LEFT',
       eventCategory: 'CHANNEL',
       metadata,
     });
