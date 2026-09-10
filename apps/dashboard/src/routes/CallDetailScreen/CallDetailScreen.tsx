@@ -244,7 +244,6 @@ export default function CallDetailScreen(): ReactElement {
         aiOpenedRef.current = false;
       }
     });
-    openAI();
     return (): void => {
       subscription.unsubscribe();
       xyneAIActor.send({ type: 'CLOSE' });

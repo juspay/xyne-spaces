@@ -38,10 +38,8 @@ import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
 import { RecordingDeleteDialog } from './components/RecordingDeleteDialog';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
 import {
-  buildRecordingRows,
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
-  findNearestVisibleRecording,
   formatRecordingParticipants,
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
@@ -49,6 +47,7 @@ import {
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
+import { buildDateGroupedRowsFromItems, findNearestVisibleItem } from '../../utils/dateGroupedList';
 import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -212,7 +211,10 @@ const RecordingsV2Screen = (): ReactElement => {
     [ownershipFilteredRecordings],
   );
 
-  const rows = useMemo(() => buildRecordingRows(filteredRecordings), [filteredRecordings]);
+  const rows = useMemo(
+    () => buildDateGroupedRowsFromItems(filteredRecordings),
+    [filteredRecordings],
+  );
   const sourceIndexByRecordingId = useMemo(
     () => new Map(recordings.map((recording, index) => [recording.id, index])),
     [recordings],
@@ -358,7 +360,7 @@ const RecordingsV2Screen = (): ReactElement => {
 
   const handleVisibleRangeChanged = useCallback(
     (startIndex: number): void => {
-      const firstVisibleRecording = findNearestVisibleRecording(rows, startIndex);
+      const firstVisibleRecording = findNearestVisibleItem(rows, startIndex);
       if (!firstVisibleRecording) return;
 
       const sourceIndex = sourceIndexByRecordingId.get(firstVisibleRecording.id);
@@ -617,23 +619,23 @@ const RecordingsV2Screen = (): ReactElement => {
                   ) : (
                     <div className='pb-2'>
                       <RecordingsV2Pill
-                        recording={row.recording}
-                        creator={usersById.get(row.recording.createdByUserId) ?? null}
+                        recording={row.item}
+                        creator={usersById.get(row.item.createdByUserId) ?? null}
                         participantsLabel={formatRecordingParticipants(
                           getRecordingParticipantIds(
-                            row.recording.createdByUserId,
-                            row.recording.recordingParticipants,
+                            row.item.createdByUserId,
+                            row.item.recordingParticipants,
                           ),
                           usersById,
                           currentUser?.id,
                         )}
-                        tags={row.recording.labels.filter(isResolved).filter(isManualLabel)}
-                        suggestedTags={row.recording.labels.filter(
+                        tags={row.item.labels.filter(isResolved).filter(isManualLabel)}
+                        suggestedTags={row.item.labels.filter(
                           label =>
                             isResolved(label) && resolveMethod(label) === TagMethod.AUTOMATED,
                         )}
                         pendingLabelCount={
-                          row.recording.labels.filter(label => !isResolved(label)).length
+                          row.item.labels.filter(label => !isResolved(label)).length
                         }
                         resolveLabel={resolveLabel}
                         currentUserId={currentUser?.id}
