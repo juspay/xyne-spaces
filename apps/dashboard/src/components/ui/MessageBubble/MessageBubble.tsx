@@ -119,6 +119,8 @@ interface AttachmentsBlockProps {
   parentMessage?: AttachmentRef['parentMessage'];
 }
 
+const FILE_PILL_GRID_COLUMNS = 'repeat(auto-fill, minmax(min(240px, 100%), 1fr))';
+
 /**
  * Check if attachment has a document thumbnail (PDF with preview)
  */
@@ -193,9 +195,6 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   const nonPreviewableFiles = fileAttachments.filter(a => !hasDocumentThumbnail(a));
 
   // Check if we need to use FilePill for all files (mixed types)
-  // Collapse to compact pills whenever there is more than one document file,
-  // so multiple Office/Excel/PDF files render as a clean grid instead of a row
-  // of large preview cards. A single file keeps its rich preview.
   const useFilePillForAllFiles = nonPreviewableFiles.length > 0 || fileAttachments.length > 1;
 
   const handleFileClick = (attachment: AttachmentType) => {
@@ -362,13 +361,13 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
           {/* Non-previewable files - use FilePill component */}
           {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
           {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
-            <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
+            <div className='grid gap-2' style={{ gridTemplateColumns: FILE_PILL_GRID_COLUMNS }}>
               {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).map(attachment => (
                 <FilePill
                   key={attachment.id}
+                  className='max-w-none'
                   fileName={attachment.originalFilename}
                   mimeType={attachment.mimetype}
-                  fileSize={attachment.size}
                   fileId={attachment.id}
                   uploadedByUserId={attachment.uploadedByUserId}
                   onClick={() => handleFileClick(attachment)}
