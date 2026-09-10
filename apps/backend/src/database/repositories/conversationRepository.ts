@@ -10,6 +10,12 @@ export interface CreateConversationInput {
   channelId: string;
   createdBy: string;
   initialMessageId: string;
+  /**
+   * Snapshot of the initial message, built with buildInitialMessageMd. The V3
+   * read path renders from this and has no join to fall back on, so a
+   * conversation created without it shows an empty message.
+   */
+  initial_message_md?: string | null;
   parentMessageId?: string;
   pinned?: boolean;
   doNotPostToChannel?: boolean;
@@ -73,6 +79,9 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         workspaceId: channel.workspaceId,
         createdBy: data.createdBy,
         initialMessageId: data.initialMessageId,
+        ...(data.initial_message_md !== undefined && {
+          initial_message_md: data.initial_message_md,
+        }),
         parentMessageId: data.parentMessageId,
         pinned: data.pinned || false,
         ...(data.doNotPostToChannel !== undefined && {
