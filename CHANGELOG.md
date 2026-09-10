@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.2](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.1...v1.295.0-release-20260909.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* render DM add/remove system message names as plain text ([#1716](https://github.com/juspay/xyne-spaces/issues/1716)) ([de9668d](https://github.com/juspay/xyne-spaces/commit/de9668db396121a46274535a93892db31bf0fa96)), closes [#690](https://github.com/juspay/xyne-spaces/issues/690)
+
 ## [1.295.0-release-20260909.1](https://github.com/juspay/xyne-spaces/compare/v1.294.1-release-20260909.2...v1.295.0-release-20260909.1) (2026-09-09)
 
 
