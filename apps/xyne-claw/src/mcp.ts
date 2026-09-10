@@ -7,6 +7,7 @@ import { writeAttachmentToContext } from "./attachment-write.js";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve as resolvePath, isAbsolute, sep } from "node:path";
 import crypto from "node:crypto";
+import { Agent } from "undici";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("mcp");
@@ -106,17 +107,31 @@ export class McpAuthServiceError extends Error {
   }
 }
 
-async function authFetch<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
+const MCP_CALL_TIMEOUT_MS = 660_000;
+
+const mcpCallDispatcher = new Agent({
+  headersTimeout: MCP_CALL_TIMEOUT_MS,
+  bodyTimeout: MCP_CALL_TIMEOUT_MS,
+  connectTimeout: 10_000,
+});
+
+async function authFetch<T>(
+  path: string,
+  sessionToken: string,
+  init?: RequestInit,
+  dispatcher?: Agent,
+): Promise<T> {
   const url = `${SERVER.authServiceUrl}${path}`;
   const res = await fetch(url, {
     ...init,
+    ...(dispatcher ? { dispatcher } : {}),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
       "x-s2s-key": SERVER.s2sKey,
       ...init?.headers,
     },
-  });
+  } as unknown as RequestInit);
   const body = (await res.json()) as AuthResponse<T>;
   if (!body.success || body.data === undefined) {
     throw new McpAuthServiceError(body.error ?? `Auth service error: ${res.status}`, res.status);
@@ -247,7 +262,7 @@ async function callMcpWithBlockedCapture<T>(
   onConnectorBlocked?: (serverType: string, status: number) => void,
 ): Promise<T> {
   try {
-    return await authFetch<T>(path, sessionToken, init);
+    return await authFetch<T>(path, sessionToken, init, mcpCallDispatcher);
   } catch (err) {
     if (err instanceof McpAuthServiceError && isCredentialRejection(err.status)) {
       onConnectorBlocked?.(serverType, err.status);
