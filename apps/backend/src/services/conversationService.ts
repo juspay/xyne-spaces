@@ -18,7 +18,7 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, buildInitialMessageMd } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -388,34 +388,57 @@ export class ConversationService {
 
     const messageContent = await replaceEmojisInContent(content?.trim() || '');
 
-    // First create the message
-    const messageData: CreateMessageInput = {
-      conversationId: 'temp', // Will be updated after conversation creation
-      senderId: userId,
-      content: messageContent,
-      msgType: msgType || MessageType.USER,
-      hasAttachment: processedFiles.length > 0,
-      metadata: {
-        ...messageMetadata,
-        contentFormat: isMarkdown ? 'markdown' : 'html',
-      },
-      ...(createdAt && { createdAt }),
+    // Both ids are minted here so the conversation can carry a complete
+    // initial_message_md on its INSERT. The alternative — insert a placeholder,
+    // then patch initialMessageId, then patch the md — is three commits, and
+    // between the first and the last the conversation is live with no message
+    // body for every subscriber.
+    const conversationId = uuidv4();
+    const messageId = uuidv4();
+    const resolvedMsgType = msgType || MessageType.USER;
+    const messageCreatedAt = createdAt ?? new Date();
+    const resolvedMessageMetadata = {
+      ...messageMetadata,
+      contentFormat: isMarkdown ? 'markdown' : 'html',
     };
 
-    // Create a placeholder conversation first
+    const messageData: CreateMessageInput = {
+      messageId,
+      conversationId,
+      senderId: userId,
+      content: messageContent,
+      msgType: resolvedMsgType,
+      hasAttachment: processedFiles.length > 0,
+      metadata: resolvedMessageMetadata,
+      createdAt: messageCreatedAt,
+    };
+
     const conversationData: CreateConversationInput = {
+      conversationId,
       channelId,
       createdBy: userId,
-      initialMessageId: 'temp', // Will be updated after message creation
+      initialMessageId: messageId,
+      initial_message_md: buildInitialMessageMd({
+        messageId,
+        conversationId,
+        workspaceId: channel.workspaceId,
+        senderId: userId,
+        content: messageContent,
+        msgType: resolvedMsgType,
+        hasAttachment: processedFiles.length > 0,
+        createdAt: messageCreatedAt.getTime(),
+        metadata: resolvedMessageMetadata,
+        // Mirror the messages column defaults the insert below relies on, so the
+        // snapshot matches the row it describes.
+        isSent: true,
+        nudgeCount: 0,
+      }),
       metadata,
       pinned: pinned || false,
       ...(createdAt && { createdAt }),
     };
 
     const conversation = await this.conversationRepository.create(conversationData);
-
-    // Update message with real conversation ID
-    messageData.conversationId = conversation.conversationId;
     const message = await this.messageRepository.create(messageData);
 
     if (await this.userRepository.findById(userId)) {
@@ -485,12 +508,6 @@ export class ConversationService {
         error
       );
     });
-
-    // Update conversation with real initial message ID
-    await this.conversationRepository.update(conversation.conversationId, {
-      initialMessageId: message.messageId,
-    });
-    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     if (
       !suppressAutomations &&
