@@ -1,3 +1,10 @@
+## [1.304.0](https://github.com/juspay/xyne-spaces/compare/v1.303.0...v1.304.0) (2026-09-10)
+
+
+### Features
+
+* Add missing tracking events per requir ([#1722](https://github.com/juspay/xyne-spaces/issues/1722)) ([dd70c9e](https://github.com/juspay/xyne-spaces/commit/dd70c9e8838be2d1e665b18d7f05b0c71ff0fe9a))
+
 ## [1.303.0](https://github.com/juspay/xyne-spaces/compare/v1.302.1...v1.303.0) (2026-09-10)
 
 
