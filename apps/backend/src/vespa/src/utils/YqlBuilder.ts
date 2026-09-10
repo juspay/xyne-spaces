@@ -41,6 +41,27 @@ const userInputClause = (defaultIndex?: string, grammar = 'grammar:"tokenize"'):
   return `({${annotations}} userInput(@query))`;
 };
 
+/**
+ * The lexical clause: an explicit weakAnd of one `contains` per whitespace token.
+ *
+ * Not userInput() -- its parser turns an all-digit token into an IntItem, so "0002" becomes the
+ * integer 2 and matches every doc containing "2" (50,047 hits on prod, none containing "0002").
+ * A bound string in `contains` is a WordItem and keeps the literal token.
+ *
+ * weakAnd, not and/near/phrase: those require every term / proximity / adjacency and would gut
+ * recall on 5-10 word queries. No term annotations: implicitTransforms:false disables
+ * segmentation, which "JP_008" needs to match as phrase("JP","008").
+ */
+const lexicalClause = (query: string, params: VespaQueryParams): string => {
+  // Deduped: bind() reuses one placeholder per (field, value), so a repeated token would
+  // otherwise emit the same @placeholder twice and count twice in weakAnd's scoring.
+  const tokens = [...new Set(query.trim().split(/\s+/).filter(Boolean))];
+  if (tokens.length === 0) return userInputClause();
+  const clauses = tokens.map((token) => `default contains ${params.bind('qtok', token)}`);
+  // weakAnd of a single term is just the term; keeps the YQL readable in traces.
+  return clauses.length === 1 ? clauses[0] : `weakAnd(${clauses.join(', ')})`;
+};
+
 export interface SlackFilters {
   channelId?: string[];
   projectId?: string[];
@@ -228,7 +249,11 @@ export class YqlBuilder {
     const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
     const queryLength = query?.length ?? 0;
 
-    // Optimization: Skip semantic search for short queries (< 3 chars) - lexical only
+    // Whether the vector half of retrieval runs. `useSemanticAnyway` is the caller's
+    // config-driven decision (searchService reads the
+    // `vespa_search_semantic_disabled_rank_profiles` Superposition flag and turns it off for
+    // rank profiles that read no vector feature). Short queries skip it regardless — under 4
+    // characters the embedding is noise.
     const useSemantic = useSemanticAnyway && queryLength > 3;
 
     if (query && query !== '*') {
@@ -250,7 +275,7 @@ export class YqlBuilder {
       or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
     )`);
         } else {
-          // Lexical only: short query, skip semantic
+          // Lexical only: semantic disabled for this rank profile, or the query is too short.
           whereConditions.push(`(
       ${lexicalFieldClauses}
     )`);
@@ -266,17 +291,18 @@ export class YqlBuilder {
       or ({targetHits:${safeLimit}} nearestNeighbor(qna_embeddings, e))
     )`);
       } else {
-        // Lexical only: short query
+        // `lexicalClause` on both sides: the digit-token fix it carries is about how the lexical
+        // half is parsed, so it must not depend on whether the vector half runs.
         if (useSemantic) {
           // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
           whereConditions.push(`(
-          ${userInputClause()}
+          ${lexicalClause(query, params)}
         or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
         or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
         or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
         )`);
         } else {
-          whereConditions.push(userInputClause());
+          whereConditions.push(lexicalClause(query, params));
         }
       }
 
