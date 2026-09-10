@@ -85,7 +85,6 @@ import {
   buildSubagentTools,
   loadDeepwikiTools,
   loadContext7Tools,
-  loadPlaywrightTools,
   type SkillTrigger,
 } from "../subagent-tools.js";
 import {
@@ -97,6 +96,7 @@ import {
   type ToolCatalogItem,
 } from "../tool-catalog.js";
 import {
+  A2A_DEFAULTS,
   AgentDelegationGovernor,
   buildCallableAgentTools,
   buildOrchestratorCallableAgentTool,
@@ -1947,10 +1947,9 @@ export async function processTask(
     // Load deepwiki/context7/playwright MCP tool groups (stdio transport, cached).
     // Playwright doesn't get its own subagent — its tools are spliced into the
     // sandbox subagent's palette via bonusToolsBySubagent below.
-    const [deepwikiGroup, context7Group, playwrightGroup] = await Promise.all([
+    const [deepwikiGroup, context7Group] = await Promise.all([
       loadDeepwikiTools(),
       loadContext7Tools(),
-      loadPlaywrightTools(),
     ]);
 
     // Extract skill triggers from agent config (needed by both subagent tools and runTask)
@@ -2247,15 +2246,6 @@ export async function processTask(
       return src === "custom:sandbox" && t.name !== "sandbox-destroy";
     });
 
-    // Playwright browser tools (@playwright/mcp) ride on sandbox selection —
-    // they were previously only in the sandbox subagent palette. An agent that
-    // selects any sandbox tool gets the browser tools on the parent too. They
-    // bypass the tools.custom gate (not custom-sourced), so only add them when
-    // sandbox is actually selected.
-    const sandboxSelected = (toolsConfigEarly?.custom ?? []).some((s) => s.startsWith("sandbox-"));
-    const playwrightHoistedTools =
-      sandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
-
     const emitDelegationProgress = (label: string): void => {
       if (!progressUrl) return;
       if (typeof progressUrl !== "string") {
@@ -2432,19 +2422,15 @@ export async function processTask(
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
           calleeDirectPickSuffixes,
         );
-        const calleeSandboxSelected = (calleeToolsConfig?.custom ?? []).some((s) => s.startsWith("sandbox-"));
         const calleeParentHoistedTools = calleeCustom.tools.filter((t) => {
           const src = (t as { source?: string }).source ?? "";
           return src === "custom:sandbox" && t.name !== "sandbox-destroy";
         });
-        const calleePlaywrightTools =
-          calleeSandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
         let calleePalette = [
           ...calleeSubagents.subagentTools,
           ...calleeSubagents.directTools,
           ...calleeSubagents.remainingCustomTools,
           ...calleeParentHoistedTools,
-          ...calleePlaywrightTools,
           ...calleeKbTools,
         ];
         calleePalette = applyAgentToolFilter(calleePalette, calleeToolsConfig, {
@@ -2489,9 +2475,13 @@ export async function processTask(
 
     // Per-agent, per-run delegation budget. Read from the parent agent's
     // free-form config bag (set in the Behaviour screen) and clamped to a safe
-    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset.
+    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset
+    // (the higher MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR for orchestrator-tier runs).
     const maxDelegationsPerRun = clampMaxDelegationsPerRun(
       agentConfig?.["maxDelegationsPerRun"],
+      delegationMode === "orchestrator"
+        ? A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR
+        : undefined,
     );
     if (agentConfig?.["maxDelegationsPerRun"] !== undefined) {
       log(
@@ -2552,20 +2542,18 @@ export async function processTask(
       ...directTools,
       ...remainingCustomTools,
       ...parentHoistedTools,
-      ...playwrightHoistedTools,
       ...kbHoistedTools,
       ...callableAgentTools,
     ].map((tool) => tool.name));
 
     let allTools = [
       ...subagentTools, // spaces, bitbucket, grafana, deepwiki, context7
-      ...fastMetaTools, // search-tools/load-tools in fast mode only
+      ...fastMetaTools, // list-tools/load-tools in fast mode only
       ...fastCatalogCandidateItems.map((item) => item.tool), // narrowed after all standard filters, dormant until load-tools activates them
       ...callableAgentTools, // A2A governed full-agent delegation tools
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
       ...parentHoistedTools, // sandbox tools mounted directly on the parent
-      ...playwrightHoistedTools, // browser tools, for sandbox-selected agents
       ...kbHoistedTools, // kb-* tools when the agent has ≥1 AgentCollection grant
     ];
 
@@ -3105,7 +3093,7 @@ export async function processTask(
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
     // (empty) meta-tools exactly as it did before, rather than silently losing
-    // search-tools/load-tools.
+    // list-tools/load-tools.
     const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
     if (catalogActive) {
       const registeredToolNames = new Set(allTools.map((tool) => tool.name));
@@ -3125,7 +3113,7 @@ export async function processTask(
           return finalFastCatalogNameSet.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name);
         }),
       ]);
-      fastMetaTools = allTools.filter((tool) => tool.name === "search-tools" || tool.name === "load-tools");
+      fastMetaTools = allTools.filter((tool) => tool.name === "list-tools" || tool.name === "load-tools");
     }
 
     const fastModeLoadedToolBudget = catalogActive

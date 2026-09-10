@@ -5,7 +5,7 @@
  * render the agent's answer into the thread as a card (a code block, a diff, a
  * chart). The agent only needs them once it already knows what it wants to say,
  * so their schemas are dead weight in the prompt for the whole exploratory part
- * of a run — and in fast mode they are exactly what `search-tools`/`load-tools`
+ * of a run — and in fast mode they are exactly what `list-tools`/`load-tools`
  * is for.
  *
  * Listing a tool's `source` here makes it a fast-mode catalog candidate rather

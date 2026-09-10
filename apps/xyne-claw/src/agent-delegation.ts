@@ -184,6 +184,7 @@ export interface DelegationGovernorOptions {
 export const A2A_DEFAULTS = {
   MAX_DEPTH: 1,
   MAX_DELEGATIONS_PER_RUN: 3,
+  MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR: 20,
   CONCURRENCY: 1, // fixed: agents are heavy; one loop at a time.
 } as const;
 
@@ -206,7 +207,10 @@ export const MAX_DELEGATIONS_PER_RUN_BOUNDS = {
  * valid delegation budget. Non-integers, out-of-range, and missing values fall
  * back to the default; in-range values are clamped to [MIN, MAX].
  */
-export function clampMaxDelegationsPerRun(value: unknown): number {
+export function clampMaxDelegationsPerRun(
+  value: unknown,
+  fallback: number = MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT,
+): number {
   const n =
     typeof value === "number"
       ? value
@@ -214,7 +218,7 @@ export function clampMaxDelegationsPerRun(value: unknown): number {
         ? Number(value)
         : NaN;
   if (!Number.isFinite(n) || !Number.isInteger(n)) {
-    return MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT;
+    return fallback;
   }
   return Math.min(
     MAX_DELEGATIONS_PER_RUN_BOUNDS.MAX,
@@ -477,7 +481,7 @@ export function buildOrchestratorCallableAgentTool(
   return [{
     name: "call-agent",
     label: "Call Agent",
-    description: "Delegate a self-contained task to another agent — ONE at a time, never batch; prefer using list_agents first to choose.",
+    description: "Delegate a self-contained task to another agent — ONE at a time, never batch.",
     progressLabels: ["Delegating to agent…"],
     parameters: {
       type: "object",

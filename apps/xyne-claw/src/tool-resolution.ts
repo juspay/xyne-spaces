@@ -17,7 +17,7 @@
  *
  * Diagnostics are first-class: a server that failed to list stays in
  * `servers[]` with its error, and report() renders one line per server so a
- * run's log (and search-tools misses) can say "github failed to load: X"
+ * run's log (and list-tools output) can say "github failed to load: X"
  * instead of handing the model an absence it will confabulate a cause for.
  */
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -61,7 +61,7 @@ export interface ToolResolution {
   /** One line per server: counts, verdicts, and load errors. */
   report(): string;
   /** Human hints for servers that contributed nothing — failed or fully denied.
-   *  Surfaced on search-tools misses so agents report facts, not theories. */
+   *  Surfaced when a catalog server is absent so agents report facts, not theories. */
   missingServerHints(): string[];
 }
 
@@ -216,7 +216,7 @@ export interface FastPresentation {
   /** Always-active: allowed write tools (a human approves writes elsewhere in
    *  the flow — burying them behind load-tools would only add latency). */
   directTools: ResolvedTool[];
-  /** Lazy catalog: allowed read tools, loadable via search-tools/load-tools. */
+  /** Lazy catalog: allowed read tools, loadable via list-tools/load-tools. */
   catalogTools: ResolvedTool[];
 }
 
