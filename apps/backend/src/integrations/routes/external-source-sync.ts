@@ -26,6 +26,30 @@ import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 
 const router = Router();
 
+async function assertChannelParticipant(channelId: string, userId: string): Promise<void> {
+  const channel = await db.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true },
+  });
+  if (!channel) {
+    const err = new Error('Channel not found') as Error & { status?: number };
+    err.status = 404;
+    throw err;
+  }
+
+  const participant = await db.channelParticipant.findFirst({
+    where: { channelId, userId },
+    select: { id: true },
+  });
+  if (participant) return;
+
+  const err = new Error('Forbidden: only channel participants can fetch from this desk') as Error & {
+    status?: number;
+  };
+  err.status = 403;
+  throw err;
+}
+
 router.use(
   express.json({
     limit: '5mb',
@@ -153,6 +177,7 @@ router.get(
       if (!isDeskChannelType(channel.type)) {
         return res.status(400).json({ success: false, error: 'Channel is not a desk channel' });
       }
+      await assertChannelParticipant(channelId, userId);
 
       const repo = new ExternalSourceRepository();
       // Email first, then apps oldest-first; both active-only.
@@ -194,11 +219,15 @@ router.get(
 
       return res.status(200).json({ sources: [...emailRows, ...appRows] });
     } catch (error) {
-      logger.error('List channel sources failed', {
-        channelId,
-        error: error instanceof Error ? error.message : String(error),
+      const status = (error as { status?: number } | undefined)?.status ?? 500;
+      const message = error instanceof Error ? error.message : String(error);
+      if (status === 500) {
+        logger.error('List channel sources failed', { channelId, error: message });
+      }
+      return res.status(status).json({
+        success: false,
+        error: status === 500 ? 'Internal server error' : message,
       });
-      return res.status(500).json({ success: false, error: 'Internal server error' });
     }
   },
 );
@@ -239,10 +268,23 @@ router.post(
         return res.status(400).json({ success: false, error: 'sourceId must be a string' });
       }
 
-      // Identical in-flight refetches share a Bull jobId (sha1 of the window)
-      // so Bull drops the duplicate add.
-      const refetchJobIdFor = (sourceId: string) =>
-        `refetch-${sourceId}-${crypto.createHash('sha1').update(`${startDate}|${endDate}`).digest('hex')}`;
+      const requesterUserId = req.user?.id;
+      if (!requesterUserId) {
+        return res.status(401).json({ success: false, error: 'Unauthenticated' });
+      }
+      await assertChannelParticipant(channelId, requesterUserId);
+
+      // Identical in-flight refetches share a Bull jobId so Bull drops the
+      // duplicate add. The hash is scoped per desk: DL desks share one
+      // workspace-level mailbox source row, so sourceId+window alone would
+      // collide across desks. jobData.targetChannelId carries the requesting
+      // desk for the DL fallback (equal to channelId there) and jobData.dlEmail
+      // further separates DL desks bound to different lists.
+      const refetchJobIdFor = (sourceId: string, jobData: FetchTarget['jobData']) =>
+        `refetch-${sourceId}-${crypto
+          .createHash('sha1')
+          .update(`${jobData.targetChannelId ?? channelId}|${jobData.dlEmail ?? ''}|${startDate}|${endDate}`)
+          .digest('hex')}`;
 
       // Target resolution: either the explicitly requested source, or the
       // mailbox (with DL fallback) plus every active app binding on the desk.
@@ -320,32 +362,49 @@ router.post(
         return res.status(404).json({ success: false, error: 'No active external source for this channel' });
       }
 
-      for (const { source } of targets) {
-        const adapter = adapterRegistry.getAdapter(source.sourceType);
-        if (!adapter.refetch) {
-          return res.status(400).json({ success: false, error: `Fetch not supported for ${source.sourceType}` });
+      // One unsupported target must not abort the whole fetch: skip it and
+      // report it. getAdapter throws for unknown sourceTypes — treated as
+      // unsupported rather than a 500.
+      const skippedUnsupported: Array<{ sourceId: string; sourceType: string; reason: string }> = [];
+      const actionable = targets.filter(({ source }) => {
+        let supported = false;
+        try {
+          supported = !!adapterRegistry.getAdapter(source.sourceType).refetch;
+        } catch {
+          supported = false;
         }
-      }
-
-      const requesterUserId = req.user?.id;
-      if (!requesterUserId) {
-        return res.status(401).json({ success: false, error: 'Unauthenticated' });
+        if (!supported) {
+          skippedUnsupported.push({
+            sourceId: source.id,
+            sourceType: source.sourceType,
+            reason: `Fetch not supported for ${source.sourceType}`,
+          });
+        }
+        return supported;
+      });
+      if (actionable.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'No fetchable sources for this channel: ' +
+            skippedUnsupported.map(s => `${s.sourceId} (${s.reason})`).join('; '),
+        });
       }
 
       if (!appConfig.enableEmailFetchWorker) {
         // The app export is paginated over up to 500 sequential requests —
         // far beyond one HTTP response's lifetime, so it requires the worker.
-        const mailboxTarget = targets.find(t => t.source.sourceType !== 'app-desk');
+        const mailboxTarget = actionable.find(t => t.source.sourceType !== 'app-desk');
         if (!mailboxTarget) {
           return res.status(409).json({
             success: false,
             error: 'App desk history fetch requires ENABLE_EMAIL_FETCH_WORKER=true',
           });
         }
-        if (mailboxTarget !== targets[0] || targets.length > 1) {
+        if (mailboxTarget !== actionable[0] || actionable.length > 1) {
           logger.info('Worker disabled — skipping app targets, fetching mailbox inline', {
             channelId,
-            skippedSources: targets.filter(t => t !== mailboxTarget).map(t => t.source.id),
+            skippedSources: actionable.filter(t => t !== mailboxTarget).map(t => t.source.id),
           });
         }
         const adapter = adapterRegistry.getAdapter(mailboxTarget.source.sourceType);
@@ -354,7 +413,11 @@ router.post(
           endDate,
           ...mailboxTarget.jobData,
         });
-        return res.json({ success: true, ...result });
+        return res.json({
+          success: true,
+          ...result,
+          ...(skippedUnsupported.length > 0 && { skippedUnsupported }),
+        });
       }
 
       if (!emailFetchQueue.isReady) {
@@ -365,7 +428,7 @@ router.post(
       // real urgency win. removeOnComplete/removeOnFail keep the stable jobId
       // dead-letter key from wedging that source+range permanently.
       const jobs: Array<{ sourceId: string; installedAppId: string | null; jobId: string }> = [];
-      for (const { source, installedAppId, jobData } of targets) {
+      for (const { source, installedAppId, jobData } of actionable) {
         const job = await emailFetchQueue.getQueue().add(
           'refetch',
           {
@@ -377,7 +440,7 @@ router.post(
             endDate,
             ...jobData,
           },
-          { jobId: refetchJobIdFor(source.id), removeOnComplete: true, removeOnFail: true },
+          { jobId: refetchJobIdFor(source.id, jobData), removeOnComplete: true, removeOnFail: true },
         );
         logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });
         jobs.push({ sourceId: source.id, installedAppId, jobId: String(job.id) });
@@ -386,18 +449,21 @@ router.post(
         success: true,
         queued: true,
         jobs,
+        ...(skippedUnsupported.length > 0 && { skippedUnsupported }),
       });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
+      const thrownStatus = (error as { status?: number } | undefined)?.status;
       const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);
-      const status = needsReauth ? 403 : 500;
-      logger.error('Fetch failed', { error: raw });
+      const status = thrownStatus ?? (needsReauth ? 403 : 500);
+      logger.error('Fetch failed', { error: raw, status });
       return res.status(status).json({
         success: false,
-        error: needsReauth
-          ? 'Account requires re-authorization. Please reconnect the source.'
-          : raw,
-        ...(needsReauth && { needsReauth: true }),
+        error:
+          needsReauth && !thrownStatus
+            ? 'Account requires re-authorization. Please reconnect the source.'
+            : raw,
+        ...(needsReauth && !thrownStatus && { needsReauth: true }),
       });
     }
   },
