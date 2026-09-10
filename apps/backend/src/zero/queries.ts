@@ -4186,12 +4186,47 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getAllTicketTags: defineQuery(() => {
     return zql.ticket_tags;
   }),
+  // Query for project tags by project ID (paginated with bidirectional cursor)
   projectTagsByProjectId: defineQuery(
-    z.object({ projectId: z.string() }),
-    ({ args: { projectId } }) => {
-      return zql.project_tags
+    z.object({
+      projectId: z.string(),
+      limit: z.number().optional(),
+      start: z.object({ name: z.string(), id: z.string() }).nullish(),
+      direction: z.enum(['forward', 'backward']).optional(),
+    }),
+    ({ args: { projectId, limit = 100, start, direction = 'forward' } }) => {
+      const isBackward = direction === 'backward';
+      let q = zql.project_tags
         .where('projectId', projectId)
-        .orderBy('name', 'asc');
+        .orderBy('name', isBackward ? 'desc' : 'asc')
+        .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (start) {
+        q = q.start({ name: start.name, id: start.id }, { inclusive: false });
+      }
+      return q.limit(limit);
+    },
+  ),
+  // Query for project tags by multiple project IDs (paginated with bidirectional cursor)
+  projectTagsByProjectIds: defineQuery(
+    z.object({
+      projectIds: z.array(z.string()),
+      limit: z.number().optional(),
+      start: z.object({ name: z.string(), id: z.string() }).nullish(),
+      direction: z.enum(['forward', 'backward']).optional(),
+    }),
+    ({ args: { projectIds, limit = 100, start, direction = 'forward' } }) => {
+      if (projectIds.length === 0) {
+        return zql.project_tags.where('id', 'nonexistent').limit(0);
+      }
+      const isBackward = direction === 'backward';
+      let q = zql.project_tags
+        .where('projectId', 'IN', projectIds)
+        .orderBy('name', isBackward ? 'desc' : 'asc')
+        .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (start) {
+        q = q.start({ name: start.name, id: start.id }, { inclusive: false });
+      }
+      return q.limit(limit);
     },
   ),
 

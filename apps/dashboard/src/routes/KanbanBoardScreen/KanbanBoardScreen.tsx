@@ -1939,7 +1939,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [workspaceSelectedBoards] = useCachedQuery(
     queries.boardsByIds({ boardIds: filters.boards ?? [] }),
     {
-      enabled: isWorkspaceView && isSourceChannelsOpen && (filters.boards?.length ?? 0) > 0,
+      // Enable when dropdown is open (for source channels or filters/tags)
+      enabled:
+        isWorkspaceView &&
+        (isSourceChannelsOpen || isFiltersDropdownOpen) &&
+        (filters.boards?.length ?? 0) > 0,
     },
   );
   const sourceChannelProjectIds = useMemo(() => {
@@ -1991,11 +1995,99 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
+  // Determine if we're in single-project or multi-project mode for tags
+  const isMultiProjectView = !effectiveProjectId && sourceChannelProjectIds.length > 0;
   const tagsProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
-  const [projectTags, projectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: tagsProjectId || '' }),
-    { enabled: !!tagsProjectId },
+
+  // State for cursor-based tag pagination
+  const [tagsCursor, setTagsCursor] = useState<{ name: string; id: string } | null>(null);
+  const [allLoadedTags, setAllLoadedTags] = useState<Array<{ name: string; id: string }>>([]);
+  const [hasMoreTags, setHasMoreTags] = useState(true);
+  const tagsLimitPerPage = 20;
+
+  // Fetch project tags for single project view (paginated with cursor)
+  const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectId({
+      projectId: tagsProjectId || '',
+      limit: tagsLimitPerPage,
+      start: tagsCursor,
+      direction: 'forward',
+    }),
+    { enabled: !!tagsProjectId && !isMultiProjectView, cursorEnabled: true },
   );
+
+  // Fetch project tags for multi-project views (paginated with cursor)
+  const [multiProjectTags, projectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectIds({
+      projectIds: sourceChannelProjectIds,
+      limit: tagsLimitPerPage,
+      start: tagsCursor,
+      direction: 'forward',
+    }),
+    { enabled: isMultiProjectView, cursorEnabled: true },
+  );
+
+  // Combine tags from either query
+  const currentPageTags = isMultiProjectView ? multiProjectTags : singleProjectTags;
+  const currentPageDetails = isMultiProjectView ? projectTagsDetails : singleProjectTagsDetails;
+
+  // Track processed cursor to avoid re-processing same page
+  const lastProcessedCursorRef = useRef<string>('initial');
+  const isLoadingMoreRef = useRef(false);
+
+  // Accumulate tags as pages load
+  useEffect(() => {
+    if (currentPageDetails?.type === 'complete' && currentPageTags) {
+      const newTags = currentPageTags as Array<{ name: string; id: string }>;
+      const cursorKey = tagsCursor ? `${tagsCursor.id}` : 'initial';
+
+      // For first page (cursor null), always process
+      if (tagsCursor === null) {
+        // Only update if tags actually changed
+        const newTagIds = newTags.map(t => t.id).join(',');
+        const existingTagIds = allLoadedTags.map(t => t.id).join(',');
+        if (newTagIds !== existingTagIds) {
+          setAllLoadedTags(newTags);
+        }
+        setHasMoreTags(newTags.length >= tagsLimitPerPage);
+        lastProcessedCursorRef.current = 'initial';
+        isLoadingMoreRef.current = false;
+      } else if (isLoadingMoreRef.current && lastProcessedCursorRef.current !== cursorKey) {
+        // Subsequent page - only process if we're actively loading more and cursor changed
+        setAllLoadedTags(prev => {
+          const existingIds = new Set(prev.map(t => t.id));
+          const uniqueNew = newTags.filter(t => !existingIds.has(t.id));
+          if (uniqueNew.length === 0) {
+            return prev;
+          }
+          return [...prev, ...uniqueNew];
+        });
+        setHasMoreTags(newTags.length >= tagsLimitPerPage);
+        lastProcessedCursorRef.current = cursorKey;
+        isLoadingMoreRef.current = false;
+      }
+    }
+  }, [currentPageTags, currentPageDetails, tagsCursor, tagsLimitPerPage, allLoadedTags]);
+
+  // Reset tags when project changes
+  const tagsProjectKey = tagsProjectId || sourceChannelProjectIds.join(',');
+  useEffect(() => {
+    setTagsCursor(null);
+    setAllLoadedTags([]);
+    setHasMoreTags(true);
+    lastProcessedCursorRef.current = 'initial';
+    isLoadingMoreRef.current = false;
+  }, [tagsProjectKey]);
+
+  // Load more tags callback
+  const handleLoadMoreTags = useCallback(() => {
+    if (!hasMoreTags || allLoadedTags.length === 0 || isLoadingMoreRef.current) return;
+    const lastTag = allLoadedTags[allLoadedTags.length - 1];
+    if (lastTag) {
+      isLoadingMoreRef.current = true;
+      setTagsCursor({ name: lastTag.name, id: lastTag.id });
+    }
+  }, [hasMoreTags, allLoadedTags]);
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
   // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
@@ -3209,11 +3301,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
+  // Compute availableTags directly from query results to avoid state timing issues
+  // For initial load, use query results directly; for pagination, use accumulated state
   const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return undefined;
-    const uniqueTags = new Set(projectTags.map(tag => tag.name));
+    // Use allLoadedTags if it has data (from pagination accumulation)
+    // Otherwise fall back to currentPageTags for immediate display
+    const tagsSource =
+      allLoadedTags.length > 0
+        ? allLoadedTags
+        : (currentPageTags as Array<{ name: string; id: string }> | undefined);
+
+    if (!tagsSource || tagsSource.length === 0) {
+      return undefined;
+    }
+    const uniqueTags = new Set(tagsSource.map(tag => tag.name));
     return Array.from(uniqueTags).sort();
-  }, [projectTags]);
+  }, [allLoadedTags, currentPageTags]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -3812,6 +3915,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               sourceChannelProjectIds={sourceChannelProjectIds}
               showBoardsFilter={!!channelId || isMyTicketsView}
               availableTags={availableTags}
+              onLoadMoreTags={handleLoadMoreTags}
+              hasMoreTags={hasMoreTags}
               availableStages={availableStages}
               hasPrReviewers={hasPrReviewers}
               hasQaAssigned={hasQaAssigned}

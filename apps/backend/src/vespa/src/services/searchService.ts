@@ -703,4 +703,86 @@ export class SearchService {
       throw error;
     }
   };
+
+  /**
+   * Search for distinct ticket tags from Vespa.
+   * Uses grouping to aggregate unique tag values from ticket documents.
+   *
+   * @param workspaceId - Workspace ID for isolation
+   * @param options - Search options (projectId, boardIds, query prefix, limit)
+   * @returns Array of distinct tag strings sorted alphabetically
+   */
+  async searchTicketTags(
+    workspaceId: string,
+    options: {
+      projectId?: string;
+      boardIds?: string[];
+      query?: string;
+      limit?: number;
+    } = {},
+  ): Promise<{ tags: string[]; total: number }> {
+    const { projectId, boardIds, query, limit = 100 } = options;
+
+    // Build WHERE conditions
+    const conditions: string[] = [
+      `docType contains "ticket"`,
+      `workspaceId contains "${workspaceId}"`,
+    ];
+
+    if (projectId) {
+      conditions.push(`projectId contains "${projectId}"`);
+    }
+
+    if (boardIds && boardIds.length > 0) {
+      const boardConditions = boardIds.map(id => `boardId contains "${id}"`).join(' or ');
+      conditions.push(`(${boardConditions})`);
+    }
+
+    // If query is provided, filter tags that match the prefix using regexp
+    // This is done post-grouping since Vespa doesn't support prefix filtering on array elements in WHERE
+    const queryPrefix = query?.trim().toLowerCase();
+
+    // YQL with grouping on each element of the tags array
+    // This returns each unique tag value with its count
+    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(each(tags)) max(${limit}) order(-count()) each(output(count())))`;
+
+    try {
+      const response = await this.vespa.search<VespaSearchResponse>({
+        yql,
+        hits: 0, // We only want grouping results, not individual docs
+        timeout: '10s',
+      } as any);
+
+      // Parse grouped results
+      const tags: string[] = [];
+      const root = (response?.root ?? {}) as any;
+      const children = (root?.children ?? []) as Array<any>;
+
+      // Navigate the grouping structure: grouplist -> group -> value
+      for (const child of children) {
+        if (child.id?.startsWith('grouplist:')) {
+          const groups = child.children ?? [];
+          for (const group of groups) {
+            if (group.id?.startsWith('group:')) {
+              const tagValue = group.value;
+              if (typeof tagValue === 'string' && tagValue.trim()) {
+                // Apply prefix filter if query provided
+                if (!queryPrefix || tagValue.toLowerCase().startsWith(queryPrefix)) {
+                  tags.push(tagValue);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Sort alphabetically
+      tags.sort((a, b) => a.localeCompare(b));
+
+      return { tags, total: tags.length };
+    } catch (error) {
+      this.logger.error(`Error searching ticket tags: ${getErrorMessage(error)}`);
+      return { tags: [], total: 0 };
+    }
+  }
 }

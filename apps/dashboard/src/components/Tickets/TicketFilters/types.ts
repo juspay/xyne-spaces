@@ -53,6 +53,10 @@ export interface TicketFiltersProps {
   sourceChannelProjectIds?: string[] | undefined;
   showBoardsFilter?: boolean;
   availableTags?: string[] | undefined;
+  /** Callback to load more tags (for pagination) */
+  onLoadMoreTags?: () => void;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
   hideAssigneeFilter?: boolean;
   hasPrReviewers?: boolean;
