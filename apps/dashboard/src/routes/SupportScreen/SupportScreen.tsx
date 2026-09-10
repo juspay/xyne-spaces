@@ -4156,7 +4156,7 @@ type SupportTicketDetailProps = {
   showAdjacentNav?: boolean;
 };
 
-type TicketReplyKind = 'app' | 'channel';
+type TicketReplyKind = 'app' | 'slack' | 'channel';
 
 /**
  * Reply routing is per-ticket, not per-channel: an app-sourced ticket can live in ANY
@@ -4164,9 +4164,13 @@ type TicketReplyKind = 'app' | 'channel';
  * longer pick the thread/composer. 'channel' = the channel-type chain, unchanged.
  */
 const getTicketReplyKind = (ticketMetadata: unknown): TicketReplyKind => {
-  const deskSource = (ticketMetadata as { deskSource?: { type?: string } } | null | undefined)
-    ?.deskSource;
-  return deskSource?.type === 'app' ? 'app' : 'channel';
+  const metadata = ticketMetadata as
+    | { deskSource?: { type?: string }; source?: string }
+    | null
+    | undefined;
+  if (metadata?.deskSource?.type === 'app') return 'app';
+  if (metadata?.source === 'slack') return 'slack';
+  return 'channel';
 };
 
 export const SupportTicketDetail = ({
@@ -4258,6 +4262,8 @@ export const SupportTicketDetail = ({
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
+  // Without this a Slack ticket on an EMAIL desk falls through to EmailComposer below.
+  const isSlackSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'slack';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
@@ -5413,6 +5419,7 @@ export const SupportTicketDetail = ({
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
+                  isSlackSourcedTicket ||
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
@@ -5455,7 +5462,7 @@ export const SupportTicketDetail = ({
                     recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              ) : !isSlackSourcedTicket && channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
@@ -5467,15 +5474,20 @@ export const SupportTicketDetail = ({
                     trackingCategory='social-media-composer'
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              ) : isSlackSourcedTicket ||
+                channel?.type === ChannelType.SLACK ||
+                channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
+                    variant={
+                      !isSlackSourcedTicket && channel?.type === ChannelType.APP ? 'app' : 'slack'
+                    }
                     recordOnly={
-                      channel.type === ChannelType.APP &&
+                      !isSlackSourcedTicket &&
+                      channel?.type === ChannelType.APP &&
                       channelPreference?.appWebhookDeliveryEnabled === false
                     }
                   />
