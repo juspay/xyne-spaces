@@ -3336,6 +3336,30 @@ model SdlcArtifact {
 // SDLC track: a named workstream inside a hub. Which hub is the CHANNEL -> TRACK edge in
 // sdlc_entity_links; the track row itself carries no scope. Groups canvases and tickets
 // through TRACK -> * TRACK_ITEM edges in the same table.
+/// A user-made folder for grouping artifacts inside a track.
+///
+/// Carries a name and nothing else. Where a folder sits — at a track's root or
+/// inside another folder — is an edge in sdlc_entity_links, and that edge holds
+/// the hub, so no scope column belongs here: the same arrangement as SdlcTrack,
+/// which is placed by its CHANNEL -> TRACK edge. Keeping placement in one place
+/// also keeps nesting and the set of things a folder can hold open, rather than
+/// fixing either in columns.
+///
+/// Distinct from CanvasFolder, which classifies artifacts by type (PRDs, Tech
+/// Docs) and is not user-made.
+model SdlcFolder {
+  workspaceId String
+  id          String   @id @default(cuid())
+  name        String
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@map("sdlc_folders")
+  @@schema("public")
+}
+
 model SdlcTrack {
   workspaceId String
   id          String   @id @default(cuid())

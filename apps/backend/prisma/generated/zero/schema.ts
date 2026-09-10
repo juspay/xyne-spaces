@@ -2033,6 +2033,17 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
   })
   .primaryKey("artifactId");
 
+export const sdlcFolderTable = table("sdlc_folders")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
     workspaceId: string(),
@@ -2633,6 +2644,18 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
     fieldValue: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const viewAccessTable = table("view_access")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -4852,12 +4875,25 @@ export const savedUserConfigurationTableRelationships = relationships(savedUserC
     sourceField: ["id"],
     destField: ["configId"],
     destSchema: savedUserConfigurationValueTable,
+  }),
+  viewAccess: many({
+    sourceField: ["id"],
+    destField: ["viewId"],
+    destSchema: viewAccessTable,
   })
 }));
 
 export const savedUserConfigurationValueTableRelationships = relationships(savedUserConfigurationValueTable, ({ one }) => ({
   config: one({
     sourceField: ["configId"],
+    destField: ["id"],
+    destSchema: savedUserConfigurationTable,
+  })
+}));
+
+export const viewAccessTableRelationships = relationships(viewAccessTable, ({ one }) => ({
+  view: one({
+    sourceField: ["viewId"],
     destField: ["id"],
     destSchema: savedUserConfigurationTable,
   })
@@ -5162,6 +5198,7 @@ export const schema = createSchema(
       repoTable,
       sdlcEntityLinkTable,
       sdlcArtifactTable,
+      sdlcFolderTable,
       sdlcTrackTable,
       lookupValueTable,
       formTable,
@@ -5203,6 +5240,7 @@ export const schema = createSchema(
       appCommandTable,
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
+      viewAccessTable,
       delayedMessageTable,
       dataSourceTable,
       dataSourceTableTable,
@@ -5326,6 +5364,7 @@ export const schema = createSchema(
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
+      viewAccessTableRelationships,
       dataSourceTableRelationships,
       dataSourceTableTableRelationships,
       dataSourceColumnTableRelationships,
@@ -5466,6 +5505,7 @@ export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
@@ -5507,6 +5547,7 @@ export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>
 export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type DataSource = Row<typeof schema.tables.data_sources>;
 export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;

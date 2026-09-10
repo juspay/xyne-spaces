@@ -133,6 +133,18 @@ interface ThreadMessagesProps {
   /** Forces the initial active tab, overriding the ?selectedTab URL param. Used by modal hosts to avoid inheriting the outer page's tab state. */
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
+  /**
+   * Render the tabbed layout for a thread that has no ticket. The tab list
+   * already drops Details and RCA without one, leaving Messages and Files —
+   * worth having rather than falling back to a bare message list.
+   */
+  tabbedView?: boolean;
+  /**
+   * Keep only the overflow menu in the header actions. For hosts whose own bar
+   * already offers Ask AI, calls and recording, or where the thread is a side
+   * panel too narrow to carry all four.
+   */
+  overflowActionsOnly?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -157,6 +169,8 @@ export const ThreadMessages = ({
   onUserClick,
   defaultTab,
   headerActionsContainer,
+  overflowActionsOnly = false,
+  tabbedView = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -1161,7 +1175,7 @@ export const ThreadMessages = ({
   const simpleViewHeaderActions = (
     <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
       {/* Ask AI */}
-      {!isStandaloneWindow() && (
+      {!overflowActionsOnly && !isStandaloneWindow() && (
         <Tooltip content='Ask AI Conversation'>
           <Button
             size='sm'
@@ -1187,7 +1201,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Initiate Call Button */}
-      {derivedConversationId && !channel?.isArchived && (
+      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
         <ThreadCallButton
           onStartCall={handleInitiateCall}
           onScheduleCall={() => setIsScheduleCallModalOpen(true)}
@@ -1202,7 +1216,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Start Recording (Take Notes) Button */}
-      {derivedConversationId && !channel?.isArchived && (
+      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
         <ThreadRecordingButton
           onStartRecording={handleStartRecordingFromThread}
           hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
@@ -1560,8 +1574,9 @@ export const ThreadMessages = ({
             </div>
           </div>
         )}
-        {/* Ticket Thread with Tabs - only when NOT simpleView */}
-        {!simpleView && derivedTicketId ? (
+        {/* Tabbed thread. A ticket brings Details and RCA with it; without one
+            the same layout still carries Messages and Files. */}
+        {!simpleView && (derivedTicketId || tabbedView) ? (
           /* Ticket Thread: Header with Tabs */
           <Tabs.Root
             value={activeTab}
@@ -1571,8 +1586,11 @@ export const ThreadMessages = ({
             {headerActionsContainer
               ? createPortal(simpleViewHeaderActions, headerActionsContainer)
               : null}
-            {/* Header with title, close button, and tabs */}
-            <div className='w-full pl-2 pr-3 py-3'>
+            {/* Header with title, close button, and tabs. When the host draws its
+                own bar above this one, the generous padding reads as a gap
+                between the tabs and the first message rather than as breathing
+                room, so it tightens. */}
+            <div className={cn('w-full pl-2 pr-3', hideHeader ? 'pb-1 pt-1.5' : 'py-3')}>
               <div className='relative flex justify-between w-full'>
                 {/* Tabs List */}
                 <div className='overflow-x-auto no-scrollbar'>
@@ -1693,12 +1711,14 @@ export const ThreadMessages = ({
             </Tabs.Content>
 
             {/* Details Tab Content */}
-            <Tabs.Content
-              value='details'
-              className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
-            >
-              <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
-            </Tabs.Content>
+            {derivedTicketId && (
+              <Tabs.Content
+                value='details'
+                className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
+              >
+                <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
+              </Tabs.Content>
+            )}
 
             {/* RCA Tab Content */}
             {isFixTicket && (

@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import type { EntityLinkOwner } from '@xyne/shared';
+import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { isCanvasInChannel, isTrackInChannel } from './sdlcChannelMembership';
 
@@ -31,14 +31,40 @@ export async function ensureLink(
   return { created: result.count > 0 };
 }
 
+/**
+ * The track a folder sits in. Read off the flat edge rather than walked up the
+ * containment chain: every folder gets one when it is created, so this is a
+ * single lookup at any depth.
+ */
+export async function resolveFolderTrackId(
+  db: Db,
+  folderId: string
+): Promise<string | null> {
+  const edge = await db.sdlcEntityLink.findFirst({
+    where: {
+      sourceType: 'TRACK',
+      targetType: 'FOLDER',
+      targetId: folderId,
+      relationType: SDLC_TRACK_FLAT_RELATION,
+    },
+    select: { sourceId: true },
+  });
+  return edge?.sourceId ?? null;
+}
+
 export async function validateOwnerInChannel(
   db: Db,
   owner: EntityLinkOwner,
   channelId: string
 ): Promise<boolean> {
-  return owner.sourceType === 'TRACK'
-    ? isTrackInChannel(db, owner.sourceId, channelId)
-    : isCanvasInChannel(db, owner.sourceId, channelId);
+  if (owner.sourceType === 'TRACK') {
+    return isTrackInChannel(db, owner.sourceId, channelId);
+  }
+  if (owner.sourceType === 'FOLDER') {
+    const trackId = await resolveFolderTrackId(db, owner.sourceId);
+    return trackId ? isTrackInChannel(db, trackId, channelId) : false;
+  }
+  return isCanvasInChannel(db, owner.sourceId, channelId);
 }
 
 export async function resolveInheritedOwner(
@@ -53,7 +79,10 @@ export async function resolveInheritedOwner(
     },
     select: { sourceType: true, sourceId: true },
   });
-  return link && (link.sourceType === 'CANVAS' || link.sourceType === 'TRACK')
+  return link &&
+    (link.sourceType === 'CANVAS' ||
+      link.sourceType === 'TRACK' ||
+      link.sourceType === 'FOLDER')
     ? { sourceType: link.sourceType, sourceId: link.sourceId }
     : null;
 }
@@ -120,13 +149,16 @@ export async function linkCreatedEntities(
         },
         actor
       );
+      // The flat edge, not containment: once an artifact is filed into a folder
+      // its containment edge is FOLDER -> CANVAS, and looking for a TRACK source
+      // would find nothing and silently drop the ticket's track.
       const trackEdge = await db.sdlcEntityLink.findFirst({
         where: {
           channelId,
           sourceType: 'TRACK',
           targetType: 'CANVAS',
           targetId: owner.sourceId,
-          relationType: 'TRACK_ITEM',
+          relationType: SDLC_TRACK_FLAT_RELATION,
         },
         select: { sourceId: true },
       });
@@ -145,18 +177,40 @@ export async function linkCreatedEntities(
         );
       }
     } else {
-      await ensureLink(
-        db,
-        {
-          channelId,
-          sourceType: 'TRACK',
-          sourceId: owner.sourceId,
-          targetType: 'TICKET',
-          targetId: ticketId,
-          relationType: 'TRACK_ITEM',
-        },
-        actor
-      );
+      if (owner.sourceType === 'FOLDER') {
+        await ensureLink(
+          db,
+          {
+            channelId,
+            sourceType: 'FOLDER',
+            sourceId: owner.sourceId,
+            targetType: 'TICKET',
+            targetId: ticketId,
+            relationType: 'TICKET',
+          },
+          actor
+        );
+      }
+      // Tickets are listed per track wherever they were raised, so a folder's
+      // resolve to the track the folder lives in.
+      const trackId =
+        owner.sourceType === 'FOLDER'
+          ? await resolveFolderTrackId(db, owner.sourceId)
+          : owner.sourceId;
+      if (trackId) {
+        await ensureLink(
+          db,
+          {
+            channelId,
+            sourceType: 'TRACK',
+            sourceId: trackId,
+            targetType: 'TICKET',
+            targetId: ticketId,
+            relationType: 'TRACK_ITEM',
+          },
+          actor
+        );
+      }
     }
   }
 }

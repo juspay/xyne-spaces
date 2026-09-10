@@ -117,6 +117,7 @@ export const SDLC_ENTITY_TYPES = [
   "REPOSITORY",
   "WORKFLOW_EXECUTION",
   "TRACK",
+  "FOLDER",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
@@ -135,8 +136,47 @@ export const SDLC_MEMBERSHIP_RELATION = "REPOSITORY";
  */
 export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
 
-/** Structure, not content. Every read of the content graph excludes these. */
+/**
+ * The parent -> child edge: a TRACK or FOLDER on the source side, the thing it
+ * holds on the target. Shares its name with track membership because a root-level
+ * item's containment edge *is* its track membership; nesting only changes which
+ * parent is on the source side.
+ */
+export const SDLC_CONTAINMENT_RELATION = "TRACK_ITEM";
+
+/**
+ * What the folder tree renders. Tickets ride the same relationType from a track
+ * but belong to their own section, so the tree filters rather than assuming
+ * everything a track holds is a tree node.
+ */
+export const SDLC_TREE_TARGET_TYPES = ["FOLDER", "CANVAS"] as const;
+
+/**
+ * A TRACK -> item edge kept alongside the containment edge, so "everything in
+ * this track" is one indexed lookup rather than a walk down the folder tree.
+ * Derived: written and removed with the item it mirrors, never on its own.
+ */
+export const SDLC_TRACK_FLAT_RELATION = "TRACK_ITEM_SECONDARY";
+
+/**
+ * Edges no user may write or delete through the generic link API. Derived or
+ * structural: the app maintains them with the thing they describe.
+ */
 export const SDLC_STRUCTURAL_RELATIONS = [
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
+] as const;
+
+/**
+ * Edges a hub's link graph leaves out: they place things in the hub rather than
+ * relate them, so readers of the graph would double-count them.
+ *
+ * Narrower than SDLC_STRUCTURAL_RELATIONS on purpose. The flat track edge is not
+ * user-writable, but the client does need to read it — excluding it here is what
+ * made a track's artifact count read zero.
+ */
+export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 ] as const;
@@ -164,7 +204,7 @@ export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 export const sdlcDiscussionSchema = z
   .object({
     repoId: z.string().min(1),
-    ownerType: z.enum(["CANVAS", "TRACK"]),
+    ownerType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
     ownerId: z.string().min(1),
     surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
     surfaceId: z.string().min(1).optional(),
@@ -184,13 +224,25 @@ export const sdlcDiscussionSchema = z
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
 export const entityLinkContextSchema = z.object({
-  sourceType: z.enum(["CANVAS", "TRACK"]),
+  sourceType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
   sourceId: z.string().min(1),
   linkId: z.string().min(1),
+  /**
+   * A folder's conversation is filed on its track as well, so the track's list
+   * shows everything discussed anywhere inside it. The flat relation, not a
+   * second DISCUSSION row: DISCUSSION has to stay one per conversation or
+   * resolveInheritedOwner picks between owners arbitrarily.
+   */
+  trackRollUp: z
+    .object({ trackId: z.string().min(1), linkId: z.string().min(1) })
+    .optional(),
 });
 export type EntityLinkContextInput = z.infer<typeof entityLinkContextSchema>;
 
-export const entityLinkOwnerSchema = entityLinkContextSchema.omit({ linkId: true });
+export const entityLinkOwnerSchema = entityLinkContextSchema.omit({
+  linkId: true,
+  trackRollUp: true,
+});
 export type EntityLinkOwner = z.infer<typeof entityLinkOwnerSchema>;
 
 export const SDLC_TRACK_STATUSES = ["ACTIVE", "COMPLETED", "ARCHIVED"] as const;

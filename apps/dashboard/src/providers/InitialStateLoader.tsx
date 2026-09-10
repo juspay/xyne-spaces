@@ -11,6 +11,7 @@ import {
   hydrateQueryCacheFromIndexedDB,
   queryCacheActor,
 } from '../machines/queryCacheMachine';
+import { hydrateUserPreferences } from '../machines/userPreferencesMachine';
 import { UserPermission } from '../machines/stateMachine';
 import { apiInstance } from '../services/clients/apiClient';
 import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
@@ -225,6 +226,9 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
           const hydrationStartTime = Date.now();
           // User is logged in - hydrate their specific database
           await hydrateQueryCacheFromIndexedDB(context.userID, schemaVersion, context.workspaceId);
+
+          // The reader's own preferences ride the same open database.
+          await hydrateUserPreferences();
 
           const hydrationLatency = Date.now() - hydrationStartTime;
 

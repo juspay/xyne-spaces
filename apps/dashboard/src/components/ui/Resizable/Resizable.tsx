@@ -1,5 +1,11 @@
 import { ReactElement } from 'react';
-import { Group, useDefaultLayout, type GroupProps } from 'react-resizable-panels';
+import {
+  Group,
+  useDefaultLayout,
+  type GroupProps,
+  type Layout,
+  type LayoutChangedMeta,
+} from 'react-resizable-panels';
 
 export {
   Panel,
@@ -11,7 +17,7 @@ export {
   type PanelSize,
 } from 'react-resizable-panels';
 
-type ResizableGroupProps = Omit<GroupProps, 'defaultLayout' | 'onLayoutChanged'> & {
+type ResizableGroupProps = Omit<GroupProps, 'defaultLayout'> & {
   /**
    * Persist this group's layout to localStorage under the given id.
    *
@@ -29,6 +35,7 @@ type ResizableGroupProps = Omit<GroupProps, 'defaultLayout' | 'onLayoutChanged'>
 const PersistedGroup = ({
   autoSaveId,
   panelIds,
+  onLayoutChanged: onLayoutChangedProp,
   ...rest
 }: ResizableGroupProps & { autoSaveId: string }): ReactElement => {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -39,7 +46,14 @@ const PersistedGroup = ({
     onlySaveAfterUserInteractions: true,
   });
 
-  return <Group defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged} {...rest} />;
+  // Saving the layout is this wrapper's job, so a caller's own handler runs
+  // alongside it rather than replacing it.
+  const handleLayoutChanged = (layout: Layout, meta: LayoutChangedMeta): void => {
+    onLayoutChanged(layout, meta);
+    onLayoutChangedProp?.(layout, meta);
+  };
+
+  return <Group defaultLayout={defaultLayout} onLayoutChanged={handleLayoutChanged} {...rest} />;
 };
 
 /**

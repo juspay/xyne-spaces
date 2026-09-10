@@ -13,6 +13,7 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    "isolatedModules": true,
     "sourceMap": true,
     "types": ["node", "react", "uuid"]
   },
