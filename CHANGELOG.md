@@ -1,3 +1,10 @@
+## [1.300.2](https://github.com/juspay/xyne-spaces/compare/v1.300.1...v1.300.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* decode FlowJSON in automation trigger message ([#1401](https://github.com/juspay/xyne-spaces/issues/1401)) ([9e65acf](https://github.com/juspay/xyne-spaces/commit/9e65acf67095f4d87172ca584ec45af70a6341b0))
+
 ## [1.300.1](https://github.com/juspay/xyne-spaces/compare/v1.300.0...v1.300.1) (2026-09-10)
 
 
