@@ -731,12 +731,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const toggleGroupExpansion = useCallback(
     (groupKey: string) => {
       setExpandedGroups(prev => {
-        const next = new Set(prev);
-        if (next.has(groupKey)) {
-          next.delete(groupKey);
-        } else {
-          next.add(groupKey);
-        }
+        const next = new Set<string>(prev.has(groupKey) ? [] : [groupKey]);
         try {
           const raw = sessionStorage.getItem(expandedGroupsStorageKey);
           const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
@@ -760,7 +755,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     try {
       const raw = sessionStorage.getItem(expandedGroupsStorageKey);
       const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
-      setExpandedGroups(new Set(map[groupByKey] ?? []));
+      setExpandedGroups(new Set((map[groupByKey] ?? []).slice(0, 1)));
     } catch (err) {
       logger.error(Event.FRONTEND_ERROR, {
         type: 'migrated_console_error',
@@ -3696,6 +3691,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const isTableEmpty = processedGroups.every(group => group.allTickets.length === 0);
   const tableGroups = isTableEmpty ? [] : processedGroups;
 
+  const hasScrolledToExpandedGroup = useRef(false);
+  useEffect(() => {
+    if (hasScrolledToExpandedGroup.current) return;
+    const [expandedGroupKey] = [...expandedGroups];
+    if (!expandedGroupKey || processedGroups.length === 0) return;
+    const el = document.querySelector(`[data-group-key="${CSS.escape(expandedGroupKey)}"]`);
+    if (!el) return;
+    hasScrolledToExpandedGroup.current = true;
+    el.scrollIntoView({ block: 'start' });
+  }, [expandedGroups, processedGroups]);
+
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
@@ -5168,6 +5174,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             return (
               <div
                 key={group.key}
+                data-group-key={group.key}
                 className='flex flex-col rounded-lg border border-border overflow-hidden'
               >
                 {showGroupHeader && (
@@ -5266,7 +5273,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : null;
 
                 return (
-                  <div key={group.key} className={isExpanded || !showGroupHeader ? 'h-full' : ''}>
+                  <div
+                    key={group.key}
+                    data-group-key={group.key}
+                    className={isExpanded || !showGroupHeader ? 'h-full' : ''}
+                  >
                     {showGroupHeader && (
                       <button
                         onClick={() => toggleGroupExpansion(group.key)}
