@@ -24,7 +24,7 @@
  */
 import { logger } from '../../utils/logger';
 import { ExternalEntityType, MessageDirection, MessageType } from '@xyne/shared';
-import { serializeInitialMessageMd, serializeRepliesMd, serializeParentMessageMd, type InitialMessageSummary } from '@xyne/shared';
+import { buildInitialMessageMd, serializeRepliesMd, serializeParentMessageMd, type InitialMessageSummary } from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
 import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
@@ -276,16 +276,16 @@ export async function bulkIngestConversationSlack(input: IngestConversationSlack
         }
         content = await applyCustomEmojis(content);
         parentRef = { messageId: parentMsgId, senderId, content, createdAt };
-        const summary: InitialMessageSummary = {
-          messageId: parentMsgId, conversationId: convId, senderId, content, msgType: MessageType.USER as InitialMessageSummary['msgType'],
-          hasAttachment: parentFiles.length > 0, edited: false, isDeleted: false, showInChannel: false, visibleTo: null,
-          createdAt: createdAt.getTime(), metadata: JSON.stringify({ contentFormat: 'html' }), nudgeCount: 0, isSent: true,
-          reactions_md: null, link_preview_md: null, childConversationId: null,
-        };
+        const initialMessageMd = buildInitialMessageMd({
+          messageId: parentMsgId, conversationId: convId, senderId, content,
+          msgType: MessageType.USER as InitialMessageSummary['msgType'],
+          hasAttachment: parentFiles.length > 0, nudgeCount: 0, isSent: true,
+          createdAt: createdAt.getTime(), metadata: { contentFormat: 'html' },
+        });
         convRows.push({
           conversationId: convId, channelId, workspaceId, createdBy: senderId, initialMessageId: parentMsgId,
           pinned: !!m.isPinned, createdAt, lastActivityAt, replyCount,
-          initial_message_md: serializeInitialMessageMd(summary), replies_md: repliesMd,
+          initial_message_md: initialMessageMd, replies_md: repliesMd,
         }); pending++;
         msgRows.push({
           messageId: parentMsgId, conversationId: convId, senderId, workspaceId, content, msgType: 'USER',
@@ -330,17 +330,18 @@ export async function bulkIngestConversationSlack(input: IngestConversationSlack
             entityId: replyMsgId, messageId: replyMsgId, direction: MessageDirection.INCOMING, entityType: 'MESSAGE',
           }); pending++;
           if (childConvId) {
-            const childSummary: InitialMessageSummary = {
-              messageId: replyMsgId, conversationId: childConvId, senderId: replySender, content, msgType: MessageType.USER as InitialMessageSummary['msgType'],
-              hasAttachment: replyFiles.length > 0, edited: false, isDeleted: false, showInChannel: true, visibleTo: null,
-              createdAt: replyCreatedAt.getTime(), metadata: JSON.stringify({ contentFormat: 'html' }), nudgeCount: 0, isSent: true,
-              reactions_md: null, link_preview_md: null, childConversationId: childConvId,
-            };
+            const childInitialMessageMd = buildInitialMessageMd({
+              messageId: replyMsgId, conversationId: childConvId, senderId: replySender, content,
+              msgType: MessageType.USER as InitialMessageSummary['msgType'],
+              hasAttachment: replyFiles.length > 0, showInChannel: true, nudgeCount: 0, isSent: true,
+              createdAt: replyCreatedAt.getTime(), metadata: { contentFormat: 'html' },
+              childConversationId: childConvId,
+            });
             convRows.push({
               conversationId: childConvId, channelId, workspaceId, createdBy: replySender, initialMessageId: replyMsgId,
               parentMessageId: parentRef.messageId, pinned: false, createdAt: replyCreatedAt, lastActivityAt: replyCreatedAt,
               replyCount: r.externalThreadId === lastReplyExternalId ? 0 : 1,
-              initial_message_md: serializeInitialMessageMd(childSummary),
+              initial_message_md: childInitialMessageMd,
               parent_message_md: serializeParentMessageMd({
                 messageId: parentRef.messageId, conversationId: convId, senderId: parentRef.senderId,
                 content: parentRef.content, msgType: MessageType.USER, createdAt: parentRef.createdAt.getTime(),
